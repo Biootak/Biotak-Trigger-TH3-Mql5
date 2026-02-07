@@ -195,6 +195,8 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         double cachedTriggerTH = GetLowerTimeframeTH(cachedCurrentTF, 2);
         double cachedLongStep = timeframePercentage * 2.0;
         double cachedShortStep = timeframePercentage * 1.5;
+        // PERFORMANCE: Cache shortCurrentTF once instead of calling per iteration
+        string shortCurrentTFCached = GetShortTimeframeName(cachedCurrentTF);
         
         // ═══════════════════════════════════════════════════════════════
         // ZONE SUPPORT: Tracking variables for Structure/Trigger separation
@@ -216,86 +218,107 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
             int lineWidth;
             double percentageTooltip = 0.0;
-            string shortCurrentTF = GetShortTimeframeName(cachedCurrentTF);
             
-            // Build overlap info for this step
-            string overlapLevels = GetOverlapLevelsInfo(stepCountAbove, intervals);
-            string overlapTFs = GetOverlapTimeframesInfo(stepCountAbove, intervals);
+            // PERFORMANCE FIX: Early viewport culling — skip ALL string work for off-screen levels
+            bool isAboveVisible = (priceLevelAbove >= vpBottom && priceLevelAbove <= vpTop);
             
-            // FIX: Use dynamic intervals from Base Multiplier instead of hardcoded values
-            // Check from highest to lowest level for priority (matching Java getPathForStep)
+            // Determine which level type this step is (needed for both counting and drawing)
+            // We must still identify level type even for off-screen to maintain correct state
+            int levelType = 0; // 0=skip, 1=structure, 2=trigger
+            int structLevel = 0;
+            
             if (intervals[4] > 0 && stepCountAbove % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
-                string tfL5 = GetShortTimeframeName(GetTimeframeForStructureLevel(5));
-                lineNameAbove = prefix + "StructureLevel5_Up_" + IntegerToString(stepCountAbove / intervals[4]);
-                tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, Digits), quintupleStructureTFTHStepSizePoints / 10.0);
-                levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[4]);
-                lineColor = inpStructureL5Color;
-                lineStyle = inpStructureL5Style;
-                lineWidth = inpStructureL5Width;
-                percentageTooltip = structurePercentages[4];
+                levelType = 1; structLevel = 5;
             } else if (intervalSize > 3 && intervals[3] > 0 && stepCountAbove % intervals[3] == 0 && inpShowStructure && inpShowStructureL4) {
-                lineNameAbove = prefix + "StructureLevel4_Up_" + IntegerToString(stepCountAbove / intervals[3]);
-                tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, Digits), quadrupleStructureTFTHStepSizePoints / 10.0);
-                levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[3]);
-                lineColor = inpStructureL4Color;
-                lineStyle = inpStructureL4Style;
-                lineWidth = inpStructureL4Width;
-                percentageTooltip = structurePercentages[3];
+                levelType = 1; structLevel = 4;
             } else if (intervalSize > 2 && intervals[2] > 0 && stepCountAbove % intervals[2] == 0 && inpShowStructure && inpShowStructureL3) {
-                lineNameAbove = prefix + "StructureLevel3_Up_" + IntegerToString(stepCountAbove / intervals[2]);
-                tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, Digits), tripleStructureTFTHStepSizePoints / 10.0);
-                levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[2]);
-                lineColor = inpStructureL3Color;
-                lineStyle = inpStructureL3Style;
-                lineWidth = inpStructureL3Width;
-                percentageTooltip = structurePercentages[2];
+                levelType = 1; structLevel = 3;
             } else if (intervalSize > 1 && intervals[1] > 0 && stepCountAbove % intervals[1] == 0 && inpShowStructure && inpShowStructureL2) {
-                lineNameAbove = prefix + "StructureLevel2_Up_" + IntegerToString(stepCountAbove / intervals[1]);
-                tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, Digits), doubleStructureTFTHStepSizePoints / 10.0);
-                levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[1]);
-                lineColor = inpStructureL2Color;
-                lineStyle = inpStructureL2Style;
-                lineWidth = inpStructureL2Width;
-                percentageTooltip = structurePercentages[1];
+                levelType = 1; structLevel = 2;
             } else if (intervalSize > 0 && intervals[0] > 0 && stepCountAbove % intervals[0] == 0 && inpShowStructure && inpShowStructureL1) {
-                lineNameAbove = prefix + "StructureLevel1_Up_" + IntegerToString(stepCountAbove / intervals[0]);
-                tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, Digits), structureTFTHStepSizePoints / 10.0);
-                levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[0]);
-                lineColor = inpStructureL1Color;
-                lineStyle = inpStructureL1Style;
-                lineWidth = inpStructureL1Width;
-                percentageTooltip = structurePercentages[0];
+                levelType = 1; structLevel = 1;
             } else if (triggerEnabled) {
-                // OPTIMIZATION: Use cached values instead of calling functions inside loop
-                // Use simple multipliers: SS = 1.5 * Structure, LS = 2.0 * Structure
-                lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCountAbove);
-                tooltipAbove = StringFormat("[%s] +%d | Price: %s | L: %.1f, S: %.1f pips",
-                    shortCurrentTF, stepCountAbove, DoubleToString(priceLevelAbove, Digits),
-                    cachedLongStep * thStepSizePoints / 10.0,
-                    cachedShortStep * thStepSizePoints / 10.0);
-                levelInfoAbove = StringFormat("%s +%d", shortCurrentTF, stepCountAbove);
-                lineColor = inpTriggerColor;
-                lineStyle = inpTriggerStyle;
-                lineWidth = inpTriggerWidth;
-                percentageTooltip = timeframePercentage;
-            } else {
+                levelType = 2;
+            }
+            
+            // If this step is not a level at all, skip entirely
+            if(levelType == 0) {
                 priceLevelAbove += (thStepSizePoints * pointValue);
-                // NO NormalizeDouble - keep full precision to match MotiveWave
                 stepCountAbove++;
                 continue;
             }
             
-            double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
-            tooltipAbove = FormatTooltipWithDistance(tooltipAbove, priceLevelAbove);
-            
-            // PERFORMANCE: Skip creating objects for levels far outside viewport
-            if(priceLevelAbove < vpBottom || priceLevelAbove > vpTop) {
-                // Still count this level and advance
+            // If off-screen, skip string building and object creation but count the level
+            if(!isAboveVisible) {
                 levelCountAbove++;
                 priceLevelAbove += (thStepSizePoints * pointValue);
                 stepCountAbove++;
                 continue;
             }
+            
+            // === ON-SCREEN: build strings and create objects ===
+            string overlapLevels = GetOverlapLevelsInfo(stepCountAbove, intervals);
+            string overlapTFs = GetOverlapTimeframesInfo(stepCountAbove, intervals);
+            
+            if(levelType == 1) {
+                // Structure level
+                switch(structLevel) {
+                    case 5: {
+                        string tfL5 = GetShortTimeframeName(GetTimeframeForStructureLevel(5));
+                        lineNameAbove = prefix + "StructureLevel5_Up_" + IntegerToString(stepCountAbove / intervals[4]);
+                        tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, Digits), quintupleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[4]);
+                        lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
+                        percentageTooltip = structurePercentages[4];
+                        break;
+                    }
+                    case 4: {
+                        lineNameAbove = prefix + "StructureLevel4_Up_" + IntegerToString(stepCountAbove / intervals[3]);
+                        tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, Digits), quadrupleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[3]);
+                        lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
+                        percentageTooltip = structurePercentages[3];
+                        break;
+                    }
+                    case 3: {
+                        lineNameAbove = prefix + "StructureLevel3_Up_" + IntegerToString(stepCountAbove / intervals[2]);
+                        tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, Digits), tripleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[2]);
+                        lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
+                        percentageTooltip = structurePercentages[2];
+                        break;
+                    }
+                    case 2: {
+                        lineNameAbove = prefix + "StructureLevel2_Up_" + IntegerToString(stepCountAbove / intervals[1]);
+                        tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, Digits), doubleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[1]);
+                        lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
+                        percentageTooltip = structurePercentages[1];
+                        break;
+                    }
+                    default: { // case 1
+                        lineNameAbove = prefix + "StructureLevel1_Up_" + IntegerToString(stepCountAbove / intervals[0]);
+                        tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, Digits), structureTFTHStepSizePoints / 10.0);
+                        levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[0]);
+                        lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
+                        percentageTooltip = structurePercentages[0];
+                        break;
+                    }
+                }
+            } else {
+                // Trigger level
+                lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCountAbove);
+                tooltipAbove = StringFormat("[%s] +%d | Price: %s | L: %.1f, S: %.1f pips",
+                    shortCurrentTFCached, stepCountAbove, DoubleToString(priceLevelAbove, Digits),
+                    cachedLongStep * thStepSizePoints / 10.0,
+                    cachedShortStep * thStepSizePoints / 10.0);
+                levelInfoAbove = StringFormat("%s +%d", shortCurrentTFCached, stepCountAbove);
+                lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
+                percentageTooltip = timeframePercentage;
+            }
+            
+            double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
+            tooltipAbove = FormatTooltipWithDistance(tooltipAbove, priceLevelAbove);
             
             CreateTHLineObject(lineNameAbove, priceLevelAbove, lineColor, lineStyle, lineWidth, tooltipAbove, inpTHLineObjectType, false);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, lineColor, levelInfoAbove);
@@ -356,85 +379,101 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
             int lineWidth;
             double percentageTooltip = 0.0;
-            string shortCurrentTFBelow = GetShortTimeframeName(cachedCurrentTF);
             
-            // Build overlap info for this step
-            string overlapLevelsBelow = GetOverlapLevelsInfo(stepCountBelow, intervals);
-            string overlapTFsBelow = GetOverlapTimeframesInfo(stepCountBelow, intervals);
+            // PERFORMANCE FIX: Early viewport culling — skip ALL string work for off-screen levels
+            bool isBelowVisible = (priceLevelBelow >= vpBottom && priceLevelBelow <= vpTop);
             
-            // FIX: Use dynamic intervals from Base Multiplier instead of hardcoded values
-            // Check from highest to lowest level for priority (matching Java getPathForStep)
+            // Determine level type (needed for counting even off-screen)
+            int levelType = 0; // 0=skip, 1=structure, 2=trigger
+            int structLevel = 0;
+            
             if (intervals[4] > 0 && stepCountBelow % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
-                lineNameBelow = prefix + "StructureLevel5_Down_" + IntegerToString(stepCountBelow / intervals[4]);
-                tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, Digits), quintupleStructureTFTHStepSizePoints / 10.0);
-                levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4]);
-                lineColor = inpStructureL5Color;
-                lineStyle = inpStructureL5Style;
-                lineWidth = inpStructureL5Width;
-                percentageTooltip = structurePercentages[4];
+                levelType = 1; structLevel = 5;
             } else if (intervals[3] > 0 && stepCountBelow % intervals[3] == 0 && inpShowStructure && inpShowStructureL4) {
-                lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
-                tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, Digits), quadrupleStructureTFTHStepSizePoints / 10.0);
-                levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
-                lineColor = inpStructureL4Color;
-                lineStyle = inpStructureL4Style;
-                lineWidth = inpStructureL4Width;
-                percentageTooltip = structurePercentages[3];
+                levelType = 1; structLevel = 4;
             } else if (intervals[2] > 0 && stepCountBelow % intervals[2] == 0 && inpShowStructure && inpShowStructureL3) {
-                lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
-                tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, Digits), tripleStructureTFTHStepSizePoints / 10.0);
-                levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
-                lineColor = inpStructureL3Color;
-                lineStyle = inpStructureL3Style;
-                lineWidth = inpStructureL3Width;
-                percentageTooltip = structurePercentages[2];
+                levelType = 1; structLevel = 3;
             } else if (intervals[1] > 0 && stepCountBelow % intervals[1] == 0 && inpShowStructure && inpShowStructureL2) {
-                lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
-                tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, Digits), doubleStructureTFTHStepSizePoints / 10.0);
-                levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
-                lineColor = inpStructureL2Color;
-                lineStyle = inpStructureL2Style;
-                lineWidth = inpStructureL2Width;
-                percentageTooltip = structurePercentages[1];
+                levelType = 1; structLevel = 2;
             } else if (intervals[0] > 0 && stepCountBelow % intervals[0] == 0 && inpShowStructure && inpShowStructureL1) {
-                lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
-                tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, Digits), structureTFTHStepSizePoints / 10.0);
-                levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
-                lineColor = inpStructureL1Color;
-                lineStyle = inpStructureL1Style;
-                lineWidth = inpStructureL1Width;
-                percentageTooltip = structurePercentages[0];
+                levelType = 1; structLevel = 1;
             } else if (triggerEnabled) {
-                // OPTIMIZATION: Use cached values instead of calling functions inside loop
-                lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCountBelow);
-                // Use simple multipliers: SS = 1.5 * Structure, LS = 2.0 * Structure
-                tooltipBelow = StringFormat("[%s] -%d | Price: %s | L: %.1f, S: %.1f pips",
-                    shortCurrentTFBelow, stepCountBelow, DoubleToString(priceLevelBelow, Digits),
-                    cachedLongStep * thStepSizePoints / 10.0,
-                    cachedShortStep * thStepSizePoints / 10.0);
-                levelInfoBelow = StringFormat("%s -%d", shortCurrentTFBelow, stepCountBelow);
-                lineColor = inpTriggerColor;
-                lineStyle = inpTriggerStyle;
-                lineWidth = inpTriggerWidth;
-                percentageTooltip = timeframePercentage;
-            } else {
+                levelType = 2;
+            }
+            
+            if(levelType == 0) {
                 priceLevelBelow -= (thStepSizePoints * pointValue);
-                // NO NormalizeDouble - keep full precision to match MotiveWave
                 stepCountBelow++;
                 continue;
             }
             
-            // OPTIMIZATION: Use cached pointValue instead of Point() inside loop
-            double pipsToLevelBelow = NormalizeDouble(MathAbs(priceLevelBelow - g_currentPrice) / pointValue / 10.0, 1);
-            tooltipBelow = StringFormat("%s | Dist: %.1f pips", tooltipBelow, pipsToLevelBelow);
-            
-            // PERFORMANCE: Skip creating objects for levels far outside viewport
-            if(priceLevelBelow < vpBottom || priceLevelBelow > vpTop) {
+            if(!isBelowVisible) {
                 levelCountBelow++;
                 priceLevelBelow -= (thStepSizePoints * pointValue);
                 stepCountBelow++;
                 continue;
             }
+            
+            // === ON-SCREEN: build strings and create objects ===
+            string overlapLevelsBelow = GetOverlapLevelsInfo(stepCountBelow, intervals);
+            string overlapTFsBelow = GetOverlapTimeframesInfo(stepCountBelow, intervals);
+            
+            if(levelType == 1) {
+                switch(structLevel) {
+                    case 5: {
+                        lineNameBelow = prefix + "StructureLevel5_Down_" + IntegerToString(stepCountBelow / intervals[4]);
+                        tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, Digits), quintupleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4]);
+                        lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
+                        percentageTooltip = structurePercentages[4];
+                        break;
+                    }
+                    case 4: {
+                        lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
+                        tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, Digits), quadrupleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
+                        lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
+                        percentageTooltip = structurePercentages[3];
+                        break;
+                    }
+                    case 3: {
+                        lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
+                        tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, Digits), tripleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
+                        lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
+                        percentageTooltip = structurePercentages[2];
+                        break;
+                    }
+                    case 2: {
+                        lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
+                        tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, Digits), doubleStructureTFTHStepSizePoints / 10.0);
+                        levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
+                        lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
+                        percentageTooltip = structurePercentages[1];
+                        break;
+                    }
+                    default: {
+                        lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
+                        tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, Digits), structureTFTHStepSizePoints / 10.0);
+                        levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
+                        lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
+                        percentageTooltip = structurePercentages[0];
+                        break;
+                    }
+                }
+            } else {
+                lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCountBelow);
+                tooltipBelow = StringFormat("[%s] -%d | Price: %s | L: %.1f, S: %.1f pips",
+                    shortCurrentTFCached, stepCountBelow, DoubleToString(priceLevelBelow, Digits),
+                    cachedLongStep * thStepSizePoints / 10.0,
+                    cachedShortStep * thStepSizePoints / 10.0);
+                levelInfoBelow = StringFormat("%s -%d", shortCurrentTFCached, stepCountBelow);
+                lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
+                percentageTooltip = timeframePercentage;
+            }
+            
+            double pipsToLevelBelow = NormalizeDouble(MathAbs(priceLevelBelow - g_currentPrice) / pointValue / 10.0, 1);
+            tooltipBelow = StringFormat("%s | Dist: %.1f pips", tooltipBelow, pipsToLevelBelow);
             
             CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
@@ -572,11 +611,8 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     
     // CRITICAL FIX: Respect Hide state (F key)
     // Labels should be hidden when indicator is hidden
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    
-    if(isHidden) {
+    // PERFORMANCE: Use cached IsIndicatorHidden()
+    if(IsIndicatorHidden()) {
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         ObjectSetInteger(0, stepsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {

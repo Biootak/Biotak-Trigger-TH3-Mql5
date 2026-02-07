@@ -10,6 +10,10 @@ static bool g_calculatedOnce = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
 bool g_redrawTHLevelsNeeded = true;
 
+// PERFORMANCE: Force ClearAllLevels on next draw (set by keyboard handlers like +/-/E/etc.)
+// Needed when object names/counts change but mode stays the same
+bool g_forceClearOnNextDraw = false;
+
 // GOLD FIX #8: Performance tracking with explicit initialization
 static int g_objectCountLast = 0;
 static datetime g_lastObjectCleanup = 0;
@@ -131,12 +135,24 @@ LabelPosition g_labelPositions[];
 //+------------------------------------------------------------------+
 //| Check if Indicator is Hidden (Helper Function)                   |
 //| بررسی مخفی بودن اندیکاتور (تابع کمکی)                            |
-//| REFACTORING: Extracted from repeated code blocks                |
-//| PERFORMANCE: Uses cached ChartID string                          |
+//| PERFORMANCE: Cached — only queries GlobalVariable every 500ms   |
+//| Call RefreshIsHiddenCache() when F key toggles state             |
 //+------------------------------------------------------------------+
-bool IsIndicatorHidden() {
+bool g_isHiddenCached = false;
+uint  g_isHiddenCacheTime = 0;
+
+void RefreshIsHiddenCache() {
     string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    return GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    g_isHiddenCached = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    g_isHiddenCacheTime = GetTickCount();
+}
+
+bool IsIndicatorHidden() {
+    uint now = GetTickCount();
+    if(now - g_isHiddenCacheTime > 500) {
+        RefreshIsHiddenCache();
+    }
+    return g_isHiddenCached;
 }
 
 //+------------------------------------------------------------------+

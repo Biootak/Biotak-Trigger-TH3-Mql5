@@ -83,10 +83,7 @@ bool CreateFactorMidZone(const string zoneName,
     // اگر اندیکاتور مخفی است، زون را فوراً مخفی کن
     // PERFORMANCE: Use cached ChartID string
     if(result.success) {
-        string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-        bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-        
-        if(isHidden) {
+        if(IsIndicatorHidden()) {
             ObjectSetInteger(0, zoneName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         }
     }
@@ -120,9 +117,8 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
     if(ObjectFind(0, lineBottom) >= 0) ObjectDelete(0, lineBottom);
     
     // CRITICAL FIX: Check if indicator is hidden
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    // PERFORMANCE: Use cached IsIndicatorHidden()
+    bool isHidden = IsIndicatorHidden();
     
     // Create top line (dotted)
     if(ObjectCreate(0, lineTop, OBJ_HLINE, 0, 0, upperPrice)) {

@@ -136,44 +136,83 @@ int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
 
 //+------------------------------------------------------------------+
 //| iATR compatibility (MQL4 4-param → MQL5 handle-based)            |
-//| PERFORMANCE: Handle is cached to avoid create/destroy each call. |
-//| بهینه‌سازی: هندل ATR کش می‌شود تا هر بار ساخته نشود               |
+//| PERFORMANCE: Multi-slot handle cache (up to 16 param combos).   |
+//| Avoids create/destroy on every call when alternating periods.    |
 //+------------------------------------------------------------------+
-int _g_atrHandleCache_handle = INVALID_HANDLE;
-string _g_atrHandleCache_symbol = "";
-ENUM_TIMEFRAMES _g_atrHandleCache_tf = PERIOD_CURRENT;
-int _g_atrHandleCache_period = 0;
+#define ATR_CACHE_SIZE 16
+
+struct ATRHandleCacheEntry {
+    int handle;
+    string symbol;
+    ENUM_TIMEFRAMES tf;
+    int period;
+};
+
+ATRHandleCacheEntry _g_atrCache[];
+int _g_atrCacheCount = 0;
+bool _g_atrCacheInitialized = false;
+
+void InitATRCache() {
+    if(!_g_atrCacheInitialized) {
+        ArrayResize(_g_atrCache, ATR_CACHE_SIZE);
+        for(int i = 0; i < ATR_CACHE_SIZE; i++) {
+            _g_atrCache[i].handle = INVALID_HANDLE;
+            _g_atrCache[i].symbol = "";
+            _g_atrCache[i].tf = PERIOD_CURRENT;
+            _g_atrCache[i].period = 0;
+        }
+        _g_atrCacheInitialized = true;
+    }
+}
 
 double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int shift) {
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     
-    // Reuse cached handle if params match
-    if(_g_atrHandleCache_handle != INVALID_HANDLE &&
-       _g_atrHandleCache_symbol == symbol &&
-       _g_atrHandleCache_tf == timeframe &&
-       _g_atrHandleCache_period == atr_period) {
-        // Use cached handle
-    } else {
-        // Release old handle if any
-        if(_g_atrHandleCache_handle != INVALID_HANDLE)
-            IndicatorRelease(_g_atrHandleCache_handle);
-        
-        _g_atrHandleCache_handle = iATR(symbol, timeframe, atr_period);
-        _g_atrHandleCache_symbol = symbol;
-        _g_atrHandleCache_tf = timeframe;
-        _g_atrHandleCache_period = atr_period;
-        
-        if(_g_atrHandleCache_handle == INVALID_HANDLE) {
+    InitATRCache();
+    
+    // Search existing cache entries
+    int handle = INVALID_HANDLE;
+    for(int i = 0; i < _g_atrCacheCount; i++) {
+        if(_g_atrCache[i].symbol == symbol &&
+           _g_atrCache[i].tf == timeframe &&
+           _g_atrCache[i].period == atr_period) {
+            handle = _g_atrCache[i].handle;
+            break;
+        }
+    }
+    
+    // Cache miss — create new handle
+    if(handle == INVALID_HANDLE) {
+        handle = iATR(symbol, timeframe, atr_period);
+        if(handle == INVALID_HANDLE) {
             PrintFormat("iATRMQL4: Failed to create ATR handle for %s/%s/%d", 
                         symbol, EnumToString(timeframe), atr_period);
             return 0.0;
         }
+        
+        // Store in cache (evict oldest if full)
+        int slot = _g_atrCacheCount;
+        if(slot >= ATR_CACHE_SIZE) {
+            // Evict slot 0 (oldest)
+            if(_g_atrCache[0].handle != INVALID_HANDLE)
+                IndicatorRelease(_g_atrCache[0].handle);
+            // Shift entries down
+            for(int j = 0; j < ATR_CACHE_SIZE - 1; j++)
+                _g_atrCache[j] = _g_atrCache[j + 1];
+            slot = ATR_CACHE_SIZE - 1;
+        } else {
+            _g_atrCacheCount++;
+        }
+        _g_atrCache[slot].handle = handle;
+        _g_atrCache[slot].symbol = symbol;
+        _g_atrCache[slot].tf = timeframe;
+        _g_atrCache[slot].period = atr_period;
     }
     
     double buffer[];
     ArraySetAsSeries(buffer, true);
     
-    int copied = CopyBuffer(_g_atrHandleCache_handle, 0, shift, 1, buffer);
+    int copied = CopyBuffer(handle, 0, shift, 1, buffer);
     if(copied <= 0) {
         return 0.0;
     }
@@ -181,12 +220,15 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
     return buffer[0];
 }
 
-// Call this from OnDeinit to release cached ATR handle
+// Call this from OnDeinit to release ALL cached ATR handles
 void ReleaseATRHandle() {
-    if(_g_atrHandleCache_handle != INVALID_HANDLE) {
-        IndicatorRelease(_g_atrHandleCache_handle);
-        _g_atrHandleCache_handle = INVALID_HANDLE;
+    for(int i = 0; i < _g_atrCacheCount; i++) {
+        if(_g_atrCache[i].handle != INVALID_HANDLE) {
+            IndicatorRelease(_g_atrCache[i].handle);
+            _g_atrCache[i].handle = INVALID_HANDLE;
+        }
     }
+    _g_atrCacheCount = 0;
 }
 
 //+------------------------------------------------------------------+

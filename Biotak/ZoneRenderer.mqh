@@ -138,9 +138,8 @@ void RenderZones(const SZoneRenderInfo &zones[])
     
     // CRITICAL FIX: Check if indicator is hidden
     // اگر اندیکاتور مخفی است، زون‌ها را رسم نکن
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    // PERFORMANCE: Use cached IsIndicatorHidden()
+    bool isHidden = IsIndicatorHidden();
     
     // Performance tracking
     int zonesCreated = 0;
@@ -217,9 +216,8 @@ void RenderLines(const SLineRenderInfo &lines[])
     
     // CRITICAL FIX: Check if indicator is hidden
     // اگر اندیکاتور مخفی است، خطوط را رسم نکن
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    // PERFORMANCE: Use cached IsIndicatorHidden()
+    bool isHidden = IsIndicatorHidden();
     
     // PERF FIX: Batch property updates to reduce API calls
     for(int i = 0; i < count; i++) {

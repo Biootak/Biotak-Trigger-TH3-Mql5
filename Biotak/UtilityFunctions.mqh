@@ -295,10 +295,8 @@ void UpdateStepModeLabel() {
     ClearAllModeLabels();
     
     // CRITICAL FIX: Don't show label if indicator is hidden
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    if(isHidden) return; // Don't show mode labels when hidden
+    // PERFORMANCE: Use cached IsIndicatorHidden()
+    if(IsIndicatorHidden()) return; // Don't show mode labels when hidden
     
     // GOLD FIX: Check if object exists before creating
     if(ObjectFind(0, g_stepModeLabelName) < 0) {
@@ -457,10 +455,8 @@ void UpdateTH3FrequencyLabel(double frequency) {
     ClearAllModeLabels();
     
     // CRITICAL FIX: Don't show label if indicator is hidden
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    if(isHidden) return; // Don't show mode labels when hidden
+    // PERFORMANCE: Use cached IsIndicatorHidden()
+    if(IsIndicatorHidden()) return; // Don't show mode labels when hidden
     
     // Calculate step information based on current TH3 structure range
     string stepInfo = "";

@@ -69,11 +69,8 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     ObjectSetInteger(0, name, OBJPROP_BACK, false);
     
     // CRITICAL FIX: Respect BOTH Hide state (F key) AND Lines visibility (L key)
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    
-    if(isHidden || !g_linesVisible) {
+    // PERFORMANCE: Use cached IsIndicatorHidden() instead of per-object GlobalVariable call
+    if(IsIndicatorHidden() || !g_linesVisible) {
         ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {
         ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
@@ -143,11 +140,8 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
     ObjectSetInteger(0, name, OBJPROP_BACK, false);
     
     // CRITICAL FIX: Respect Hide state (F key)
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    
-    if(isHidden) {
+    // PERFORMANCE: Use cached IsIndicatorHidden() instead of per-object GlobalVariable call
+    if(IsIndicatorHidden()) {
         ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {
         ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);

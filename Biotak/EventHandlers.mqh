@@ -125,6 +125,9 @@ int OnInitHandler() {
     // Enable Object Delete Events (Critical for TH3 cleanup)
     ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
     
+    // PERFORMANCE FIX: Enable mouse move events for real-time custom price line dragging
+    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
+    
     ChartSetInteger(0, CHART_SHOW_GRID, false);
     // ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrLavender);
     CheckArraySizes();
@@ -1041,11 +1044,25 @@ bool CalculateCommonStepData(const double dailyClosePrice, StepCalculationData &
 //+------------------------------------------------------------------+
 void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
 {
-    // Clear all existing levels from all modes to prevent overlapping
-    ClearAllLevels(objectPrefix);
+    // PERFORMANCE FIX: Only clear ALL objects when the mode actually changes.
+    // CreateTHLineObject already handles update-in-place (ObjectFind → ObjectSetDouble).
+    // This eliminates the expensive destroy-all + recreate-all cycle on every redraw.
+    static ENUM_STEP_CALCULATION_MODE s_lastDrawnMode = (ENUM_STEP_CALCULATION_MODE)-1;
+    static ENUM_CALCULATION_BASIS s_lastDrawnBasis = (ENUM_CALCULATION_BASIS)-1;
+    
+    ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
+    ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
+    
+    bool modeChanged = (currentMode != s_lastDrawnMode || currentBasis != s_lastDrawnBasis);
+    if(modeChanged || g_forceClearOnNextDraw) {
+        // Mode changed, or keyboard handler requested a full clear
+        ClearAllLevels(objectPrefix);
+        s_lastDrawnMode = currentMode;
+        s_lastDrawnBasis = currentBasis;
+        g_forceClearOnNextDraw = false;
+    }
     
     // Draw based on selected mode (respects keyboard override)
-    ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     switch(currentMode) {
         case SS_LS_STEP:
         {
@@ -1700,9 +1717,9 @@ void RedrawAllObjects(bool force_redraw=false)
         g_redrawTHLevelsNeeded = false;
     }
 
-    // CRITICAL: Apply lines visibility state after redraw
-    // اعمال وضعیت نمایش خطوط بعد از redraw
-    ApplyLinesVisibility();
+    // PERFORMANCE FIX: ApplyLinesVisibility removed from per-redraw path.
+    // Drawing functions (CreateTHLineObject, etc.) already respect g_linesVisible.
+    // ApplyLinesVisibility is now ONLY called from the L key toggle handler.
 
     CheckAlerts(objectPrefix, g_currentPrice);
 }
@@ -1713,19 +1730,8 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     static int s_cpuWarningCount = 0;
     uint startTime = GetTickCount();
     
-    // OPTIMIZATION: Cache hidden state check (check every 1 second)
-    static bool s_isHidden = false;
-    static datetime s_lastHiddenCheck = 0;
-    datetime currentTime = TimeCurrent();
-    
-    if(currentTime - s_lastHiddenCheck >= 1) {
-        // PERFORMANCE: Use cached ChartID string
-        string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-        s_isHidden = (GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name));
-        s_lastHiddenCheck = currentTime;
-    }
-    
-    if(s_isHidden)
+    // OPTIMIZATION: Use centralized cached hidden state
+    if(IsIndicatorHidden())
     {
         return(rates_total);
     }
@@ -1893,6 +1899,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 #endif
             }
             GlobalVariableTemp(gvar_name); // Ignore failure - not critical
+            
+            // PERFORMANCE: Immediately refresh the cached hidden state
+            RefreshIsHiddenCache();
 
             if(isBecomingHidden)
             {
@@ -2114,6 +2123,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 GlobalVariableSet(overrideFlagName, 0.0);
                 GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
                 
+                g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true); // Force redraw with input parameter setting
                 #ifdef ENABLE_DEBUG_LOGS
@@ -2150,6 +2160,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             }
             
             // Force redraw to apply the change
+            g_forceClearOnNextDraw = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
             ChartRedraw();
@@ -2207,6 +2218,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             UpdateStepModeLabel();
             
             // Force redraw to apply the change
+            g_forceClearOnNextDraw = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
             ChartRedraw();
@@ -2263,6 +2275,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 UpdateFactorLabel(newFactor);
                 
                 // Force redraw
+                g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true);
                 ChartRedraw();
@@ -2320,6 +2333,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 UpdateFactorLabel(newFactor);
                 
                 // Force redraw
+                g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true);
                 ChartRedraw();
@@ -2365,6 +2379,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             }
             
             // Force redraw to apply the change
+            g_forceClearOnNextDraw = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
             ChartRedraw();
@@ -2538,6 +2553,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             EventSetTimer(2);
             
             // Force full redraw
+            g_forceClearOnNextDraw = true;
             g_calculatedOnce = false;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
@@ -2587,6 +2603,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             GlobalVariableTemp(lockPeriodName); // Ignore failure - not critical
             
             // Trigger full redraw with new lock state
+            g_forceClearOnNextDraw = true;
             g_calculatedOnce = false;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
@@ -2771,7 +2788,38 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         }
     }
     
-    // Handle object drag event for custom price line
+    // ═══════════════════════════════════════════════════════════════
+    // REAL-TIME DRAG: Update levels instantly while mouse is moving
+    // بروزرسانی آنی سطوح هنگام درگ خط قیمت سفارشی
+    // In MT5, CHARTEVENT_OBJECT_DRAG only fires on mouse RELEASE.
+    // We use CHARTEVENT_MOUSE_MOVE + left-button check for real-time.
+    // ═══════════════════════════════════════════════════════════════
+    if(id == CHARTEVENT_MOUSE_MOVE && g_customPriceLineCreated)
+    {
+        // sparam contains mouse state flags: bit0=left, bit1=right, bit2=middle, bit4=shift, bit5=ctrl
+        int mouseFlags = (int)StringToInteger(sparam);
+        bool leftButtonDown = (mouseFlags & 1) != 0;
+        
+        if(leftButtonDown)
+        {
+            // Check if the custom price line is selected (being dragged)
+            bool lineSelected = (bool)ObjectGetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED);
+            if(lineSelected)
+            {
+                double currentLinePrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
+                if(currentLinePrice > 0 && MathAbs(currentLinePrice - g_customTHStartPrice) > _Point * 0.5)
+                {
+                    g_customTHStartPrice = currentLinePrice;
+                    g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+                    g_redrawTHLevelsNeeded = true;
+                    RedrawAllObjects(true);
+                    ChartRedraw();
+                }
+            }
+        }
+    }
+    
+    // Handle object drag event for custom price line (fires on mouse release)
     if(id == CHARTEVENT_OBJECT_DRAG && sparam == g_customPriceHorizontalLineName)
     {
         // Get the current price from the horizontal line
