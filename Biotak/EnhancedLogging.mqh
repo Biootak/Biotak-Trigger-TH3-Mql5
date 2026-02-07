@@ -73,7 +73,9 @@ void SetLogLevel(ENUM_LOG_LEVEL level)
         case LOG_LEVEL_DIAGNOSTIC: levelName = "DIAGNOSTIC"; break;
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("[EnhancedLogging] Log level set to: ", levelName);
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -85,9 +87,13 @@ void EnableModuleLogging(string modules)
     g_enabledModules = modules;
     
     if(StringLen(modules) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("[EnhancedLogging] All modules enabled");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("[EnhancedLogging] Enabled modules: ", modules);
+        #endif
     }
 }
 
@@ -266,6 +272,7 @@ void LogMemoryUsage(string module, string arrayName, int size)
 //+------------------------------------------------------------------+
 void PrintLogStatistics()
 {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════");
     Print("📊 LOGGING STATISTICS");
     Print("═══════════════════════════════════════════════════════════");
@@ -276,6 +283,7 @@ void PrintLogStatistics()
     Print("Diagnostic: ", g_logStats.diagnosticCount);
     Print("Last Log: ", TimeToString(g_logStats.lastLogTime, TIME_DATE|TIME_SECONDS));
     Print("═══════════════════════════════════════════════════════════");
+    #endif
 }
 
 //+------------------------------------------------------------------+

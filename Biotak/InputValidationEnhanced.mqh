@@ -144,14 +144,18 @@ ValidationResult ValidateIntegerInput(int value, const string paramName,
 bool ValidateColorInput(color clr, const string paramName) {
     // Check if color is valid (not clrNONE unless explicitly allowed)
     if(clr == clrNONE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ ", paramName, " is clrNONE - using default");
+        #endif
         return false;
     }
     
     // MQL4 colors are 32-bit integers, check if in valid range
     int colorValue = (int)clr;
     if(colorValue < 0 || colorValue > 0xFFFFFF) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", paramName, " has invalid color value: ", colorValue);
+        #endif
         return false;
     }
     
@@ -199,12 +203,16 @@ ValidationResult ValidateStringInput(const string value, const string paramName,
 bool ValidateArraySize(const int size, const string arrayName, 
                        int minSize = 0, int maxSize = 100000) {
     if(size < minSize) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", arrayName, " size too small: ", size, " (min: ", minSize, ")");
+        #endif
         return false;
     }
     
     if(size > maxSize) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", arrayName, " size too large: ", size, " (max: ", maxSize, ")");
+        #endif
         return false;
     }
     

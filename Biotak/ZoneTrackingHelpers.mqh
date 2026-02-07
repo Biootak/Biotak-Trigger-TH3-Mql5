@@ -94,8 +94,10 @@ bool InitializeZoneTracking(const double centerPrice,
     Print("✅ InitializeZoneTracking: SUCCESS");
     Print("   Center=", DoubleToString(normalizedCenter, s_cachedDigits));
     Print("   Structure=", DoubleToString(lastStructurePrice, s_cachedDigits));
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   Trigger=", DoubleToString(lastTriggerPrice, s_cachedDigits), " (0=skip first zone)");
     Print("   Fallback=", DoubleToString(lastFallbackPrice, s_cachedDigits));
+    #endif
     #endif
     
     return true;

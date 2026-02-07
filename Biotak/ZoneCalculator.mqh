@@ -56,17 +56,9 @@ void ClassifyLevels(
     // OPTIMIZATION: Use centralized cached Digits from PerformanceOptimizations.mqh
     int s_cachedDigits = GetCachedDigits();
     
-    // DIAGNOSTIC LOG: Configuration State
-    Print("═══════════════════════════════════════════════════════════");
-    Print("🔍 ZONE CLASSIFICATION DIAGNOSTIC");
-    Print("═══════════════════════════════════════════════════════════");
-    Print("📋 Config State:");
-    Print("   showStructure: ", config.showStructure ? "TRUE" : "FALSE");
-    Print("   showTrigger: ", config.showTrigger ? "TRUE" : "FALSE");
-    Print("   baseMultiplier: ", config.baseMultiplier);
-    Print("   structColorL1: ", ColorToString(config.structColorL1));
-    Print("   triggerColor: ", ColorToString(config.triggerColor));
-    Print("───────────────────────────────────────────────────────────");
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("🔍 ZONE CLASSIFICATION: struct=", config.showStructure, " trigger=", config.showTrigger, " mult=", config.baseMultiplier);
+    #endif
     
     for(int i = 0; i < count; i++) {
         // Determine if Structure Level
@@ -110,14 +102,7 @@ void ClassifyLevels(
         outClassifications[i].style = style;
         outClassifications[i].width = width;
         
-        // DIAGNOSTIC LOG: Per-Level Classification
-        if(isActive) {
-            Print("📍 Level ", i, " [Step ", levels[i].logicalStep, "]:");
-            Print("   Price: ", DoubleToString(levels[i].price, s_cachedDigits));
-            Print("   Type: ", isStructure ? "STRUCTURE" : "TRIGGER");
-            Print("   Color: ", ColorToString(levelColor));
-            Print("   Active: ", isActive ? "YES" : "NO");
-        }
+        // Per-level classification logging removed for performance
     }
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -131,6 +116,7 @@ void ClassifyLevels(
             else triggerCount++;
         }
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("───────────────────────────────────────────────────────────");
     Print("✅ ClassifyLevels Summary:");
     Print("   Total Levels: ", count);
@@ -138,6 +124,7 @@ void ClassifyLevels(
     Print("   Structure Levels: ", structureCount);
     Print("   Trigger Levels: ", triggerCount);
     Print("═══════════════════════════════════════════════════════════");
+    #endif
     #endif
 }
 
@@ -181,14 +168,9 @@ void CalculateZoneGeometries(
     
     ArrayResize(outGeometries, count);
     
-    // DIAGNOSTIC LOG: Start
-    Print("═══════════════════════════════════════════════════════════");
-    Print("🔍 ZONE GEOMETRY CALCULATION DIAGNOSTIC");
-    Print("═══════════════════════════════════════════════════════════");
-    Print("📋 Input Parameters:");
-    Print("   Total Levels: ", count);
-    Print("   Zone Height: ", DoubleToString(zoneHeight, s_cachedDigits));
-    Print("───────────────────────────────────────────────────────────");
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("🔍 ZONE GEOMETRY: levels=", count, " height=", DoubleToString(zoneHeight, s_cachedDigits));
+    #endif
     
     // GOLD FIX: Initialize ALL trackers (structure + trigger) with midpoint
     double lastStructurePriceAbove = -1;
@@ -201,7 +183,9 @@ void CalculateZoneGeometries(
     for(int i = 0; i < count; i++) {
         // CRITICAL FIX: Bounds check before access
         if(i >= count || i >= classCount) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ Index out of bounds: i=", i, ", count=", count, ", classCount=", classCount);
+            #endif
             break;
         }
         
@@ -211,7 +195,9 @@ void CalculateZoneGeometries(
             lastTriggerPriceAbove = levels[i].price;
             lastTriggerPriceBelow = levels[i].price;
             midpointFound = true;
+            #ifdef ENABLE_DEBUG_LOGS
             Print("📍 Midpoint Found at Index ", i, ": ", DoubleToString(levels[i].price, s_cachedDigits));
+            #endif
             break;
         }
     }
@@ -228,13 +214,13 @@ void CalculateZoneGeometries(
     // Calculate Zone Geometries
     int validZoneCount = 0;
     
-    Print("───────────────────────────────────────────────────────────");
-    Print("🎨 Zone Calculation Process:");
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("Zone Calculation: ", count, " levels");
+    #endif
     
     for(int i = 0; i < count; i++) {
         // CRITICAL FIX: Bounds check
         if(i >= count || i >= classCount) {
-            Print("❌ Index out of bounds in loop: i=", i);
             break;
         }
         
@@ -243,13 +229,11 @@ void CalculateZoneGeometries(
         
         // Skip if level is not active
         if(!classifications[i].isActive) {
-            Print("⏭️ Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Inactive)");
             continue;
         }
         
         // Skip midpoint (no zone for midpoint itself)
         if(levels[i].logicalStep == 0) {
-            Print("⏭️ Level ", i, " [Step 0]: SKIPPED (Midpoint - no zone)");
             continue;
         }
         
@@ -309,28 +293,16 @@ void CalculateZoneGeometries(
                 outGeometries[i].bottomPrice = NormalizeDouble(bottomPrice, s_cachedDigits);
                 outGeometries[i].midPoint = NormalizeDouble(midPoint, s_cachedDigits);
                 validZoneCount++;
-                
-                // DIAGNOSTIC LOG: Zone Created
-                Print("✅ Zone ", validZoneCount, " [Level ", i, ", Step ", levels[i].logicalStep, "]:");
-                Print("   Type: ", isStructure ? "STRUCTURE" : "TRIGGER");
-                Print("   Between: ", DoubleToString(prevPrice, s_cachedDigits), " → ", DoubleToString(levels[i].price, s_cachedDigits));
-                Print("   Zone Top: ", DoubleToString(topPrice, s_cachedDigits));
-                Print("   Zone Mid: ", DoubleToString(midPoint, s_cachedDigits));
-                Print("   Zone Bottom: ", DoubleToString(bottomPrice, s_cachedDigits));
-                Print("   Color: ", ColorToString(classifications[i].levelColor));
             }
             else {
-                Print("❌ Level ", i, " [Step ", levels[i].logicalStep, "]: Invalid Geometry - ", validation.errorMessage);
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("Zone geometry invalid for step ", levels[i].logicalStep, ": ", validation.errorMessage);
+                #endif
             }
-        }
-        else {
-            Print("⏭️ Level ", i, " [Step ", levels[i].logicalStep, "]: Cannot Calculate (No Previous ", 
-                  isStructure ? "Structure" : "Trigger", " Price)");
         }
     }
     
-    Print("───────────────────────────────────────────────────────────");
-    Print("✅ CalculateZoneGeometries Summary:");
-    Print("   Valid Zones Created: ", validZoneCount);
-    Print("═══════════════════════════════════════════════════════════");
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("CalculateZoneGeometries: ", validZoneCount, " valid zones");
+    #endif
 }

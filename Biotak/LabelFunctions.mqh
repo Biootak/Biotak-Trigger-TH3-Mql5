@@ -55,7 +55,9 @@ bool DrawMainLevels(const string prefix) {
 
 void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
     if(dailyClosePrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawTHLevels: Invalid daily close price");
+        #endif
         return;
     }
     
@@ -130,7 +132,9 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
     // GOLD FIX #11: Array bounds checking - get size for safe access
     int intervalSize = ArraySize(intervals);
     if(intervalSize == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawTHLevels: Empty intervals array, cannot draw structure levels");
+        #endif
         return;
     }
     
@@ -157,6 +161,14 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
     }
     // OPTIMIZATION: Cache IsTriggerLevelsEnabled() result BEFORE the loops
     bool triggerEnabled = IsTriggerLevelsEnabled();
+    
+    // PERFORMANCE: Get chart viewport range to skip off-screen levels
+    double chartPriceMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double chartPriceMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double viewportRange = chartPriceMax - chartPriceMin;
+    // Add 100% margin around viewport so levels appear smoothly when scrolling
+    double vpTop = chartPriceMax + viewportRange;
+    double vpBottom = chartPriceMin - viewportRange;
     
     // ═══════════════════════════════════════════════════════════════
     // ZONE SUPPORT: Cleanup old zones
@@ -275,6 +287,16 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             
             double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
             tooltipAbove = FormatTooltipWithDistance(tooltipAbove, priceLevelAbove);
+            
+            // PERFORMANCE: Skip creating objects for levels far outside viewport
+            if(priceLevelAbove < vpBottom || priceLevelAbove > vpTop) {
+                // Still count this level and advance
+                levelCountAbove++;
+                priceLevelAbove += (thStepSizePoints * pointValue);
+                stepCountAbove++;
+                continue;
+            }
+            
             CreateTHLineObject(lineNameAbove, priceLevelAbove, lineColor, lineStyle, lineWidth, tooltipAbove, inpTHLineObjectType, false);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, lineColor, levelInfoAbove);
             
@@ -405,6 +427,15 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             // OPTIMIZATION: Use cached pointValue instead of Point() inside loop
             double pipsToLevelBelow = NormalizeDouble(MathAbs(priceLevelBelow - g_currentPrice) / pointValue / 10.0, 1);
             tooltipBelow = StringFormat("%s | Dist: %.1f pips", tooltipBelow, pipsToLevelBelow);
+            
+            // PERFORMANCE: Skip creating objects for levels far outside viewport
+            if(priceLevelBelow < vpBottom || priceLevelBelow > vpTop) {
+                levelCountBelow++;
+                priceLevelBelow -= (thStepSizePoints * pointValue);
+                stepCountBelow++;
+                continue;
+            }
+            
             CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
             
@@ -688,7 +719,9 @@ void StoreLabelPosition(const string name, const int xPos, const int yPos) {
         g_labelPositions[size].xPos=xPos;
         g_labelPositions[size].yPos=yPos;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("StoreLabelPosition: Failed to resize array");
+        #endif
     }
 }
 
@@ -732,7 +765,9 @@ void UpdateLockStatusLabel()
         {
             if(!ObjectCreate(0, g_lockStatusLabelName, OBJ_LABEL, 0, 0, 0))
             {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("Failed to create lock status label. Error: ", GetLastError());
+                #endif
                 return;
             }
         }

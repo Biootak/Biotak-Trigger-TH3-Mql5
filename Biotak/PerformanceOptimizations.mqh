@@ -278,14 +278,18 @@ bool ObjectExistsCached(const string name) {
 // Pre-allocate array with estimated size
 bool PreAllocateArray(double &array[], int estimatedSize, double fillValue = 0.0) {
     if(estimatedSize <= 0 || estimatedSize > 100000) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Invalid array size: ", estimatedSize);
+        #endif
         return false;
     }
     
     // Allocate with 20% buffer for growth
     int allocSize = (int)(estimatedSize * 1.2);
     if(ArrayResize(array, allocSize) != allocSize) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Failed to pre-allocate array");
+        #endif
         return false;
     }
     

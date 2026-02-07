@@ -134,6 +134,7 @@ void PrintZonePerformanceReport() {
     Print("═══════════════════════════════════════════════════════════");
     Print("📊 Zone Drawing Performance Report");
     Print("═══════════════════════════════════════════════════════════");
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Zones Created: ", g_zoneMetrics.totalZonesCreated);
     Print("🔄 Zones Updated: ", g_zoneMetrics.totalZonesUpdated);
     Print("❌ Zones Failed: ", g_zoneMetrics.totalZonesFailed);
@@ -143,6 +144,7 @@ void PrintZonePerformanceReport() {
     Print("⏱️ Avg Render Time: ", DoubleToString(g_zoneMetrics.avgRenderTime, 2), " ms");
     Print("📅 Last Reset: ", TimeToString(g_zoneMetrics.lastResetTime));
     Print("═══════════════════════════════════════════════════════════");
+    #endif
     #endif
 }
 

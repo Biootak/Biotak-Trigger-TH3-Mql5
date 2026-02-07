@@ -14,13 +14,17 @@ bool UpdateHistoricalValues() {
                    inpHistoricalPeriods;
     
     if(totalBars <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("UpdateHistoricalValues: Invalid totalBars=", totalBars);
+        #endif
         return false;
     }
 
     // Resize arrays
     if(ArrayResize(highArray, totalBars) != totalBars || ArrayResize(lowArray, totalBars) != totalBars) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("UpdateHistoricalValues: Failed to resize arrays. Error: ", GetLastError());
+        #endif
         ArrayFree(highArray);
         ArrayFree(lowArray);
         return false;
@@ -31,7 +35,9 @@ bool UpdateHistoricalValues() {
     int copiedLow = CopyLow(_Symbol, inpHistoricalTimeframe, 0, totalBars, lowArray);
     
     if(copiedHigh <= 0 || copiedLow <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("UpdateHistoricalValues: Failed to copy data. High=", copiedHigh, ", Low=", copiedLow);
+        #endif
         ArrayFree(highArray);
         ArrayFree(lowArray);
         return false;
@@ -46,7 +52,9 @@ bool UpdateHistoricalValues() {
     ArrayFree(lowArray);
     
     if(g_highestHigh <= 0 || g_lowestLow <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("UpdateHistoricalValues: Invalid high/low values");
+        #endif
         return false;
     }
     

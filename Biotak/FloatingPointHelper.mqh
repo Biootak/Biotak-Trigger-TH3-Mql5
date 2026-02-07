@@ -263,33 +263,49 @@ double MapRange(double value, double fromMin, double fromMax, double toMin, doub
 //+------------------------------------------------------------------+
 void TestFloatingPointHelper()
 {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  FLOATING-POINT HELPER TESTS                                  ║");
     Print("╚═══════════════════════════════════════════════════════════════╝");
+    #endif
     
     // Test 1: IsZero
     bool test1 = IsZero(0.0000000001, EPSILON_GENERAL);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Test 1 (IsZero): ", test1 ? "PASS" : "FAIL");
+    #endif
     
     // Test 2: AreEqual
     bool test2 = AreEqual(1.0000000001, 1.0, EPSILON_GENERAL);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Test 2 (AreEqual): ", test2 ? "PASS" : "FAIL");
+    #endif
     
     // Test 3: SafeDivide
     double test3 = SafeDivide(10.0, 0.0, 999.0);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Test 3 (SafeDivide): ", (test3 == 999.0) ? "PASS" : "FAIL");
+    #endif
     
     // Test 4: SafeSqrt
     double test4 = SafeSqrt(-1.0, 0.0);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Test 4 (SafeSqrt): ", (test4 == 0.0) ? "PASS" : "FAIL");
+    #endif
     
     // Test 5: ClampValue
     double test5 = ClampValue(150.0, 0.0, 100.0);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Test 5 (ClampValue): ", (test5 == 100.0) ? "PASS" : "FAIL");
+    #endif
     
     // Test 6: MapRange
     double test6 = MapRange(50.0, 0.0, 100.0, 0.0, 1.0);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Test 6 (MapRange): ", AreEqual(test6, 0.5, EPSILON_GENERAL) ? "PASS" : "FAIL");
+    #endif
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╚═══════════════════════════════════════════════════════════════╝");
+    #endif
 }

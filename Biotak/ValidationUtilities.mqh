@@ -24,13 +24,17 @@ struct ValidationResult {
 //+------------------------------------------------------------------+
 bool ValidateArrayIndex(int index, int arraySize, const string context = "") {
     if(index < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateArrayIndex: Negative index (", index, ")", 
+        #endif
               (StringLen(context) > 0) ? " in " + context : "");
         return false;
     }
     
     if(index >= arraySize) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateArrayIndex: Index out of bounds (", index, " >= ", arraySize, ")",
+        #endif
               (StringLen(context) > 0) ? " in " + context : "");
         return false;
     }
@@ -44,7 +48,9 @@ bool ValidateArrayIndex(int index, int arraySize, const string context = "") {
 //+------------------------------------------------------------------+
 bool ValidateArraySizesMatch(int size1, int size2, const string name1, const string name2) {
     if(size1 != size2) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Array size mismatch: ", name1, "=", size1, ", ", name2, "=", size2);
+        #endif
         return false;
     }
     return true;
@@ -149,7 +155,9 @@ ValidationResult ValidatePercentage(double percentage, double minValue = 0.001,
 //+------------------------------------------------------------------+
 bool ValidateIntRange(int value, int minValue, int maxValue, const string paramName = "value") {
     if(value < minValue || value > maxValue) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", paramName, " out of range: ", value, " (valid: ", minValue, "-", maxValue, ")");
+        #endif
         return false;
     }
     return true;
@@ -161,7 +169,9 @@ bool ValidateIntRange(int value, int minValue, int maxValue, const string paramN
 //+------------------------------------------------------------------+
 bool ValidateStringNotEmpty(const string str, const string paramName = "string") {
     if(StringLen(str) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", paramName, " is empty");
+        #endif
         return false;
     }
     return true;
@@ -185,7 +195,9 @@ bool ValidateTimeframe(int timeframe) {
         case PERIOD_MN1:
             return true;
         default:
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ Invalid timeframe: ", timeframe);
+            #endif
             return false;
     }
 }
@@ -198,13 +210,17 @@ bool ValidateColor(color clr, const string paramName = "color") {
     // In MQL4, color is uint, so always >= 0
     // Check for clrNONE (special value)
     if(clr == clrNONE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ ", paramName, " is clrNONE");
+        #endif
         return true; // Not an error, just a warning
     }
     
     // Check for valid RGB range (0x00RRGGBB)
     if(clr > 0x00FFFFFF) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", paramName, " invalid: ", ColorToString(clr));
+        #endif
         return false;
     }
     
@@ -220,12 +236,16 @@ bool ValidatePriceRange(double price1, double price2, const string name1, const 
     ValidationResult result2 = ValidatePrice(price2, name2);
     
     if(!result1.isValid) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", result1.errorMessage);
+        #endif
         return false;
     }
     
     if(!result2.isValid) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ", result2.errorMessage);
+        #endif
         return false;
     }
     
@@ -238,14 +258,18 @@ bool ValidatePriceRange(double price1, double price2, const string name1, const 
 //+------------------------------------------------------------------+
 bool ValidateDivisionOperands(double numerator, double denominator, const string context = "") {
     if(IsZero(denominator, EPSILON_GENERAL)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Division by zero", (StringLen(context) > 0) ? " in " + context : "",
               " (denominator=", DoubleToString(denominator, 10), ")");
+        #endif
         return false;
     }
     
     // Check for potential overflow
     if(MathAbs(numerator) > DBL_MAX / 2.0 && MathAbs(denominator) < 1.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Potential overflow in division", (StringLen(context) > 0) ? " in " + context : "");
+        #endif
         return false;
     }
     

@@ -41,7 +41,9 @@ void InitializeMemoryManager()
     g_memoryStats.criticalIssued = false;
     g_memoryStatsInitialized = true;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Memory Manager initialized");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -77,7 +79,9 @@ void TrackObjectDeletion(const string objectName)
     g_memoryStats.currentObjectCount--;
     
     if(g_memoryStats.currentObjectCount < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ WARNING: Negative object count detected - resetting");
+        #endif
         g_memoryStats.currentObjectCount = 0;
     }
 }
@@ -101,8 +105,10 @@ void CheckMemoryHealth()
     
     // Sync our tracking with reality
     if(MathAbs(actualCount - g_memoryStats.currentObjectCount) > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Memory tracking drift detected: tracked=", g_memoryStats.currentObjectCount,
               ", actual=", actualCount, " - syncing");
+        #endif
         g_memoryStats.currentObjectCount = actualCount;
     }
     
@@ -112,16 +118,20 @@ void CheckMemoryHealth()
     // Issue warnings
     if(usagePercent >= MEMORY_CRITICAL_THRESHOLD) {
         if(!g_memoryStats.criticalIssued) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ CRITICAL: Memory usage at ", DoubleToString(usagePercent * 100, 1), "%");
             Print("   Objects: ", actualCount, "/", MT4_OBJECT_LIMIT);
             Print("   Consider reducing Max Levels or closing other indicators");
+            #endif
             g_memoryStats.criticalIssued = true;
         }
     }
     else if(usagePercent >= MEMORY_WARNING_THRESHOLD) {
         if(!g_memoryStats.warningIssued) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ WARNING: Memory usage at ", DoubleToString(usagePercent * 100, 1), "%");
             Print("   Objects: ", actualCount, "/", MT4_OBJECT_LIMIT);
+            #endif
             g_memoryStats.warningIssued = true;
         }
     }
@@ -145,10 +155,12 @@ bool DetectMemoryLeaks()
     int difference = actualCount - expectedCount;
     
     if(difference > 50) { // Threshold for leak detection
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ MEMORY LEAK DETECTED:");
         Print("   Expected objects: ", expectedCount);
         Print("   Actual objects: ", actualCount);
         Print("   Leaked objects: ", difference);
+        #endif
         return true;
     }
     
@@ -161,13 +173,16 @@ bool DetectMemoryLeaks()
 void PrintMemoryStatistics()
 {
     if(!g_memoryStatsInitialized) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("Memory Manager not initialized");
+        #endif
         return;
     }
     
     int actualCount = ObjectsTotal(0, -1, -1);
     double usagePercent = (double)actualCount / MT4_OBJECT_LIMIT * 100.0;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════╗");
     Print("║  MEMORY STATISTICS                                        ║");
     Print("╠═══════════════════════════════════════════════════════════╣");
@@ -177,6 +192,7 @@ void PrintMemoryStatistics()
     Print("║  Total Deleted: ", g_memoryStats.totalObjectsDeleted);
     Print("║  MT4 Limit: ", MT4_OBJECT_LIMIT);
     Print("╚═══════════════════════════════════════════════════════════╝");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -195,7 +211,9 @@ void CleanupAllObjects(const string prefix = "")
     }
     
     if(deletedCount > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Cleaned up ", deletedCount, " objects", 
+        #endif
               (StringLen(prefix) > 0) ? " with prefix: " + prefix : "");
     }
     
@@ -213,15 +231,21 @@ void DeinitializeMemoryManager()
 {
     if(!g_memoryStatsInitialized) return;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════");
     Print("Memory Manager Shutdown");
+    #endif
     PrintMemoryStatistics();
     
     // Check for leaks one last time
     if(DetectMemoryLeaks()) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Memory leaks detected during shutdown");
+        #endif
     }
     
     g_memoryStatsInitialized = false;
+    #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════");
+    #endif
 }

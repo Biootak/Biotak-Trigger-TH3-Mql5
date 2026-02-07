@@ -139,6 +139,7 @@ double CalculateOptimalDefaultFrequency()
     }
     
     // نمایش نتایج تحلیل
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("📊 OPTIMAL DEFAULT FREQUENCY ANALYSIS");
     Print("========================================");
@@ -152,6 +153,7 @@ double CalculateOptimalDefaultFrequency()
     Print("  → Closest: ", DoubleToString(TH3_TEST_FREQUENCIES[bestIndices[2]], 3), 
           "% (Index: ", bestIndices[2], ", Error: ", DoubleToString(minErrors[2], 3), "%)");
     Print("========================================");
+    #endif
     
     // انتخاب بهترین فرکانس: میانگین وزن‌دار بر اساس اهمیت هر گام
     // Step 5 مهم‌ترین است (وزن 50%)
@@ -176,10 +178,12 @@ double CalculateOptimalDefaultFrequency()
     
     double bestDefault = TH3_TEST_FREQUENCIES[bestDefaultIdx];
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("🎯 RECOMMENDED DEFAULT FREQUENCY:");
     Print("  Weighted Average: ", DoubleToString(weightedFreq, 3), "%");
     Print("  Best Match: ", DoubleToString(bestDefault, 3), "% (Index: ", bestDefaultIdx, ")");
     Print("========================================");
+    #endif
     
     return bestDefault;
 }
@@ -268,8 +272,10 @@ WaveAnalysis AnalyzeThreeWaves(datetime tX, double pX, datetime tA, double pA,
     
     // SECURITY: Validate time ordering (X < A < B < C)
     if(!(tX < tA && tA < tB && tB < tC)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ AnalyzeThreeWaves: Invalid time ordering (X < A < B < C required)");
         Print("   tX=", TimeToString(tX), ", tA=", TimeToString(tA), ", tB=", TimeToString(tB), ", tC=", TimeToString(tC));
+        #endif
         // Return default values
         analysis.XA_Distance = 0;
         analysis.AB_Distance = 0;
@@ -374,22 +380,38 @@ WaveAnalysis AnalyzeThreeWaves(datetime tX, double pX, datetime tA, double pA,
     Print("🚀 ACCELERATION ANALYSIS:");
     Print("   XA→AB: ", DoubleToString(analysis.XA_to_AB_Acceleration, 4), " pips/min²");
     if(analysis.XA_to_AB_Acceleration > 0.001) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("      ⬆️ ACCELERATING: Speed increasing (getting stronger)");
+        #endif
     } else if(analysis.XA_to_AB_Acceleration < -0.001) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("      ⬇️ DECELERATING: Speed decreasing (getting weaker)");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("      ➡️ CONSTANT: Speed stable");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   AB→BC: ", DoubleToString(analysis.AB_to_BC_Acceleration, 4), " pips/min²");
+    #endif
     if(analysis.AB_to_BC_Acceleration > 0.001) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("      ⬆️ ACCELERATING: Correction speeding up");
+        #endif
     } else if(analysis.AB_to_BC_Acceleration < -0.001) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("      ⬇️ DECELERATING: Correction slowing down");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("      ➡️ CONSTANT: Correction speed stable");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     #endif
     
     // ========================================
@@ -452,12 +474,14 @@ WaveAnalysis AnalyzeThreeWaves(datetime tX, double pX, datetime tA, double pA,
     Print("   XA: Raw=", DoubleToString(analysis.XA_RawStrength, 2), 
           " | Weighted=", DoubleToString(analysis.XA_WeightedStrength, 2),
           " | Relative=", DoubleToString(analysis.XA_RelativeStrength, 2), "x ATR");
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   AB: Raw=", DoubleToString(analysis.AB_RawStrength, 2), 
           " | Weighted=", DoubleToString(analysis.AB_WeightedStrength, 2),
           " | Relative=", DoubleToString(analysis.AB_RelativeStrength, 2), "x ATR");
     Print("   BC: Raw=", DoubleToString(analysis.BC_RawStrength, 2), 
           " | Weighted=", DoubleToString(analysis.BC_WeightedStrength, 2),
           " | Relative=", DoubleToString(analysis.BC_RelativeStrength, 2), "x ATR");
+    #endif
     
     // تشخیص قوی‌ترین leg
     string strongestLeg = "XA";
@@ -471,19 +495,31 @@ WaveAnalysis AnalyzeThreeWaves(datetime tX, double pX, datetime tA, double pA,
         maxStrength = analysis.BC_RelativeStrength;
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   🏆 Strongest Leg: ", strongestLeg, " (", DoubleToString(maxStrength, 2), "x ATR)");
+    #endif
     
     // تشخیص نوع قدرت
     if(maxStrength > 3.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚡ VERY STRONG: Explosive movement detected");
+        #endif
     } else if(maxStrength > 2.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   💪 STRONG: Powerful movement");
+        #endif
     } else if(maxStrength > 1.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ✓ MODERATE: Normal strength");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚠️ WEAK: Low momentum");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     #endif
     
     // ========================================
@@ -525,11 +561,15 @@ double CalculateWaveAngle(datetime tStart, double pStart, datetime tEnd, double 
 {
     // SECURITY: Validate inputs
     if(tEnd <= tStart) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateWaveAngle: Invalid time range");
+        #endif
         return 0;
     }
     if(pStart <= 0 || pEnd <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateWaveAngle: Invalid prices");
+        #endif
         return 0;
     }
     
@@ -615,13 +655,17 @@ int CalculateRequiredRestCandles(double angle, int movementCandles)
     // CRITICAL FIX #1: Validate movementCandles to prevent overflow
     // ═══════════════════════════════════════════════════════════════
     if(movementCandles < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateRequiredRestCandles: Negative movementCandles (", 
               movementCandles, "), setting to 0");
+        #endif
         movementCandles = 0;
     }
     if(movementCandles > MAX_MOVEMENT_CANDLES) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateRequiredRestCandles: movementCandles too large (", 
               movementCandles, "), clamping to ", MAX_MOVEMENT_CANDLES);
+        #endif
         movementCandles = MAX_MOVEMENT_CANDLES;
     }
     
@@ -692,8 +736,10 @@ int CalculateRequiredRestCandles(double angle, int movementCandles)
     // ═══════════════════════════════════════════════════════════════
     if(restCandles < 0) restCandles = 0;
     if(restCandles > MAX_REST_CANDLES) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateRequiredRestCandles: Result too large (", restCandles, 
               "), clamping to ", MAX_REST_CANDLES);
+        #endif
         restCandles = MAX_REST_CANDLES;
     }
     
@@ -1033,23 +1079,35 @@ void AnalyzeHarmonicProperties(WaveAnalysis &waves)
         double arithmeticMean = (waves.XA_Speed + waves.AB_Speed + waves.BC_Speed) / 3.0;
         double geometricMean = MathPow(waves.XA_Speed * waves.AB_Speed * waves.BC_Speed, 1.0/3.0);
         
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📊 PYTHAGOREAN MEANS:");
         Print("   Harmonic Mean:   ", DoubleToString(harmonicMean, 2), " pips/min");
         Print("   Geometric Mean:  ", DoubleToString(geometricMean, 2), " pips/min");
         Print("   Arithmetic Mean: ", DoubleToString(arithmeticMean, 2), " pips/min");
         Print("   Relationship: HM ≤ GM ≤ AM ", 
+        #endif
               (harmonicMean <= geometricMean && geometricMean <= arithmeticMean) ? "✅" : "❌");
         
         double meanRatio = harmonicMean / arithmeticMean;
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   HM/AM Ratio: ", DoubleToString(meanRatio, 3));
+        #endif
         if(meanRatio > 0.9) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → ✅ EXCELLENT: Very consistent speeds");
+            #endif
         } else if(meanRatio > 0.8) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → ✓ GOOD: Moderately consistent speeds");
+            #endif
         } else if(meanRatio > 0.7) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → ⚠️ FAIR: Some speed variation");
+            #endif
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → ❌ POOR: High speed variation");
+            #endif
         }
     }
     
@@ -1059,32 +1117,48 @@ void AnalyzeHarmonicProperties(WaveAnalysis &waves)
     double phi = 1.618033988749;
     double phiInverse = 0.618033988749;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("📐 GOLDEN RATIO (φ = 1.618):");
+    #endif
     
     // AB/XA ratio
     double phiDev_AB_XA = MathAbs(waves.AB_XA_Ratio - phiInverse);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   AB/XA = ", DoubleToString(waves.AB_XA_Ratio, 3));
+    #endif
     if(phiDev_AB_XA < 0.05) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → ✨ GOLDEN RATIO (0.618) detected! Deviation: ", 
+        #endif
               DoubleToString(phiDev_AB_XA * 100, 1), "%");
     } else {
         double phiDev_ext = MathAbs(waves.AB_XA_Ratio - phi);
         if(phiDev_ext < 0.08) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → ✨ PHI EXTENSION (1.618) detected! Deviation: ", 
+            #endif
                   DoubleToString(phiDev_ext * 100, 1), "%");
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → No Golden Ratio (deviation: ", DoubleToString(phiDev_AB_XA * 100, 1), "%)");
+            #endif
         }
     }
     
     // BC/AB ratio
     double phiDev_BC_AB = MathAbs(waves.BC_AB_Ratio - phiInverse);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   BC/AB = ", DoubleToString(waves.BC_AB_Ratio, 3));
+    #endif
     if(phiDev_BC_AB < 0.05) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → ✨ GOLDEN RATIO (0.618) detected! Deviation: ", 
+        #endif
               DoubleToString(phiDev_BC_AB * 100, 1), "%");
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → No Golden Ratio (deviation: ", DoubleToString(phiDev_BC_AB * 100, 1), "%)");
+        #endif
     }
     
     // ========================================
@@ -1101,16 +1175,26 @@ void AnalyzeHarmonicProperties(WaveAnalysis &waves)
     
     if(phiDev_AB_XA < 0.05 || phiDev_BC_AB < 0.05) harmonicScore++;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("🎯 HARMONIC QUALITY: ", harmonicScore, "/2");
+    #endif
     if(harmonicScore == 2) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⭐⭐ EXCELLENT: Strong harmonic properties");
+        #endif
     } else if(harmonicScore == 1) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⭐ GOOD: Some harmonic properties");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ➡️ NORMAL: No special harmonic properties");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     #endif
 }
 
@@ -1129,9 +1213,11 @@ double CalculateFrequencyError(double pA, double pB, double pC,
     double minDistance = Point * 10; // Minimum 10 pips
     
     if(AB_Distance < minDistance) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFrequencyError: AB distance too small (", 
               DoubleToString(AB_Distance, Digits), ") - minimum ", 
               DoubleToString(minDistance, Digits), " required");
+        #endif
         calculatedD = 0.0;
         targetPrice = 0.0;
         return 999.99; // Invalid error
@@ -1245,6 +1331,7 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
     Print("   Wave Distances: XA=", DoubleToString(waves.XA_Distance/pipSize, 1), 
           " | AB=", DoubleToString(waves.AB_Distance/pipSize, 1),
           " | BC=", DoubleToString(waves.BC_Distance/pipSize, 1), " pips");
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   Wave Speeds: XA=", DoubleToString(waves.XA_Speed, 2), 
           " | AB=", DoubleToString(waves.AB_Speed, 2),
           " | BC=", DoubleToString(waves.BC_Speed, 2), " pips/min");
@@ -1256,24 +1343,37 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
     Print("   Pattern Type: ", waves.isImpulsive ? "Impulsive" : (waves.isCorrectional ? "Correctional" : "Balanced"));
     Print("   Suggested Frequency: ", DoubleToString(suggestedFreq, 3), "%");
     Print("   Speed Ratio: ", DoubleToString(speedRatio, 2), "x");
+    #endif
     
     // هشدار برای کیفیت پایین
     if(waves.speedConsistency < 0.5) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚠️ WARNING: Low speed consistency - results may be unreliable");
+        #endif
     } else if(waves.speedConsistency < 0.7) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚠️ CAUTION: Moderate speed consistency");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ✅ Good speed consistency");
+        #endif
     }
     
     // هشدار برای consolidation بالا
     if(consolidationFactor > 0.7) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   🔥 HIGH CONSOLIDATION: Expect strong breakout - using larger steps");
+        #endif
     } else if(consolidationFactor > 0.4) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚡ MODERATE CONSOLIDATION: Some energy buildup detected");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     #endif
     
     // ========================================
@@ -1385,67 +1485,99 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
     
     // Harmonic Pattern Detection
     if(harmonicPattern != "NONE") {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📊 HARMONIC PATTERN: ", harmonicPattern);
         Print("   AB/XA Ratio: ", DoubleToString(waves.AB_XA_Ratio, 3));
         Print("   BC/AB Ratio: ", DoubleToString(bcToAbRatio, 3));
         Print("   Confidence Level: ", DoubleToString(harmonicConfidence, 3));
         Print("   PRZ Frequency: ", DoubleToString(prz_Frequency, 1), "%");
         Print("   → Using harmonic-based frequency selection");
+        #endif
     }
     
     // Median Line Analysis
+    #ifdef ENABLE_DEBUG_LOGS
     Print("📐 ANDREWS PITCHFORK (Median Line):");
     Print("   Median Price: ", DoubleToString(medianPrice, Digits));
     Print("   Distance from Median: ", DoubleToString(medianLineDeviation * 100, 1), "%");
+    #endif
     if(strongMedianLinePull) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   🎯 STRONG PULL: Price far from median (>80%)");
         Print("   → Expect strong reversal to median");
         Print("   → Median Frequency: ", DoubleToString(medianLineFrequency, 1), "%");
+        #endif
     } else if(moderateMedianLinePull) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚡ MODERATE PULL: Price moderately far (50-80%)");
         Print("   → Median Frequency: ", DoubleToString(medianLineFrequency, 1), "%");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ✓ Near Median: Price close to equilibrium");
+        #endif
     }
     
     // AB=CD Validation
+    #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 AB=CD PATTERN VALIDATION:");
     Print("   BC Retracement: ", DoubleToString(bcToAbRatio, 3), " (Target: 0.618)");
     Print("   Error: ", DoubleToString(bcRetracementError, 3));
+    #endif
     if(isValidABCD) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ✅ VALID AB=CD: Score ", DoubleToString(abcdScore * 100, 1), "%");
         Print("   → Using AB=CD frequency rules");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   ⚠️ Not a classic AB=CD pattern");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     
     // Original Impulsive Pattern Detection
     if(isStrongImpulsive) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("🚀 STRONG IMPULSIVE PATTERN DETECTED:");
         Print("   Gann Angle: ", DoubleToString(gannAngle, 2), "° (>75°)");
         Print("   Consolidation: ", DoubleToString(consolidationFactor * 100, 1), "% (<10%)");
         Print("   BC/AB Ratio: ", DoubleToString(bcToAbRatio, 3));
+        #endif
         if(hasDeepRetracement) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   Deep Retracement: YES - Expect strong continuation");
+            #endif
         }
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Adjusting scoring: Prefer higher frequencies (50-70% range)");
         Print("   → Reducing penalties for low consistency and time symmetry");
+        #endif
     }
     else if(isMediumImpulsive) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚡ MEDIUM IMPULSIVE PATTERN DETECTED:");
         Print("   Gann Angle: ", DoubleToString(gannAngle, 2), "° (50-75°)");
         Print("   Consolidation: ", DoubleToString(consolidationFactor * 100, 1), "% (<10%)");
         Print("   BC/AB Ratio: ", DoubleToString(bcToAbRatio, 3));
         Print("   Time Symmetry: ", DoubleToString(timeSymmetry * 100, 1), "%");
+        #endif
         if(hasGoodTimeSymmetry) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   Good Time Symmetry: Pattern is reliable");
+            #endif
         }
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Adjusting scoring: Prefer frequencies (35-50% range)");
         Print("   → Reducing penalties for low consistency");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     #endif
     
     // ========================================
@@ -1960,7 +2092,9 @@ bool AutoSelectBestFrequency(string patternName)
     string lineBC = patternName + "_Line_BC";
     
     if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Pattern not found: ", patternName);
+        #endif
         return false;
     }
     
@@ -1973,7 +2107,9 @@ bool AutoSelectBestFrequency(string patternName)
     
     // CRITICAL FIX: Validate all retrieved values
     if(tA <= 0 || tB <= 0 || tC <= 0 || pA <= 0 || pB <= 0 || pC <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Invalid pattern data");
+        #endif
         return false;
     }
     
@@ -2051,11 +2187,14 @@ bool AutoSelectBestFrequency(string patternName)
     }
     
     if(resultCount == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ No suitable frequency found (error > 5%)");
+        #endif
         return false;
     }
     
     // نمایش نتایج با جزئیات کامل
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("🔍 FREQUENCY SEARCH RESULTS");
     Print("Pattern: ", patternName);
@@ -2069,6 +2208,7 @@ bool AutoSelectBestFrequency(string patternName)
     Print("   Time Symmetry: ", DoubleToString(results[0].timeSymmetry * 100, 1), "% | Total Score: ", DoubleToString(results[0].totalScore, 2));
     Print("========================================");
     Print("📊 TOP 10 ALTERNATIVES:");
+    #endif
     
     int displayCount = MathMin(10, resultCount);
     for(int i = 0; i < displayCount; i++)
@@ -2082,7 +2222,9 @@ bool AutoSelectBestFrequency(string patternName)
               results[i].gannAngle,
               results[i].totalScore));
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     
     // انتخاب بهترین فرکانس
     double bestFreq = results[0].frequency;
@@ -2102,7 +2244,9 @@ bool AutoSelectBestFrequency(string patternName)
     GlobalVariableTemp(freqGvarName);
     GlobalVariableTemp(indexGvarName);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Frequency applied successfully");
+    #endif
     
     // Update frequency label
     UpdateTH3FrequencyLabel(bestFreq);
@@ -2120,19 +2264,25 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
 {
     // 1. Validate input times
     if(tA <= 0 || tB <= 0 || tC <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ AB=CD Error: Invalid time inputs");
+        #endif
         return false;
     }
     
     // 2. Validate input prices
     if(pA <= 0 || pB <= 0 || pC <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ AB=CD Error: Invalid price inputs");
+        #endif
         return false;
     }
     
     // 3. Time ordering: A < B < C
     if(!(tA < tB && tB < tC)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ AB=CD Error: Time ordering violated (A < B < C required)");
+        #endif
         return false;
     }
     
@@ -2142,7 +2292,9 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
     double minDistance = Point * ABCD_MIN_DISTANCE_POINTS;
     
     if(AB_Distance < minDistance) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ AB=CD Error: AB distance too small (min: ", minDistance, ")");
+        #endif
         return false;
     }
     
@@ -2186,7 +2338,9 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
     // 9. Final validation: D price must be reasonable (RELAXED)
     // اعتبارسنجی نهایی: قیمت D باید منطقی باشه (آزاد شده)
     if(pD <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ AB=CD Error: Calculated D price is zero or negative");
+        #endif
         return false;
     }
     
@@ -2209,7 +2363,9 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     Print("🎨 DrawABCDPattern called | Name: ", mainObjName);
     Print("   A: ", TimeToString(tA), " @ ", DoubleToString(pA, Digits));
     Print("   B: ", TimeToString(tB), " @ ", DoubleToString(pB, Digits));
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   C: ", TimeToString(tC), " @ ", DoubleToString(pC, Digits));
+    #endif
     #endif
     
     datetime tD;
@@ -2696,7 +2852,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             
             ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
             ChartRedraw();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✖️ AB=CD creation cancelled");
+            #endif
             return;
         }
         
@@ -2751,7 +2909,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_COLOR, clrYellow);
                 ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_FONTSIZE, 10);
                 ChartRedraw();
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point X placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+                #endif
             }
             else if(g_abcdPointCount == 1) {
                 g_abcdTimeA = clickTime;
@@ -2768,7 +2928,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_STYLE, STYLE_DOT);
                 ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_RAY_RIGHT, false);
                 ChartRedraw();
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point A placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+                #endif
             }
             else if(g_abcdPointCount == 2) {
                 g_abcdTimeB = clickTime;
@@ -2785,13 +2947,17 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_STYLE, STYLE_DOT);
                 ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_RAY_RIGHT, false);
                 ChartRedraw();
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point B placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+                #endif
             }
             else if(g_abcdPointCount == 3) {
                 g_abcdTimeC = clickTime;
                 g_abcdPriceC = clickPrice;
                 
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point C placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+                #endif
                 
                 // 🔍 AUTO-SEARCH: Find optimal frequency for this pattern (with 3-wave analysis)
                 // جستجوی خودکار: پیدا کردن بهترین فرکانس برای این پترن (با تحلیل 3 موج)
@@ -2824,6 +2990,7 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                     GlobalVariableTemp(freqGvarName);
                     GlobalVariableTemp(indexGvarName);
                     
+                    #ifdef ENABLE_DEBUG_LOGS
                     Print("========================================");
                     Print("🎯 AUTO-SELECTED FREQUENCY");
                     Print("========================================");
@@ -2833,6 +3000,7 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                     Print("Time Sym: ", DoubleToString(searchResults[0].timeSymmetry * 100, 1), "% | Score: ", DoubleToString(searchResults[0].totalScore, 2));
                     Print("========================================");
                     Print("📊 TOP 5 ALTERNATIVES:");
+                    #endif
                     for(int i = 0; i < MathMin(5, resultCount); i++) {
                         Print(StringFormat("%d. %.3f%% → Step %d | Err: %.2f%% | Speed: %.2fx | Score: %.2f",
                               i + 1,
@@ -2842,7 +3010,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                               searchResults[i].gannAngle,
                               searchResults[i].totalScore));
                     }
+                    #ifdef ENABLE_DEBUG_LOGS
                     Print("========================================");
+                    #endif
                 }
                 
                 string patternName = "ABCD_Pattern_" + IntegerToString((long)GetTickCount());
@@ -2886,7 +3056,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
                 
                 ChartRedraw();
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("✅ AB=CD pattern created: ", patternName);
+                #endif
             }
         }
         else if(!leftButtonDown && s_lastLeftButtonState) {
@@ -2939,7 +3111,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_COLOR, clrYellow);
             ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_FONTSIZE, 10);
             ChartRedraw();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point X placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+            #endif
         }
         else if(g_abcdPointCount == 1) {
             g_abcdTimeA = clickTime;
@@ -2956,7 +3130,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_STYLE, STYLE_DOT);
             ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_RAY_RIGHT, false);
             ChartRedraw();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point A placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+            #endif
         }
         else if(g_abcdPointCount == 2) {
             g_abcdTimeB = clickTime;
@@ -2973,13 +3149,17 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_STYLE, STYLE_DOT);
             ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_RAY_RIGHT, false);
             ChartRedraw();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point B placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+            #endif
         }
         else if(g_abcdPointCount == 3) {
             g_abcdTimeC = clickTime;
             g_abcdPriceC = clickPrice;
             
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point C placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
+            #endif
             
             string patternName = "ABCD_Pattern_" + IntegerToString((long)GetTickCount());
             DrawABCDPattern(patternName, g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB, g_abcdTimeC, g_abcdPriceC);
@@ -2999,7 +3179,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             g_abcdPointCount = 0;
             ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
             ChartRedraw();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✅ AB=CD pattern created: ", patternName);
+            #endif
         }
     }
     
@@ -3229,7 +3411,9 @@ void ToggleTH3Tool() {
             g_abcdPointCount = 0;
             g_abcdLastClickTime = 0;
             ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
+            #ifdef ENABLE_DEBUG_LOGS
             Print("🎯 AB=CD Mode: Click 4 points (X, A, B, C). Right-click to cancel.");
+            #endif
         } else {
             // Cancel current drawing
             g_abcdDrawing = false;
@@ -3243,7 +3427,9 @@ void ToggleTH3Tool() {
             ObjectDelete(0, "ABCD_Temp_Line_BC");
             ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
             ChartRedraw();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✖️ AB=CD creation cancelled");
+            #endif
         }
     }
 }
@@ -3272,7 +3458,9 @@ void CycleTH3Frequency() {
     // Update frequency label
     UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 TH3 Frequency: ", DoubleToString(g_th3FrequencyOverride, 3), "%");
+    #endif
 }
 
 void DecrementTH3Frequency() {
@@ -3295,7 +3483,9 @@ void DecrementTH3Frequency() {
     // Update frequency label
     UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 TH3 Frequency: ", DoubleToString(g_th3FrequencyOverride, 3), "%");
+    #endif
 }
 
 

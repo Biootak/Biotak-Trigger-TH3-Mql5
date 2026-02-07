@@ -2,9 +2,9 @@
 #define CACHE_TIMEOUT 60
 
 // Performance & Safety Constants
-#define MAX_SAFE_LEVELS 2000          // Maximum safe number of levels per side
-#define MAX_SAFE_OBJECTS 5000         // Warning threshold for total objects
-#define CRITICAL_OBJECT_LIMIT 50000   // Critical threshold (MT4 limit ~64K)
+#define MAX_SAFE_LEVELS 200           // Maximum safe number of levels per side (was 2000 - too many objects)
+#define MAX_SAFE_OBJECTS 3000         // Warning threshold for total objects
+#define CRITICAL_OBJECT_LIMIT 50000   // Critical threshold (MT5 limit ~64K)
 #define CPU_WARNING_MS 100            // Warning if OnCalculate takes >100ms
 #define CPU_CRITICAL_MS 500           // Critical if OnCalculate takes >500ms
 

@@ -114,103 +114,21 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // PHASE 2: TIME CALCULATION (Race Condition Prevention - GOLD v3 FINAL)
+    // PHASE 2: TIME CALCULATION
+    // PERFORMANCE: Mutex removed — MQL5 indicators are single-threaded
+    // بهینه‌سازی: Mutex حذف شد — اندیکاتورها تک‌نخی هستند
     // ═══════════════════════════════════════════════════════════════
     
-    // GOLD FIX v3: Use GlobalVariable mutex for true atomic operation
-    // PERFORMANCE: Use cached ChartID string
-    string mutexName = "Biotak_ZoneCreate_Mutex_" + GetCachedChartIdStr();
-    string mutexTimeName = mutexName + "_Time";
+    int safeBars = Bars(_Symbol, _Period);
+    datetime currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
     
-    // Check for stale mutex (older than 2 seconds)
-    if(GlobalVariableCheck(mutexTimeName)) {
-        datetime lockTime = (datetime)GlobalVariableGet(mutexTimeName);
-        if(TimeCurrent() - lockTime > 2) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ ZoneFactory: Stale mutex detected, forcing release");
-            #endif
-            GlobalVariableDel(mutexName);
-            GlobalVariableDel(mutexTimeName);
-        }
-    }
-    
-    // CRITICAL FIX: Use GlobalVariableSetOnCondition for atomic lock acquisition
-    // This prevents race condition between Check and Set
-    bool lockAcquired = false;
-    for(int attempt = 0; attempt < 10; attempt++) {
-        // First attempt: create new mutex if doesn't exist
-        if(!GlobalVariableCheck(mutexName)) {
-            // Use atomic set - only succeeds if value is still 0 (doesn't exist)
-            // Note: In MQL4, we use a workaround since GlobalVariableSetOnCondition
-            // checks for specific value. We set to 0 first, then try to change to 1
-            GlobalVariableSet(mutexName, 0.0);
-            GlobalVariableTemp(mutexName);
-            
-            // Atomic compare-and-swap: only set to 1 if still 0
-            if(GlobalVariableSetOnCondition(mutexName, 1.0, 0.0)) {
-                GlobalVariableSet(mutexTimeName, (double)TimeCurrent());
-                GlobalVariableTemp(mutexTimeName);
-                lockAcquired = true;
-                break;
-            }
-        }
-        // Sleep removed for MQL5 indicator compatibility
-    }
-    
-    // CRITICAL SECTION: Read Bars and Time atomically
-    int safeBars = 0;
-    datetime currentTime = 0;
-    bool atomicReadSuccess = false;
-    
-    if(lockAcquired) {
-        // Inside mutex - safe to read
-        safeBars = Bars(_Symbol, _Period);
-        currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
-        
-        // Validate read
-        if(safeBars > 0 && currentTime > 0) {
-            atomicReadSuccess = true;
-        }
-        
-        // Release mutex immediately
-        GlobalVariableDel(mutexName);
-        GlobalVariableDel(mutexTimeName);
-    }
-    
-    // Fallback strategy if mutex acquisition failed
-    if(!atomicReadSuccess) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ ZoneFactory: Mutex acquisition failed, using fallback");
-        #endif
-        
-        // Enhanced fallback with multiple retries
-        const int FALLBACK_MAX_RETRIES = 5;
-        for(int retry = 0; retry < FALLBACK_MAX_RETRIES && !atomicReadSuccess; retry++) {
-            int bars1 = Bars(_Symbol, _Period);
-            datetime time1 = (bars1 > 0) ? iTime(_Symbol, _Period, 0) : 0;
-            int bars2 = Bars(_Symbol, _Period);
-            datetime time2 = (bars2 > 0) ? iTime(_Symbol, _Period, 0) : 0;
-            
-            if(bars1 > 0 && bars1 == bars2 && time1 > 0 && time1 == time2) {
-                safeBars = bars1;
-                currentTime = time1;
-                atomicReadSuccess = true;
-            } else {
-                // Sleep removed for MQL5 indicator compatibility
-            }
-        }
-        
-        // Final fallback
-        if(!atomicReadSuccess) {
-            safeBars = Bars(_Symbol, _Period);
-            currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : TimeCurrent();
-            if(currentTime <= 0) currentTime = TimeCurrent();
-        }
-    }
-    
-    // Final validation with detailed error
     if(currentTime <= 0) {
-        result.errorMessage = StringFormat("Invalid time after fallback (Bars=%d)", safeBars);
+        currentTime = TimeCurrent();
+    }
+    
+    // Final validation
+    if(currentTime <= 0) {
+        result.errorMessage = StringFormat("Invalid time (Bars=%d)", safeBars);
         result.errorCode = ERR_ZONE_RENDER_FAILED;
         return result;
     }
@@ -314,21 +232,18 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // PHASE 3: CALCULATE FINAL COLOR (Before Object Creation)
     // ═══════════════════════════════════════════════════════════════
     
-    // Calculate final color with clamped transparency
-    color finalColor = request.zoneColor;
+    // FIX: Use MQL5 ColorToARGB() for correct transparency instead of manual bit-packing.
+    // Old code had wrong byte order (AABBGGRR vs AARRGGBB) and (color) cast truncated alpha.
+    long finalColorARGB = (long)request.zoneColor;  // Default: fully opaque
     if(clampedTransparency > 0) {
-        int r = (int)((finalColor >> 0) & 0xFF);
-        int g = (int)((finalColor >> 8) & 0xFF);
-        int b = (int)((finalColor >> 16) & 0xFF);
+        // transparency 0%=fully opaque (alpha=255), 100%=fully transparent (alpha=0)
+        uchar alpha = (uchar)((100 - clampedTransparency) * 255 / 100);
         
-        // Calculate alpha (already clamped)
-        int alpha = (int)((100 - clampedTransparency) * 255 / 100);
+        // CRITICAL: clamp alpha bounds (defense in depth)
+        if(alpha < (uchar)MIN_ALPHA_VALUE) alpha = (uchar)MIN_ALPHA_VALUE;
+        if(alpha > (uchar)MAX_ALPHA_VALUE) alpha = (uchar)MAX_ALPHA_VALUE;
         
-        // CRITICAL: Double-check alpha bounds (defense in depth)
-        if(alpha < MIN_ALPHA_VALUE) alpha = MIN_ALPHA_VALUE;
-        if(alpha > MAX_ALPHA_VALUE) alpha = MAX_ALPHA_VALUE;
-        
-        finalColor = (color)((alpha << 24) | (b << 16) | (g << 8) | r);
+        finalColorARGB = (long)ColorToARGB(request.zoneColor, alpha);
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -363,7 +278,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             }
             
             if(ObjectFind(0, request.name) >= 0) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ Failed to cleanup partial zone object after ", cleanupAttempts, " attempts");
+                #endif
             }
             
             return result;
@@ -397,7 +314,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     
     if(needsPropertyUpdate) {
         bool propsSuccess = true;
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColor);
+        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColorARGB);
         propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_BACK, true);
         propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_FILL, request.filled);
         propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_SELECTABLE, false);

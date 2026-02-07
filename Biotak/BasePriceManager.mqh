@@ -33,8 +33,10 @@
 void PrintRecentM30Bars(int count = 5)
 {
     Print("[BasePriceManager] ╔═══════════════════════════════════════════════════════════════╗");
+    #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] ║  RECENT M30 BARS (Last ", count, " completed bars)                    ║");
     Print("[BasePriceManager] ╠═══════════════════════════════════════════════════════════════╣");
+    #endif
     
     for(int i = 1; i <= count; i++)  // Start from 1 (skip current incomplete bar)
     {
@@ -46,13 +48,17 @@ void PrintRecentM30Bars(int count = 5)
         // FIXED: Use centralized conversion function
         datetime barTimeGMT = ConvertServerToGMT(barTime);
         
+        #ifdef ENABLE_DEBUG_LOGS
         Print("[BasePriceManager] ║  Bar ", i, ":");
         Print("[BasePriceManager] ║    Server Time: ", TimeToString(barTime, TIME_DATE|TIME_MINUTES));
         Print("[BasePriceManager] ║    GMT Time:    ", TimeToString(barTimeGMT, TIME_DATE|TIME_MINUTES));
         Print("[BasePriceManager] ║    Close:       ", DoubleToString(barClose, Digits));
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] ╚═══════════════════════════════════════════════════════════════╝");
+    #endif
 }
 #else
 #define PrintRecentM30Bars(count)
@@ -93,99 +99,43 @@ static int g_symbolStateCount = 0;
 //+------------------------------------------------------------------+
 int GetSymbolStateIndex()
 {
-    string currentSymbol = Symbol();
+    string currentSymbol = _Symbol;
     
     // ═══════════════════════════════════════════════════════════════
-    // CRITICAL FIX #1: Buffer Overflow Prevention
+    // Buffer Overflow Prevention
     // ═══════════════════════════════════════════════════════════════
     if(g_symbolStateCount < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CRITICAL: Corrupted symbol state count (", g_symbolStateCount, ")");
+        #endif
         g_symbolStateCount = 0;
         ArrayResize(g_symbolStates, 0);
         return -1;
     }
     
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CRITICAL: Symbol state limit reached (", MAX_SYMBOL_STATES, ")");
-        Print("   Cannot track more symbols. Consider increasing MAX_SYMBOL_STATES.");
+        #endif
         return -1;
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // CRITICAL FIX #2: Enhanced Lock with Stale Detection
+    // PERFORMANCE: Mutex removed — MQL5 indicators run single-threaded
+    // بهینه‌سازی: قفل GlobalVariable حذف شد — اندیکاتورها تک‌نخی هستند
     // ═══════════════════════════════════════════════════════════════
-    string lockName = "Biotak_StateAccess_Lock_" + currentSymbol;
-    string lockTimeName = lockName + "_Time";
-    
-    // Check for stale lock
-    if(GlobalVariableCheck(lockTimeName)) {
-        datetime lockTime = (datetime)GlobalVariableGet(lockTimeName);
-        if(TimeCurrent() - lockTime > LOCK_TIMEOUT_SECONDS) {
-            Print("⚠️ Stale lock detected (", TimeCurrent() - lockTime, "s old), forcing release");
-            GlobalVariableDel(lockName);
-            GlobalVariableDel(lockTimeName);
-        }
-    }
-    
-    // Try to acquire lock
-    bool lockAcquired = false;
-    for(int attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++)
-    {
-        if(!GlobalVariableCheck(lockName))
-        {
-            GlobalVariableSet(lockName, 1.0);
-            GlobalVariableSet(lockTimeName, (double)TimeCurrent());
-            GlobalVariableTemp(lockName);
-            GlobalVariableTemp(lockTimeName);
-            lockAcquired = true;
-            break;
-        }
-        // Sleep removed for MQL5 indicator compatibility
-    }
-    
-    if(!lockAcquired)
-    {
-        Print("❌ CRITICAL: GetSymbolStateIndex failed to acquire lock after ", LOCK_MAX_ATTEMPTS, " attempts");
-        Print("   Symbol: ", currentSymbol, " - Aborting to prevent race condition");
-        return -1; // CRITICAL FIX: Return error instead of proceeding
-    }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // CRITICAL FIX #3: Bounds-Checked Search
-    // ═══════════════════════════════════════════════════════════════
-    int resultIndex = -1;
     int arraySize = ArraySize(g_symbolStates);
     
-    // Validate array size matches count
     if(arraySize != g_symbolStateCount) {
-        Print("⚠️ WARNING: Array size mismatch (size=", arraySize, ", count=", g_symbolStateCount, ")");
-        g_symbolStateCount = arraySize; // Sync
+        g_symbolStateCount = arraySize;
     }
     
     for(int i = 0; i < g_symbolStateCount && i < arraySize; i++)
     {
         if(g_symbolStates[i].symbol == currentSymbol)
         {
-            resultIndex = i;
-            break;
+            return i;
         }
-    }
-    
-    // Release lock
-    GlobalVariableDel(lockName);
-    GlobalVariableDel(lockTimeName);
-    
-    if(resultIndex >= 0)
-    {
-        return resultIndex;
-    }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // CRITICAL FIX #4: Safe State Creation with Bounds Check
-    // ═══════════════════════════════════════════════════════════════
-    if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
-        Print("❌ Cannot create new state - limit reached");
-        return -1;
     }
     
     // Create new state for this symbol
@@ -193,7 +143,9 @@ int GetSymbolStateIndex()
     
     // Safe resize with validation
     if(ArrayResize(g_symbolStates, newIndex + 1) != newIndex + 1) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CRITICAL: Failed to resize symbol states array");
+        #endif
         return -1;
     }
     
@@ -210,7 +162,9 @@ int GetSymbolStateIndex()
     
     g_symbolStateCount++;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");
+    #endif
     return newIndex;
     ArrayResize(g_symbolStates, g_symbolStateCount + 1);
     g_symbolStates[g_symbolStateCount].symbol = currentSymbol;
@@ -232,7 +186,8 @@ int GetSymbolStateIndex()
 // Helper functions for array access (to avoid macro expansion issues)
 string GetHistoryEntry(int index)
 {
-    int stateIdx = GetSymbolStateIndex();
+    int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return "";
     if(index >= 0 && index < g_symbolStates[stateIdx].historyCount)
     {
         return g_symbolStates[stateIdx].basePriceHistory[index];
@@ -242,7 +197,8 @@ string GetHistoryEntry(int index)
 
 void SetHistoryEntry(int index, string value)
 {
-    int stateIdx = GetSymbolStateIndex();
+    int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return;
     if(index >= 0 && index < ArraySize(g_symbolStates[stateIdx].basePriceHistory))
     {
         g_symbolStates[stateIdx].basePriceHistory[index] = value;
@@ -251,13 +207,15 @@ void SetHistoryEntry(int index, string value)
 
 void ResizeHistory(int newSize)
 {
-    int stateIdx = GetSymbolStateIndex();
+    int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, newSize);
 }
 
 void GetHistoryArray(string &output[])
 {
-    int stateIdx = GetSymbolStateIndex();
+    int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) { ArrayResize(output, 0); return; }
     int count = g_symbolStates[stateIdx].historyCount;
     ArrayResize(output, count);
     for(int i = 0; i < count; i++)
@@ -268,7 +226,8 @@ void GetHistoryArray(string &output[])
 
 void SetHistoryArray(string &inputArray[], int count)
 {
-    int stateIdx = GetSymbolStateIndex();
+    int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, count);
     for(int i = 0; i < count; i++)
     {
@@ -279,13 +238,33 @@ void SetHistoryArray(string &inputArray[], int count)
 
 // Legacy global variables for backward compatibility (now use GetSymbolStateIndex())
 // These are kept as macros that redirect to symbol-specific state
-#define g_basePriceCached (g_symbolStates[GetSymbolStateIndex()].basePriceCached)
-#define g_lastProcessedBlockTimestamp (g_symbolStates[GetSymbolStateIndex()].lastProcessedBlockTimestamp)
-#define g_referenceM1Power (g_symbolStates[GetSymbolStateIndex()].referenceM1Power)
-#define g_historyCount (g_symbolStates[GetSymbolStateIndex()].historyCount)
-#define g_lastHistoryDay (g_symbolStates[GetSymbolStateIndex()].lastHistoryDay)
-#define g_lastHistoryYear (g_symbolStates[GetSymbolStateIndex()].lastHistoryYear)
-#define g_systemInitialized (g_symbolStates[GetSymbolStateIndex()].systemInitialized)
+//+------------------------------------------------------------------+
+//| PERFORMANCE: Cached symbol state index                           |
+//| بهینه‌سازی: ایندکس وضعیت سیمبل کش شده تا هر بار محاسبه نشود     |
+//| GetSymbolStateIndex() calls GlobalVariable (~100μs each).        |
+//| These macros called 50+ times/tick → now ONE call per tick.      |
+//+------------------------------------------------------------------+
+static int _g_cachedStateIdx = -1;
+static string _g_cachedStateSymbol = "";
+
+int GetCachedSymbolStateIndex() {
+    string sym = _Symbol;
+    if(_g_cachedStateIdx >= 0 && _g_cachedStateSymbol == sym &&
+       _g_cachedStateIdx < g_symbolStateCount) {
+        return _g_cachedStateIdx;
+    }
+    _g_cachedStateIdx = GetSymbolStateIndex();
+    _g_cachedStateSymbol = sym;
+    return _g_cachedStateIdx;
+}
+
+#define g_basePriceCached (g_symbolStates[GetCachedSymbolStateIndex()].basePriceCached)
+#define g_lastProcessedBlockTimestamp (g_symbolStates[GetCachedSymbolStateIndex()].lastProcessedBlockTimestamp)
+#define g_referenceM1Power (g_symbolStates[GetCachedSymbolStateIndex()].referenceM1Power)
+#define g_historyCount (g_symbolStates[GetCachedSymbolStateIndex()].historyCount)
+#define g_lastHistoryDay (g_symbolStates[GetCachedSymbolStateIndex()].lastHistoryDay)
+#define g_lastHistoryYear (g_symbolStates[GetCachedSymbolStateIndex()].lastHistoryYear)
+#define g_systemInitialized (g_symbolStates[GetCachedSymbolStateIndex()].systemInitialized)
 
 //+------------------------------------------------------------------+
 //| Validate restored base price against current market conditions   |
@@ -342,7 +321,9 @@ void InitializeBasePriceSystem()
         Print("╔═══════════════════════════════════════════════════════════════╗");
         Print("║  🔄 HISTORY FORMAT UPGRADE DETECTED                          ║");
         Print("║  Cleaning up old history files with incorrect timestamps...  ║");
+        #ifdef ENABLE_DEBUG_LOGS
         Print("╚═══════════════════════════════════════════════════════════════╝");
+        #endif
         #endif
         
         DeleteAllHistoryFiles();
@@ -375,12 +356,14 @@ void InitializeBasePriceSystem()
     Print("[BasePriceManager] ╔═══════════════════════════════════════════════════════════════╗");
     Print("[BasePriceManager] ║  TIMEZONE INFORMATION                                         ║");
     Print("[BasePriceManager] ╠═══════════════════════════════════════════════════════════════╣");
+    #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] ║  Server Time: ", TimeToString(serverTime, TIME_DATE|TIME_MINUTES));
     Print("[BasePriceManager] ║  GMT Time:    ", TimeToString(gmtTime, TIME_DATE|TIME_MINUTES));
     Print("[BasePriceManager] ║  Offset:      Server = GMT", (timezoneOffsetHours >= 0 ? "+" : ""), timezoneOffsetHours, " hours");
     Print("[BasePriceManager] ║  Day (Server): ", dtServer.day_of_year + 1);
     Print("[BasePriceManager] ║  Day (GMT):    ", dtGMT.day_of_year + 1);
     Print("[BasePriceManager] ╚═══════════════════════════════════════════════════════════════╝");
+    #endif
     #endif
     
     // Debug: Show recent M30 bars
@@ -461,7 +444,9 @@ void InitializeBasePriceSystem()
         Print("╔═══════════════════════════════════════════════════════════════╗");
         Print("║  🔄 MIGRATION DETECTED - OLD FORMAT WITH SERVER TIME         ║");
         Print("║  Deleting old file and rebuilding with GMT format...         ║");
+        #ifdef ENABLE_DEBUG_LOGS
         Print("╚═══════════════════════════════════════════════════════════════╝");
+        #endif
         #endif
         
         // Delete old file
@@ -552,13 +537,19 @@ void InitializeBasePriceSystem()
                     Print("╔═══════════════════════════════════════════════════════════════╗");
                     if(isValid)
                     {
+                        #ifdef ENABLE_DEBUG_LOGS
                         Print("║  ✅ BASE PRICE RESTORED: ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
+                        #endif
                     }
                     else
                     {
+                        #ifdef ENABLE_DEBUG_LOGS
                         Print("║  ⚠️ STALE PRICE REJECTED: ", DoubleToString(restoredPrice, Digits), " → ", DoubleToString(g_basePriceCached, Digits));
+                        #endif
                     }
+                    #ifdef ENABLE_DEBUG_LOGS
                     Print("╚═══════════════════════════════════════════════════════════════╝");
+                    #endif
                 }
                 #endif
             }
@@ -576,8 +567,10 @@ void InitializeBasePriceSystem()
                 if(!g_systemInitialized)
                 {
                     Print("╔═══════════════════════════════════════════════════════════════╗");
+                    #ifdef ENABLE_DEBUG_LOGS
                     Print("║  🆕 BASE PRICE INIT: ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
                     Print("╚═══════════════════════════════════════════════════════════════╝");
+                    #endif
                 }
                 #endif
             }
@@ -596,8 +589,10 @@ void InitializeBasePriceSystem()
             if(!g_systemInitialized)
             {
                 Print("╔═══════════════════════════════════════════════════════════════╗");
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("║  🆕 BASE PRICE INIT (First Run): ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
                 Print("╚═══════════════════════════════════════════════════════════════╝");
+                #endif
             }
             #endif
         }
@@ -614,20 +609,24 @@ void InitializeBasePriceSystem()
         if(g_historyCount > 0)
         {
             Print("╔═══════════════════════════════════════════════════════════════╗");
+            #ifdef ENABLE_DEBUG_LOGS
             Print("║  CHART REOPENED - RESTORING TODAY'S BASE PRICE               ║");
             Print("║  Date: Day ", dayOfYear, " of Year ", year);
             Print("║  Base Price: ", DoubleToString(g_basePriceCached, Digits));
             Print("║  Total Entries: ", g_historyCount);
             Print("╚═══════════════════════════════════════════════════════════════╝");
+            #endif
             PrintBasePriceHistory();
             SaveBasePriceHistoryToFile();
         }
         else
         {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("╔═══════════════════════════════════════════════════════════════╗");
             Print("║  🆕 FIRST RUN TODAY - REBUILDING HISTORY FROM START OF DAY   ║");
             Print("║  Current time: ", TimeToString(gmtTime, TIME_DATE|TIME_MINUTES));
             Print("╚═══════════════════════════════════════════════════════════════╝");
+            #endif
         }
         #endif
             
@@ -641,10 +640,12 @@ void InitializeBasePriceSystem()
             if(g_historyCount > 0)
             {
                 Print("╔═══════════════════════════════════════════════════════════════╗");
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("║  ✅ HISTORY REBUILT SUCCESSFULLY                             ║");
                 Print("║  Total Entries: ", g_historyCount);
                 Print("║  Base Price: ", DoubleToString(g_basePriceCached, Digits));
                 Print("╚═══════════════════════════════════════════════════════════════╝");
+                #endif
                 PrintBasePriceHistory();
                 SaveBasePriceHistoryToFile();
             }
@@ -781,7 +782,9 @@ int FindLastM1CandleInBlock(const datetime blockStart, const datetime blockEnd)
     }
     else
     {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("[BasePriceManager] FindLastM1CandleInBlock() - No M1 bar found in block [",
+        #endif
               TimeToString(blockStart, TIME_MINUTES), "-",
               TimeToString(blockEnd, TIME_MINUTES), "]");
     }
@@ -857,13 +860,17 @@ void MergeHistoryLists(const string &existingHistory[], const int existingCount,
         {
             // CRITICAL: Double-check bounds before adding
             if(totalEntries >= safeMaxSize) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ MergeHistoryLists: Buffer overflow prevented at ", totalEntries, " entries");
+                #endif
                 break;
             }
             
             // Additional validation: Check array size
             if(totalEntries >= ArraySize(timeBlocks) || totalEntries >= ArraySize(entries)) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ MergeHistoryLists: Array size mismatch detected");
+                #endif
                 break;
             }
             
@@ -900,13 +907,17 @@ void MergeHistoryLists(const string &existingHistory[], const int existingCount,
         {
             // CRITICAL: Double-check bounds before adding
             if(totalEntries >= safeMaxSize) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ MergeHistoryLists: Buffer overflow prevented (rebuilt) at ", totalEntries, " entries");
+                #endif
                 break;
             }
             
             // Additional validation: Check array size
             if(totalEntries >= ArraySize(timeBlocks) || totalEntries >= ArraySize(entries)) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ MergeHistoryLists: Array size mismatch detected (rebuilt)");
+                #endif
                 break;
             }
             
@@ -1641,19 +1652,23 @@ void PrintBasePriceHistory()
 {
     if(g_historyCount == 0)
     {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📊 Base Price History: No entries yet");
+        #endif
         return;
     }
     
     MqlDateTime dt;
     TimeToStruct(TimeGMT(), dt);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("+---------------------------------------------------------------------------------------------------------------------+");
     Print("|  📊 BASE PRICE HISTORY TODAY (All 30-min updates) - ", g_historyCount, " entries                                                    |");
     Print("+---------------------------------------------------------------------------------------------------------------------+");
     Print("|  Time  | 30-Min Price    | Ref Price (Used)      | Status/D%           | Ref M1     | M1 Old     | M1 New     |");
     Print("|        |                 |                       |                     |            |            |            |");
     Print("|  ----- | --------------- | --------------------- | ------------------- | ---------- | ---------- | ---------- |");
+    #endif
     
     for(int i = 0; i < g_historyCount; i++)
     {
@@ -1694,7 +1709,9 @@ void PrintBasePriceHistory()
         }
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("+---------------------------------------------------------------------------------------------------------------------+");
+    #endif
 }
 #else
 #define PrintBasePriceHistory()

@@ -491,6 +491,7 @@ double CalculateWeightedATR() {
     static datetime s_lastATRLog = 0;
     if(currentTime - s_lastATRLog > 300) {  // Log every 5 minutes
         Print("========== WEIGHTED ATR CALCULATION ==========");
+        #ifdef ENABLE_DEBUG_LOGS
         Print("ATR₅: ", DoubleToString(atrValues[0], Digits));
         Print("ATR₁₀: ", DoubleToString(atrValues[1], Digits));
         Print("ATR₂₁: ", DoubleToString(atrValues[2], Digits));
@@ -500,6 +501,7 @@ double CalculateWeightedATR() {
         Print("Weighted ATR: ", DoubleToString(result, Digits));
         Print("Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
         Print("==============================================");
+        #endif
         s_lastATRLog = TimeCurrent();
     }
     #endif
@@ -628,13 +630,17 @@ double CalculateATRBasedStep() {
     
     // AUDIT FIX: Use IsZero for comparison
     if(IsZero(weightedATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBasedStep: Invalid weighted ATR value");
+        #endif
         return 0.0;
     }
     
     // AUDIT FIX: Validate result
     if(!IsValidPrice(weightedATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBasedStep: ATR value out of valid range (", weightedATR, ")");
+        #endif
         return 0.0;
     }
     
@@ -842,8 +848,10 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
         #endif
     } else {
         // AUDIT FIX: Log error if index is invalid
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ UpdateMultiTFCache: Invalid target index (", targetIndex, 
               "), cache update failed");
+        #endif
     }
 }
 
@@ -924,9 +932,11 @@ string GetATRCacheStats() {
 //| AUDIT FIX: Comprehensive test suite for all ATR functions        |
 //+------------------------------------------------------------------+
 void TestATRCalculations() {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  ATR CALCULATIONS MODULE TESTS                                ║");
     Print("╚═══════════════════════════════════════════════════════════════╝");
+    #endif
     
     int passCount = 0;
     int totalTests = 0;
@@ -937,10 +947,14 @@ void TestATRCalculations() {
     totalTests++;
     InitializeATRCache();
     if(g_atrCacheInitialized && g_multiTFCacheInitialized) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 1: Cache initialization - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 1: Cache initialization - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -949,10 +963,14 @@ void TestATRCalculations() {
     totalTests++;
     int effectiveTF = GetEffectiveTimeframe();
     if(effectiveTF > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 2: GetEffectiveTimeframe (", effectiveTF, ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 2: GetEffectiveTimeframe - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -961,10 +979,14 @@ void TestATRCalculations() {
     totalTests++;
     int effectiveBars = GetEffectiveBars();
     if(effectiveBars > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 3: GetEffectiveBars (", effectiveBars, ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 3: GetEffectiveBars - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -973,10 +995,14 @@ void TestATRCalculations() {
     totalTests++;
     double tr = CalculateTrueRange(1);
     if(!IsZero(tr, EPSILON_PRICE) && IsValidPrice(tr, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 4: CalculateTrueRange (", DoubleToString(tr, Digits), ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 4: CalculateTrueRange - FAIL (TR=", tr, ")");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -985,10 +1011,14 @@ void TestATRCalculations() {
     totalTests++;
     double simpleATR = CalculateSimpleATR(14);
     if(!IsZero(simpleATR, EPSILON_PRICE) && IsValidPrice(simpleATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 5: CalculateSimpleATR(14) (", DoubleToString(simpleATR, Digits), ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 5: CalculateSimpleATR - FAIL (ATR=", simpleATR, ")");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -998,13 +1028,17 @@ void TestATRCalculations() {
     double batchResults[];
     CalculateATRBatch(batchResults);
     if(ArraySize(batchResults) == 6 && !IsZero(batchResults[0], EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 6: CalculateATRBatch - PASS");
         Print("   ATR₅=", DoubleToString(batchResults[0], Digits));
         Print("   ATR₁₀=", DoubleToString(batchResults[1], Digits));
         Print("   ATR₂₁=", DoubleToString(batchResults[2], Digits));
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 6: CalculateATRBatch - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1013,10 +1047,14 @@ void TestATRCalculations() {
     totalTests++;
     double weightedATR = CalculateWeightedATR();
     if(!IsZero(weightedATR, EPSILON_PRICE) && IsValidPrice(weightedATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 7: CalculateWeightedATR (", DoubleToString(weightedATR, Digits), ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 7: CalculateWeightedATR - FAIL (ATR=", weightedATR, ")");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1024,10 +1062,14 @@ void TestATRCalculations() {
     // ═══════════════════════════════════════════════════════════════
     totalTests++;
     if(g_atrCache.valid && AreEqual(g_atrCache.weightedATR, weightedATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 8: Cache validation - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 8: Cache validation - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1036,10 +1078,14 @@ void TestATRCalculations() {
     totalTests++;
     int currentMinutes = GetCurrentTimeframeMinutes();
     if(currentMinutes > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 9: GetCurrentTimeframeMinutes (", currentMinutes, ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 9: GetCurrentTimeframeMinutes - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1048,10 +1094,14 @@ void TestATRCalculations() {
     totalTests++;
     double hybridATR = CalculateHybridATR(currentMinutes, 60); // Scale to H1
     if(!IsZero(hybridATR, EPSILON_PRICE) && IsValidPrice(hybridATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 10: CalculateHybridATR (", DoubleToString(hybridATR, Digits), ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 10: CalculateHybridATR - FAIL (ATR=", hybridATR, ")");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1061,10 +1111,14 @@ void TestATRCalculations() {
     double tfATR1 = GetATRForTimeframe(60);
     double tfATR2 = GetATRForTimeframe(60); // Should hit cache
     if(AreEqual(tfATR1, tfATR2, EPSILON_PRICE) && g_multiTFCacheCount > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 11: Multi-TF cache - PASS (", g_multiTFCacheCount, " entries)");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 11: Multi-TF cache - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1073,10 +1127,14 @@ void TestATRCalculations() {
     totalTests++;
     double atrStep = CalculateATRBasedStep();
     if(!IsZero(atrStep, EPSILON_PRICE) && IsValidPrice(atrStep, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 12: CalculateATRBasedStep (", DoubleToString(atrStep, Digits), ") - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 12: CalculateATRBasedStep - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1088,13 +1146,17 @@ void TestATRCalculations() {
     if(!IsZero(structure, EPSILON_PRICE) && 
        AreEqual(pattern, structure * 0.5, EPSILON_PRICE) &&
        AreEqual(trigger, structure * 0.25, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 13: CalculateATRFractalValues - PASS");
         Print("   Structure=", DoubleToString(structure, Digits));
         Print("   Pattern=", DoubleToString(pattern, Digits));
         Print("   Trigger=", DoubleToString(trigger, Digits));
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 13: CalculateATRFractalValues - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1103,10 +1165,14 @@ void TestATRCalculations() {
     totalTests++;
     InvalidateATRCache();
     if(!g_atrCache.valid) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 14: InvalidateATRCache - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 14: InvalidateATRCache - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1117,11 +1183,15 @@ void TestATRCalculations() {
     CalculateWeightedATR();
     string stats = GetATRCacheStats();
     if(StringLen(stats) > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 15: GetATRCacheStats - PASS");
+        #endif
         Print(stats);
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 15: GetATRCacheStats - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1130,10 +1200,14 @@ void TestATRCalculations() {
     totalTests++;
     double invalidATR = CalculateSimpleATR(-1);
     if(IsZero(invalidATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 16: Edge case (invalid period) - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 16: Edge case (invalid period) - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1142,28 +1216,40 @@ void TestATRCalculations() {
     totalTests++;
     double zeroATR = CalculateHybridATR(0, 60);
     if(IsZero(zeroATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Test 17: Edge case (zero division) - PASS");
+        #endif
         passCount++;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Test 17: Edge case (zero division) - FAIL");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
     // Final Results
     // ═══════════════════════════════════════════════════════════════
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  TEST RESULTS                                                 ║");
     Print("╠═══════════════════════════════════════════════════════════════╣");
     Print("║  Passed: ", passCount, " / ", totalTests);
     Print("║  Success Rate: ", DoubleToString(100.0 * passCount / totalTests, 1), "%");
+    #endif
     
     if(passCount == totalTests) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("║  Status: ✅ ALL TESTS PASSED                                 ║");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("║  Status: ⚠️ SOME TESTS FAILED                                ║");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╚═══════════════════════════════════════════════════════════════╝");
+    #endif
     
     // Cleanup
     CleanupATRCache();

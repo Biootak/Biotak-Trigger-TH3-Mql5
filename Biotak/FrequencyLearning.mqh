@@ -111,7 +111,9 @@ bool SafeAppendLearningData(const PatternLearningData &newData) {
     // Safe resize with bounds check
     int newSize = g_learningDataCount + 1;
     if(ArrayResize(g_learningData, newSize) != newSize) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Failed to resize learning data array");
+        #endif
         return false;
     }
     
@@ -267,7 +269,9 @@ public:
     // Open file
     bool Open(string filename, int flags, string delimiter = "") {
         if(m_isOpen) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ File already open: ", m_filename);
+            #endif
             return false;
         }
         
@@ -279,7 +283,9 @@ public:
         
         if(m_handle == INVALID_HANDLE) {
             int error = GetLastError();
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ File open failed: ", filename, " (Error: ", error, ")");
+            #endif
             return false;
         }
         
@@ -304,7 +310,9 @@ public:
             FileClose(tempHandle);
             int error = GetLastError();
             if(error != 0) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ FileClose() error: ", error, " for file: ", m_filename);
+                #endif
             }
         }
     }
@@ -327,7 +335,9 @@ int SafeFileOpen(string filename, int flags, string delimiter = "") {
     
     if(handle == INVALID_HANDLE) {
         int error = GetLastError();
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ File open failed: ", filename, " (Error: ", error, ")");
+        #endif
     }
     
     return handle;
@@ -341,7 +351,9 @@ void SafeFileClose(int &handle) {
         FileClose(tempHandle);
         int error = GetLastError();
         if(error != 0) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ FileClose() error detected (Error: ", error, "), handle forcibly reset");
+            #endif
         }
     }
 }
@@ -361,19 +373,23 @@ LEARNING_ERROR_CODE InitializeLearningSystem()
     // بارگذاری داده‌های یادگیری قبلی
     LEARNING_ERROR_CODE result = LoadLearningDataFromCSV();
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("🎓 LEARNING SYSTEM INITIALIZED");
     Print("========================================");
     Print("Total Patterns: ", g_learningDataCount);
     Print("Approved: ", g_weights.approvedPatterns);
     Print("Rejected: ", g_weights.rejectedPatterns);
+    #endif
     
     double accuracy = (g_weights.totalPatterns > 0) ? 
                       (100.0 * g_weights.approvedPatterns / g_weights.totalPatterns) : 0.0;
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Accuracy: ", DoubleToString(accuracy, 1), "%");
     Print("Last Update: ", TimeToString(g_weights.lastUpdate));
     Print("Reports Folder: ", REPORTS_FOLDER);
     Print("========================================");
+    #endif
     
     return result;
 }
@@ -391,9 +407,13 @@ void CreateReportsFolder()
     if(handle != INVALID_HANDLE) {
         SafeFileClose(handle);
         FileDelete(testFile);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Reports folder ready: MQL5/Files/", REPORTS_FOLDER);
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Could not create reports folder");
+        #endif
     }
 }
 
@@ -424,7 +444,9 @@ void LoadLearnedWeights()
     // تلاش برای بارگذاری از فایل
     int handle = SafeFileOpen(WEIGHTS_FILE, FILE_READ|FILE_TXT|FILE_ANSI);
     if(handle == INVALID_HANDLE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("ℹ️ No saved weights found, using defaults");
+        #endif
         return;
     }
     
@@ -457,7 +479,9 @@ void LoadLearnedWeights()
     }
     
     SafeFileClose(handle);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Learned weights loaded from file");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -477,13 +501,11 @@ LEARNING_ERROR_CODE SaveLearnedWeights()
     // Helper macro for write operations
     #define WRITE_WEIGHT(name, value) \
         if(!FileWriteString(file.Handle(), name "=" + DoubleToString(value, 4) + "\n")) { \
-            Print("❌ SaveLearnedWeights: Write failed for " name); \
             return LEARNING_ERROR_FILE_WRITE_FAILED; \
         }
     
     #define WRITE_INT(name, value) \
         if(!FileWriteString(file.Handle(), name "=" + IntegerToString(value) + "\n")) { \
-            Print("❌ SaveLearnedWeights: Write failed for " name); \
             return LEARNING_ERROR_FILE_WRITE_FAILED; \
         }
     
@@ -507,7 +529,9 @@ LEARNING_ERROR_CODE SaveLearnedWeights()
     #undef WRITE_INT
     
     // File automatically closed by destructor
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Learned weights saved to file");
+    #endif
     return LEARNING_SUCCESS;
 }
 
@@ -519,7 +543,9 @@ LEARNING_ERROR_CODE LoadLearningDataFromCSV()
 {
     int handle = SafeFileOpen(LEARNING_CSV_FILE, FILE_READ|FILE_CSV|FILE_ANSI, ",");
     if(handle == INVALID_HANDLE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("ℹ️ No previous learning data found");
+        #endif
         return LEARNING_SUCCESS; // Not an error - first run
     }
     
@@ -585,11 +611,15 @@ LEARNING_ERROR_CODE LoadLearningDataFromCSV()
     SafeFileClose(handle);
     
     if(g_learningDataCount >= MAX_LEARNING_DATA_SIZE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Learning data limit reached (", MAX_LEARNING_DATA_SIZE, ")");
         Print("   Consider archiving old data");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Loaded ", g_learningDataCount, " patterns from CSV");
+    #endif
     return LEARNING_SUCCESS;
 }
 
@@ -615,7 +645,9 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     // STATE LOCK - Prevent race conditions
     // ========================================
     if(!AcquireStateLock()) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ State locked - another operation in progress");
+        #endif
         return LEARNING_ERROR_STATE_CONFLICT;
     }
     
@@ -624,14 +656,18 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     // ========================================
     if(g_learningDataCount < 0) {
         ReleaseStateLock();
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Cannot save pattern - corrupted count: ", g_learningDataCount);
+        #endif
         return LEARNING_ERROR_MEMORY_LIMIT;
     }
     
     // CIRCULAR BUFFER: When limit reached, remove oldest entry
     // این باعث می‌شود که همیشه جدیدترین پترن‌ها نگه داشته شوند
     if(g_learningDataCount >= MAX_LEARNING_DATA_SIZE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Learning data limit reached (", MAX_LEARNING_DATA_SIZE, ") - removing oldest pattern");
+        #endif
         
         // Shift all entries one position left (remove first, oldest entry)
         for(int i = 0; i < g_learningDataCount - 1; i++) {
@@ -650,6 +686,7 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     // اگر پترن قبلی در انتظار بود، اون رو نادیده بگیر
     // ========================================
     if(g_waitingForFeedback && g_pendingPatternIndex >= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("========================================");
         Print("⚠️ NEW PATTERN CREATED");
         Print("========================================");
@@ -657,6 +694,7 @@ LEARNING_ERROR_CODE SavePatternForLearning(
         Print("Previous pattern will remain as PENDING in CSV");
         Print("Starting new pattern...");
         Print("========================================");
+        #endif
         
         ResetSmartFeedbackState();
     }
@@ -750,7 +788,9 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     // ========================================
     LEARNING_ERROR_CODE csvResult = AppendToLearningCSV(data);
     if(csvResult != LEARNING_SUCCESS) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Failed to save to CSV, but pattern stored in memory");
+        #endif
     }
     
     // ========================================
@@ -770,6 +810,7 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     // Release lock
     ReleaseStateLock();
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("📊 PATTERN SAVED FOR LEARNING");
     Print("========================================");
@@ -781,6 +822,7 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     Print("========================================");
     Print("⌨️  Press [5] to approve & save report");
     Print("========================================");
+    #endif
     
     return LEARNING_SUCCESS;
 }
@@ -895,7 +937,9 @@ LEARNING_ERROR_CODE UpdateLearningCSV()
     }
     
     SafeFileClose(handle);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ CSV rewritten after circular buffer cleanup");
+    #endif
     
     return LEARNING_SUCCESS;
 }
@@ -950,7 +994,9 @@ LEARNING_ERROR_CODE UpdateLearningCSVRow(int index)
     }
     
     SafeFileClose(handle);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ CSV updated");
+    #endif
     
     return LEARNING_SUCCESS;
 }
@@ -984,22 +1030,30 @@ void AnalyzeAndUpdateWeights()
     g_weights.rejectedPatterns = rejectedCount;
     g_weights.lastUpdate = TimeCurrent();
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("📊 LEARNING STATISTICS");
     Print("========================================");
     Print("Total: ", g_learningDataCount);
+    #endif
     
     int totalFeedback = approvedCount + rejectedCount;
     if(totalFeedback > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("Approved: ", approvedCount, " (", DoubleToString(100.0 * approvedCount / totalFeedback, 1), "%)");
         Print("Rejected: ", rejectedCount, " (", DoubleToString(100.0 * rejectedCount / totalFeedback, 1), "%)");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Pending: ", pendingCount);
     Print("========================================");
+    #endif
     
     // اگر داده کافی نداریم، وزن‌ها رو تغییر نمیدیم
     if(totalFeedback < MIN_PATTERNS_FOR_LEARNING) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("ℹ️ Not enough data for weight adjustment (need ", MIN_PATTERNS_FOR_LEARNING, "+)");
+        #endif
         SaveLearnedWeights();
         return;
     }
@@ -1023,8 +1077,10 @@ void AnalyzeAndUpdateWeights()
     avgApprovedScore = SafeDivide(avgApprovedScore, approvedCount, 0.0, EPSILON_GENERAL);
     avgRejectedScore = SafeDivide(avgRejectedScore, rejectedCount, 0.0, EPSILON_GENERAL);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Avg Approved Score: ", DoubleToString(avgApprovedScore, 2));
     Print("Avg Rejected Score: ", DoubleToString(avgRejectedScore, 2));
+    #endif
     
     // ========================================
     // تحلیل ویژگی‌های مهم
@@ -1060,12 +1116,14 @@ void AnalyzeAndUpdateWeights()
     double step5_rate = SafeDivide(step5_approved, step5_approved + step5_rejected, 0.5, EPSILON_GENERAL);
     double step7_rate = SafeDivide(step7_approved, step7_approved + step7_rejected, 0.5, EPSILON_GENERAL);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Step Success Rates (System Suggested):");
     Print("  Step 1: ", DoubleToString(step1_rate * 100, 1), "% (", step1_approved, "/", step1_approved + step1_rejected, ")");
     Print("  Step 3: ", DoubleToString(step3_rate * 100, 1), "% (", step3_approved, "/", step3_approved + step3_rejected, ")");
     Print("  Step 4: ", DoubleToString(step4_rate * 100, 1), "% (", step4_approved, "/", step4_approved + step4_rejected, ")");
     Print("  Step 5: ", DoubleToString(step5_rate * 100, 1), "% (", step5_approved, "/", step5_approved + step5_rejected, ")");
     Print("  Step 7: ", DoubleToString(step7_rate * 100, 1), "% (", step7_approved, "/", step7_approved + step7_rejected, ")");
+    #endif
     
     // ========================================
     // 2. تحلیل Step انتخابی کاربر (User Selected)
@@ -1084,6 +1142,7 @@ void AnalyzeAndUpdateWeights()
         else if(userStep == 7) userStep7_count++;
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
     Print("User Step Preferences (What user actually selected):");
     Print("  Step 1: ", userStep1_count, " times (", DoubleToString(SafeDivide(100.0 * userStep1_count, totalFeedback, 0.0, EPSILON_GENERAL), 1), "%)");
@@ -1091,26 +1150,35 @@ void AnalyzeAndUpdateWeights()
     Print("  Step 4: ", userStep4_count, " times (", DoubleToString(SafeDivide(100.0 * userStep4_count, totalFeedback, 0.0, EPSILON_GENERAL), 1), "%)");
     Print("  Step 5: ", userStep5_count, " times (", DoubleToString(SafeDivide(100.0 * userStep5_count, totalFeedback, 0.0, EPSILON_GENERAL), 1), "%)");
     Print("  Step 7: ", userStep7_count, " times (", DoubleToString(SafeDivide(100.0 * userStep7_count, totalFeedback, 0.0, EPSILON_GENERAL), 1), "%)");
+    #endif
     
     // پیدا کردن محبوب‌ترین Step
     int maxCount = MathMax(userStep1_count, MathMax(userStep3_count, MathMax(userStep4_count, MathMax(userStep5_count, userStep7_count))));
     
     if(maxCount > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("");
         Print("🎯 USER PREFERENCE DETECTED:");
+        #endif
         if(userStep4_count == maxCount) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → User prefers Step 4 (", userStep4_count, " times)");
             Print("   → Adjusting priorities to favor Step 4");
+            #endif
             
             // تنظیم اولویت‌ها: Step 4 رو ترجیح بده
             g_weights.step5Priority = 0.6;  // Step 5 کمی کم‌اولویت‌تر
             g_weights.step3_7Priority = 0.55; // Step 3/7 کمی کم‌اولویت‌تر
             
         } else if(userStep5_count == maxCount) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → User prefers Step 5 (", userStep5_count, " times)");
+            #endif
             g_weights.step5Priority = 0.4;  // Step 5 خیلی اولویت‌دار
         } else if(userStep3_count == maxCount || userStep7_count == maxCount) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → User prefers Step 3/7 (", MathMax(userStep3_count, userStep7_count), " times)");
+            #endif
             g_weights.step3_7Priority = 0.5;  // Step 3/7 اولویت‌دار
         }
     }
@@ -1133,11 +1201,13 @@ void AnalyzeAndUpdateWeights()
     g_weights.step5Priority = ClampValue(g_weights.step5Priority, MIN_STEP_PRIORITY, MAX_STEP_PRIORITY);
     g_weights.step3_7Priority = ClampValue(g_weights.step3_7Priority, MIN_STEP_PRIORITY, MAX_STEP_PRIORITY);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
     Print("Adjusted Step Priorities:");
     Print("  Step 5: ", DoubleToString(g_weights.step5Priority, 3));
     Print("  Step 3/7: ", DoubleToString(g_weights.step3_7Priority, 3));
     Print("  Step 1: ", DoubleToString(g_weights.step1Priority, 3));
+    #endif
     
     // ========================================
     // 3. تحلیل Consolidation Factor
@@ -1164,12 +1234,16 @@ void AnalyzeAndUpdateWeights()
     
     g_weights.consolidationWeight = ClampValue(g_weights.consolidationWeight, MIN_CONSOLIDATION_WEIGHT, MAX_CONSOLIDATION_WEIGHT);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Consolidation Analysis:");
     Print("  Approved avg: ", DoubleToString(avgConsolidation_approved, 3));
     Print("  Rejected avg: ", DoubleToString(avgConsolidation_rejected, 3));
     Print("  New weight: ", DoubleToString(g_weights.consolidationWeight, 4));
+    #endif
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
     
     // ذخیره وزن‌های جدید
     SaveLearnedWeights();
@@ -1207,22 +1281,30 @@ double GetLearnedStepPriority(int step)
 //+------------------------------------------------------------------+
 void QuickApprovePattern()
 {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("🔑 KEY 5 PRESSED - Quick Approve");
     Print("========================================");
     Print("g_waitingForFeedback: ", g_waitingForFeedback);
     Print("g_pendingPatternIndex: ", g_pendingPatternIndex);
     Print("g_learningDataCount: ", g_learningDataCount);
+    #endif
     
     if(!g_waitingForFeedback || g_pendingPatternIndex < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ No pattern waiting for feedback");
         Print("   Reason: ", !g_waitingForFeedback ? "Not waiting" : "Invalid index");
+        #endif
         return;
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Calling AutoApprovePendingPattern...");
+    #endif
     AutoApprovePendingPattern();
+    #ifdef ENABLE_DEBUG_LOGS
     Print("⚡ Quick approved with key [5]");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -1258,7 +1340,9 @@ void OnFeedbackButtonClick(string buttonName)
     // این تابع دیگر استفاده نمیشه - سیستم دکمه‌ها حذف شده
     // This function is no longer used - button system removed
     // Kept for backward compatibility
+    #ifdef ENABLE_DEBUG_LOGS
     Print("⚠️ Button system is deprecated. Use key [5] to approve patterns.");
+    #endif
     return;
 }
 
@@ -1281,9 +1365,11 @@ void AutoApprovePendingPattern()
     
     if(frequencyChanged) {
         // فرکانس تغییر کرده - به عنوان REJECTED ذخیره کن
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Frequency changed from ", DoubleToString(g_lastSuggestedFrequency, 3), 
               "% to ", DoubleToString(currentFreq, 3), "%");
         Print("   Saving as REJECTED...");
+        #endif
         
         // رد پترن و ذخیره فرکانس جدید
         g_learningData[idx].feedbackReceived = true;
@@ -1297,6 +1383,7 @@ void AutoApprovePendingPattern()
         // گرفتن اسکرین‌شات
         TakePatternScreenshot(idx);
         
+        #ifdef ENABLE_DEBUG_LOGS
         Print("========================================");
         Print("❌ REJECTED (Frequency Changed)");
         Print("========================================");
@@ -1306,6 +1393,7 @@ void AutoApprovePendingPattern()
         Print("Error: ", DoubleToString(g_learningData[idx].actualErrorPercent, 3), "%");
         Print("Screenshot & Report saved");
         Print("========================================");
+        #endif
         
         // آپدیت CSV
         UpdateLearningCSVRow(idx);
@@ -1332,6 +1420,7 @@ void AutoApprovePendingPattern()
         g_learningData[idx].userSelectedStep = g_learningData[idx].targetStep;
         g_learningData[idx].actualErrorPercent = g_learningData[idx].errorPercent;
         
+        #ifdef ENABLE_DEBUG_LOGS
         Print("========================================");
         Print("✅ APPROVED (Key 5 pressed)");
         Print("========================================");
@@ -1340,6 +1429,7 @@ void AutoApprovePendingPattern()
         Print("Step: ", g_learningData[idx].targetStep);
         Print("Screenshot & Report saved");
         Print("========================================");
+        #endif
         
         // آپدیت CSV
         UpdateLearningCSVRow(idx);
@@ -1357,7 +1447,9 @@ void AutoApprovePendingPattern()
     // ========================================
     ResetSmartFeedbackState();
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Pattern finalized. Create new pattern to continue learning.");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -1384,7 +1476,9 @@ void CalculateUserSelectedStep(int idx)
         
         // Validate AB_Distance to prevent division by zero
         if(AB_Distance < 0.0001) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ Invalid AB_Distance, using default step");
+            #endif
             g_learningData[idx].userSelectedStep = 5;
             g_learningData[idx].actualErrorPercent = 0;
             return;
@@ -1413,7 +1507,9 @@ void CalculateUserSelectedStep(int idx)
         g_learningData[idx].userSelectedStep = bestStep;
         g_learningData[idx].actualErrorPercent = SafeDivide(minError, AB_Distance, 0.0, EPSILON_GENERAL) * 100.0;
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Pattern objects not found, using default step");
+        #endif
         g_learningData[idx].userSelectedStep = 5;
         g_learningData[idx].actualErrorPercent = 0;
     }
@@ -1434,149 +1530,225 @@ void PerformReverseEngineering(int patternIndex)
     double freqDiff = d.userSelectedFrequency - d.suggestedFrequency;
     double freqDiffPercent = SafeDivide(freqDiff, d.suggestedFrequency, 0.0, EPSILON_GENERAL) * 100.0;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("🔧 REVERSE ENGINEERING ANALYSIS");
     Print("========================================");
     Print("Frequency Difference: ", DoubleToString(freqDiff, 3), "% (", 
           DoubleToString(freqDiffPercent, 1), "%)");
     Print("");
+    #endif
     
     // ========================================
     // تحلیل: چه ویژگی‌هایی باید تغییر کنند تا به فرکانس کاربر برسیم؟
     // Analysis: Which features should change to reach user's frequency?
     // ========================================
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("FEATURE ANALYSIS:");
     Print("Current pattern features vs. what they should be:");
     Print("");
+    #endif
     
     // 1. تحلیل سرعت موج (Wave Speed)
+    #ifdef ENABLE_DEBUG_LOGS
     Print("1. WAVE SPEED:");
     Print("   Current AB Speed: ", DoubleToString(d.AB_Speed, 3), " pips/min");
+    #endif
     if(freqDiff > 0) {
         // کاربر فرکانس بالاتر خواست → موج باید سریع‌تر باشه
         double targetSpeed = d.AB_Speed * (1.0 + freqDiffPercent / 100.0);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be FASTER: ~", DoubleToString(targetSpeed, 3), " pips/min");
         Print("   → Increase: +", DoubleToString(SafeDivide(targetSpeed - d.AB_Speed, d.AB_Speed, 0.0, EPSILON_GENERAL) * 100, 1), "%");
+        #endif
     } else if(freqDiff < 0) {
         // کاربر فرکانس پایین‌تر خواست → موج باید کندتر باشه
         double targetSpeed = d.AB_Speed * (1.0 + freqDiffPercent / 100.0);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be SLOWER: ~", DoubleToString(targetSpeed, 3), " pips/min");
         Print("   → Decrease: ", DoubleToString(SafeDivide(targetSpeed - d.AB_Speed, d.AB_Speed, 0.0, EPSILON_GENERAL) * 100, 1), "%");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
+    #endif
     
     // 2. تحلیل زاویه Gann (Gann Angle)
+    #ifdef ENABLE_DEBUG_LOGS
     Print("2. GANN ANGLE:");
     Print("   Current AB Angle: ", DoubleToString(d.AB_Angle, 2), " degrees");
+    #endif
     if(freqDiff > 0) {
         double targetAngle = d.AB_Angle * (1.0 + freqDiffPercent / 200.0); // کمتر حساس
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be STEEPER: ~", DoubleToString(targetAngle, 2), " degrees");
+        #endif
     } else if(freqDiff < 0) {
         double targetAngle = d.AB_Angle * (1.0 + freqDiffPercent / 200.0);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be FLATTER: ~", DoubleToString(targetAngle, 2), " degrees");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
+    #endif
     
     // 3. تحلیل Consolidation (انرژی جمع شده)
+    #ifdef ENABLE_DEBUG_LOGS
     Print("3. CONSOLIDATION FACTOR:");
     Print("   Current: ", DoubleToString(d.consolidationFactor * 100, 1), "%");
+    #endif
     if(freqDiff > 0 && d.consolidationFactor < 0.5) {
         // فرکانس بالاتر → consolidation بیشتر نیاز داره
         double targetConsolidation = ClampValue(d.consolidationFactor + (freqDiffPercent / 100.0 * 0.3), 0, 1);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be HIGHER: ~", DoubleToString(targetConsolidation * 100, 1), "%");
         Print("   → More energy buildup needed for higher frequency");
+        #endif
     } else if(freqDiff < 0 && d.consolidationFactor > 0.3) {
         // فرکانس پایین‌تر → consolidation کمتر
         double targetConsolidation = ClampValue(d.consolidationFactor + (freqDiffPercent / 100.0 * 0.3), 0, 1);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be LOWER: ~", DoubleToString(targetConsolidation * 100, 1), "%");
         Print("   → Less consolidation for lower frequency");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Current level is appropriate");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
+    #endif
     
     // 4. تحلیل نسبت Fibonacci
+    #ifdef ENABLE_DEBUG_LOGS
     Print("4. FIBONACCI RATIOS:");
     Print("   Current AB/XA: ", DoubleToString(d.AB_XA_Ratio, 3));
     Print("   Current BC/AB: ", DoubleToString(d.BC_AB_Ratio, 3));
+    #endif
     
     // محاسبه نسبت ایده‌آل بر اساس فرکانس کاربر
     double idealAB_XA = 1.0 + SafeDivide(d.userSelectedFrequency, 100.0, 0.0, EPSILON_GENERAL); // تقریبی
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   → Ideal AB/XA for ", DoubleToString(d.userSelectedFrequency, 1), "%: ~", DoubleToString(idealAB_XA, 3));
+    #endif
     
     if(MathAbs(d.AB_XA_Ratio - idealAB_XA) > 0.2) {
         if(d.AB_XA_Ratio < idealAB_XA) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → AB should be LONGER relative to XA");
+            #endif
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → AB should be SHORTER relative to XA");
+            #endif
         }
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Current ratio is close to ideal");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
+    #endif
     
     // 5. تحلیل تقارن زمانی (Time Symmetry)
+    #ifdef ENABLE_DEBUG_LOGS
     Print("5. TIME SYMMETRY:");
     Print("   Current: ", DoubleToString(d.timeSymmetry * 100, 1), "%");
+    #endif
     if(d.timeSymmetry < 0.7) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Should be HIGHER for better prediction");
         Print("   → BC time should match AB time more closely");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Good time symmetry");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
+    #endif
     
     // 6. تحلیل Step (گام هدف)
+    #ifdef ENABLE_DEBUG_LOGS
     Print("6. TARGET STEP:");
     Print("   System suggested: Step ", d.targetStep, " (", DoubleToString(d.suggestedFrequency, 3), "%)");
     Print("   User selected: Step ", d.userSelectedStep, " (", DoubleToString(d.userSelectedFrequency, 3), "%)");
+    #endif
     
     if(d.userSelectedStep != d.targetStep) {
         int stepDiff = d.userSelectedStep - d.targetStep;
         if(stepDiff > 0) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → User prefers LARGER steps (", stepDiff, " steps more)");
             Print("   → Pattern should show stronger momentum");
+            #endif
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   → User prefers SMALLER steps (", MathAbs(stepDiff), " steps less)");
             Print("   → Pattern should show more conservative movement");
+            #endif
         }
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   → Step selection matches (frequency adjustment only)");
+        #endif
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
+    #endif
     
     // ========================================
     // خلاصه و توصیه‌ها
     // Summary & Recommendations
     // ========================================
+    #ifdef ENABLE_DEBUG_LOGS
     Print("SUMMARY & RECOMMENDATIONS:");
     Print("-------------------------");
+    #endif
     
     if(MathAbs(freqDiffPercent) < 5.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Minor adjustment - system was close");
         Print("   Fine-tune: Speed consistency and time symmetry");
+        #endif
     }
     else if(MathAbs(freqDiffPercent) < 15.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Moderate adjustment needed");
         Print("   Focus on: Wave speed and consolidation factor");
+        #endif
     }
     else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Major adjustment required");
         Print("   Review: All features - pattern type may be different");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
     Print("For similar patterns in the future:");
+    #endif
     if(freqDiff > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("→ Look for: Faster waves, steeper angles, more consolidation");
         Print("→ Expect: Higher frequency (", DoubleToString(d.userSelectedFrequency, 1), "% range)");
+        #endif
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("→ Look for: Slower waves, flatter angles, less consolidation");
         Print("→ Expect: Lower frequency (", DoubleToString(d.userSelectedFrequency, 1), "% range)");
+        #endif
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -1594,7 +1766,9 @@ void TakePatternScreenshot(int patternIndex)
     // Check if screenshot already taken
     if(d.screenshotFilename != "" && d.screenshotFilename != "FAILED") {
         // تلاش برای گرفتن اسکرین‌شات
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📸 Taking screenshot for pattern: ", d.patternName);
+        #endif
         
         // ========================================
         // ایجاد پوشه اگر وجود نداره
@@ -1608,9 +1782,13 @@ void TakePatternScreenshot(int patternIndex)
         if(dummyHandle != INVALID_HANDLE) {
             SafeFileClose(dummyHandle);
             FileDelete(dummyFile);
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✅ Folder created: ", folderPath);
+            #endif
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ Could not create folder");
+            #endif
         }
         
         // ========================================
@@ -1649,10 +1827,14 @@ void TakePatternScreenshot(int patternIndex)
         
         // گرفتن اسکرین‌شات با سایز بزرگتر - MQL5: ChartScreenShot has 4 params (no ALIGN param)
         if(ChartScreenShot(0, d.screenshotFilename, SCREENSHOT_WIDTH, SCREENSHOT_HEIGHT)) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✅ Screenshot saved: ", d.screenshotFilename);
             Print("   Size: ", SCREENSHOT_WIDTH, "x", SCREENSHOT_HEIGHT);
+            #endif
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ Screenshot failed (Error: ", GetLastError(), ")");
+            #endif
             g_learningData[patternIndex].screenshotFilename = "FAILED";
         }
         
@@ -1675,7 +1857,9 @@ void GeneratePatternReport(PatternLearningData &data, int patternIndex, string p
     
     int handle = SafeFileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI);
     if(handle == INVALID_HANDLE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Failed to create pattern report");
+        #endif
         return;
     }
     
@@ -1771,7 +1955,9 @@ void GeneratePatternReport(PatternLearningData &data, int patternIndex, string p
     
     SafeFileClose(handle);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("📄 Pattern report created: ", filename);
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -1804,7 +1990,9 @@ void UpdatePatternReport(int patternIndex, string status)
     // Append update section to end of file (not replace)
     int handle = SafeFileOpen(filename, FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI);
     if(handle == INVALID_HANDLE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Could not find pattern report to update");
+        #endif
         return;
     }
     
@@ -1878,7 +2066,9 @@ void UpdatePatternReport(int patternIndex, string status)
     
     SafeFileClose(handle);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Pattern report updated: ", filename);
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -1894,7 +2084,9 @@ void GenerateLearningReport()
     
     int handle = SafeFileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI);
     if(handle == INVALID_HANDLE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Failed to create report file");
+        #endif
         return;
     }
     
@@ -2016,6 +2208,7 @@ void GenerateLearningReport()
     
     SafeFileClose(handle);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("📄 LEARNING REPORT GENERATED");
     Print("========================================");
@@ -2023,6 +2216,7 @@ void GenerateLearningReport()
     Print("Location: MQL5/Files/", REPORTS_FOLDER);
     Print("Format: AI-readable JSON-like structure");
     Print("========================================");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -2045,6 +2239,7 @@ void OnNewPatternCreated()
 //+------------------------------------------------------------------+
 void OnPatternDeleted(string patternName)
 {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("========================================");
     Print("🗑️ PATTERN DELETION DETECTED");
     Print("========================================");
@@ -2052,6 +2247,7 @@ void OnPatternDeleted(string patternName)
     Print("Current Pattern For Feedback: ", g_currentPatternForFeedback);
     Print("g_waitingForFeedback: ", g_waitingForFeedback);
     Print("g_pendingPatternIndex: ", g_pendingPatternIndex);
+    #endif
     
     // اگر پترن حذف شده همان پترن در انتظار است، نادیده بگیر
     if(g_waitingForFeedback && g_pendingPatternIndex >= 0) {
@@ -2060,13 +2256,17 @@ void OnPatternDeleted(string patternName)
         if(g_pendingPatternIndex < g_learningDataCount) {
             string pendingPatternName = g_learningData[g_pendingPatternIndex].patternName;
             
+            #ifdef ENABLE_DEBUG_LOGS
             Print("Pending Pattern Name: ", pendingPatternName);
+            #endif
             
             // مقایسه نام پترن‌ها
             if(pendingPatternName == patternName || g_currentPatternForFeedback == patternName) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("✅ Match found - ignoring this pattern");
                 Print("No feedback will be recorded");
                 Print("========================================");
+                #endif
                 
                 // ریست حالت بدون ذخیره
                 ResetSmartFeedbackState();
@@ -2075,8 +2275,10 @@ void OnPatternDeleted(string patternName)
         }
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("⚠️ No match - pattern was not pending for feedback");
     Print("========================================");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -2113,5 +2315,7 @@ void CleanupLearningSystem()
         GenerateLearningReport();
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("🎓 Learning system cleaned up");
+    #endif
 }

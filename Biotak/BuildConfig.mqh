@@ -90,16 +90,22 @@
 //+------------------------------------------------------------------+
 void PrintBuildInfo()
 {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  ", BUILD_MODE_EMOJI, " Biotak Trigger TH3 - Version ", INDICATOR_VERSION);
     Print("║  Build Mode: ", BUILD_MODE_STR);
     Print("║  Compiled: ", __DATE__);
+    #endif
     #ifdef DEBUG_BUILD
     Print("║  ⚠️ DEBUG BUILD - Not for production use!");
     Print("║  Features: Logs, Assertions ENABLED");
     #else
+    #ifdef ENABLE_DEBUG_LOGS
     Print("║  ✅ PRODUCTION BUILD - Optimized for performance");
     #endif
+    #endif
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╚═══════════════════════════════════════════════════════════════╝");
+    #endif
 }
 

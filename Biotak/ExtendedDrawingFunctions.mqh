@@ -733,16 +733,22 @@ double GetStepSizeFromComponent(const double basePrice, const ENUM_COMBO_COMPONE
             Print("⚠️ GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
             Print("   TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
             Print("   SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   LS: ", (ls > 0 ? DoubleToString(ls, Digits) : "INVALID"));
+            #endif
             #endif
             
             // Production warning for incomplete mean calculation
             if(validCount == 1) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("ℹ️ MEAN COMPONENT INFO: ", EnumToString(comp), 
                       " - Only 1/3 values valid. Result equals the single valid value.");
+                #endif
             } else if(validCount == 2) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("ℹ️ MEAN COMPONENT INFO: ", EnumToString(comp), 
                       " - Only 2/3 values valid. Mean calculated from 2 values.");
+                #endif
             }
         }
         
@@ -1065,10 +1071,14 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
     if(count > 0) {
         Print("✅ CollectQuickTestComponents: Collected ", count, " components");
         for(int i = 0; i < count; i++) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("   [", i, "] = ", EnumToString(components[i]));
+            #endif
         }
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CollectQuickTestComponents: No components collected!");
+        #endif
     }
     #endif
     
@@ -1099,7 +1109,9 @@ double CalculateQuickTestStepSize(const double basePrice) {
     int componentCount = CollectQuickTestComponents(selectedComponents);
     
     if(componentCount == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Quick Test: No components selected");
+        #endif
         Alert("⚠️ QUICK TEST MODE ERROR\n\nNo components selected!\nPlease select at least one timeframe in Quick Test settings.");
         return 0;
     }
@@ -1149,7 +1161,9 @@ double CalculateQuickTestStepSize(const double basePrice) {
         case MEAN_GEOMETRIC: meanTypeName = "Geometric"; break;
         case MEAN_HARMONIC: meanTypeName = "Harmonic"; break;
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=", 
+    #endif
           DoubleToString(result, Digits));
     #endif
     
@@ -1230,14 +1244,18 @@ double CalculateDualGroupTopology(const double basePrice) {
     
     // 1. Start with Component 1
     if(inpComboComp1 == COMP_IGNORE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Calculator Mode (Dual): Component 1 cannot be IGNORE");
+        #endif
         Alert("⚠️ ADVANCED MODE ERROR (Dual Group Topology)\n\nComponent 1 cannot be IGNORE!\nDual Group topology requires at least Component 1.");
         return 0;
     }
     
     double valG1 = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(valG1 <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Calculator Mode (Dual): Component 1 calculation failed");
+        #endif
         Alert("⚠️ ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
         return 0;
     }
@@ -1269,12 +1287,16 @@ double CalculateDualGroupTopology(const double basePrice) {
         Print("⚠️ Dual Group: Component 3 invalid or failed");
         Print("   Component 3: ", EnumToString(inpComboComp3));
         Print("   Fallback: Using Group 1 result only");
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
+        #endif
         #endif
         
         // Production warning (always show, not just debug)
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3), 
               ") calculation failed. Using Group 1 result only.");
+        #endif
         
         return valG1;
     }
@@ -1290,9 +1312,8 @@ double CalculateDualGroupTopology(const double basePrice) {
         Print("   Component 4: ", EnumToString(inpComboComp4));
         Print("   Fallback: Using Group 1 result only");
         Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-        #endif
-        
         Print("⚠️ DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
+        #endif
         
         return valG1;
     }
@@ -1312,10 +1333,9 @@ double CalculateDualGroupTopology(const double basePrice) {
         Print("   Group 2: ", DoubleToString(valG2, Digits));
         Print("   Result: ", DoubleToString(finalResult, Digits));
         Print("   Fallback: Using Group 1 result only");
-        #endif
-        
         Print("⚠️ DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2), 
               ") produced invalid result. Using Group 1 result only.");
+        #endif
         
         return valG1;
     }
@@ -1347,7 +1367,9 @@ double ApplyOperationWithComponent(const double currentVal,
         if(op == OP_NONE) {
             Print("ℹ️ ApplyOperationWithComponent: Operator is NONE, skipping");
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("ℹ️ ApplyOperationWithComponent: Component is IGNORE, skipping");
+            #endif
         }
         #endif
         return currentVal;
@@ -1363,10 +1385,9 @@ double ApplyOperationWithComponent(const double currentVal,
         Print("   Component: ", EnumToString(nextComp));
         Print("   Operator: ", EnumToString(op));
         Print("   Keeping current value: ", DoubleToString(currentVal, Digits));
-        #endif
-        
         Print("⚠️ CALCULATOR WARNING: Component ", EnumToString(nextComp), 
               " calculation failed. Skipping operation ", EnumToString(op));
+        #endif
         
         return currentVal;
     }
@@ -1383,10 +1404,9 @@ double ApplyOperationWithComponent(const double currentVal,
         Print("   Next: ", DoubleToString(nextVal, Digits));
         Print("   Result: ", DoubleToString(result, Digits));
         Print("   Fallback to current value");
-        #endif
-        
         Print("⚠️ CALCULATOR WARNING: Operation ", EnumToString(op), 
               " produced invalid result. Keeping previous value.");
+        #endif
         
         return currentVal; // Fallback to previous valid value
     }
@@ -1409,14 +1429,18 @@ double ApplyOperationWithComponent(const double currentVal,
 double CalculateLinearTopology(const double basePrice) {
     // 1. Start with Component 1 (Foundation)
     if(inpComboComp1 == COMP_IGNORE) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Calculator Mode (Linear): Component 1 is IGNORE");
+        #endif
         Alert("⚠️ ADVANCED MODE ERROR (Linear Topology)\n\nComponent 1 cannot be IGNORE!\nLinear topology requires at least Component 1.");
         return 0;
     }
 
     double result = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(result <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Calculator Mode (Linear): Component 1 calculation failed");
+        #endif
         Alert("⚠️ ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
         return 0;
     }
@@ -1498,7 +1522,9 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
         // Validate: Need at least 1 component
         int componentCount = ArraySize(componentValues);
         if(componentCount == 0) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ N-ARY Mode: No valid components found");
+            #endif
             Alert("⚠️ ADVANCED MODE ERROR (N-ary Operator)\n\nAll components are set to IGNORE!\nPlease select at least one component.");
             return 0;
         }
@@ -1645,7 +1671,9 @@ double CalculateComboStepSize(const double basePrice) {
     // ═══════════════════════════════════════════════════════════════
     
     if(basePrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateComboStepSize: Invalid basePrice=", basePrice);
+        #endif
         Alert("⚠️ COMBO MODE ERROR\n\nInvalid base price for calculation.\nPlease check your settings.");
         return 0;
     }
@@ -2328,7 +2356,9 @@ double ApplyComboOperation(const double value1, const double value2,
                       ", v2=", DoubleToString(value2, Digits), 
                       ", result=", DoubleToString(result, Digits), 
                       " > threshold=", DoubleToString(overflowThreshold, Digits));
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("   Clamping to max input=", DoubleToString(maxInput, Digits));
+                #endif
                 #endif
                 result = maxInput;
             }
@@ -2735,7 +2765,9 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
     Print("✅ GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
     Print("   TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
     Print("   TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   Operation=", EnumToString(operation));
+    #endif
     #endif
 }
 ENUM_TIMEFRAMES GetPatternTimeframe() {
@@ -2818,12 +2850,16 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
 int CalculateStructureInterval(const int baseMultiplier, const int level) {
     // Defensive checks for invalid inputs
     if(baseMultiplier < 2 || baseMultiplier > 9) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Invalid base multiplier: ", baseMultiplier, " (must be 2-9)");
+        #endif
         return 0;
     }
     
     if(level < 1 || level > 5) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Invalid level: ", level, " (must be 1-5)");
+        #endif
         return 0;
     }
     
@@ -3178,6 +3214,17 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
     int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
     
+    // PERFORMANCE: Clamp to safe limits
+    if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
+    if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
+    
+    // PERFORMANCE: Get chart viewport range to skip off-screen levels
+    double chartPriceMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double chartPriceMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double viewportRange = chartPriceMax - chartPriceMin;
+    double vpTop = chartPriceMax + viewportRange;
+    double vpBottom = chartPriceMin - viewportRange;
+    
     // OPTIMIZATION: Cache frequently called values BEFORE the loop
     bool triggerEnabled = IsTriggerLevelsEnabled();
     bool structureEnabled = inpShowStructure;
@@ -3242,11 +3289,13 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         if(logicalStep == 1) {
             Print("========== MT4 FIRST LEVEL DEBUG ==========");
             Print("Anchor (midpoint): ", DoubleToString(midpointPrice, 10));
+            #ifdef ENABLE_DEBUG_LOGS
             Print("Step distance (LS): ", DoubleToString(dist, 10));
             Print("First level price: ", DoubleToString(priceLevel, 10));
             Print("Formula: ", DoubleToString(midpointPrice, 10), " + ", DoubleToString(dist, 10), " = ", DoubleToString(priceLevel, 10));
             Print("===========================================");
             Print("🔵 MT4 FIRST LEVEL: ", DoubleToString(priceLevel, 10), " (LS=", DoubleToString(dist, 10), ")");
+            #endif
         }
         #endif
         
@@ -3284,6 +3333,12 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         }
         
         string levelName = objectPrefix + "SSLS_Above_" + IntegerToString(logicalStep);
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(priceLevel < vpBottom || priceLevel > vpTop) {
+            drawnAbove++;
+            continue;
+        }
         
         // Create the level line
         if(ObjectFind(0, levelName) < 0) {
@@ -3402,6 +3457,12 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         }
         
         string levelName = objectPrefix + "SSLS_Below_" + IntegerToString(logicalStep);
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(priceLevel < vpBottom || priceLevel > vpTop) {
+            drawnBelow++;
+            continue;
+        }
         
         // Create the level line
         if(ObjectFind(0, levelName) < 0) {
@@ -3566,7 +3627,9 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
                  const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
     if(controlDistance <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawMLevels: Invalid control distance");
+        #endif
         return;
     }
     
@@ -3583,6 +3646,15 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     // Use adaptive level counts if provided, otherwise use input parameters
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
     int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
+    if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
+    
+    // PERFORMANCE: Get chart viewport range to skip off-screen levels
+    double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double vpRange = vpChartMax - vpChartMin;
+    double vpTop = vpChartMax + vpRange;
+    double vpBottom = vpChartMin - vpRange;
     
     // OPTIMIZATION: Cache frequently called values BEFORE the loop
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -3677,6 +3749,14 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             levelColor = isM ? inpMLevelColor : inpCLevelColor;
             levelStyle = isM ? inpMLevelStyle : inpCLevelStyle;
             levelWidth = isM ? inpMLevelWidth : inpCLevelWidth;
+        }
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(priceAbove < vpBottom || priceAbove > vpTop) {
+            drawnAbove++;
+            logicalStep++;
+            priceAbove += controlDistance;
+            continue;
         }
         
         // Always draw the level (matching Java line 279-283)
@@ -3803,6 +3883,14 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             levelWidth = isM2 ? inpMLevelWidth : inpCLevelWidth;
         }
         
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(priceBelow < vpBottom || priceBelow > vpTop) {
+            drawnBelow++;
+            logicalStep++;
+            priceBelow -= controlDistance;
+            continue;
+        }
+        
         // Always draw the level (matching Java line 307-311)
         {
             string levelName = objectPrefix + "M_Below_" + IntegerToString(logicalStep);
@@ -3883,19 +3971,15 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
                           const double stepSizePrice, const string modeName,
                           const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
-    // CRITICAL DEBUG: Always log entry
-    Print("═══════════════════════════════════════════════════════════");
-    Print("🔍 DrawTHLevelsWithStep CALLED");
-    Print("   Mode: ", modeName);
-    Print("   Midpoint: ", DoubleToString(midpointPrice, Digits));
-    Print("   Step Size: ", DoubleToString(stepSizePrice, Digits));
-    Print("   Max Above: ", maxLevelsAbove);
-    Print("   Max Below: ", maxLevelsBelow);
-    Print("   g_linesVisible: ", g_linesVisible ? "TRUE" : "FALSE");
-    Print("═══════════════════════════════════════════════════════════");
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("DrawTHLevelsWithStep: Mode=", modeName, " Mid=", DoubleToString(midpointPrice, Digits),
+          " Step=", DoubleToString(stepSizePrice, Digits), " MaxAbove=", maxLevelsAbove, " MaxBelow=", maxLevelsBelow);
+    #endif
     
     if(stepSizePrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawTHLevelsWithStep: Invalid step size - ABORTING");
+        #endif
         return;
     }
     
@@ -3912,6 +3996,15 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     // Use adaptive level counts if provided, otherwise use input parameters
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
     int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
+    if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
+    
+    // PERFORMANCE: Get chart viewport range to skip off-screen levels
+    double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double vpRange = vpChartMax - vpChartMin;
+    double vpTop = vpChartMax + vpRange;
+    double vpBottom = vpChartMin - vpRange;
     
     // OPTIMIZATION: Cache frequently called values BEFORE the loop
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -4004,6 +4097,14 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
             levelColor = inpCLevelColor;
             levelStyle = inpCLevelStyle;
             levelWidth = inpCLevelWidth;
+        }
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(priceAbove < vpBottom || priceAbove > vpTop) {
+            drawnAbove++;
+            logicalStep++;
+            priceAbove += stepSizePrice;
+            continue;
         }
         
         // Draw the level
@@ -4113,6 +4214,14 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
             levelWidth = inpCLevelWidth;
         }
         
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(priceBelow < vpBottom || priceBelow > vpTop) {
+            drawnBelow++;
+            logicalStep++;
+            priceBelow -= stepSizePrice;
+            continue;
+        }
+        
         // Draw the level
         string levelName = objectPrefix + modeName + "_Below_" + IntegerToString(logicalStep);
         
@@ -4163,10 +4272,12 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         priceBelow -= stepSizePrice;
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ DrawTHLevelsWithStep COMPLETED for mode: ", modeName);
     Print("   Levels drawn: Above=", drawnAbove, ", Below=", drawnBelow);
     Print("   Zones drawn: Above=", zoneCountAbove, ", Below=", zoneCountBelow);
     Print("═══════════════════════════════════════════════════════════");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -4176,7 +4287,9 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
                       const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
     if(mDistance <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawMEqualLevels: Invalid M distance");
+        #endif
         return;
     }
     
@@ -4193,6 +4306,15 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
     // Use adaptive level counts if provided, otherwise use input parameters
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
     int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
+    if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
+    
+    // PERFORMANCE: Get chart viewport range to skip off-screen levels
+    double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double vpRange = vpChartMax - vpChartMin;
+    double vpTop = vpChartMax + vpRange;
+    double vpBottom = vpChartMin - vpRange;
     
     // OPTIMIZATION: Cache IsTriggerLevelsEnabled() result BEFORE the loops
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -4237,6 +4359,14 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
     
     while(step <= effectiveMaxAbove && (g_thStartPointType == TH_START_POINT_CUSTOM_PRICE || price <= g_highestHigh) && iterations < maxIterations) {
         iterations++;
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(price < vpBottom || price > vpTop) {
+            step++;
+            price += mDistance;
+            continue;
+        }
+        
         string levelName = objectPrefix + "MEq_Above_" + IntegerToString(step);
         
         // Create the level line
@@ -4305,6 +4435,14 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
     
     while(step <= effectiveMaxBelow && (g_thStartPointType == TH_START_POINT_CUSTOM_PRICE || price >= g_lowestLow) && iterations < maxIterations) {
         iterations++;
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(price < vpBottom || price > vpTop) {
+            step++;
+            price -= mDistance;
+            continue;
+        }
+        
         string levelName = objectPrefix + "MEq_Below_" + IntegerToString(step);
         
         // Create the level line
@@ -4474,35 +4612,47 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     
     // Validate object prefix
     if(StringLen(objectPrefix) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Empty object prefix");
+        #endif
         return;
     }
     
     // Validate price range
     if(highPrice <= 0 || lowPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        #endif
         return;
     }
     if(highPrice <= lowPrice) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Invalid range - High must be > Low");
+        #endif
         return;
     }
     
     // Validate base step size
     if(baseStepSize <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Invalid base step size: ", baseStepSize);
+        #endif
         return;
     }
     
     // CRITICAL: Validate harmonic ratio with strict bounds
     if(harmonicRatio < MIN_HARMONIC_RATIO) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Ratio too small (", harmonicRatio, 
               ") - must be >= ", MIN_HARMONIC_RATIO, " for meaningful alternation");
+        #endif
         return;
     }
     if(harmonicRatio > MAX_HARMONIC_RATIO) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Ratio too large (", harmonicRatio, 
               ") - must be <= ", MAX_HARMONIC_RATIO);
+        #endif
         return;
     }
     
@@ -4525,8 +4675,10 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     // Validate large step doesn't exceed range
     double range = highPrice - lowPrice;
     if(largeStepSize > range) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ DrawFactorLevelsHarmonic: Large step (", largeStepSize, 
               ") exceeds range (", range, ") - adjusting");
+        #endif
         largeStepSize = range * 0.5;  // Max 50% of range
     }
     
@@ -4548,7 +4700,9 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     string midName = objectPrefix + "Factor_Mid_0";
     if(ObjectFind(0, midName) < 0) {
         if(!ObjectCreate(0, midName, OBJ_HLINE, 0, 0, midpoint)) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ Failed to create midpoint level. Error: ", GetLastError());
+            #endif
             return;
         }
     }
@@ -4593,8 +4747,10 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     
     // Additional safety: minimum step size check
     if(baseStepSize < Point * 2) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Base step too small (", baseStepSize, 
               ") - must be >= ", Point * 2);
+        #endif
         return;
     }
     
@@ -4666,7 +4822,9 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         // Create or update level
         if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ Failed to create level above ", i + 1, ". Error: ", GetLastError());
+                #endif
                 continue;
             }
         }
@@ -4733,7 +4891,9 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         
         if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ Failed to create level below ", i + 1, ". Error: ", GetLastError());
+                #endif
                 continue;
             }
         }
@@ -4770,19 +4930,27 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
 {
     // Comprehensive input validation
     if(StringLen(objectPrefix) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevelsAligned: Empty object prefix");
+        #endif
         return;
     }
     if(highPrice <= 0 || lowPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevelsAligned: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        #endif
         return;
     }
     if(highPrice <= lowPrice) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevelsAligned: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
+        #endif
         return;
     }
     if(stepSize <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevelsAligned: Invalid step size: ", stepSize);
+        #endif
         return;
     }
     
@@ -4827,9 +4995,11 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     int totalLevels = (int)MathFloor(range / stepSize);
     
     if(totalLevels <= 1) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevelsAligned: Not enough space (totalLevels=", totalLevels, 
               ", range=", DoubleToString(range, Digits), 
               ", stepSize=", DoubleToString(stepSize, Digits), ")");
+        #endif
         return;
     }
     
@@ -4841,8 +5011,10 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     // Safety: Limit max levels to prevent performance issues
     const int MAX_FACTOR_LEVELS = 5000;
     if(totalLevels > MAX_FACTOR_LEVELS) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevelsAligned: WARNING - Too many levels (", totalLevels, 
               "), clamping to ", MAX_FACTOR_LEVELS);
+        #endif
         totalLevels = MAX_FACTOR_LEVELS;
     }
     
@@ -4963,7 +5135,9 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             // Trigger ON: Create or update level
             if(!objectExists) {
                 if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                    #ifdef ENABLE_DEBUG_LOGS
                     Print("DrawFactorLevelsAligned: Failed to create level ", i, ", Error: ", GetLastError());
+                    #endif
                     continue;
                 }
             }
@@ -5020,19 +5194,27 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     // PHASE 1: INPUT VALIDATION (Security Layer)
     // ═══════════════════════════════════════════════════════════════
     if(StringLen(objectPrefix) == 0 || centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid inputs");
+        #endif
         return;
     }
     if(highPrice <= lowPrice) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid range - High must be > Low");
+        #endif
         return;
     }
     if(baseStepSize <= 0 || harmonicRatio < MIN_HARMONIC_RATIO || harmonicRatio > MAX_HARMONIC_RATIO) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid step or ratio");
+        #endif
         return;
     }
     if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid level counts");
+        #endif
         return;
     }
     
@@ -5337,24 +5519,34 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     // PHASE 1: INPUT VALIDATION (Security Layer)
     // ═══════════════════════════════════════════════════════════════
     if(StringLen(objectPrefix) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsFromCenter: Empty object prefix");
+        #endif
         return;
     }
     if(centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsFromCenter: Invalid prices - Center=", centerPrice, 
               ", High=", highPrice, ", Low=", lowPrice);
+        #endif
         return;
     }
     if(highPrice <= lowPrice) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsFromCenter: Invalid range - High must be > Low");
+        #endif
         return;
     }
     if(stepSize <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsFromCenter: Invalid step size: ", stepSize);
+        #endif
         return;
     }
     if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsFromCenter: Invalid level counts");
+        #endif
         return;
     }
     
@@ -5362,9 +5554,16 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     // PHASE 2: SAFETY CHECKS (Performance Protection)
     // ═══════════════════════════════════════════════════════════════
     
-    // Use user-defined level counts directly
-    int safeMaxAbove = maxLevelsAbove;
-    int safeMaxBelow = maxLevelsBelow;
+    // Use user-defined level counts directly, clamped to safety limit
+    int safeMaxAbove = (maxLevelsAbove > MAX_SAFE_LEVELS) ? MAX_SAFE_LEVELS : maxLevelsAbove;
+    int safeMaxBelow = (maxLevelsBelow > MAX_SAFE_LEVELS) ? MAX_SAFE_LEVELS : maxLevelsBelow;
+    
+    // PERFORMANCE: Get chart viewport range to skip off-screen levels
+    double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double vpRange = vpChartMax - vpChartMin;
+    double vpTop = vpChartMax + vpRange;
+    double vpBottom = vpChartMin - vpRange;
     
     #ifdef ENABLE_DEBUG_LOGS
     Print("DrawFactorLevelsFromCenter: Center=", DoubleToString(centerPrice, Digits),
@@ -5472,6 +5671,13 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         }
         
         double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(normalizedPrice < vpBottom || normalizedPrice > vpTop) {
+            logicalStep++;
+            levelsAboveCount++;
+            continue;
+        }
         
         // Get path for this level - check Structure first, then Trigger (matching M Mode)
         color levelColor;
@@ -5594,6 +5800,13 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         
         double normalizedPrice = NormalizeDouble(levelPrice, Digits);
         
+        // PERFORMANCE: Skip creating objects for levels far outside viewport
+        if(normalizedPrice < vpBottom || normalizedPrice > vpTop) {
+            logicalStep++;
+            levelsBelowCount++;
+            continue;
+        }
+        
         // Get path for this level - check Structure first, then Trigger (matching M Mode)
         color levelColor;
         ENUM_LINE_STYLE levelStyle;
@@ -5692,27 +5905,37 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
 {
     // Comprehensive input validation
     if(StringLen(objectPrefix) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: Empty object prefix");
+        #endif
         return;
     }
     if(highPrice <= 0 || lowPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        #endif
         return;
     }
     if(highPrice <= lowPrice) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
+        #endif
         return;
     }
     // Support 2 decimal places: minimum 0.01, maximum 10000
     if(factor < 0.01 || factor > 10000) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: Invalid factor (", DoubleToString(factor, 2), ") - must be 0.01-10000");
+        #endif
         return;
     }
     
     // Calculate step size
     double stepSize = CalculateFactorStepSize(highPrice, lowPrice, factor);
     if(stepSize <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: Invalid step size calculated");
+        #endif
         return;
     }
     
@@ -5722,8 +5945,10 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     int totalLevels = (int)MathFloor(range / stepSize) - 1;  // -1 to exclude boundaries
     
     if(totalLevels <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: No levels to draw (totalLevels=", totalLevels, 
               ", factor=", DoubleToString(factor, 2), ", stepSize=", stepSize, ")");
+        #endif
         return;
     }
     
@@ -5734,8 +5959,10 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     // Maximum safe levels per indicator: 5000 (leaves room for other objects)
     const int MAX_FACTOR_LEVELS = 5000;
     if(totalLevels > MAX_FACTOR_LEVELS) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("DrawFactorLevels: WARNING - Too many levels (", totalLevels, 
               "), clamping to ", MAX_FACTOR_LEVELS, " for safety");
+        #endif
         totalLevels = MAX_FACTOR_LEVELS;
     }
     
@@ -5880,7 +6107,9 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
         
         if(!objectExists) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("DrawFactorLevels: Failed to create level ", levelNumber, ", Error: ", GetLastError());
+                #endif
                 levelNumber++;
                 continue;
             }

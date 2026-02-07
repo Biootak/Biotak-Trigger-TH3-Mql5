@@ -47,28 +47,36 @@ ENUM_LOG_LEVEL GetLogLevel() {
 // Log Error (always shown unless LOG_LEVEL_NONE)
 void LogError(string message) {
     if(g_currentLogLevel >= LOG_LEVEL_ERROR) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: ", message);
+        #endif
     }
 }
 
 // Log Warning
 void LogWarning(string message) {
     if(g_currentLogLevel >= LOG_LEVEL_WARNING) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ WARNING: ", message);
+        #endif
     }
 }
 
 // Log Info
 void LogInfo(string message) {
     if(g_currentLogLevel >= LOG_LEVEL_INFO) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("ℹ️ INFO: ", message);
+        #endif
     }
 }
 
 // Log Debug (verbose)
 void LogDebug(string message) {
     if(g_currentLogLevel >= LOG_LEVEL_DEBUG) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("🔍 DEBUG: ", message);
+        #endif
     }
 }
 

@@ -16,8 +16,8 @@ input bool inpShowMidpointLine = true;
 input bool inpShowTimeframeInLabels = true;
 input bool inpShowFractalTHs = false;
 input bool inpShowStandardTHs = false;
-input int inpMaxTHLevelsAbove = 1000;
-input int inpMaxTHLevelsBelow = 1000;
+input int inpMaxTHLevelsAbove = 100;
+input int inpMaxTHLevelsBelow = 100;
 input string inpFontName = "Arial Black";
 input int inpFontSize = 8;
 

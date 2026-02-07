@@ -18,24 +18,30 @@ int ValidateInputs()
     
     // 1. Base Price Threshold Percent (0.001-10.0) with epsilon check
     if(inpBasePriceThresholdPercent < 0.0001 || inpBasePriceThresholdPercent > 10.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Base Price Threshold (", DoubleToString(inpBasePriceThresholdPercent, 3), ") out of range");
         Print("   Valid range: 0.0001 - 10.0 (epsilon-safe)");
         Print("   Recommended: 0.066 (default)");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // SECURITY: Additional check for extreme precision loss
     if(inpBasePriceThresholdPercent < 0.001) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ WARNING: Base Price Threshold (", DoubleToString(inpBasePriceThresholdPercent, 6), ") is very small");
         Print("   May cause floating-point precision issues");
+        #endif
     }
     
     // 2. Harmonic Ratio (1.01-2.0)
     if(inpEnableHarmonicPattern) {
         if(inpHarmonicRatio < 1.01 || inpHarmonicRatio > 2.0) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ ERROR: Harmonic Ratio (", DoubleToString(inpHarmonicRatio, 3), ") out of range");
             Print("   Valid range: 1.01 - 2.0");
             Print("   Recommended: 1.333 (Golden), 1.5 (Medium), 2.0 (Max)");
+            #endif
             return INIT_PARAMETERS_INCORRECT;
         }
     }
@@ -47,10 +53,12 @@ int ValidateInputs()
     
     // AUTO-CORRECTION: If invalid value detected, auto-correct to default (3)
     if(baseMultiplier < 2 || baseMultiplier > 9) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ WARNING: Structure Base Multiplier (", baseMultiplier, ") is invalid");
         Print("   Valid range: 2 - 9");
         Print("   🔧 AUTO-CORRECTING to default: 3");
         Print("   Reason: Value ", baseMultiplier, " would make structure levels meaningless");
+        #endif
         
         // Note: We cannot modify input parameter directly in MQL4
         // The validation functions will use fallback value (3) throughout the code
@@ -62,93 +70,123 @@ int ValidateInputs()
     
     // Success: Valid base multiplier or auto-corrected
     if(baseMultiplier >= 2 && baseMultiplier <= 9) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Structure Base Multiplier: ", baseMultiplier);
+        #endif
     }
     
     // 4. Font Size (1-100)
     if(inpFontSize <= 0 || inpFontSize > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Font Size (", inpFontSize, ") out of range");
         Print("   Valid range: 1 - 100");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 5. Line Widths (1-10)
     if(inpCustomPriceLevelWidth <= 0 || inpCustomPriceLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Custom Price Line Width (", inpCustomPriceLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpHighWidth <= 0 || inpHighWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: High Line Width (", inpHighWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpLowWidth <= 0 || inpLowWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Low Line Width (", inpLowWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpTriggerWidth <= 0 || inpTriggerWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Trigger Level Width (", inpTriggerWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 6. Spacing Values (non-negative)
     if(inpInitialX < 0 || inpInitialY < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Initial position values must be non-negative");
         Print("   X: ", inpInitialX, ", Y: ", inpInitialY);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpLabelSpacing < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Label spacing must be non-negative");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 7. Max Levels (positive)
     if(inpMaxTHLevelsAbove <= 0 || inpMaxTHLevelsBelow <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Max TH Levels must be positive");
         Print("   Above: ", inpMaxTHLevelsAbove, ", Below: ", inpMaxTHLevelsBelow);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpCustomPriceMaxLevels <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Custom Price Max Levels must be positive");
         Print("   Value: ", inpCustomPriceMaxLevels);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 8. Label Width (positive)
     if(inpMaxLabelWidth <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Max Label Width must be positive");
         Print("   Value: ", inpMaxLabelWidth);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 9. TH3 Zone Transparency (0-100)
     if(inpTH3ZoneTransparency < 0 || inpTH3ZoneTransparency > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: TH3 Zone Transparency (", inpTH3ZoneTransparency, ") out of range");
         Print("   Valid range: 0 - 100");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 9.1 TH3 Zone Height Percent (1-100)
     if(inpTH3ZoneHeightPercent < 1.0 || inpTH3ZoneHeightPercent > 100.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: TH3 Zone Height Percent (", inpTH3ZoneHeightPercent, ") out of range");
         Print("   Valid range: 1.0 - 100.0");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 9.2 Mid-Zone Height Percent (1-100)
     if(inpMidZoneHeightPercent < 1.0 || inpMidZoneHeightPercent > 100.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Mid-Zone Height Percent (", inpMidZoneHeightPercent, ") out of range");
         Print("   Valid range: 1.0 - 100.0");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // 9.3 Mid-Zone Transparency (0-100)
     if(inpMidZoneTransparency < 0 || inpMidZoneTransparency > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Mid-Zone Transparency (", inpMidZoneTransparency, ") out of range");
         Print("   Valid range: 0 - 100");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -158,8 +196,10 @@ int ValidateInputs()
     
     // 10. Historical Periods (non-negative)
     if(inpHistoricalPeriods < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Historical Periods must be non-negative (0=Auto)");
         Print("   Value: ", inpHistoricalPeriods);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -188,37 +228,49 @@ int ValidateInputs()
     if(inpEnableHarmonicPattern) {
         // Warning if ratio is too close to 1.0 (subtle alternation)
         if(inpHarmonicRatio < 1.05) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ WARNING: Harmonic Ratio (", DoubleToString(inpHarmonicRatio, 3), 
                   ") is very close to 1.0");
             Print("   Alternation will be subtle. Consider using 1.333 or higher for clearer pattern");
+            #endif
         }
         
         // Validate Harmonic colors are different
         if(inpHarmonicBaseColor == inpHarmonicLargeColor) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ WARNING: Base and Large step colors are identical");
             Print("   Consider using different colors for better visual distinction");
+            #endif
         }
         
         // Validate Harmonic widths
         if(inpHarmonicBaseWidth <= 0 || inpHarmonicBaseWidth > 10) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ ERROR: Invalid Harmonic Base Width (", inpHarmonicBaseWidth, "). Must be between 1 and 10");
+            #endif
             return INIT_PARAMETERS_INCORRECT;
         }
         if(inpHarmonicLargeWidth <= 0 || inpHarmonicLargeWidth > 10) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ ERROR: Invalid Harmonic Large Width (", inpHarmonicLargeWidth, "). Must be between 1 and 10");
+            #endif
             return INIT_PARAMETERS_INCORRECT;
         }
         
         // Conflict warnings
         if(inpTHStartPointType == TH_START_POINT_CUSTOM_PRICE) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ WARNING: Harmonic Pattern with Custom Price Mode");
             Print("   Harmonic always uses Historical High/Low midpoint as center");
             Print("   Custom Price will be ignored in Harmonic Mode");
+            #endif
         }
         
         if(inpShowStructure || inpShowTrigger) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("ℹ️ INFO: Harmonic Pattern Priority");
             Print("   Harmonic colors will override Structure/Trigger colors");
+            #endif
         }
         
         #ifdef ENABLE_DEBUG_LOGS
@@ -237,29 +289,37 @@ int ValidateInputs()
     
     // SECURITY FIX: Validate factor value
     if(inpFactorValue < 0.01 || inpFactorValue > 10000) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Factor Value (", DoubleToString(inpFactorValue, 2), ") out of range");
         Print("   Valid range: 0.01 - 10000");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // SECURITY FIX: Validate harmonic ratio
     if(inpEnableHarmonicPattern) {
         if(inpHarmonicRatio < 1.01 || inpHarmonicRatio > 2.0) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ ERROR: Harmonic Ratio (", DoubleToString(inpHarmonicRatio, 3), ") out of range");
             Print("   Valid range: 1.01 - 2.0");
             Print("   Recommended: 1.333 (Golden), 1.5 (Medium), 2.0 (Max)");
+            #endif
             return INIT_PARAMETERS_INCORRECT;
         }
     }
     
     if(inpFactorAdjustStep <= 0 || inpFactorAdjustStep > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Factor Adjust Step (", DoubleToString(inpFactorAdjustStep, 2), ") out of range");
         Print("   Valid range: 0.01 - 100");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpFactorLevelWidth <= 0 || inpFactorLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Factor Level Width (", inpFactorLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -269,39 +329,51 @@ int ValidateInputs()
     
     // M Step Mode
     if(inpCLevelWidth <= 0 || inpCLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: C Level Width (", inpCLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpMLevelWidth <= 0 || inpMLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: M Level Width (", inpMLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // SS/LS Step Mode
     if(inpSSLevelWidth <= 0 || inpSSLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: SS Level Width (", inpSSLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpLSLevelWidth <= 0 || inpLSLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: LS Level Width (", inpLSLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // Combo Step Mode
     if(inpComboLevelWidth <= 0 || inpComboLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Combo Level Width (", inpComboLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
     // TP Step Mode
     if(inpTPLevelWidth <= 0 || inpTPLevelWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: TP Level Width (", inpTPLevelWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -310,34 +382,46 @@ int ValidateInputs()
     // ═══════════════════════════════════════════════════════════════
     
     if(inpTH3BaseStepPercent < 0.1 || inpTH3BaseStepPercent > 120.0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: TH3 Base Step Percent (", DoubleToString(inpTH3BaseStepPercent, 3), ") out of range");
         Print("   Valid range: 0.1 - 120.0 (extended range)");
         Print("   Recommended: 28.125 (default)");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpTH3Width <= 0 || inpTH3Width > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: TH3 Level Width (", inpTH3Width, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpABCDWidth <= 0 || inpABCDWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: AB=CD Line Width (", inpABCDWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpTH3ZoneBorderWidth <= 0 || inpTH3ZoneBorderWidth > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: TH3 Zone Border Width (", inpTH3ZoneBorderWidth, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpABCDInfoFontSize <= 0 || inpABCDInfoFontSize > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: AB=CD Info Font Size (", inpABCDInfoFontSize, ") out of range");
         Print("   Valid range: 1 - 100");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpABCDInfoXDistance < 0 || inpABCDInfoYDistance < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: AB=CD Info position must be non-negative");
         Print("   X: ", inpABCDInfoXDistance, ", Y: ", inpABCDInfoYDistance);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -347,28 +431,38 @@ int ValidateInputs()
     
     // Validate all 5 structure level widths
     if(inpStructureL1Width <= 0 || inpStructureL1Width > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Structure Level 1 Width (", inpStructureL1Width, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpStructureL2Width <= 0 || inpStructureL2Width > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Structure Level 2 Width (", inpStructureL2Width, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpStructureL3Width <= 0 || inpStructureL3Width > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Structure Level 3 Width (", inpStructureL3Width, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpStructureL4Width <= 0 || inpStructureL4Width > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Structure Level 4 Width (", inpStructureL4Width, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpStructureL5Width <= 0 || inpStructureL5Width > 10) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Structure Level 5 Width (", inpStructureL5Width, ") out of range");
         Print("   Valid range: 1 - 10");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -377,13 +471,17 @@ int ValidateInputs()
     // ═══════════════════════════════════════════════════════════════
     
     if(inpModeLabelFontSize <= 0 || inpModeLabelFontSize > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Mode Label Font Size (", inpModeLabelFontSize, ") out of range");
         Print("   Valid range: 1 - 100");
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     if(inpModeLabelXDistance < 0 || inpModeLabelYDistance < 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ERROR: Mode Label position must be non-negative");
         Print("   X: ", inpModeLabelXDistance, ", Y: ", inpModeLabelYDistance);
+        #endif
         return INIT_PARAMETERS_INCORRECT;
     }
     
@@ -412,9 +510,11 @@ int ValidateInputs()
 //| Shows which settings are active/ignored based on selected mode   |
 //+------------------------------------------------------------------+
 void ValidateComboModeConfiguration() {
+    #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════════");
     Print("📊 COMBO MODE CONFIGURATION VALIDATION");
     Print("═══════════════════════════════════════════════════════════════");
+    #endif
     
     // ═══════════════════════════════════════════════════════════════
     // SHOW SELECTED MODE
@@ -427,8 +527,10 @@ void ValidateComboModeConfiguration() {
         default: modeName = "UNKNOWN"; break;
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ SELECTED MODE: ", modeName);
     Print("───────────────────────────────────────────────────────────────");
+    #endif
     
     // ═══════════════════════════════════════════════════════════════
     // MODE-SPECIFIC VALIDATION AND GUIDANCE
@@ -438,6 +540,7 @@ void ValidateComboModeConfiguration() {
         // ═══════════════════════════════════════════════════════════
         // QUICK TEST MODE
         // ═══════════════════════════════════════════════════════════
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📌 ACTIVE SETTINGS (Quick Test Mode):");
         Print("   • Preset: ", EnumToString(inpQuickTestPreset));
         Print("   • Step Type: ", EnumToString(inpQuickTestStepType));
@@ -448,11 +551,13 @@ void ValidateComboModeConfiguration() {
         Print("   • Advanced Mode settings (Topology, Components, Operators)");
         Print("");
         Print("ℹ️  FLOW: Preset → Step Type → Mean Type → Result");
+        #endif
         
     } else if(inpComboMode == COMBO_MODE_PRESET) {
         // ═══════════════════════════════════════════════════════════
         // PRESET MODE
         // ═══════════════════════════════════════════════════════════
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📌 ACTIVE SETTINGS (Preset Mode):");
         Print("   • Selected Preset: ", EnumToString(inpComboPreset));
         Print("");
@@ -461,11 +566,13 @@ void ValidateComboModeConfiguration() {
         Print("   • Advanced Mode settings (Topology, Components, Operators)");
         Print("");
         Print("ℹ️  FLOW: Select Preset → Automatic calculation → Result");
+        #endif
         
     } else if(inpComboMode == COMBO_MODE_ADVANCED) {
         // ═══════════════════════════════════════════════════════════
         // ADVANCED MODE
         // ═══════════════════════════════════════════════════════════
+        #ifdef ENABLE_DEBUG_LOGS
         Print("📌 ACTIVE SETTINGS (Advanced Mode):");
         Print("   • Topology: ", EnumToString(inpComboTopology));
         Print("   • Component 1: ", EnumToString(inpComboComp1));
@@ -480,6 +587,7 @@ void ValidateComboModeConfiguration() {
         Print("   • Quick Test settings (Preset, Step Type, Mean Type)");
         Print("   • Preset Mode settings (inpComboPreset)");
         Print("");
+        #endif
         
         // ═══════════════════════════════════════════════════════════
         // ADVANCED MODE VALIDATION
@@ -494,11 +602,15 @@ void ValidateComboModeConfiguration() {
         
         // CRITICAL VALIDATION: At least 1 component required
         if(activeComponents == 0) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️  WARNING: All components are set to IGNORE!");
             Print("   Advanced Mode requires at least 1 active component");
             Print("   Please select at least one component (not IGNORE)");
+            #endif
         } else {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("✅ Active Components: ", activeComponents);
+            #endif
         }
         
         // ═══════════════════════════════════════════════════════════
@@ -519,26 +631,34 @@ void ValidateComboModeConfiguration() {
         }
         
         if(hasNaryOperator) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("");
             Print("⚠️  N-ARY OPERATOR DETECTED: ", naryOpName);
             Print("   ⚠️  TOPOLOGY WILL BE IGNORED!");
             Print("   N-ary operators collect ALL non-IGNORE components");
             Print("   and apply the operation to all of them at once.");
             Print("   Other operators (Op2, Op3) will also be ignored.");
+            #endif
         }
         
         // ═══════════════════════════════════════════════════════════
         // TOPOLOGY EXPLANATION
         // ═══════════════════════════════════════════════════════════
         if(!hasNaryOperator) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("");
             Print("ℹ️  TOPOLOGY: ", EnumToString(inpComboTopology));
+            #endif
             if(inpComboTopology == TOPOLOGY_LINEAR) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("   Formula: ((C1 op1 C2) op2 C3) op3 C4");
                 Print("   Sequential left-to-right evaluation");
+                #endif
             } else {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("   Formula: (C1 op1 C2) op2 (C3 op3 C4)");
                 Print("   Two groups combined with middle operator");
+                #endif
             }
         }
     }
@@ -546,12 +666,16 @@ void ValidateComboModeConfiguration() {
     // ═══════════════════════════════════════════════════════════════
     // GLOBAL SETTINGS (All Modes)
     // ═══════════════════════════════════════════════════════════════
+    #ifdef ENABLE_DEBUG_LOGS
     Print("");
     Print("🌐 GLOBAL SETTINGS (Used by all modes):");
     Print("   • Aggregate Mean Type: ", EnumToString(inpAggregateMeanType));
     Print("   ℹ️  Used ONLY for COMP_*_MEAN components");
     Print("   ℹ️  Example: COMP_TRIGGER_MEAN = Mean(Trigger_TH, Trigger_SS, Trigger_LS)");
+    #endif
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════════");
+    #endif
 }
 

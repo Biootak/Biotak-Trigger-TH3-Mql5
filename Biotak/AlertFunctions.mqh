@@ -19,7 +19,9 @@ bool ShouldTriggerAlert(const string levelName) {
 void CheckAlerts(const string objectPrefix, double currentPrice) {
     // بررسی اعتبار پارامترهای ورودی
     if(objectPrefix == "" || currentPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("CheckAlerts: Invalid parameters - objectPrefix: ", objectPrefix, ", currentPrice: ", currentPrice);
+        #endif
         return;
     }
     

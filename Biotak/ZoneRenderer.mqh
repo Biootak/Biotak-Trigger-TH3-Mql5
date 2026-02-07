@@ -69,7 +69,9 @@ void ResolveLineStyles(
     for(int i = 0; i < count; i++) {
         if(outLines[i].isVisible) visibleCount++;
     }
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ ResolveLineStyles: ", visibleCount, " visible lines");
+    #endif
     #endif
 }
 
@@ -92,19 +94,7 @@ void ResolveZoneStyles(
     // CRITICAL: بررسی خالی نبودن objectPrefix
     string safePrefix = (StringLen(objectPrefix) > 0) ? objectPrefix : "Zone_";
     
-    // DIAGNOSTIC LOG: Start
-    Print("═══════════════════════════════════════════════════════════");
-    Print("🔍 ZONE STYLE RESOLUTION DIAGNOSTIC");
-    Print("═══════════════════════════════════════════════════════════");
-    Print("📋 Configuration:");
-    Print("   Show Zones: ", config.showZones ? "TRUE" : "FALSE");
-    Print("   Zone Transparency: ", config.zoneTransparency, "%");
-    Print("   Object Prefix: ", safePrefix);
-    Print("───────────────────────────────────────────────────────────");
-    
     if(config.showZones) {
-        Print("🎨 Zone Style Assignment:");
-        
         for(int i = 0; i < count; i++) {
             if(geometries[i].isValid && classifications[i].isActive) {
                 string suffix = (levels[i].logicalStep >= 0) ? "Above_" : "Below_";
@@ -118,36 +108,12 @@ void ResolveZoneStyles(
                 outZones[zoneCount].topPrice = geometries[i].topPrice;
                 outZones[zoneCount].bottomPrice = geometries[i].bottomPrice;
                 
-                // DIAGNOSTIC LOG: Zone Style
-                Print("✅ Zone ", zoneCount + 1, " [Level ", i, ", Step ", levels[i].logicalStep, "]:");
-                Print("   Name: ", outZones[zoneCount].name);
-                Print("   Color: ", ColorToString(outZones[zoneCount].clr));
-                Print("   Top: ", DoubleToString(outZones[zoneCount].topPrice, Digits));
-                Print("   Bottom: ", DoubleToString(outZones[zoneCount].bottomPrice, Digits));
-                Print("   Type: ", classifications[i].isStructure ? "STRUCTURE" : "TRIGGER");
-                
                 zoneCount++;
-            }
-            else {
-                if(!geometries[i].isValid) {
-                    Print("⏭️ Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Invalid Geometry)");
-                }
-                else if(!classifications[i].isActive) {
-                    Print("⏭️ Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Inactive)");
-                }
             }
         }
     }
-    else {
-        Print("⚠️ Zone Display is DISABLED (config.showZones = false)");
-    }
     
     ArrayResize(outZones, zoneCount);
-    
-    Print("───────────────────────────────────────────────────────────");
-    Print("✅ ResolveZoneStyles Summary:");
-    Print("   Zones Prepared for Rendering: ", zoneCount);
-    Print("═══════════════════════════════════════════════════════════");
 }
 
 //+------------------------------------------------------------------+

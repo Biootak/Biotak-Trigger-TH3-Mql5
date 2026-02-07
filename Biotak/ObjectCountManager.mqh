@@ -56,8 +56,10 @@ bool CanCreateObject()
     // CRITICAL: Check if limit reached
     // ═══════════════════════════════════════════════════════════════
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
         Print("   Forcing emergency cleanup...");
+        #endif
         
         // Emergency cleanup
         int cleanedCount = EmergencyCleanupObjects();
@@ -67,13 +69,17 @@ bool CanCreateObject()
         g_lastObjectCount = totalObjects;
         
         if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("❌ FATAL: Cannot free objects (", totalObjects, " remaining)");
             Print("   Please close some charts or remove other indicators");
+            #endif
             return false;
         }
         
+        #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Emergency cleanup successful: ", cleanedCount, " objects removed");
         Print("   Current count: ", totalObjects);
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -83,8 +89,10 @@ bool CanCreateObject()
         // Throttle warning (once per minute)
         static datetime s_lastWarning = 0;
         if(currentTime - s_lastWarning > 60) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ WARNING: Approaching object limit (", totalObjects, "/", MAX_SAFE_OBJECTS, ")");
             Print("   Consider reducing Max Levels in settings");
+            #endif
             s_lastWarning = currentTime;
         }
     }
@@ -105,7 +113,9 @@ int EmergencyCleanupObjects()
     // Prevent cleanup spam (minimum 30 seconds between cleanups)
     // ═══════════════════════════════════════════════════════════════
     if(currentTime - g_lastEmergencyCleanup < 30) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ EmergencyCleanup: Too soon since last cleanup, skipping");
+        #endif
         return 0;
     }
     
@@ -114,8 +124,10 @@ int EmergencyCleanupObjects()
     int deletedCount = 0;
     datetime cutoffTime = currentTime - EMERGENCY_CLEANUP_AGE;
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("🧹 Emergency cleanup starting...");
     Print("   Cutoff time: ", TimeToString(cutoffTime, TIME_DATE|TIME_MINUTES));
+    #endif
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 1: Delete old temporary objects (labels, zones)
@@ -157,14 +169,18 @@ int EmergencyCleanupObjects()
         }
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("   Phase 1: Deleted ", deletedCount, " old objects");
+    #endif
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 2: If still critical, delete ALL non-essential objects
     // ═══════════════════════════════════════════════════════════════
     totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Still critical after Phase 1, starting Phase 2...");
+        #endif
         
         int phase2Deleted = 0;
         
@@ -196,7 +212,9 @@ int EmergencyCleanupObjects()
         }
         
         deletedCount += phase2Deleted;
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   Phase 2: Deleted ", phase2Deleted, " non-essential objects");
+        #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -204,7 +222,9 @@ int EmergencyCleanupObjects()
     // ═══════════════════════════════════════════════════════════════
     ChartRedraw();
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Emergency cleanup complete: ", deletedCount, " total objects removed");
+    #endif
     
     return deletedCount;
 }
@@ -282,6 +302,7 @@ void PrintObjectCountStats()
         }
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  OBJECT COUNT STATISTICS                                      ║");
     Print("╠═══════════════════════════════════════════════════════════════╣");
@@ -294,4 +315,5 @@ void PrintObjectCountStats()
     Print("║  Trends:     ", trends);
     Print("║  Other:      ", other);
     Print("╚═══════════════════════════════════════════════════════════════╝");
+    #endif
 }

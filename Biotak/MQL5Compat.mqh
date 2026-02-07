@@ -136,31 +136,57 @@ int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
 
 //+------------------------------------------------------------------+
 //| iATR compatibility (MQL4 4-param → MQL5 handle-based)            |
-//| MQL4: iATR(symbol, timeframe, period, shift) → returns double   |
-//| MQL5: iATR(symbol, timeframe, period) → returns handle          |
-//| This wrapper mimics MQL4 behavior                                |
+//| PERFORMANCE: Handle is cached to avoid create/destroy each call. |
+//| بهینه‌سازی: هندل ATR کش می‌شود تا هر بار ساخته نشود               |
 //+------------------------------------------------------------------+
+int _g_atrHandleCache_handle = INVALID_HANDLE;
+string _g_atrHandleCache_symbol = "";
+ENUM_TIMEFRAMES _g_atrHandleCache_tf = PERIOD_CURRENT;
+int _g_atrHandleCache_period = 0;
+
 double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int shift) {
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     
-    int handle = iATR(symbol, timeframe, atr_period);
-    if(handle == INVALID_HANDLE) {
-        PrintFormat("iATRMQL4: Failed to create ATR handle for %s/%s/%d", 
-                    symbol, EnumToString(timeframe), atr_period);
-        return 0.0;
+    // Reuse cached handle if params match
+    if(_g_atrHandleCache_handle != INVALID_HANDLE &&
+       _g_atrHandleCache_symbol == symbol &&
+       _g_atrHandleCache_tf == timeframe &&
+       _g_atrHandleCache_period == atr_period) {
+        // Use cached handle
+    } else {
+        // Release old handle if any
+        if(_g_atrHandleCache_handle != INVALID_HANDLE)
+            IndicatorRelease(_g_atrHandleCache_handle);
+        
+        _g_atrHandleCache_handle = iATR(symbol, timeframe, atr_period);
+        _g_atrHandleCache_symbol = symbol;
+        _g_atrHandleCache_tf = timeframe;
+        _g_atrHandleCache_period = atr_period;
+        
+        if(_g_atrHandleCache_handle == INVALID_HANDLE) {
+            PrintFormat("iATRMQL4: Failed to create ATR handle for %s/%s/%d", 
+                        symbol, EnumToString(timeframe), atr_period);
+            return 0.0;
+        }
     }
     
     double buffer[];
     ArraySetAsSeries(buffer, true);
     
-    int copied = CopyBuffer(handle, 0, shift, 1, buffer);
-    IndicatorRelease(handle);
-    
+    int copied = CopyBuffer(_g_atrHandleCache_handle, 0, shift, 1, buffer);
     if(copied <= 0) {
         return 0.0;
     }
     
     return buffer[0];
+}
+
+// Call this from OnDeinit to release cached ATR handle
+void ReleaseATRHandle() {
+    if(_g_atrHandleCache_handle != INVALID_HANDLE) {
+        IndicatorRelease(_g_atrHandleCache_handle);
+        _g_atrHandleCache_handle = INVALID_HANDLE;
+    }
 }
 
 //+------------------------------------------------------------------+
