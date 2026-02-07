@@ -9,7 +9,7 @@
 //+------------------------------------------------------------------+
 //| Find current session start by detecting gaps in data             |
 //+------------------------------------------------------------------+
-datetime FindCurrentSessionStart(int timeframe = PERIOD_M1)
+datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1)
 {
     datetime currentTime = TimeGMT();
     

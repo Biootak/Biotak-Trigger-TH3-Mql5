@@ -72,13 +72,13 @@ double GetPriceForPreviousDay(ENUM_APPLIED_PRICE priceType) {
         lastUpdate = currentTime;
     }
     
-    switch(priceType) {
-        case 1: return cachedPrices[1]; // Open
-        case 2: return cachedPrices[2]; // High
-        case 3: return cachedPrices[3]; // Low
-        case 4: return cachedPrices[4]; // Median
-        case 5: return cachedPrices[5]; // Typical
-        case 0: default: return cachedPrices[0]; // Close
+    switch((int)priceType) {
+        case PRICE_OPEN:    return cachedPrices[1]; // Open
+        case PRICE_HIGH:    return cachedPrices[2]; // High
+        case PRICE_LOW:     return cachedPrices[3]; // Low
+        case PRICE_MEDIAN:  return cachedPrices[4]; // Median
+        case PRICE_TYPICAL: return cachedPrices[5]; // Typical
+        case PRICE_CLOSE: default: return cachedPrices[0]; // Close
     }
     return EMPTY_VALUE;
 }

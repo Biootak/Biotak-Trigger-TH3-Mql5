@@ -95,8 +95,8 @@ SecurityTestResult Test_ZoneFactory_RaceCondition()
     if(createResult.success) {
         // Verify zone was created correctly
         if(ObjectFind(0, request.name) >= 0) {
-            double topPrice = ObjectGetDouble(0, request.name, OBJPROP_PRICE1);
-            double bottomPrice = ObjectGetDouble(0, request.name, OBJPROP_PRICE2);
+            double topPrice = ObjectGetDouble(0, request.name, OBJPROP_PRICE, 0);
+            double bottomPrice = ObjectGetDouble(0, request.name, OBJPROP_PRICE, 1);
             
             if(MathAbs(topPrice - request.topPrice) < 0.00001 && 
                MathAbs(bottomPrice - request.bottomPrice) < 0.00001) {

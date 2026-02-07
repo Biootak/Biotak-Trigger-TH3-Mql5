@@ -44,7 +44,7 @@ void CheckAlerts(const string objectPrefix, double currentPrice) {
     if(inpEnableTHAlerts && IsTriggerLevelsEnabled()) {
         string prefix = objectPrefix + "TH_Level_";
         string lineNameMid = prefix + "Mid";
-        double midpointLevel = ObjectGetDouble(0, lineNameMid, OBJPROP_PRICE1);
+        double midpointLevel = ObjectGetDouble(0, lineNameMid, OBJPROP_PRICE, 0);
         
         // بررسی سطح میانی
         if(midpointLevel != EMPTY_VALUE && MathAbs(currentPrice - midpointLevel) < Point) {
@@ -65,7 +65,7 @@ void CheckAlerts(const string objectPrefix, double currentPrice) {
             if(stepCount <= inpMaxTHLevelsAbove) {
                 string lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCount);
                 if(ObjectFind(0, lineNameAbove) >= 0) { // بررسی وجود آبجکت
-                    double levelAbove = ObjectGetDouble(0, lineNameAbove, OBJPROP_PRICE1);
+                    double levelAbove = ObjectGetDouble(0, lineNameAbove, OBJPROP_PRICE, 0);
                     if(levelAbove != EMPTY_VALUE && currentPrice >= levelAbove) {
                         string alertKey = "TriggerTH_Up_" + IntegerToString(stepCount);
                         if(ShouldTriggerAlert(alertKey)) {
@@ -82,7 +82,7 @@ void CheckAlerts(const string objectPrefix, double currentPrice) {
             if(stepCount <= inpMaxTHLevelsBelow) {
                 string lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCount);
                 if(ObjectFind(0, lineNameBelow) >= 0) { // بررسی وجود آبجکت
-                    double levelBelow = ObjectGetDouble(0, lineNameBelow, OBJPROP_PRICE1);
+                    double levelBelow = ObjectGetDouble(0, lineNameBelow, OBJPROP_PRICE, 0);
                     if(levelBelow != EMPTY_VALUE && currentPrice <= levelBelow) {
                         string alertKey = "TriggerTH_Down_" + IntegerToString(stepCount);
                         if(ShouldTriggerAlert(alertKey)) {

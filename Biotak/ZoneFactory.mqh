@@ -374,10 +374,10 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         // Update existing zone - geometry only
         // FIX BUG #11: Check return values
         bool updateSuccess = true;
-        updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE1, request.topPrice);
-        updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE2, request.bottomPrice);
-        updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME1, startTime);
-        updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME2, endTime);
+        updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
+        updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
+        updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
+        updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
         
         if(!updateSuccess) {
             int error = GetLastError();

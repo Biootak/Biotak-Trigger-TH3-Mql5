@@ -33,14 +33,14 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     double normalizedPrice = NormalizePrice(price);
     datetime currentTime = TimeCurrent();
     datetime futureTime = currentTime + PeriodSeconds(Period()) * 10000;
-    int objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
+    ENUM_OBJECT objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
     
     // Check if object already exists
     bool objectExists = (ObjectFind(0, name) >= 0);
     
     if(!objectExists) {
         // Create new object
-        if(!ObjectCreate(0, name, objectType, 0, currentTime, normalizedPrice, (objectType == OBJ_TREND ? futureTime : 0), normalizedPrice)) {
+        if(!ObjectCreate(0, name, objectType, 0, currentTime, normalizedPrice, (objectType == OBJ_TREND ? futureTime : (datetime)0), normalizedPrice)) {
             #ifdef ENABLE_DEBUG_LOGS
             int error = GetLastError();
             Print("❌ CreateTHLineObject: Failed to create '", name, "', error=", error);

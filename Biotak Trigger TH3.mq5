@@ -5,6 +5,7 @@
 #property link      "@biotak"
 #property version   "3.10"
 #property indicator_chart_window
+#property indicator_plots 0
 #property description "Version 3.10 - GOLD: Post-Audit - All Critical Issues Fixed"
 #property description "Race conditions fixed | Memory leaks eliminated | Buffer overflow prevented"
 #property description "MQL5 Compatible Version"

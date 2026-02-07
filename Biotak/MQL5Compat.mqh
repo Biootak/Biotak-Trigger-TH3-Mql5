@@ -73,54 +73,8 @@ double MarketInfo(string symbol, int mode) {
     }
 }
 
-//+------------------------------------------------------------------+
-//| iBarShift() compatibility (MQL4 → MQL5)                         |
-//| این تابع در MQL5 وجود ندارد - باید شبیه‌سازی شود                  |
-//+------------------------------------------------------------------+
-int iBarShift(string symbol, ENUM_TIMEFRAMES timeframe, datetime time, bool exact = false) {
-    if(symbol == NULL || symbol == "") symbol = _Symbol;
-    if(timeframe == 0) timeframe = _Period;
-    
-    datetime arr[];
-    // Get bars from the searched time to current time
-    int copied = CopyTime(symbol, timeframe, time, TimeCurrent(), arr);
-    if(copied <= 0) {
-        // Try alternative approach
-        copied = CopyTime(symbol, timeframe, 0, 1, arr);
-        if(copied <= 0) return -1;
-        
-        // If the requested time is newer than the latest bar
-        if(time > arr[0]) return 0;
-        
-        // Binary search approach
-        int bars = Bars(symbol, timeframe);
-        if(bars <= 0) return -1;
-        
-        datetime arr2[];
-        copied = CopyTime(symbol, timeframe, 0, bars, arr2);
-        if(copied <= 0) return -1;
-        
-        // Search for the bar
-        for(int i = copied - 1; i >= 0; i--) {
-            if(arr2[i] <= time) {
-                int shift = copied - 1 - i;
-                if(exact && arr2[i] != time) return -1;
-                return shift;
-            }
-        }
-        return exact ? -1 : copied - 1;
-    }
-    
-    // The shift is the distance from current bar (0) to the found bar
-    int shift = copied - 1;
-    
-    if(exact) {
-        // Check if exact time match exists
-        if(arr[0] != time) return -1;
-    }
-    
-    return shift;
-}
+// NOTE: iBarShift() is now built-in in MQL5 (newer builds)
+// No custom implementation needed
 
 //+------------------------------------------------------------------+
 //| Time decomposition functions (MQL4 → MQL5)                      |

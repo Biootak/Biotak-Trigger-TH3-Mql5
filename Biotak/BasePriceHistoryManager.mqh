@@ -152,8 +152,8 @@ int LoadBasePriceHistory(int year, int dayOfYear, string &history[])
             string line = FileReadString(fileHandle);
             
             // Trim whitespace
-            line = StringTrimLeft(line);
-            line = StringTrimRight(line);
+            StringTrimLeft(line);
+            StringTrimRight(line);
             
             if(StringLen(line) == 0)
             {
@@ -529,8 +529,8 @@ int RepairHistoryFile(int year, int dayOfYear)
     while(!FileIsEnding(fileHandle))
     {
         string line = FileReadString(fileHandle);
-        line = StringTrimLeft(line);
-        line = StringTrimRight(line);
+        StringTrimLeft(line);
+        StringTrimRight(line);
         
         if(StringLen(line) > 0 && StringFind(line, "|") > 0)
         {
