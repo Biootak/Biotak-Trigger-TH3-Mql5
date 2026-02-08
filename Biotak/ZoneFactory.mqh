@@ -82,16 +82,16 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // Validate prices
     if(request.topPrice <= 0 || request.bottomPrice <= 0) {
         result.errorMessage = StringFormat("Invalid zone prices: Top=%s, Bottom=%s",
-                                          DoubleToString(request.topPrice, Digits),
-                                          DoubleToString(request.bottomPrice, Digits));
+                                          DoubleToString(request.topPrice, GetCachedDigits()),
+                                          DoubleToString(request.bottomPrice, GetCachedDigits()));
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
         return result;
     }
     
     if(request.topPrice <= request.bottomPrice) {
         result.errorMessage = StringFormat("Top price (%s) must be greater than bottom price (%s)",
-                                          DoubleToString(request.topPrice, Digits),
-                                          DoubleToString(request.bottomPrice, Digits));
+                                          DoubleToString(request.topPrice, GetCachedDigits()),
+                                          DoubleToString(request.bottomPrice, GetCachedDigits()));
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
         return result;
     }
@@ -180,7 +180,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         }
         
         // CRITICAL FIX: Validate PeriodSeconds before use
-        int periodSeconds = PeriodSeconds(Period());
+        int periodSeconds = PeriodSeconds(GetCachedPeriod());
         if(periodSeconds <= 0) {
             #ifdef ENABLE_DEBUG_LOGS
             Print("❌ CreateZone: Invalid PeriodSeconds=", periodSeconds, " for Period=", Period());
@@ -199,7 +199,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         }
         
         // Now safe to use periodSeconds
-        datetime calculatedEndTime = startTime + (periodSeconds * 10000);
+        datetime calculatedEndTime = startTime + (periodSeconds * ZONE_EXTENSION_MULTIPLIER);
         
         // Validate endTime is reasonable
         if(calculatedEndTime <= startTime) {

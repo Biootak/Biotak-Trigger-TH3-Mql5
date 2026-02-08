@@ -220,18 +220,18 @@ static string WEIGHTS_FILE = "Biotak_Learned_Weights.txt";
 bool AcquireStateLock() {
     string lockName = STATE_LOCK_NAME + "_" + GetCachedChartIdStr();
     
-    // Check if lock exists and is held
-    if(GlobalVariableCheck(lockName)) {
-        double lockValue = GlobalVariableGet(lockName);
-        if(lockValue > 0) {
-            // Lock is held by another operation
-            return false;
-        }
+    // Ensure the GlobalVariable exists (initialized to 0 = unlocked)
+    if(!GlobalVariableCheck(lockName)) {
+        GlobalVariableSet(lockName, 0.0);
+        GlobalVariableTemp(lockName); // Make it temporary (auto-cleanup)
     }
     
-    // Acquire lock (atomic operation)
-    GlobalVariableSet(lockName, 1.0);
-    GlobalVariableTemp(lockName); // Make it temporary (auto-cleanup)
+    // ATOMIC acquire: only succeeds if current value is 0 (unlocked)
+    // GlobalVariableSetOnCondition is truly atomic — no TOCTOU race
+    if(!GlobalVariableSetOnCondition(lockName, 1.0, 0.0)) {
+        // Lock is held by another operation
+        return false;
+    }
     
     return true;
 }
@@ -239,9 +239,10 @@ bool AcquireStateLock() {
 void ReleaseStateLock() {
     string lockName = STATE_LOCK_NAME + "_" + GetCachedChartIdStr();
     
-    // Release lock
+    // Release lock: set back to 0 (unlocked) instead of deleting
+    // This keeps the GV alive for the next atomic SetOnCondition call
     if(GlobalVariableCheck(lockName)) {
-        GlobalVariableDel(lockName);
+        GlobalVariableSet(lockName, 0.0);
     }
 }
 
@@ -716,8 +717,8 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     // شناسه‌ها - Sanitize inputs
     data.patternName = SanitizeFilename(patternName);
     data.timestamp = TimeCurrent();
-    data.symbol = Symbol();
-    data.timeframe = Period();
+    data.symbol = GetCachedSymbol();
+    data.timeframe = _Period;
     
     // ویژگی‌های موج - Validate positive values
     int cachedDig = GetCachedDigits();
@@ -775,8 +776,8 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     StringReplace(timestamp, ":", "_");
     StringReplace(timestamp, " ", "_");
     
-    // SECURITY FIX: Sanitize Symbol() to prevent path traversal
-    string safeSymbol = SanitizeFilename(Symbol());
+    // SECURITY FIX: Sanitize symbol to prevent path traversal
+    string safeSymbol = SanitizeFilename(GetCachedSymbol());
     
     string patternFolder = REPORTS_FOLDER + "\\Pattern_" + 
                            IntegerToString(g_learningDataCount + 1) + "_" + 
@@ -2091,7 +2092,7 @@ void GenerateLearningReport()
     string timestamp = TimeToString(TimeCurrent(), TIME_DATE);
     StringReplace(timestamp, ".", "_");
     
-    string filename = REPORTS_FOLDER + "\\Learning_Report_" + Symbol() + "_" + timestamp + ".txt";
+    string filename = REPORTS_FOLDER + "\\Learning_Report_" + GetCachedSymbol() + "_" + timestamp + ".txt";
     
     int handle = SafeFileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI);
     if(handle == INVALID_HANDLE) {
@@ -2109,7 +2110,7 @@ void GenerateLearningReport()
     FileWriteString(handle, "AI-READABLE FORMAT FOR ANALYSIS\n");
     FileWriteString(handle, "========================================\n");
     FileWriteString(handle, "Generated: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + "\n");
-    FileWriteString(handle, "Symbol: " + Symbol() + "\n");
+    FileWriteString(handle, "Symbol: " + GetCachedSymbol() + "\n");
     FileWriteString(handle, "Timeframe: " + IntegerToString(PeriodMinutes()) + " minutes\n");
     FileWriteString(handle, "Total Patterns: " + IntegerToString(g_learningDataCount) + "\n");
     FileWriteString(handle, "\n");

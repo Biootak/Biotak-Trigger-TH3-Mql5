@@ -155,7 +155,7 @@ void RefreshIsHiddenCache() {
 
 bool IsIndicatorHidden() {
     uint now = GetTickCount();
-    if(now - g_isHiddenCacheTime > 500) {
+    if(now - g_isHiddenCacheTime > HIDDEN_CACHE_TTL_MS) {
         RefreshIsHiddenCache();
     }
     return g_isHiddenCached;

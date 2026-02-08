@@ -407,7 +407,7 @@ void UpdateFactorLabel(double factorValue) {
         
         if(stepSize > 0) {
             // Calculate pip size based on Digits
-            double pipSize = (Digits <= 3) ? 0.01 : 0.0001;
+            double pipSize = GetCachedPipSize();
             double stepPips = stepSize / pipSize;
             stepText = " | Step: " + DoubleToString(stepPips, 1) + " pips";
         }
@@ -424,8 +424,8 @@ void UpdateFactorLabel(double factorValue) {
     
     // Position: top-left corner with minimal space usage (same as step mode)
     ObjectSetInteger(0, g_factorLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_XDISTANCE, 15);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_YDISTANCE, 25); // First line (temporary display)
+    ObjectSetInteger(0, g_factorLabelName, OBJPROP_XDISTANCE, LABEL_X_OFFSET);
+    ObjectSetInteger(0, g_factorLabelName, OBJPROP_YDISTANCE, LABEL_Y_OFFSET); // First line (temporary display)
     ObjectSetInteger(0, g_factorLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     
     // Font: bold for better visibility (same as step mode)
@@ -518,8 +518,8 @@ void UpdateTH3FrequencyLabel(double frequency) {
     // موقعیت: زیر لیبل step mode برای جلوگیری از همپوشانی
     ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_CORNER, inpModeLabelCorner);
     ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_XDISTANCE, inpModeLabelXDistance);
-    // Add 20 pixels offset to Y position to place below step mode label
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_YDISTANCE, inpModeLabelYDistance + 20);
+    // Add FREQUENCY_LABEL_Y_EXTRA pixels offset to Y position to place below step mode label
+    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_YDISTANCE, inpModeLabelYDistance + FREQUENCY_LABEL_Y_EXTRA);
     ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     
     // Font: use input parameters for customization
@@ -533,8 +533,8 @@ void UpdateTH3FrequencyLabel(double frequency) {
     ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_HIDDEN, true);
     
-    // Set timer for auto-hide (5 seconds for frequency - longer than other labels)
-    EventSetTimer(5);
+    // Set timer for auto-hide (frequency labels stay longer for readability)
+    EventSetTimer(FREQUENCY_LABEL_TIMER_SEC);
 }
 
 
@@ -606,8 +606,8 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     
     // Calculate zone boundaries (±zoneHeight from midpoint)
     // OPTIMIZATION: Single NormalizeDouble call per value
-    double upperPrice = NormalizeDouble(midPoint + zoneHeight, Digits);
-    double lowerPrice = NormalizeDouble(midPoint - zoneHeight, Digits);
+    double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
+    double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
     
     // Validate zone boundaries
     if(upperPrice <= lowerPrice) {

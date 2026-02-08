@@ -15,19 +15,13 @@
 //| ثوابت جهانی: تنظیمات رسم زون                                     |
 //+------------------------------------------------------------------+
 
-// Performance Constants
-const int ZONE_EXTENSION_PERIODS = 100;        // تعداد دوره‌های گسترش زون به آینده (برای ray_right)
-const int MAX_ZONES_PER_CHART = 500;          // حداکثر تعداد زون در هر چارت (محدودیت MT4)
-const int OBJECT_CACHE_SIZE = 1000;            // اندازه کش اشیاء (بهینه برای 500 zone)
+// Performance Constants — duplicates moved to ProjectConstants.mqh (single source of truth)\n// ZONE_EXTENSION_PERIODS, MAX_ZONES_PER_CHART, OBJECT_CACHE_SIZE → ProjectConstants.mqh
 const int VALIDATION_CACHE_TTL = 60;           // مدت اعتبار کش اعتبارسنجی (ثانیه)
 const int CACHE_CLEANUP_INTERVAL = 300;        // فاصله cleanup کش (5 دقیقه)
 const int MAX_ALPHA_VALUE = 255;               // حداکثر مقدار آلفا برای transparency
 const int MIN_ALPHA_VALUE = 0;                 // حداقل مقدار آلفا
 
-// Safety Limits
-const double MAX_ZONE_HEIGHT_PERCENT = 1.0;    // حداکثر درصد ارتفاع زون (100%)
-const double MIN_ZONE_HEIGHT_PERCENT = 0.01;   // حداقل درصد ارتفاع زون (1%)
-const double MAX_PRICE_DEVIATION = 2.0;        // حداکثر انحراف قیمت (200% قیمت فعلی)
+// Safety Limits — duplicates moved to ProjectConstants.mqh (single source of truth)\n// MAX_ZONE_HEIGHT_PERCENT, MIN_ZONE_HEIGHT_PERCENT, MAX_PRICE_DEVIATION → ProjectConstants.mqh
 const double MIN_STEP_SIZE_RATIO = 0.000001;   // حداقل نسبت اندازه گام به قیمت
 
 // Error Codes

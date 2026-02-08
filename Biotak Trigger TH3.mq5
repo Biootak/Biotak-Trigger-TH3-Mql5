@@ -24,6 +24,7 @@
 
 #include "Biotak\PropertiesAndInputs.mqh"
 #include "Biotak\ConstantsAndEnums.mqh"
+#include "Biotak\ProjectConstants.mqh"
 #include "Biotak\InputValidator.mqh"
 #include "Biotak\GlobalVariables.mqh"
 

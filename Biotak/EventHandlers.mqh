@@ -123,7 +123,7 @@ int OnInitHandler() {
     if(g_dailyClosePriceForTH==EMPTY_VALUE) {g_dailyClosePriceForTH=EMPTY_VALUE; Print("OnInit: GetPriceForPreviousDay failed, returning INIT_FAILED."); return INIT_FAILED;}
     
     // Check if custom price is saved in GlobalVariable (persistent with temp)
-    string symbolName = Symbol();
+    string symbolName = GetCachedSymbol();
     string gvarName = "Biotak_CustomPrice_" + symbolName;
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
     int digits = Digits;
@@ -502,8 +502,8 @@ void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = 
     
     // If resetGlobalVars is true, also delete the global variable and reset keyboard override
     if (resetGlobalVars) {
-        // OPTIMIZATION: Use Symbol() directly here since this is cleanup code (not in a loop)
-        string symbolName = Symbol();
+        // OPTIMIZATION: Use GetCachedSymbol() for consistency
+        string symbolName = GetCachedSymbol();
         string gvarName = "Biotak_CustomPrice_" + symbolName;
         string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
         // PERF FIX: GlobalVariableDel safely returns false if not found
@@ -584,7 +584,7 @@ void OnDeinitHandler(const int reason) {
     {
         // User opened settings and clicked OK - reset ALL override flags
         // This means user wants to use settings values (even if same as before)
-        string symbolName = Symbol();
+        string symbolName = GetCachedSymbol();
         
         // PERFORMANCE: Use cached ChartID string for all GlobalVariable operations
         string chartIdStrLocal = GetCachedChartIdStr();
@@ -1851,7 +1851,7 @@ void ApplyLinesVisibility()
     #endif
 }
 
-void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
+void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
     // Handle key press events
     if(id == CHARTEVENT_KEYDOWN)
@@ -2042,7 +2042,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_customPriceKeyboardOverride = true; // User pressed C - override input parameter
             
             // Save override flag to GlobalVariable for persistence across timeframe changes
-            string overrideFlagName = "Biotak_CustomPriceOverride_" + Symbol();
+            string overrideFlagName = "Biotak_CustomPriceOverride_" + GetCachedSymbol();
             GlobalVariableSet(overrideFlagName, 1.0);
             
             #ifdef ENABLE_DEBUG_LOGS
@@ -2054,14 +2054,14 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_customPriceLineCreated = false;
             
             // Create a horizontal line at current price (original behavior - always reset to current price)
-            double currentPrice = iClose(_Symbol, Period(), 0); // Get current price
+            double currentPrice = iClose(_Symbol, GetCachedPeriod(), 0); // Get current price
             
             // IMPORTANT: Update global variables immediately so TH levels update
             g_customTHStartPrice = currentPrice;
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             
             // Save to GlobalVariable for persistence
-            string gvarName = "Biotak_CustomPrice_" + Symbol();
+            string gvarName = "Biotak_CustomPrice_" + GetCachedSymbol();
             GlobalVariableSet(gvarName, currentPrice);
             
             if(!ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, currentPrice)) {
@@ -2093,7 +2093,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // Handle Escape key to cancel/exit custom price mode
         if(lparam == 27) // 27 is the ASCII code for Escape key
         {
-            string symbolName = Symbol();
+            string symbolName = GetCachedSymbol();
             string gvarName = "Biotak_CustomPrice_" + symbolName;
             string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
             bool customPriceActive = GlobalVariableCheck(gvarName);
@@ -2555,7 +2555,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_timeframeLocked = !g_timeframeLocked;
             if(g_timeframeLocked)
             {
-                g_lockedPeriod = Period(); // Capture current chart timeframe
+                g_lockedPeriod = GetCachedPeriod(); // Capture current chart timeframe
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("🔒 Timeframe locked to: ", GetCurrentTimeframe());
                 #endif
@@ -2684,7 +2684,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                 
                 // IMPORTANT: Save to GlobalVariable for persistence
-                string symbolName = Symbol();
+                string symbolName = GetCachedSymbol();
                 string gvarName = "Biotak_CustomPrice_" + symbolName;
                 string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
                 GlobalVariableSet(gvarName, selectedPrice);
@@ -2735,7 +2735,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             
             // IMPORTANT: Save to GlobalVariable for persistence
-            string symbolName = Symbol();
+            string symbolName = GetCachedSymbol();
             string gvarName = "Biotak_CustomPrice_" + symbolName;
             string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
             GlobalVariableSet(gvarName, selectedPrice);
@@ -2803,7 +2803,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         g_customPriceKeyboardOverride = true; // User dragged line - override input parameter
         
         // Save to GlobalVariable IMMEDIATELY for live preview
-        string symbolName = Symbol();
+        string symbolName = GetCachedSymbol();
         string gvarName = "Biotak_CustomPrice_" + symbolName;
         string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
         GlobalVariableSet(gvarName, draggedPrice);

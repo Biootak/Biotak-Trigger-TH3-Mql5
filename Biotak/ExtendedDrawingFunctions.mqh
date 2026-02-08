@@ -29,6 +29,42 @@ void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutive
 }
 
 //+------------------------------------------------------------------+
+//| HELPER: Create or Update a horizontal level line                 |
+//| کمکی: ایجاد یا بروزرسانی خط سطح افقی                              |
+//| Returns true if a NEW object was created (for zone tracking)    |
+//| PERF: Only sets visual properties on new objects                |
+//+------------------------------------------------------------------+
+bool CreateOrUpdateHLine(const string name, double price, 
+                          color clr, ENUM_LINE_STYLE style, int width,
+                          const string tooltip) {
+    if(ObjectFind(0, name) < 0) {
+        ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        return true;
+    } else {
+        ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+        return false;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| HELPER: Get common viewport bounds for level drawing             |
+//| کمکی: محاسبه محدوده viewport برای رسم سطوح                        |
+//+------------------------------------------------------------------+
+void GetViewportBounds(double &vpTop, double &vpBottom) {
+    double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double vpRange = (vpChartMax - vpChartMin) * 0.5;
+    vpTop = vpChartMax + vpRange;
+    vpBottom = vpChartMin - vpRange;
+}
+
+//+------------------------------------------------------------------+
 //| Create Factor Mid Zone - REFACTORED to use Unified System        |
 //| ایجاد Zone Factor - Refactor شده با Unified System               |
 //|                                                                  |
@@ -1181,7 +1217,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
           DoubleToString(result, Digits));
     #endif
     
-    return NormalizeDouble(result, Digits);
+    return NormalizeDouble(result, GetCachedDigits());
 }
 
 //+------------------------------------------------------------------+
@@ -1624,7 +1660,7 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
             return 0;
         }
         
-        return NormalizeDouble(naryResult, Digits);
+        return NormalizeDouble(naryResult, GetCachedDigits());
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1650,7 +1686,7 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     }
     
     // 5. Optimization: Normalize Result
-    finalResult = NormalizeDouble(finalResult, Digits);
+    finalResult = NormalizeDouble(finalResult, GetCachedDigits());
     
     #ifdef ENABLE_DEBUG_LOGS
     string topoName = (inpComboTopology == TOPOLOGY_LINEAR) ? "LINEAR" : "DUAL_GROUP";
@@ -1911,8 +1947,8 @@ double CalculateComboStepSize(const double basePrice) {
               " after operation=", EnumToString(operation));
         #endif
         Alert("⚠️ PRESET MODE ERROR\n\nInvalid result after Combo operation!\nOperation: ", EnumToString(operation),
-              "\nStep1: ", DoubleToString(step1, Digits), 
-              "\nStep2: ", DoubleToString(step2, Digits));
+              "\nStep1: ", DoubleToString(step1, GetCachedDigits()), 
+              "\nStep2: ", DoubleToString(step2, GetCachedDigits()));
         return 0;
     }
     
@@ -2003,15 +2039,15 @@ double GetStepSizeForSharedComponent(const double basePrice,
             
         // Pattern components (Current timeframe) - User Request
         case COMP_PATTERN_TH:
-            timeframe = (ENUM_TIMEFRAMES)Period();
+            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
             multiplier = 1.0;
             break;
         case COMP_PATTERN_SS:
-            timeframe = (ENUM_TIMEFRAMES)Period();
+            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
             multiplier = 1.5;
             break;
         case COMP_PATTERN_LS:
-            timeframe = (ENUM_TIMEFRAMES)Period();
+            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
             multiplier = 2.0;
             break;
             
@@ -2182,7 +2218,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
         #endif
-        return (ENUM_TIMEFRAMES)Period();  // GOLD FIX: Use Period() instead of PERIOD_CURRENT (0)
+        return (ENUM_TIMEFRAMES)GetCachedPeriod();  // GOLD FIX: Use cached period instead of PERIOD_CURRENT (0)
     }
     
     ENUM_TIMEFRAMES result;
@@ -2215,7 +2251,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 
         case COMBO_TF_PATTERN:
             // User Request: Pattern = Current Timeframe
-            result = (ENUM_TIMEFRAMES)Period();
+            result = (ENUM_TIMEFRAMES)GetCachedPeriod();
             break;
 
         case COMBO_TF_STRUCTURE:
@@ -2227,7 +2263,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
             #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
             #endif
-            result = (ENUM_TIMEFRAMES)Period();
+            result = (ENUM_TIMEFRAMES)GetCachedPeriod();
             break;
     }
     
@@ -2236,7 +2272,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
         #endif
-        return (ENUM_TIMEFRAMES)Period();  // GOLD FIX: Use Period() instead of PERIOD_CURRENT (0)
+        return (ENUM_TIMEFRAMES)GetCachedPeriod();  // GOLD FIX: Use cached period instead of PERIOD_CURRENT (0)
     }
     
     return result;
@@ -3253,18 +3289,7 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         midpointWidth = inpLSLevelWidth;
     }
     
-    string midpointName = objectPrefix + "SSLS_Midpoint_0";
-    if(ObjectFind(0, midpointName) < 0) {
-        ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);
-    }
-    ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
-    ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
-    ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
-    ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
-    ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
-                   "Midpoint (Start) - " + DoubleToString(midpointPrice, Digits));
+    string midpointName = objectPrefix + \"SSLS_Midpoint_0\";\n    if(ObjectFind(0, midpointName) < 0) {\n        ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);\n        ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);\n        ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);\n        ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);\n        ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);\n        ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);\n        ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, \n                       \"Midpoint (Start) - \" + DoubleToString(midpointPrice, GetCachedDigits()));\n    } else {\n        ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);\n    }
     
     int drawnAbove = 0;
     int logicalStep = 0;
@@ -3359,7 +3384,7 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
             ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
             ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                            (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
-                           " (" + DoubleToString(priceLevel, Digits) + ")");
+                           " (" + DoubleToString(priceLevel, GetCachedDigits()) + ")");
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
@@ -3488,7 +3513,7 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
             ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
             ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                            (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
-                           " (" + DoubleToString(priceLevel, Digits) + ")");
+                           " (" + DoubleToString(priceLevel, GetCachedDigits()) + ")");
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
@@ -3692,15 +3717,16 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     string midpointName = objectPrefix + "M_Midpoint_0";
     if(ObjectFind(0, midpointName) < 0) {
         ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);
+        ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
+        ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
+        ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
+        ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
+                       "Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
+    } else {
+        ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
-    ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
-    ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
-    ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
-    ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
-                   "Midpoint (Start) - " + DoubleToString(midpointPrice, Digits));
     
     // Draw levels above midpoint
     int logicalStep = 1; // Start with 1C
@@ -3777,20 +3803,20 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
         {
             string levelName = objectPrefix + "M_Above_" + IntegerToString(logicalStep);
             
-            // Create the level line
+            // PERF FIX: Set visual properties only on new objects, update price only for existing
             if(ObjectFind(0, levelName) < 0) {
                 ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceAbove);
-            }
-            
-            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
-            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
-            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
-            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                           "Level " + IntegerToString(logicalStep) + 
-                           " (" + DoubleToString(priceAbove, Digits) + ")");
+                ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+                ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+                ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+                ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+                ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                               "Level " + IntegerToString(logicalStep) + 
+                               " (" + DoubleToString(priceAbove, GetCachedDigits()) + ")");
+            } else {
+                ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
+            };
             
             drawnAbove++;
             
@@ -3914,20 +3940,20 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
         {
             string levelName = objectPrefix + "M_Below_" + IntegerToString(logicalStep);
             
-            // Create the level line
+            // PERF FIX: Set visual properties only on new objects, update price only for existing
             if(ObjectFind(0, levelName) < 0) {
                 ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceBelow);
-            }
-            
-            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
-            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
-            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
-            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                           "Level " + IntegerToString(logicalStep) + 
-                           " (" + DoubleToString(priceBelow, Digits) + ")");
+                ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+                ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+                ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+                ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+                ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                               "Level " + IntegerToString(logicalStep) + 
+                               " (" + DoubleToString(priceBelow, GetCachedDigits()) + ")");
+            } else {
+                ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
+            };
             
             drawnBelow++;
             
@@ -4047,15 +4073,16 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     string midpointName = objectPrefix + modeName + "_Midpoint_0";
     if(ObjectFind(0, midpointName) < 0) {
         ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);
+        ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
+        ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
+        ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
+        ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
+                       "Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
+    } else {
+        ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
-    ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
-    ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
-    ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
-    ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
-                   "Midpoint (Start) - " + DoubleToString(midpointPrice, Digits));
     
     // Draw levels above midpoint
     int logicalStep = 1;
@@ -4129,19 +4156,20 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         // Draw the level
         string levelName = objectPrefix + modeName + "_Above_" + IntegerToString(logicalStep);
         
+        // PERF FIX: Set visual properties only on new objects, update price only for existing
         if(ObjectFind(0, levelName) < 0) {
             ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceAbove);
-        }
-        
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                       "Level " + IntegerToString(logicalStep) + 
-                       " (" + DoubleToString(priceAbove, Digits) + ")");
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                           "Level " + IntegerToString(logicalStep) + 
+                           " (" + DoubleToString(priceAbove, GetCachedDigits()) + ")");
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
+        };
         
         drawnAbove++;
         
@@ -4249,19 +4277,20 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         // Draw the level
         string levelName = objectPrefix + modeName + "_Below_" + IntegerToString(logicalStep);
         
+        // PERF FIX: Set visual properties only on new objects, update price only for existing
         if(ObjectFind(0, levelName) < 0) {
             ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceBelow);
-        }
-        
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                       "Level " + IntegerToString(logicalStep) + 
-                       " (" + DoubleToString(priceBelow, Digits) + ")");
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                           "Level " + IntegerToString(logicalStep) + 
+                           " (" + DoubleToString(priceBelow, GetCachedDigits()) + ")");
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
+        };
         
         drawnBelow++;
         
@@ -4359,15 +4388,16 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
     string midpointName = objectPrefix + "MEq_Midpoint_0";
     if(ObjectFind(0, midpointName) < 0) {
         ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);
+        ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
+        ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
+        ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
+        ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
+                       "M-Equal Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
+    } else {
+        ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
-    ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
-    ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
-    ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
-    ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
-                   "M-Equal Midpoint (Start) - " + DoubleToString(midpointPrice, Digits));
     
     // Draw levels above midpoint
     int step = 1;
@@ -4393,11 +4423,6 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
         
         string levelName = objectPrefix + "MEq_Above_" + IntegerToString(step);
         
-        // Create the level line
-        if(ObjectFind(0, levelName) < 0) {
-            ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price);
-        }
-        
         // Get path for this level - check Structure first, then Trigger (matching Java line 347-351)
         color levelColor;
         ENUM_LINE_STYLE levelStyle;
@@ -4418,15 +4443,20 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
             }
         }
         
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                       "Level " + IntegerToString(step) + 
-                       " (" + DoubleToString(price, Digits) + ")");
+        // PERF FIX: Set visual properties only on new objects, update price only for existing
+        if(ObjectFind(0, levelName) < 0) {
+            ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price);
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                           "Level " + IntegerToString(step) + 
+                           " (" + DoubleToString(price, GetCachedDigits()) + ")");
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
+        };
         
         // ═══════════════════════════════════════════════════════════
         // DRAW MID-RANGE ZONE (AFTER drawing this level)
@@ -4474,11 +4504,6 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
         
         string levelName = objectPrefix + "MEq_Below_" + IntegerToString(step);
         
-        // Create the level line
-        if(ObjectFind(0, levelName) < 0) {
-            ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price);
-        }
-        
         // Get path for this level - check Structure first, then Trigger (matching Java line 364-368)
         color levelColor;
         ENUM_LINE_STYLE levelStyle;
@@ -4499,15 +4524,20 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
             }
         }
         
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                       "Level " + IntegerToString(step) + 
-                       " (" + DoubleToString(price, Digits) + ")");
+        // PERF FIX: Set visual properties only on new objects, update price only for existing
+        if(ObjectFind(0, levelName) < 0) {
+            ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price);
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                           "Level " + IntegerToString(step) + 
+                           " (" + DoubleToString(price, GetCachedDigits()) + ")");
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
+        };
         
         // ═══════════════════════════════════════════════════════════
         // DRAW MID-RANGE ZONE (AFTER drawing this level)
@@ -4559,7 +4589,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     }
     
     // Calculate pip size for tooltip
-    double pipSize = (Digits <= 3) ? 0.01 : 0.0001;
+    double pipSize = (GetCachedDigits() <= 3) ? 0.01 : 0.0001;
     double rangePips = (highPrice - lowPrice) / pipSize;
     double stepPips = stepSize / pipSize;
     
@@ -4576,7 +4606,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
     ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical HIGH | %s | Range: %.0f pips", 
-            DoubleToString(highPrice, Digits), rangePips));
+            DoubleToString(highPrice, GetCachedDigits()), rangePips));
     
     // ========== Draw Historical LOW line ==========
     string lowLineName = objectPrefix + "Factor_Low";
@@ -4591,7 +4621,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
     ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical LOW | %s | Range: %.0f pips", 
-            DoubleToString(lowPrice, Digits), rangePips));
+            DoubleToString(lowPrice, GetCachedDigits()), rangePips));
     
     // ========== Draw HIGH label ==========
     string highLabelName = objectPrefix + "Factor_High_Label";
@@ -4606,7 +4636,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
     ObjectSetString(0, highLabelName, OBJPROP_TEXT, 
         StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
-            DoubleToString(highPrice, Digits), rangePips, factor, stepPips));
+            DoubleToString(highPrice, GetCachedDigits()), rangePips, factor, stepPips));
     ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
     
     // ========== Draw LOW label ==========
@@ -4622,7 +4652,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
     ObjectSetString(0, lowLabelName, OBJPROP_TEXT, 
         StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
-            DoubleToString(lowPrice, Digits), rangePips, factor, stepPips));
+            DoubleToString(lowPrice, GetCachedDigits()), rangePips, factor, stepPips));
     ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
 }
 
@@ -4715,7 +4745,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     }
     
     // Calculate midpoint (center of range)
-    double midpoint = NormalizeDouble((highPrice + lowPrice) / 2.0, Digits);
+    double midpoint = NormalizeDouble((highPrice + lowPrice) / 2.0, GetCachedDigits());
     
     #ifdef ENABLE_DEBUG_LOGS
     Print("═══ DrawFactorLevelsHarmonic ═══");
@@ -4746,7 +4776,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         ObjectSetInteger(0, midName, OBJPROP_BACK, false);
         ObjectSetString(0, midName, OBJPROP_TOOLTIP, 
             StringFormat("🎯 Harmonic Center | %s | F=%.2f | R=%.3f", 
-                DoubleToString(midpoint, Digits), factor, harmonicRatio));
+                DoubleToString(midpoint, GetCachedDigits()), factor, harmonicRatio));
     } else {
         ObjectSetDouble(0, midName, OBJPROP_PRICE, midpoint);
     }
@@ -4779,7 +4809,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     }
     
     // Additional safety: minimum step size check
-    if(baseStepSize < Point * 2) {
+    if(baseStepSize < GetCachedPoint() * 2) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawFactorLevelsHarmonic: Base step too small (", baseStepSize, 
               ") - must be >= ", Point * 2);
@@ -4818,7 +4848,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         }
         
         // Normalize price
-        priceLevel = NormalizeDouble(priceLevel, Digits);
+        priceLevel = NormalizeDouble(priceLevel, GetCachedDigits());
         
         // Determine if this is base or large step
         bool isBase = (i % 2 == 0);
@@ -4869,7 +4899,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
             ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
                     (isBase ? "📏 Base" : "📐 Large"), i + 1, 
-                    DoubleToString(priceLevel, Digits), factor, step / Point));
+                    DoubleToString(priceLevel, GetCachedDigits()), factor, step / GetCachedPoint()));
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
@@ -4899,7 +4929,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         }
         
         // Normalize price
-        priceLevel = NormalizeDouble(priceLevel, Digits);
+        priceLevel = NormalizeDouble(priceLevel, GetCachedDigits());
         
         bool isBase = (i % 2 == 0);
         
@@ -4939,7 +4969,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
             ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
                     (isBase ? "📏 Base" : "📐 Large"), i + 1, 
-                    DoubleToString(priceLevel, Digits), factor, step / Point));
+                    DoubleToString(priceLevel, GetCachedDigits()), factor, step / GetCachedPoint()));
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
@@ -5093,7 +5123,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         }
         
         // Normalize price to symbol's digits
-        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        double normalizedPrice = NormalizeDouble(levelPrice, GetCachedDigits());
         
         // ═══════════════════════════════════════════════════════════
         // DRAW MID-RANGE ZONE (BEFORE this level)
@@ -5106,7 +5136,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         if(inpShowMidZones) {
             // Determine previous price (boundary for i=1, previous level for i>1)
             double prevPrice = (i == 1) ? startPrice : (startPrice + (direction * stepSize * (i-1)));
-            prevPrice = NormalizeDouble(prevPrice, Digits);
+            prevPrice = NormalizeDouble(prevPrice, GetCachedDigits());
             
             // Calculate midpoint between previous and current
             double midPoint = (normalizedPrice + prevPrice) / 2.0;
@@ -5116,8 +5146,8 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             double zoneBottom = midPoint - zoneHeight;
             
             // Normalize zone boundaries
-            zoneTop = NormalizeDouble(zoneTop, Digits);
-            zoneBottom = NormalizeDouble(zoneBottom, Digits);
+            zoneTop = NormalizeDouble(zoneTop, GetCachedDigits());
+            zoneBottom = NormalizeDouble(zoneBottom, GetCachedDigits());
             
             // Validate zone is within chart range
             if(zoneTop <= highPrice && zoneBottom >= lowPrice) {
@@ -5185,7 +5215,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             // Set tooltip
             ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("Factor Level %d | %s | F=%.2f", 
-                    i, DoubleToString(normalizedPrice, Digits), factor));
+                    i, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
             
             levelsDrawn++;
         } else {
@@ -5298,7 +5328,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     
     // Draw center level
     string centerName = objectPrefix + "Factor_Harmonic_Center";
-    double normalizedCenter = NormalizeDouble(centerPrice, Digits);
+    double normalizedCenter = NormalizeDouble(centerPrice, GetCachedDigits());
     
     if(shouldShowLine && ObjectFind(0, centerName) < 0) {
         if(ObjectCreate(0, centerName, OBJ_HLINE, 0, 0, normalizedCenter)) {
@@ -5310,7 +5340,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
             ObjectSetString(0, centerName, OBJPROP_TOOLTIP,
                 StringFormat("Harmonic Center | %s | F=%.2f | R=%.3f",
-                    DoubleToString(normalizedCenter, Digits), factor, harmonicRatio));
+                    DoubleToString(normalizedCenter, GetCachedDigits()), factor, harmonicRatio));
             levelsDrawn++;
         }
     }
@@ -5356,7 +5386,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             }
         }
         
-        double normalizedPrice = NormalizeDouble(priceLevel, Digits);
+        double normalizedPrice = NormalizeDouble(priceLevel, GetCachedDigits());
         bool isBase = (i % 2 == 0);
         
         // Get path for this level - check Structure first, then Trigger (matching M Mode)
@@ -5390,7 +5420,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
                 ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                     StringFormat("Harmonic +%d (%s) | %s | F=%.2f",
-                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, Digits), factor));
+                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
                 levelsDrawn++;
                 levelsAboveCount++;
             }
@@ -5463,7 +5493,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             }
         }
         
-        double normalizedPrice = NormalizeDouble(priceLevel, Digits);
+        double normalizedPrice = NormalizeDouble(priceLevel, GetCachedDigits());
         bool isBase = (i % 2 == 0);
         
         // Get path for this level - check Structure first, then Trigger (matching M Mode)
@@ -5497,7 +5527,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
                 ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                     StringFormat("Harmonic -%d (%s) | %s | F=%.2f",
-                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, Digits), factor));
+                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
                 levelsDrawn++;
                 levelsBelowCount++;
             }
@@ -5634,7 +5664,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     // رسم سطح مرکزی
     // ═══════════════════════════════════════════════════════════════
     string centerLevelName = objectPrefix + "Factor_Center";
-    double normalizedCenter = NormalizeDouble(centerPrice, Digits);
+    double normalizedCenter = NormalizeDouble(centerPrice, GetCachedDigits());
     
     if(shouldShowLine) {
         if(ObjectFind(0, centerLevelName) < 0) {
@@ -5648,7 +5678,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                 ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
                 ObjectSetString(0, centerLevelName, OBJPROP_TOOLTIP, 
                     StringFormat("Factor Center | %s | F=%.2f", 
-                        DoubleToString(normalizedCenter, Digits), factor));
+                        DoubleToString(normalizedCenter, GetCachedDigits()), factor));
                 levelsDrawn++;
             }
         }
@@ -5708,7 +5738,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
             }
         }
         
-        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        double normalizedPrice = NormalizeDouble(levelPrice, GetCachedDigits());
         
         // PERFORMANCE: Skip creating objects for levels far outside viewport
         if(normalizedPrice < vpBottom || normalizedPrice > vpTop) {
@@ -5776,7 +5806,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                     ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
                     ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                         StringFormat("Factor +%d | %s | F=%.2f",
-                            logicalStep, DoubleToString(normalizedPrice, Digits), factor));
+                            logicalStep, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
                     levelsDrawn++;
                 }
             }
@@ -5842,7 +5872,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
             }
         }
         
-        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        double normalizedPrice = NormalizeDouble(levelPrice, GetCachedDigits());
         
         // PERFORMANCE: Skip creating objects for levels far outside viewport
         if(normalizedPrice < vpBottom || normalizedPrice > vpTop) {
@@ -5910,7 +5940,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                     ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
                     ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                         StringFormat("Factor -%d | %s | F=%.2f",
-                            logicalStep, DoubleToString(normalizedPrice, Digits), factor));
+                            logicalStep, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
                     levelsDrawn++;
                 }
             }
@@ -6022,7 +6052,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     // Digits >= 4 (most forex pairs): 1 pip = 0.0001
     // This handles: EURUSD(5), USDJPY(3), XAUUSD(2), indices, etc.
     double pipSize;
-    if(Digits <= 3) {
+    if(GetCachedDigits() <= 3) {
         pipSize = 0.01;  // JPY pairs, Gold (2 digits), etc.
     } else {
         pipSize = 0.0001;  // Standard forex pairs (4 or 5 digits)
@@ -6060,7 +6090,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
     ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical HIGH | %s | Range: %.0f pips", 
-            DoubleToString(highPrice, Digits), rangePips));
+            DoubleToString(highPrice, GetCachedDigits()), rangePips));
     
     // ========== Draw Historical LOW line ==========
     string lowLineName = objectPrefix + "Factor_Low";
@@ -6075,7 +6105,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
     ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical LOW | %s | Range: %.0f pips", 
-            DoubleToString(lowPrice, Digits), rangePips));
+            DoubleToString(lowPrice, GetCachedDigits()), rangePips));
     
     // ========== Draw HIGH label ==========
     string highLabelName = objectPrefix + "Factor_High_Label";
@@ -6090,7 +6120,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
     ObjectSetString(0, highLabelName, OBJPROP_TEXT, 
         StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
-            DoubleToString(highPrice, Digits), rangePips, factor, stepPips));
+            DoubleToString(highPrice, GetCachedDigits()), rangePips, factor, stepPips));
     ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
     
     // ========== Draw LOW label ==========
@@ -6106,7 +6136,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
     ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
     ObjectSetString(0, lowLabelName, OBJPROP_TEXT, 
         StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
-            DoubleToString(lowPrice, Digits), rangePips, factor, stepPips));
+            DoubleToString(lowPrice, GetCachedDigits()), rangePips, factor, stepPips));
     ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
     
     // Draw levels from nearest boundary (High or Low) towards the other
@@ -6150,7 +6180,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
         string levelName = objectPrefix + "Factor_" + IntegerToString(levelNumber);
         
         // Normalize price for consistency
-        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        double normalizedPrice = NormalizeDouble(levelPrice, GetCachedDigits());
         
         // Create or update level
         bool objectExists = (ObjectFind(0, levelName) >= 0);
@@ -6176,7 +6206,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
         } else {
             // OPTIMIZATION: Only update price if it changed significantly
             double oldPrice = ObjectGetDouble(0, levelName, OBJPROP_PRICE);
-            if(MathAbs(oldPrice - normalizedPrice) > Point * 0.1) {
+            if(MathAbs(oldPrice - normalizedPrice) > GetCachedPoint() * 0.1) {
                 ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
             }
         }
@@ -6184,7 +6214,7 @@ void DrawFactorLevels(const string objectPrefix, const double highPrice,
         // Tooltip always updated (lightweight operation)
         string tooltip = StringFormat("Factor %d/%d | Price: %s | Step: %.1f pips", 
             levelNumber, totalLevels, 
-            DoubleToString(normalizedPrice, Digits),
+            DoubleToString(normalizedPrice, GetCachedDigits()),
             stepPips);
         ObjectSetString(0, levelName, OBJPROP_TOOLTIP, tooltip);
         

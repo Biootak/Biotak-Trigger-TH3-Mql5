@@ -125,8 +125,8 @@ bool CreateUnifiedZone(const string zoneName,
     double midPoint = (prevLevelPrice + currentLevelPrice) / 2.0;
     
     // Calculate zone boundaries
-    double upperPrice = NormalizeDouble(midPoint + zoneHeight, Digits);
-    double lowerPrice = NormalizeDouble(midPoint - zoneHeight, Digits);
+    double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
+    double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
     
     // Validate zone boundaries
     if(upperPrice <= lowerPrice) {
@@ -375,8 +375,8 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         // Calculate zone with fixed step size (for consistent height)
         double zoneHeight = fixedStepSize * config.heightPercent * 0.5;
         double midPoint = (effectivePrevPrice + currentPrice) / 2.0;
-        double upperPrice = NormalizeDouble(midPoint + zoneHeight, Digits);
-        double lowerPrice = NormalizeDouble(midPoint - zoneHeight, Digits);
+        double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
+        double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
         
         // Handle LINES style (special case)
         if(config.style == FACTOR_ZONE_LINES) {

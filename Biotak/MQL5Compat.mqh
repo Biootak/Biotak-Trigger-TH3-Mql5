@@ -130,7 +130,7 @@ int TimeDayOfWeek(datetime time) {
 //| (مثلاً PERIOD_H1 = 16385 و نه 60)                                 |
 //+------------------------------------------------------------------+
 int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
-    if(tf == PERIOD_CURRENT || tf == 0) tf = Period();
+    if(tf == PERIOD_CURRENT || tf == 0) tf = (ENUM_TIMEFRAMES)GetCachedPeriod();
     return PeriodSeconds(tf) / 60;
 }
 
@@ -148,20 +148,20 @@ struct ATRHandleCacheEntry {
     int period;
 };
 
-ATRHandleCacheEntry _g_atrCache[];
-int _g_atrCacheCount = 0;
-bool _g_atrCacheInitialized = false;
+ATRHandleCacheEntry g_atrCache[];
+int g_atrCacheCount = 0;
+bool g_atrCacheInitialized = false;
 
 void InitATRCache() {
-    if(!_g_atrCacheInitialized) {
-        ArrayResize(_g_atrCache, ATR_CACHE_SIZE);
+    if(!g_atrCacheInitialized) {
+        ArrayResize(g_atrCache, ATR_CACHE_SIZE);
         for(int i = 0; i < ATR_CACHE_SIZE; i++) {
-            _g_atrCache[i].handle = INVALID_HANDLE;
-            _g_atrCache[i].symbol = "";
-            _g_atrCache[i].tf = PERIOD_CURRENT;
-            _g_atrCache[i].period = 0;
+            g_atrCache[i].handle = INVALID_HANDLE;
+            g_atrCache[i].symbol = "";
+            g_atrCache[i].tf = PERIOD_CURRENT;
+            g_atrCache[i].period = 0;
         }
-        _g_atrCacheInitialized = true;
+        g_atrCacheInitialized = true;
     }
 }
 
@@ -172,11 +172,11 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
     
     // Search existing cache entries
     int handle = INVALID_HANDLE;
-    for(int i = 0; i < _g_atrCacheCount; i++) {
-        if(_g_atrCache[i].symbol == symbol &&
-           _g_atrCache[i].tf == timeframe &&
-           _g_atrCache[i].period == atr_period) {
-            handle = _g_atrCache[i].handle;
+    for(int i = 0; i < g_atrCacheCount; i++) {
+        if(g_atrCache[i].symbol == symbol &&
+           g_atrCache[i].tf == timeframe &&
+           g_atrCache[i].period == atr_period) {
+            handle = g_atrCache[i].handle;
             break;
         }
     }
@@ -190,20 +190,22 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
             return 0.0;
         }
         
-        // Store in cache (evict oldest if full using direct overwrite)
-        int slot = _g_atrCacheCount;
+        // Store in cache (round-robin eviction when full)
+        static int g_atrEvictSlot = 0; // Round-robin eviction cursor
+        int slot = g_atrCacheCount;
         if(slot >= ATR_CACHE_SIZE) {
-            // Evict slot 0 directly (no O(n) shifting)
-            if(_g_atrCache[0].handle != INVALID_HANDLE)
-                IndicatorRelease(_g_atrCache[0].handle);
-            slot = 0;
+            // Round-robin eviction: cycle through all slots fairly
+            slot = g_atrEvictSlot;
+            if(g_atrCache[slot].handle != INVALID_HANDLE)
+                IndicatorRelease(g_atrCache[slot].handle);
+            g_atrEvictSlot = (g_atrEvictSlot + 1) % ATR_CACHE_SIZE;
         } else {
-            _g_atrCacheCount++;
+            g_atrCacheCount++;
         }
-        _g_atrCache[slot].handle = handle;
-        _g_atrCache[slot].symbol = symbol;
-        _g_atrCache[slot].tf = timeframe;
-        _g_atrCache[slot].period = atr_period;
+        g_atrCache[slot].handle = handle;
+        g_atrCache[slot].symbol = symbol;
+        g_atrCache[slot].tf = timeframe;
+        g_atrCache[slot].period = atr_period;
     }
     
     double buffer[];
@@ -219,13 +221,13 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
 
 // Call this from OnDeinit to release ALL cached ATR handles
 void ReleaseATRHandle() {
-    for(int i = 0; i < _g_atrCacheCount; i++) {
-        if(_g_atrCache[i].handle != INVALID_HANDLE) {
-            IndicatorRelease(_g_atrCache[i].handle);
-            _g_atrCache[i].handle = INVALID_HANDLE;
+    for(int i = 0; i < g_atrCacheCount; i++) {
+        if(g_atrCache[i].handle != INVALID_HANDLE) {
+            IndicatorRelease(g_atrCache[i].handle);
+            g_atrCache[i].handle = INVALID_HANDLE;
         }
     }
-    _g_atrCacheCount = 0;
+    g_atrCacheCount = 0;
 }
 
 //+------------------------------------------------------------------+

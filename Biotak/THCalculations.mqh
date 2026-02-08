@@ -231,12 +231,12 @@ void InvalidateFactorCache() {
 
 double CalculateFactorStepSize(const double highPrice, const double lowPrice, const double factor) {
     // GOLD FIX v3: Enhanced cache invalidation with all conditions
-    bool periodChanged = (s_cachedFactorPeriod != Period());
+    bool periodChanged = (s_cachedFactorPeriod != GetCachedPeriod());
     bool historicalPeriodsChanged = (s_cachedHistoricalPeriods != inpHistoricalPeriods);
     
     if(periodChanged || historicalPeriodsChanged) {
         InvalidateFactorCache();
-        s_cachedFactorPeriod = Period();
+        s_cachedFactorPeriod = GetCachedPeriod();
         s_cachedHistoricalPeriods = inpHistoricalPeriods;
     }
     

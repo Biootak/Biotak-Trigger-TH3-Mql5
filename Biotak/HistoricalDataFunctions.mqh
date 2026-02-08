@@ -1,7 +1,7 @@
 bool UpdateHistoricalValues() {
     // Only update if necessary
     datetime currentTime = TimeCurrent();
-    if(currentTime - g_lastHistoricalUpdate < 3600 && g_initialized) return true;
+    if(currentTime - g_lastHistoricalUpdate < SECONDS_PER_HOUR && g_initialized) return true;
 
     // OPTIMIZATION: Use dynamic arrays and ensure cleanup
     double highArray[], lowArray[];
@@ -70,7 +70,7 @@ double GetPriceForPreviousDay(ENUM_APPLIED_PRICE priceType) {
     static double cachedPrices[6];
     
     datetime currentTime = TimeCurrent();
-    if(currentTime-lastUpdate >= 86400 || lastUpdate==0) { // Update cache daily
+    if(currentTime-lastUpdate >= SECONDS_PER_DAY || lastUpdate==0) { // Update cache daily
         cachedPrices[0]=iClose(_Symbol,PERIOD_D1,1);
         cachedPrices[1]=iOpen(_Symbol,PERIOD_D1,1);
         cachedPrices[2]=iHigh(_Symbol,PERIOD_D1,1);

@@ -33,6 +33,7 @@ void InitializeGlobalCache() {
     g_cachedPoint = Point;
     g_cachedChartId = ChartID();
     g_cachedChartIdStr = IntegerToString(g_cachedChartId);
+    g_cachedPipSize = (g_cachedDigits == 3 || g_cachedDigits == 5) ? g_cachedPoint * 10.0 : g_cachedPoint;
     g_globalCacheInitialized = true;
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -117,6 +118,38 @@ string GetCachedChartIdStr() {
     }
     return g_cachedChartIdStr;
 }
+
+//+------------------------------------------------------------------+
+//| Get Pip Size (cached, replaces 9+ inline duplications)           |
+//| دریافت اندازه پیپ (کش شده)                                       |
+//| Replaces: (Digits==3||Digits==5) ? Point*10 : Point             |
+//+------------------------------------------------------------------+
+static double g_cachedPipSize = 0.0;
+
+double GetCachedPipSize() {
+    if(g_cachedPipSize > 0.0) return g_cachedPipSize;
+    int d = GetCachedDigits();
+    double p = GetCachedPoint();
+    g_cachedPipSize = (d == 3 || d == 5) ? p * 10.0 : p;
+    return g_cachedPipSize;
+}
+
+//+------------------------------------------------------------------+
+//| HIDDEN CACHE TTL (named constant for magic number 500ms)        |
+//+------------------------------------------------------------------+
+#define HIDDEN_CACHE_TTL_MS 500
+
+//+------------------------------------------------------------------+
+//| LABEL POSITION CONSTANTS                                         |
+//+------------------------------------------------------------------+
+#define LABEL_X_OFFSET 15
+#define LABEL_Y_OFFSET 25
+#define FREQUENCY_LABEL_Y_EXTRA 20
+
+//+------------------------------------------------------------------+
+//| TIMER CONSTANTS                                                   |
+//+------------------------------------------------------------------+
+#define FREQUENCY_LABEL_TIMER_SEC 5
 
 //+------------------------------------------------------------------+
 //| GOLD FIX #13: Function Call Caching System                       |

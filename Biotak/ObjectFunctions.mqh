@@ -32,7 +32,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     // OPTIMIZATION: Check if object exists first, only update properties instead of recreate
     double normalizedPrice = NormalizePrice(price);
     datetime currentTime = TimeCurrent();
-    datetime futureTime = currentTime + PeriodSeconds(Period()) * 10000;
+    datetime futureTime = currentTime + PeriodSeconds(GetCachedPeriod()) * ZONE_EXTENSION_MULTIPLIER;
     ENUM_OBJECT objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
     
     // Check if object already exists
@@ -59,7 +59,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         // Object exists - just update price
         // OPTIMIZATION: Only update if price actually changed (reduces terminal calls)
         double currentObjPrice = ObjectGetDouble(0, name, OBJPROP_PRICE);
-        if(MathAbs(currentObjPrice - normalizedPrice) > Point * 0.1) {
+        if(MathAbs(currentObjPrice - normalizedPrice) > GetCachedPoint() * 0.1) {
             if(!ObjectSetDouble(0, name, OBJPROP_PRICE, normalizedPrice)) {
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ CreateTHLineObject: Failed to update price for '", name, "'");

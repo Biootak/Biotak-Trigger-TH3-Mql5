@@ -38,20 +38,23 @@ double GetCachedDailyATR()
         
         // CRITICAL FIX: Check for EMPTY_VALUE which iATR returns on error
         // Also check for invalid values using epsilon comparison
-        if(atrValue == EMPTY_VALUE || IsZero(atrValue, EPSILON_PRICE) || atrValue < Point * 10) {
-            // Fallback: Calculate average range manually
+        if(atrValue == EMPTY_VALUE || IsZero(atrValue, EPSILON_PRICE) || atrValue < GetCachedPoint() * 10) {
+            // Fallback: Calculate average range manually using batch copy
+            double highArr[], lowArr[];
+            int copied = CopyHigh(_Symbol, PERIOD_D1, 1, 20, highArr);
+            int copiedL = CopyLow(_Symbol, PERIOD_D1, 1, 20, lowArr);
             double avgRange = 0;
             int validBars = 0;
-            for(int i = 1; i <= 20; i++) {
-                double high = iHigh(_Symbol, PERIOD_D1, i);
-                double low = iLow(_Symbol, PERIOD_D1, i);
-                // Validate OHLC data
-                if(high != EMPTY_VALUE && low != EMPTY_VALUE && high > low) {
-                    avgRange += (high - low);
-                    validBars++;
+            if(copied > 0 && copiedL > 0) {
+                int cnt = MathMin(copied, copiedL);
+                for(int i = 0; i < cnt; i++) {
+                    if(highArr[i] != EMPTY_VALUE && lowArr[i] != EMPTY_VALUE && highArr[i] > lowArr[i]) {
+                        avgRange += (highArr[i] - lowArr[i]);
+                        validBars++;
+                    }
                 }
             }
-            cachedATR = (validBars > 0) ? (avgRange / validBars) : Point * 100;
+            cachedATR = (validBars > 0) ? (avgRange / validBars) : GetCachedPoint() * 100;
         } else {
             cachedATR = atrValue;
         }
@@ -268,7 +271,7 @@ WaveAnalysis AnalyzeThreeWaves(datetime tX, double pX, datetime tA, double pA,
                                 datetime tB, double pB, datetime tC, double pC)
 {
     WaveAnalysis analysis;
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    double pipSize = GetCachedPipSize();
     
     // SECURITY: Validate time ordering (X < A < B < C)
     if(!(tX < tA && tA < tB && tB < tC)) {
@@ -579,19 +582,27 @@ double CalculateWaveAngle(datetime tStart, double pStart, datetime tEnd, double 
     if(timeChangeMinutes <= 0) timeChangeMinutes = 1;
     
     // نرمال‌سازی: قیمت به پیپ
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    double pipSize = GetCachedPipSize();
     double priceInPips = priceChange / pipSize;
     
     // محاسبه زاویه (degrees)
     // نرمال‌سازی: 1 pip per minute = 45 degrees (Gann 1×1)
     // OPTIMIZATION: Use cached ATR instead of repeated iATR() calls
     double dailyATR = GetCachedDailyATR();
-    if(dailyATR <= 0 || dailyATR < Point * 10) {
+    if(dailyATR <= 0 || dailyATR < GetCachedPoint() * 10) {
+        double highArr[], lowArr[];
+        int copied = CopyHigh(_Symbol, PERIOD_D1, 1, 20, highArr);
+        int copiedL = CopyLow(_Symbol, PERIOD_D1, 1, 20, lowArr);
         double avgRange = 0;
-        for(int i = 1; i <= 20; i++) {
-            avgRange += (iHigh(_Symbol, PERIOD_D1, i) - iLow(_Symbol, PERIOD_D1, i));
+        if(copied > 0 && copiedL > 0) {
+            int cnt = MathMin(copied, copiedL);
+            for(int i = 0; i < cnt; i++) {
+                avgRange += (highArr[i] - lowArr[i]);
+            }
+            dailyATR = avgRange / cnt;
+        } else {
+            dailyATR = GetCachedPoint() * 100;
         }
-        dailyATR = avgRange / 20.0;
     }
     
     double dailyATRInPips = dailyATR / pipSize;
@@ -900,14 +911,22 @@ double CalculateFrequencyFromWaves(WaveAnalysis &waves)
     // محاسبه نسبت سرعت نسبت به ATR
     // OPTIMIZATION: Use cached ATR instead of repeated iATR() calls
     double dailyATR = GetCachedDailyATR();
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    double pipSize = GetCachedPipSize();
     
-    if(dailyATR <= 0 || dailyATR < Point * 10) {
+    if(dailyATR <= 0 || dailyATR < GetCachedPoint() * 10) {
+        double highArr[], lowArr[];
+        int copied = CopyHigh(_Symbol, PERIOD_D1, 1, 20, highArr);
+        int copiedL = CopyLow(_Symbol, PERIOD_D1, 1, 20, lowArr);
         double avgRange = 0;
-        for(int i = 1; i <= 20; i++) {
-            avgRange += (iHigh(_Symbol, PERIOD_D1, i) - iLow(_Symbol, PERIOD_D1, i));
+        if(copied > 0 && copiedL > 0) {
+            int cnt = MathMin(copied, copiedL);
+            for(int i = 0; i < cnt; i++) {
+                avgRange += (highArr[i] - lowArr[i]);
+            }
+            dailyATR = avgRange / cnt;
+        } else {
+            dailyATR = GetCachedPoint() * 100;
         }
-        dailyATR = avgRange / 20.0;
     }
     
     double dailyATRInPips = dailyATR / pipSize;
@@ -987,7 +1006,7 @@ double CalculateMovementSpeed(datetime tA, double pA, datetime tB, double pB)
     if(timeChangeMinutes <= 0) return 1.0; // Default to balanced
     
     // نرمال‌سازی: قیمت به پیپ
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    double pipSize = GetCachedPipSize();
     double priceInPips = priceChange / pipSize;
     
     // محاسبه سرعت: پیپ در دقیقه
@@ -1210,7 +1229,7 @@ double CalculateFrequencyError(double pA, double pB, double pC,
 {
     // SECURITY: Validate AB distance to prevent division by zero
     double AB_Distance = MathAbs(pB - pA);
-    double minDistance = Point * 10; // Minimum 10 pips
+    double minDistance = GetCachedPoint() * 10; // Minimum 10 pips
     
     if(AB_Distance < minDistance) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -1302,7 +1321,7 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
     double AB_Distance = MathAbs(pB - pA);
     if(AB_Distance <= 0) return 0;
     
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    double pipSize = GetCachedPipSize();
     
     // ========================================
     // مرحله 1: تحلیل کامل موج (Wave Analysis)
@@ -2287,7 +2306,7 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
     // 4. Minimum distance check (prevent micro-patterns)
     double AB_Distance = MathAbs(pB - pA);
     double BC_Distance = MathAbs(pC - pB);
-    double minDistance = Point * ABCD_MIN_DISTANCE_POINTS;
+    double minDistance = GetCachedPoint() * ABCD_MIN_DISTANCE_POINTS;
     
     if(AB_Distance < minDistance) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -2395,7 +2414,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     double frequency = GetCurrentTH3Frequency();
     double baseUnit = AB_Distance * (frequency / 100.0);
     
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    double pipSize = GetCachedPipSize();
     
     // DYNAMIC OFFSET: Calculate based on candle size for better positioning
     // Offset داینامیک: محاسبه بر اساس اندازه کندل برای موقعیت بهتر
@@ -2405,10 +2424,18 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // User-defined offset percentage
         double avgCandleSize = 0;
         int lookback = 20; // میانگین 20 کندل اخیر
-        for(int k = 0; k < lookback; k++) {
-            avgCandleSize += (iHigh(_Symbol, 0, k) - iLow(_Symbol, 0, k));
+        double highArr[], lowArr[];
+        int copied = CopyHigh(_Symbol, 0, 0, lookback, highArr);
+        int copiedL = CopyLow(_Symbol, 0, 0, lookback, lowArr);
+        if(copied > 0 && copiedL > 0) {
+            int cnt = MathMin(copied, copiedL);
+            for(int k = 0; k < cnt; k++) {
+                avgCandleSize += (highArr[k] - lowArr[k]);
+            }
+            avgCandleSize /= cnt;
+        } else {
+            avgCandleSize = GetCachedPipSize() * 10; // fallback
         }
-        avgCandleSize /= lookback;
         
         // Use user-defined percentage of average candle size
         labelOffset = avgCandleSize * (inpABCDLabelOffsetPercent / 100.0);
@@ -2466,7 +2493,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             // Offset point slightly outside candle for visibility
             // جابجایی نقطه کمی خارج از کندل برای قابل مشاهده بودن
             double offset = (high - low) * 0.15; // 15% of candle range
-            if(offset < Point * 10) offset = Point * 10; // Minimum offset
+            if(offset < GetCachedPoint() * 10) offset = GetCachedPoint() * 10; // Minimum offset
             
             if(isAtTop) {
                 // Point at top - place above high
@@ -2826,6 +2853,30 @@ void UpdateAllTH3Objects() {
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Create ABCD temporary point marker on chart             |
+//| کمکی: ساخت نشانگر نقطه موقت ABCD روی چارت                        |
+//+------------------------------------------------------------------+
+void CreateABCDTempPoint(const string pointLabel, datetime clickTime, double clickPrice) {
+    string objName = "ABCD_Temp_" + pointLabel;
+    ObjectCreate(0, objName, OBJ_TEXT, 0, clickTime, clickPrice);
+    ObjectSetString(0, objName, OBJPROP_TEXT, pointLabel);
+    ObjectSetInteger(0, objName, OBJPROP_COLOR, clrYellow);
+    ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 10);
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Create ABCD temporary trend line between two points     |
+//| کمکی: ساخت خط روند موقت ABCD بین دو نقطه                         |
+//+------------------------------------------------------------------+
+void CreateABCDTempLine(const string lineSuffix, datetime t1, double p1, datetime t2, double p2) {
+    string objName = "ABCD_Temp_Line_" + lineSuffix;
+    ObjectCreate(0, objName, OBJ_TREND, 0, t1, p1, t2, p2);
+    ObjectSetInteger(0, objName, OBJPROP_COLOR, clrYellow);
+    ObjectSetInteger(0, objName, OBJPROP_STYLE, STYLE_DOT);
+    ObjectSetInteger(0, objName, OBJPROP_RAY_RIGHT, false);
+}
+
+//+------------------------------------------------------------------+
 //| Handle AB=CD Mouse Events (3-point click workflow)              |
 //| مدیریت رویدادهای موس برای AB=CD (کلیک 3 نقطه)                   |
 //+------------------------------------------------------------------+
@@ -2902,10 +2953,7 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 g_abcdPriceX = clickPrice;
                 g_abcdPointCount = 1;
                 
-                ObjectCreate(0, "ABCD_Temp_X", OBJ_TEXT, 0, clickTime, clickPrice);
-                ObjectSetString(0, "ABCD_Temp_X", OBJPROP_TEXT, "X");
-                ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_COLOR, clrYellow);
-                ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_FONTSIZE, 10);
+                CreateABCDTempPoint("X", clickTime, clickPrice);
                 ChartRedraw();
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point X placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
@@ -2916,15 +2964,8 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 g_abcdPriceA = clickPrice;
                 g_abcdPointCount = 2;
                 
-                ObjectCreate(0, "ABCD_Temp_A", OBJ_TEXT, 0, clickTime, clickPrice);
-                ObjectSetString(0, "ABCD_Temp_A", OBJPROP_TEXT, "A");
-                ObjectSetInteger(0, "ABCD_Temp_A", OBJPROP_COLOR, clrYellow);
-                ObjectSetInteger(0, "ABCD_Temp_A", OBJPROP_FONTSIZE, 10);
-                
-                ObjectCreate(0, "ABCD_Temp_Line_XA", OBJ_TREND, 0, g_abcdTimeX, g_abcdPriceX, g_abcdTimeA, g_abcdPriceA);
-                ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_COLOR, clrYellow);
-                ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_STYLE, STYLE_DOT);
-                ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_RAY_RIGHT, false);
+                CreateABCDTempPoint("A", clickTime, clickPrice);
+                CreateABCDTempLine("XA", g_abcdTimeX, g_abcdPriceX, g_abcdTimeA, g_abcdPriceA);
                 ChartRedraw();
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point A placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
@@ -2935,15 +2976,8 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 g_abcdPriceB = clickPrice;
                 g_abcdPointCount = 3;
                 
-                ObjectCreate(0, "ABCD_Temp_B", OBJ_TEXT, 0, clickTime, clickPrice);
-                ObjectSetString(0, "ABCD_Temp_B", OBJPROP_TEXT, "B");
-                ObjectSetInteger(0, "ABCD_Temp_B", OBJPROP_COLOR, clrYellow);
-                ObjectSetInteger(0, "ABCD_Temp_B", OBJPROP_FONTSIZE, 10);
-                
-                ObjectCreate(0, "ABCD_Temp_Line_AB", OBJ_TREND, 0, g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB);
-                ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_COLOR, clrYellow);
-                ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_STYLE, STYLE_DOT);
-                ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_RAY_RIGHT, false);
+                CreateABCDTempPoint("B", clickTime, clickPrice);
+                CreateABCDTempLine("AB", g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB);
                 ChartRedraw();
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("✓ Point B placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
@@ -3102,10 +3136,7 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             g_abcdPriceX = clickPrice;
             g_abcdPointCount = 1;
             
-            ObjectCreate(0, "ABCD_Temp_X", OBJ_TEXT, 0, clickTime, clickPrice);
-            ObjectSetString(0, "ABCD_Temp_X", OBJPROP_TEXT, "X");
-            ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_COLOR, clrYellow);
-            ObjectSetInteger(0, "ABCD_Temp_X", OBJPROP_FONTSIZE, 10);
+            CreateABCDTempPoint("X", clickTime, clickPrice);
             ChartRedraw();
             #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point X placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
@@ -3116,15 +3147,8 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             g_abcdPriceA = clickPrice;
             g_abcdPointCount = 2;
             
-            ObjectCreate(0, "ABCD_Temp_A", OBJ_TEXT, 0, clickTime, clickPrice);
-            ObjectSetString(0, "ABCD_Temp_A", OBJPROP_TEXT, "A");
-            ObjectSetInteger(0, "ABCD_Temp_A", OBJPROP_COLOR, clrYellow);
-            ObjectSetInteger(0, "ABCD_Temp_A", OBJPROP_FONTSIZE, 10);
-            
-            ObjectCreate(0, "ABCD_Temp_Line_XA", OBJ_TREND, 0, g_abcdTimeX, g_abcdPriceX, g_abcdTimeA, g_abcdPriceA);
-            ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_COLOR, clrYellow);
-            ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_STYLE, STYLE_DOT);
-            ObjectSetInteger(0, "ABCD_Temp_Line_XA", OBJPROP_RAY_RIGHT, false);
+            CreateABCDTempPoint("A", clickTime, clickPrice);
+            CreateABCDTempLine("XA", g_abcdTimeX, g_abcdPriceX, g_abcdTimeA, g_abcdPriceA);
             ChartRedraw();
             #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point A placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
@@ -3135,15 +3159,8 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             g_abcdPriceB = clickPrice;
             g_abcdPointCount = 3;
             
-            ObjectCreate(0, "ABCD_Temp_B", OBJ_TEXT, 0, clickTime, clickPrice);
-            ObjectSetString(0, "ABCD_Temp_B", OBJPROP_TEXT, "B");
-            ObjectSetInteger(0, "ABCD_Temp_B", OBJPROP_COLOR, clrYellow);
-            ObjectSetInteger(0, "ABCD_Temp_B", OBJPROP_FONTSIZE, 10);
-            
-            ObjectCreate(0, "ABCD_Temp_Line_AB", OBJ_TREND, 0, g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB);
-            ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_COLOR, clrYellow);
-            ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_STYLE, STYLE_DOT);
-            ObjectSetInteger(0, "ABCD_Temp_Line_AB", OBJPROP_RAY_RIGHT, false);
+            CreateABCDTempPoint("B", clickTime, clickPrice);
+            CreateABCDTempLine("AB", g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB);
             ChartRedraw();
             #ifdef ENABLE_DEBUG_LOGS
             Print("✓ Point B placed at ", TimeToString(clickTime), " price ", DoubleToString(clickPrice, Digits));
@@ -3211,7 +3228,7 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 double close = iClose(_Symbol, 0, barIndex);
                 
                 // Calculate distances in pips
-                double pipSize = (Digits == 5 || Digits == 3) ? Point * 10 : Point;
+                double pipSize = GetCachedPipSize();
                 double distToHigh = MathAbs(newPrice - high) / pipSize;
                 double distToLow = MathAbs(newPrice - low) / pipSize;
                 double distToOpen = MathAbs(newPrice - open) / pipSize;
