@@ -25,17 +25,17 @@ struct ValidationResult {
 bool ValidateArrayIndex(int index, int arraySize, const string context = "") {
     if(index < 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ ValidateArrayIndex: Negative index (", index, ")", 
+        string ctxMsg1 = (StringLen(context) > 0) ? " in " + context : "";
+        Print("❌ ValidateArrayIndex: Negative index (", index, ")", ctxMsg1);
         #endif
-              (StringLen(context) > 0) ? " in " + context : "");
         return false;
     }
     
     if(index >= arraySize) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ ValidateArrayIndex: Index out of bounds (", index, " >= ", arraySize, ")",
+        string ctxMsg2 = (StringLen(context) > 0) ? " in " + context : "";
+        Print("❌ ValidateArrayIndex: Index out of bounds (", index, " >= ", arraySize, ")", ctxMsg2);
         #endif
-              (StringLen(context) > 0) ? " in " + context : "");
         return false;
     }
     

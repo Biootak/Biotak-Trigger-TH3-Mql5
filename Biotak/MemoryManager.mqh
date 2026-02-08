@@ -212,9 +212,9 @@ void CleanupAllObjects(const string prefix = "")
     
     if(deletedCount > 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("✅ Cleaned up ", deletedCount, " objects", 
+        string prefixMsg = (StringLen(prefix) > 0) ? " with prefix: " + prefix : "";
+        Print("✅ Cleaned up ", deletedCount, " objects", prefixMsg);
         #endif
-              (StringLen(prefix) > 0) ? " with prefix: " + prefix : "");
     }
     
     // Reset stats if all objects deleted

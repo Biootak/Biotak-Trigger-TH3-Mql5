@@ -33,10 +33,8 @@
 void PrintRecentM30Bars(int count = 5)
 {
     Print("[BasePriceManager] ╔═══════════════════════════════════════════════════════════════╗");
-    #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] ║  RECENT M30 BARS (Last ", count, " completed bars)                    ║");
     Print("[BasePriceManager] ╠═══════════════════════════════════════════════════════════════╣");
-    #endif
     
     for(int i = 1; i <= count; i++)  // Start from 1 (skip current incomplete bar)
     {
@@ -142,7 +140,7 @@ int GetSymbolStateIndex()
     int newIndex = g_symbolStateCount;
     
     // Safe resize with validation
-    if(ArrayResize(g_symbolStates, newIndex + 1) != newIndex + 1) {
+    if(ArrayResize(g_symbolStates, newIndex + 1, 8) != newIndex + 1) {  // PERF FIX: Reserve extra
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CRITICAL: Failed to resize symbol states array");
         #endif
@@ -166,21 +164,6 @@ int GetSymbolStateIndex()
     Print("✅ Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");
     #endif
     return newIndex;
-    ArrayResize(g_symbolStates, g_symbolStateCount + 1);
-    g_symbolStates[g_symbolStateCount].symbol = currentSymbol;
-    g_symbolStates[g_symbolStateCount].basePriceCached = EMPTY_VALUE;
-    g_symbolStates[g_symbolStateCount].lastProcessedBlockTimestamp = 0;  // Used for log deduplication
-    g_symbolStates[g_symbolStateCount].referenceM1Power = 0.0;
-    ArrayResize(g_symbolStates[g_symbolStateCount].basePriceHistory, 0);
-    g_symbolStates[g_symbolStateCount].historyCount = 0;
-    g_symbolStates[g_symbolStateCount].lastHistoryDay = -1;
-    g_symbolStates[g_symbolStateCount].lastHistoryYear = -1;
-    g_symbolStates[g_symbolStateCount].systemInitialized = false;
-    
-    DEBUG_PRINTF("Created new state for symbol: ", currentSymbol);
-    
-    g_symbolStateCount++;
-    return g_symbolStateCount - 1;
 }
 
 // Helper functions for array access (to avoid macro expansion issues)

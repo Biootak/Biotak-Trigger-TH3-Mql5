@@ -169,7 +169,7 @@ int LoadBasePriceHistory(int year, int dayOfYear, string &history[])
                 continue;
             }
             
-            ArrayResize(history, count + 1);
+            ArrayResize(history, count + 1, 64);  // PERF FIX: Reserve 64 extra slots
             history[count] = line;
             count++;
         }
@@ -422,8 +422,8 @@ int DeduplicateHistory(string &history[], int count)
         else
         {
             // Add new entry
-            ArrayResize(uniqueTimeBlocks, uniqueCount + 1);
-            ArrayResize(uniqueEntries, uniqueCount + 1);
+            ArrayResize(uniqueTimeBlocks, uniqueCount + 1, 64);  // PERF FIX: Reserve extra
+            ArrayResize(uniqueEntries, uniqueCount + 1, 64);     // PERF FIX: Reserve extra
             uniqueTimeBlocks[uniqueCount] = timeBlock;
             uniqueEntries[uniqueCount] = history[i];
             uniqueCount++;
@@ -534,7 +534,7 @@ int RepairHistoryFile(int year, int dayOfYear)
         
         if(StringLen(line) > 0 && StringFind(line, "|") > 0)
         {
-            ArrayResize(history, count + 1);
+            ArrayResize(history, count + 1, 64);  // PERF FIX: Reserve extra slots
             history[count] = line;
             count++;
         }

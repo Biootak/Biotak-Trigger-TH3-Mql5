@@ -190,16 +190,13 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
             return 0.0;
         }
         
-        // Store in cache (evict oldest if full)
+        // Store in cache (evict oldest if full using direct overwrite)
         int slot = _g_atrCacheCount;
         if(slot >= ATR_CACHE_SIZE) {
-            // Evict slot 0 (oldest)
+            // Evict slot 0 directly (no O(n) shifting)
             if(_g_atrCache[0].handle != INVALID_HANDLE)
                 IndicatorRelease(_g_atrCache[0].handle);
-            // Shift entries down
-            for(int j = 0; j < ATR_CACHE_SIZE - 1; j++)
-                _g_atrCache[j] = _g_atrCache[j + 1];
-            slot = ATR_CACHE_SIZE - 1;
+            slot = 0;
         } else {
             _g_atrCacheCount++;
         }

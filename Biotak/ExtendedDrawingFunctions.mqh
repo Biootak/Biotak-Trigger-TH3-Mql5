@@ -11,6 +11,24 @@
 // Note: CalculateFactorStepSize has been moved to THCalculations.mqh
 
 //+------------------------------------------------------------------+
+//| PERF: Delete surplus zone/line objects beyond what was just drawn |
+//| حذف اشیاء zone/line اضافی فراتر از آنچه رسم شد                    |
+//| Uses consecutive-miss strategy: stops after 3 misses in a row    |
+//+------------------------------------------------------------------+
+void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6) {
+    int misses = 0;
+    for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
+        string name = prefix + IntegerToString(idx);
+        if(ObjectFind(0, name) >= 0) {
+            ObjectDelete(0, name);
+            misses = 0; // Reset on hit
+        } else {
+            misses++;
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
 //| Create Factor Mid Zone - REFACTORED to use Unified System        |
 //| ایجاد Zone Factor - Refactor شده با Unified System               |
 //|                                                                  |
@@ -3192,13 +3210,8 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
     
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     
-    // ═══════════════════════════════════════════════════════════════
-    // CLEANUP OLD ZONES
-    // پاکسازی محدوده‌های قدیمی
-    // ═══════════════════════════════════════════════════════════════
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + "SSLS_Zone_", -1, -1);
-    }
+    // PERF FIX: Zones are now updated in-place by ZoneFactory::CreateZone.
+    // Surplus cleanup happens after each direction's loop.
     
     double stepDistances[2];
     stepDistances[0] = lsFirst ? lsValue : ssValue;  // First step
@@ -3336,20 +3349,20 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
             continue;
         }
         
-        // Create the level line
+        // PERF FIX: Set visual properties only on new objects, update price only for existing
         if(ObjectFind(0, levelName) < 0) {
             ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel);
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                           (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
+                           " (" + DoubleToString(priceLevel, Digits) + ")");
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
-        
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                       (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
-                       " (" + DoubleToString(priceLevel, Digits) + ")");
         
         drawnAbove++;
         
@@ -3389,6 +3402,11 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         
         // Note: lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove
         // are updated inside CreateZoneWithSmartFallback
+    }
+    
+    // PERF FIX: Cleanup surplus zones from previous draws (above)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "SSLS_Zone_Above_", logicalStep + 1);
     }
     
     // Draw levels below midpoint
@@ -3460,20 +3478,20 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
             continue;
         }
         
-        // Create the level line
+        // PERF FIX: Set visual properties only on new objects, update price only for existing
         if(ObjectFind(0, levelName) < 0) {
             ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel);
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                           (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
+                           " (" + DoubleToString(priceLevel, Digits) + ")");
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
-        
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                       (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
-                       " (" + DoubleToString(priceLevel, Digits) + ")");
         
         drawnBelow++;
         
@@ -3513,6 +3531,11 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         
         // Note: lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow
         // are updated inside CreateZoneWithSmartFallback
+    }
+    
+    // PERF FIX: Cleanup surplus zones from previous draws (below)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "SSLS_Zone_Below_", logicalStep + 1);
     }
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -3631,13 +3654,8 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     
-    // ═══════════════════════════════════════════════════════════════
-    // CLEANUP OLD ZONES
-    // پاکسازی محدوده‌های قدیمی
-    // ═══════════════════════════════════════════════════════════════
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + "M_Zone_", -1, -1);
-    }
+    // PERF FIX: Zones are now updated in-place by ZoneFactory::CreateZone.
+    // Surplus cleanup happens after each direction's loop.
     
     // Use adaptive level counts if provided, otherwise use input parameters
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
@@ -3816,6 +3834,11 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
         priceAbove += controlDistance;
     }
     
+    // PERF FIX: Cleanup surplus zones from previous draws (above)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "M_Zone_Above_", logicalStep);
+    }
+    
     // Draw levels below midpoint
     logicalStep = 1;
     int drawnBelow = 0;
@@ -3948,6 +3971,11 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
         priceBelow -= controlDistance;
     }
     
+    // PERF FIX: Cleanup surplus zones from previous draws (below)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "M_Zone_Below_", logicalStep);
+    }
+    
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
         Print("✅ DrawMLevels: Drew ", zoneCountAbove, " zones above, ", 
@@ -3981,13 +4009,8 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     
-    // ═══════════════════════════════════════════════════════════════
-    // CLEANUP OLD ZONES
-    // پاکسازی محدوده‌های قدیمی
-    // ═══════════════════════════════════════════════════════════════
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + modeName + "_Zone_", -1, -1);
-    }
+    // PERF FIX: Zones are now updated in-place by ZoneFactory::CreateZone.
+    // Surplus cleanup happens after each direction's loop.
     
     // Use adaptive level counts if provided, otherwise use input parameters
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
@@ -4153,6 +4176,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         priceAbove += stepSizePrice;
     }
     
+    // PERF FIX: Cleanup surplus zones from previous draws (above)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + modeName + "_Zone_Above_", logicalStep);
+    }
+    
     // Draw levels below midpoint
     logicalStep = 1;
     int drawnBelow = 0;
@@ -4268,6 +4296,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         priceBelow -= stepSizePrice;
     }
     
+    // PERF FIX: Cleanup surplus zones from previous draws (below)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + modeName + "_Zone_Below_", logicalStep);
+    }
+    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ DrawTHLevelsWithStep COMPLETED for mode: ", modeName);
     Print("   Levels drawn: Above=", drawnAbove, ", Below=", drawnBelow);
@@ -4291,13 +4324,8 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
     
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     
-    // ═══════════════════════════════════════════════════════════════
-    // CLEANUP OLD ZONES
-    // پاکسازی محدوده‌های قدیمی
-    // ═══════════════════════════════════════════════════════════════
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + "MEq_Zone_", -1, -1);
-    }
+    // PERF FIX: Zones are now updated in-place by ZoneFactory::CreateZone.
+    // Surplus cleanup happens after each direction's loop.
     
     // Use adaptive level counts if provided, otherwise use input parameters
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
@@ -4417,6 +4445,11 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
         price += mDistance;
     }
     
+    // PERF FIX: Cleanup surplus zones from previous draws (above)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "MEq_Zone_Above_", step);
+    }
+    
     // Draw levels below midpoint
     step = 1;
     price = midpointPrice - mDistance;
@@ -4491,6 +4524,11 @@ void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, con
         lastDrawnPriceBelow = price;
         step++;
         price -= mDistance;
+    }
+    
+    // PERF FIX: Cleanup surplus zones from previous draws (below)
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "MEq_Zone_Below_", step);
     }
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -4656,10 +4694,8 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     // CLEANUP OLD OBJECTS (prevent visual clutter)
     // ═══════════════════════════════════════════════════════════════
     
-    // Delete old harmonic objects before drawing new ones
-    ObjectsDeleteAll(0, objectPrefix + "Factor_Mid_", -1, -1);
-    ObjectsDeleteAll(0, objectPrefix + "Factor_Up_", -1, -1);
-    ObjectsDeleteAll(0, objectPrefix + "Factor_Down_", -1, -1);
+    // PERF FIX: Removed ObjectsDeleteAll - use create-if-new pattern instead
+    // Old objects with same names get updated in-place (price only)
     
     // ═══════════════════════════════════════════════════════════════
     // CALCULATE STEP SIZES
@@ -4701,18 +4737,19 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
             #endif
             return;
         }
+        // PERF FIX: Set visual properties only on creation
+        ObjectSetInteger(0, midName, OBJPROP_COLOR, C'255,140,0');
+        ObjectSetInteger(0, midName, OBJPROP_STYLE, STYLE_SOLID);
+        ObjectSetInteger(0, midName, OBJPROP_WIDTH, 2);
+        ObjectSetInteger(0, midName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, midName, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, midName, OBJPROP_BACK, false);
+        ObjectSetString(0, midName, OBJPROP_TOOLTIP, 
+            StringFormat("🎯 Harmonic Center | %s | F=%.2f | R=%.3f", 
+                DoubleToString(midpoint, Digits), factor, harmonicRatio));
+    } else {
+        ObjectSetDouble(0, midName, OBJPROP_PRICE, midpoint);
     }
-    
-    ObjectSetDouble(0, midName, OBJPROP_PRICE, midpoint);
-    ObjectSetInteger(0, midName, OBJPROP_COLOR, C'255,140,0');  // DarkOrange - visible on Lavender
-    ObjectSetInteger(0, midName, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(0, midName, OBJPROP_WIDTH, 2);
-    ObjectSetInteger(0, midName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, midName, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, midName, OBJPROP_BACK, false);
-    ObjectSetString(0, midName, OBJPROP_TOOLTIP, 
-        StringFormat("🎯 Harmonic Center | %s | F=%.2f | R=%.3f", 
-            DoubleToString(midpoint, Digits), factor, harmonicRatio));
     
     // ═══════════════════════════════════════════════════════════════
     // PREPARE PATTERN ARRAY (optimization)
@@ -4815,7 +4852,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         // Create level name
         string levelName = objectPrefix + "Factor_Up_" + IntegerToString(i + 1);
         
-        // Create or update level
+        // PERF FIX: Set visual properties only on creation, update price only for existing
         if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
                 #ifdef ENABLE_DEBUG_LOGS
@@ -4823,19 +4860,19 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
                 #endif
                 continue;
             }
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
+                    (isBase ? "📏 Base" : "📐 Large"), i + 1, 
+                    DoubleToString(priceLevel, Digits), factor, step / Point));
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
-        
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
-        ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-            StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
-                (isBase ? "📏 Base" : "📐 Large"), i + 1, 
-                DoubleToString(priceLevel, Digits), factor, step / Point));
         
         levelsAbove++;
     }
@@ -4885,6 +4922,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         
         string levelName = objectPrefix + "Factor_Down_" + IntegerToString(i + 1);
         
+        // PERF FIX: Set visual properties only on creation, update price only for existing
         if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
                 #ifdef ENABLE_DEBUG_LOGS
@@ -4892,19 +4930,19 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
                 #endif
                 continue;
             }
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
+                    (isBase ? "📏 Base" : "📐 Large"), i + 1, 
+                    DoubleToString(priceLevel, Digits), factor, step / Point));
+        } else {
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
-        
-        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
-        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
-        ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-            StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
-                (isBase ? "📏 Base" : "📐 Large"), i + 1, 
-                DoubleToString(priceLevel, Digits), factor, step / Point));
         
         levelsBelow++;
     }
@@ -5024,13 +5062,8 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     double startPrice = startFromHigh ? highPrice : lowPrice;
     double direction = startFromHigh ? -1.0 : 1.0;  // -1 = downward, +1 = upward
     
-    // ═══════════════════════════════════════════════════════════════
-    // CLEANUP OLD ZONES
-    // پاکسازی محدوده‌های قدیمی
-    // ═══════════════════════════════════════════════════════════════
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + "Factor_Zone_", -1, -1);
-    }
+    // PERF FIX: Zones are now updated in-place by ZoneFactory::CreateZone.
+    // Surplus cleanup happens after the draw loop.
     
     int levelsDrawn = 0;
     int zoneCount = 0;  // Track zones drawn
@@ -5163,6 +5196,11 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         }
     }
     
+    // PERF FIX: Cleanup surplus zones from previous draws
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "Factor_Zone_", totalLevels + 1);
+    }
+    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ DrawFactorLevelsAligned: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
     Print("   halfStep=", DoubleToString(halfStep, Digits), 
@@ -5244,14 +5282,8 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     // CRITICAL FIX: Calculate average step size for consistent zone height
     double avgStepSize = (baseStepSize + largeStepSize) / 2.0;
     
-    // ═══════════════════════════════════════════════════════════════
-    // CLEANUP OLD OBJECTS (including zones)
-    // پاکسازی اشیاء قدیمی (شامل zone ها)
-    // ═══════════════════════════════════════════════════════════════
-    ObjectsDeleteAll(0, objectPrefix + "Factor_Harmonic_", -1, -1);
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + "Factor_Harmonic_Zone_", -1, -1);
-    }
+    // PERF FIX: Lines and zones are now updated in-place.
+    // Surplus cleanup happens after each direction's loop.
     
     bool shouldShowLine = !IsTriggerLevelsEnabled();
     int levelsDrawn = 0;
@@ -5391,6 +5423,12 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         }
     }
     
+    // PERF FIX: Cleanup surplus lines/zones from previous draws (above)
+    CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Above_", logicalStep + 1);
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Above_", logicalStep + 1);
+    }
+    
     // Draw levels below center (alternating pattern, respects maxLevelsBelow)
     // UNIFIED LOGIC: Uses M Mode color logic with Harmonic pattern
     cumulative = 0;
@@ -5492,6 +5530,12 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         }
     }
     
+    // PERF FIX: Cleanup surplus lines/zones from previous draws (below)
+    CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Below_", logicalStep + 1);
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Below_", logicalStep + 1);
+    }
+    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ DrawFactorLevelsHarmonicFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
     Print("   Above=", levelsAboveCount, "/", maxLevelsAbove,
@@ -5569,10 +5613,8 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
           ", MaxAbove=", safeMaxAbove, ", MaxBelow=", safeMaxBelow);
     #endif
     
-    // Cleanup old zones
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, objectPrefix + "Factor_Zone_", -1, -1);
-    }
+    // PERF FIX: Zones are now updated in-place by ZoneFactory::CreateZone.
+    // Surplus cleanup happens after each direction's loop.
     
     // ═══════════════════════════════════════════════════════════════
     // ZONE HEIGHT CALCULATION (Unified Formula)
@@ -5749,6 +5791,12 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         levelsAboveCount++;
     }
     
+    // PERF FIX: Cleanup surplus zones/lines from previous draws (above)
+    CleanupSurplusObjects(objectPrefix + "Factor_Above_", logicalStep);
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "Factor_Zone_Above_", logicalStep);
+    }
+    
     // ═══════════════════════════════════════════════════════════════
     // ═══════════════════════════════════════════════════════════════
     // DRAW LEVELS BELOW CENTER (respects maxLevelsBelow)
@@ -5875,6 +5923,12 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         prevPrice = normalizedPrice;
         logicalStep++;
         levelsBelowCount++;
+    }
+    
+    // PERF FIX: Cleanup surplus zones/lines from previous draws (below)
+    CleanupSurplusObjects(objectPrefix + "Factor_Below_", logicalStep);
+    if(inpShowMidZones) {
+        CleanupSurplusObjects(objectPrefix + "Factor_Zone_Below_", logicalStep);
     }
     
     #ifdef ENABLE_DEBUG_LOGS

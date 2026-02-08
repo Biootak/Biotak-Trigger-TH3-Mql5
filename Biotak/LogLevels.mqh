@@ -16,7 +16,8 @@ enum ENUM_LOG_LEVEL {
     LOG_LEVEL_ERROR = 1,     // Only errors
     LOG_LEVEL_WARNING = 2,   // Errors + warnings
     LOG_LEVEL_INFO = 3,      // Errors + warnings + info
-    LOG_LEVEL_DEBUG = 4      // All messages (verbose)
+    LOG_LEVEL_DEBUG = 4,     // All messages (verbose)
+    LOG_LEVEL_DIAGNOSTIC = 5 // Everything + diagnostic (very detailed)
 };
 
 // Global log level setting

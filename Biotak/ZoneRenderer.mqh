@@ -238,18 +238,19 @@ void RenderLines(const SLineRenderInfo &lines[])
                 }
                 continue;
             }
+            
+            // PERF FIX: Set visual properties only on creation (not every update)
+            ObjectSetInteger(0, lines[i].name, OBJPROP_COLOR, lines[i].clr);
+            ObjectSetInteger(0, lines[i].name, OBJPROP_STYLE, lines[i].style);
+            ObjectSetInteger(0, lines[i].name, OBJPROP_WIDTH, lines[i].width);
+            ObjectSetInteger(0, lines[i].name, OBJPROP_SELECTABLE, lines[i].selectable);
+            ObjectSetInteger(0, lines[i].name, OBJPROP_BACK, false);
+            ObjectSetString(0, lines[i].name, OBJPROP_TOOLTIP, lines[i].tooltip);
         }
         else {
+            // Existing object: only update price (the only value that changes per tick)
             ObjectSetDouble(0, lines[i].name, OBJPROP_PRICE, lines[i].price);
         }
-        
-        // PERF FIX: Set visual properties in batch (reduces overhead)
-        ObjectSetInteger(0, lines[i].name, OBJPROP_COLOR, lines[i].clr);
-        ObjectSetInteger(0, lines[i].name, OBJPROP_STYLE, lines[i].style);
-        ObjectSetInteger(0, lines[i].name, OBJPROP_WIDTH, lines[i].width);
-        ObjectSetInteger(0, lines[i].name, OBJPROP_SELECTABLE, lines[i].selectable);
-        ObjectSetInteger(0, lines[i].name, OBJPROP_BACK, false);
-        ObjectSetString(0, lines[i].name, OBJPROP_TOOLTIP, lines[i].tooltip);
         
         // Control visibility via TIMEFRAMES property (hide/show without deleting)
         // کنترل نمایش از طریق TIMEFRAMES (مخفی/نمایش بدون حذف)

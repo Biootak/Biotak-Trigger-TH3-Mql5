@@ -12,22 +12,16 @@
 //+------------------------------------------------------------------+
 
 // ═══════════════════════════════════════════════════════════════
-// LOG LEVELS
-// سطوح لاگ
+// LOG LEVELS - Use LogLevels.mqh definitions (prevent duplicate enum)
+// سطوح لاگ - از تعریف LogLevels.mqh استفاده می‌شود
 // ═══════════════════════════════════════════════════════════════
-enum ENUM_LOG_LEVEL {
-    LOG_LEVEL_ERROR = 0,        // فقط خطاها
-    LOG_LEVEL_WARNING = 1,      // خطاها + هشدارها
-    LOG_LEVEL_INFO = 2,         // خطاها + هشدارها + اطلاعات
-    LOG_LEVEL_DEBUG = 3,        // همه + دیباگ
-    LOG_LEVEL_DIAGNOSTIC = 4    // همه + تشخیصی (خیلی جزئی)
-};
+// ENUM_LOG_LEVEL is defined in LogLevels.mqh (includes LOG_LEVEL_DIAGNOSTIC)
 
 // ═══════════════════════════════════════════════════════════════
-// GLOBAL CONFIGURATION
+// GLOBAL CONFIGURATION (Enhanced — extends LogLevels.mqh)
 // تنظیمات سراسری
 // ═══════════════════════════════════════════════════════════════
-static ENUM_LOG_LEVEL g_currentLogLevel = LOG_LEVEL_INFO;
+// g_currentLogLevel is already declared in LogLevels.mqh
 static bool g_logTimestamp = true;
 static bool g_logSymbol = true;
 static bool g_logTimeframe = true;
@@ -57,10 +51,10 @@ static LogStatistics g_logStats;
 // ═══════════════════════════════════════════════════════════════
 
 //+------------------------------------------------------------------+
-//| Set Log Level                                                    |
+//| Set Log Level (Enhanced - overrides LogLevels.mqh version)      |
 //| تنظیم سطح لاگ                                                    |
 //+------------------------------------------------------------------+
-void SetLogLevel(ENUM_LOG_LEVEL level)
+void SetLogLevelEnhanced(ENUM_LOG_LEVEL level)
 {
     g_currentLogLevel = level;
     
@@ -152,12 +146,13 @@ void LogMessage(ENUM_LOG_LEVEL level, string module, string message)
     // Context
     string context = "[" + module + "]";
     
+    // PERF FIX: Use cached Symbol/Period instead of API calls
     if(g_logSymbol) {
-        context += " [" + Symbol() + "]";
+        context += " [" + GetCachedSymbol() + "]";
     }
     
     if(g_logTimeframe) {
-        context += " [TF:" + EnumToString(Period()) + "]";
+        context += " [TF:" + EnumToString((ENUM_TIMEFRAMES)GetCachedPeriod()) + "]";
     }
     
     if(g_logTimestamp) {

@@ -37,17 +37,19 @@ double GetSymbolPoint() {
 double GetArrayMax(const double &array[]) {
     int size=ArraySize(array);
     if(size<=0) return EMPTY_VALUE;
-    double maxValue=array[0];
-    for(int i=1; i<size; i++) if(array[i]>maxValue) maxValue=array[i];
-    return maxValue;
+    // PERF FIX: Use MQL5 built-in ArrayMaximum (potentially faster/optimized)
+    int maxIdx = ArrayMaximum(array);
+    if(maxIdx < 0) return EMPTY_VALUE;
+    return array[maxIdx];
 }
 
 double GetArrayMin(const double &array[]) {
     int size=ArraySize(array);
     if(size<=0) return EMPTY_VALUE;
-    double minValue=array[0];
-    for(int i=1; i<size; i++) if(array[i]<minValue) minValue=array[i];
-    return minValue;
+    // PERF FIX: Use MQL5 built-in ArrayMinimum (potentially faster/optimized)
+    int minIdx = ArrayMinimum(array);
+    if(minIdx < 0) return EMPTY_VALUE;
+    return array[minIdx];
 }
 
 void CheckArraySizes() {

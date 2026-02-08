@@ -86,7 +86,8 @@ bool CreateUnifiedZone(const string zoneName,
     }
     
     // Check if prices are equal (no zone needed)
-    if(prevLevelPrice == currentLevelPrice) {
+    // PERF FIX: Use epsilon comparison instead of exact float ==
+    if(AreEqual(prevLevelPrice, currentLevelPrice, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CreateUnifiedZone: Prices are equal - no zone needed");
         #endif

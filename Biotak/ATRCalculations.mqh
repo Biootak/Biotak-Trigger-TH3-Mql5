@@ -322,11 +322,50 @@ void CalculateATRBatch(double &results[]) {
         return;
     }
     
-    // Pre-calculate True Range for all bars we need
+    // Pre-calculate True Range for all bars we need using batch CopyXxx
+    // PERF FIX: Use CopyHigh/CopyLow/CopyClose/CopyOpen batch calls instead of
+    // per-bar iHigh/iLow/iClose/iOpen (reduces ~1000 API calls to ~4)
     int maxPeriod = ATR_PERIOD_6;
-    double trValues[];
+    int tf = GetEffectiveTimeframe();
+    ENUM_TIMEFRAMES etf = (ENUM_TIMEFRAMES)tf;
     
-    // AUDIT FIX: Check array resize success
+    // Batch copy OHLC data in 4 calls instead of ~1000 individual calls
+    double highArr[], lowArr[], closeArr[], openArr[];
+    // Need maxPeriod + 1 bars: [0..maxPeriod-1] for current bars + one extra for prevClose
+    int copyCount = maxPeriod + 1;
+    
+    int copiedHigh  = CopyHigh(_Symbol, etf, 0, copyCount, highArr);
+    int copiedLow   = CopyLow(_Symbol, etf, 0, copyCount, lowArr);
+    int copiedClose = CopyClose(_Symbol, etf, 0, copyCount, closeArr);
+    int copiedOpen  = CopyOpen(_Symbol, etf, 0, copyCount, openArr);
+    
+    if(copiedHigh < copyCount || copiedLow < copyCount || 
+       copiedClose < copyCount || copiedOpen < copyCount) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatch: CopyXxx failed (H:", copiedHigh, " L:", copiedLow,
+              " C:", copiedClose, " O:", copiedOpen, " needed:", copyCount, "), falling back");
+        #endif
+        // Fallback to per-bar method
+        double trFallback[];
+        if(ArrayResize(trFallback, maxPeriod) != maxPeriod) return;
+        for(int i = 0; i < maxPeriod; i++) trFallback[i] = CalculateTrueRange(i);
+        int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
+                            ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
+        for(int p = 0; p < 6; p++) {
+            double sum_fb = 0.0; int count_fb = 0;
+            int limit_fb = (periods_fb[p] < maxPeriod) ? periods_fb[p] : maxPeriod;
+            for(int i = 0; i < limit_fb; i++) {
+                if(!IsZero(trFallback[i], EPSILON_PRICE)) { sum_fb += trFallback[i]; count_fb++; }
+            }
+            results[p] = SafeDivide(sum_fb, (double)count_fb, 0.0, EPSILON_GENERAL);
+        }
+        ArrayFree(trFallback);
+        return;
+    }
+    
+    // CopyXxx returns data in chronological order [oldest..newest]
+    // We need index 0 = newest bar. Convert: bar_i -> arr[copyCount - 1 - i]
+    double trValues[];
     if(ArrayResize(trValues, maxPeriod) != maxPeriod) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateATRBatch: Failed to resize TR array");
@@ -334,10 +373,43 @@ void CalculateATRBatch(double &results[]) {
         return;
     }
     
-    // Calculate TR for all bars
+    // Calculate TR from batch arrays (no more per-bar API calls)
     for(int i = 0; i < maxPeriod; i++) {
-        trValues[i] = CalculateTrueRange(i);
+        int arrIdx = copyCount - 1 - i;  // newest bar = last element
+        
+        double high = highArr[arrIdx];
+        double low  = lowArr[arrIdx];
+        double prevClose;
+        
+        // For prevClose, use previous bar's close (arrIdx-1 in chronological order)
+        if(arrIdx > 0) {
+            prevClose = closeArr[arrIdx - 1];
+        } else {
+            prevClose = openArr[arrIdx]; // First available bar, use its open
+        }
+        
+        // Validate prices
+        if(!IsValidPrice(high, EPSILON_PRICE) || !IsValidPrice(low, EPSILON_PRICE) || 
+           !IsValidPrice(prevClose, EPSILON_PRICE) || IsLess(high, low, EPSILON_PRICE)) {
+            trValues[i] = 0.0;
+            continue;
+        }
+        
+        // True Range = max(H-L, |H-prevC|, |L-prevC|)
+        double hl = high - low;
+        double hc = MathAbs(high - prevClose);
+        double lc = MathAbs(low - prevClose);
+        double tr = hl;
+        if(hc > tr) tr = hc;
+        if(lc > tr) tr = lc;
+        trValues[i] = tr;
     }
+    
+    // Free batch arrays
+    ArrayFree(highArr);
+    ArrayFree(lowArr);
+    ArrayFree(closeArr);
+    ArrayFree(openArr);
     
     // Calculate ATR for each period using pre-computed TR values
     int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
@@ -491,7 +563,6 @@ double CalculateWeightedATR() {
     static datetime s_lastATRLog = 0;
     if(currentTime - s_lastATRLog > 300) {  // Log every 5 minutes
         Print("========== WEIGHTED ATR CALCULATION ==========");
-        #ifdef ENABLE_DEBUG_LOGS
         Print("ATR₅: ", DoubleToString(atrValues[0], Digits));
         Print("ATR₁₀: ", DoubleToString(atrValues[1], Digits));
         Print("ATR₂₁: ", DoubleToString(atrValues[2], Digits));
@@ -501,7 +572,6 @@ double CalculateWeightedATR() {
         Print("Weighted ATR: ", DoubleToString(result, Digits));
         Print("Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
         Print("==============================================");
-        #endif
         s_lastATRLog = TimeCurrent();
     }
     #endif

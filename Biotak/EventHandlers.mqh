@@ -42,11 +42,6 @@ int OnInitHandler() {
             #endif
             
             GlobalVariableSet(gvar_name, 0.0);
-            if(!GlobalVariableTemp(gvar_name)) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ OnInit: GlobalVariableTemp() failed for ", gvar_name);
-                #endif
-            }
             shouldBeHidden = false;
         }
     }
@@ -79,11 +74,6 @@ int OnInitHandler() {
             GlobalVariableSet(triggerGvarName, inpShowTrigger ? 1.0 : 0.0);
             g_triggerLevelsEnabled = inpShowTrigger;
         }
-        if(!GlobalVariableTemp(triggerGvarName)) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ OnInit: GlobalVariableTemp() failed for ", triggerGvarName);
-            #endif
-        }
     } else {
         // First time - use input parameter
         g_triggerLevelsEnabled = inpShowTrigger;
@@ -105,11 +95,6 @@ int OnInitHandler() {
             #endif
             GlobalVariableSet(linesGvarName, inpShowLines ? 1.0 : 0.0);
             g_linesVisible = inpShowLines;
-        }
-        if(!GlobalVariableTemp(linesGvarName)) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ OnInit: GlobalVariableTemp() failed for ", linesGvarName);
-            #endif
         }
     } else {
         // First time - use input parameter
@@ -178,19 +163,24 @@ int OnInitHandler() {
     // ═══════════════════════════════════════════════════════════════════
     
     // Restore keyboard override flag
-    g_customPriceKeyboardOverride = GlobalVariableCheck(overrideFlagName) ? (bool)GlobalVariableGet(overrideFlagName) : false;
+    {
+        double val = GlobalVariableGet(overrideFlagName);
+        g_customPriceKeyboardOverride = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? (bool)val : false;
+    }
     
     // Get saved price from GlobalVariable
-    double savedPrice = GlobalVariableCheck(gvarName) ? GlobalVariableGet(gvarName) : 0.0;
+    double savedPrice;
+    {
+        double val = GlobalVariableGet(gvarName);
+        savedPrice = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? val : 0.0;
+    }
     
     // Debug logging (only in DEBUG_BUILD - zero overhead in production)
     #ifdef ENABLE_DEBUG_LOGS
     Print("=== Custom Price Debug (OnInit) ===");
     Print("inpCustomTHStartPrice: ", inpCustomTHStartPrice);
     Print("savedPrice: ", savedPrice);
-    #ifdef ENABLE_DEBUG_LOGS
     Print("override: ", g_customPriceKeyboardOverride);
-    #endif
     #endif
     
     // Priority logic - SIMPLIFIED
@@ -211,8 +201,6 @@ int OnInitHandler() {
         // Save to GlobalVariables
         GlobalVariableSet(gvarName, g_customTHStartPrice);
         GlobalVariableSet(overrideFlagName, 0.0);
-        GlobalVariableTemp(gvarName);
-        GlobalVariableTemp(overrideFlagName);
         
         DEBUG_PRINTF("OnInit: Using custom price from settings: ", DoubleToString(g_customTHStartPrice, digits));
         CreateCustomPriceLine(g_customTHStartPrice, digits);
@@ -233,9 +221,9 @@ int OnInitHandler() {
         g_thStartPointType = inpTHStartPointType;
         g_customPriceKeyboardOverride = false;
         
-        // Clear GlobalVariables
-        if(GlobalVariableCheck(gvarName)) GlobalVariableDel(gvarName);
-        if(GlobalVariableCheck(overrideFlagName)) GlobalVariableDel(overrideFlagName);
+        // Clear GlobalVariables (Del is safe even if not found)
+        GlobalVariableDel(gvarName);
+        GlobalVariableDel(overrideFlagName);
         
         DEBUG_PRINT("OnInit: Using default mode (no custom price)");
     }
@@ -247,71 +235,85 @@ int OnInitHandler() {
 
     // Restore timeframe lock state (persist across timeframe changes)
     // PERFORMANCE: Use cached chartIdStr for all GlobalVariable operations
+    // PERF FIX: Single GlobalVariableGet + GetLastError instead of Check+Get
     string lockFlagName = "Biotak_LockTF_" + chartIdStr;
-    if(GlobalVariableCheck(lockFlagName)) {
-        g_timeframeLocked = (bool)GlobalVariableGet(lockFlagName);
-        GlobalVariableTemp(lockFlagName); // Ignore failure - not critical
+    {
+        double val = GlobalVariableGet(lockFlagName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            g_timeframeLocked = (bool)val;
+        }
     }
     string lockPeriodName = "Biotak_LockTFPeriod_" + chartIdStr;
-    if(GlobalVariableCheck(lockPeriodName)) {
-        g_lockedPeriod = (int)GlobalVariableGet(lockPeriodName);
-        GlobalVariableTemp(lockPeriodName); // Ignore failure - not critical
+    {
+        double val = GlobalVariableGet(lockPeriodName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            g_lockedPeriod = (int)val;
+        }
     }
     
     // Restore step mode override state (persist across timeframe changes)
     string stepModeGvarName = "Biotak_StepMode_" + chartIdStr;
-    if(GlobalVariableCheck(stepModeGvarName)) {
-        g_stepModeOverride = (int)GlobalVariableGet(stepModeGvarName);
-        GlobalVariableTemp(stepModeGvarName); // Ignore failure - not critical
+    {
+        double val = GlobalVariableGet(stepModeGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            g_stepModeOverride = (int)val;
+        }
     }
     
     // Restore Factor value override state (persist across timeframe changes)
     // بازیابی مقدار فاکتور (پایدار در تغییر تایم‌فریم)
     string factorGvarName = "Biotak_Factor_" + chartIdStr;
-    if(GlobalVariableCheck(factorGvarName)) {
-        g_factorValueOverride = GlobalVariableGet(factorGvarName);
-        GlobalVariableTemp(factorGvarName); // Ignore failure - not critical
-    } else {
-        // No saved override - reset to 0 (use settings)
-        g_factorValueOverride = 0.0;
+    {
+        double val = GlobalVariableGet(factorGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            g_factorValueOverride = val;
+        } else {
+            // No saved override - reset to 0 (use settings)
+            g_factorValueOverride = 0.0;
+        }
     }
     
     // Restore calculation basis override state (persist across timeframe changes)
     // بازیابی وضعیت مبنای محاسبات (پایدار در تغییر تایم‌فریم)
     string basisGvarName = "Biotak_CalcBasis_" + chartIdStr;
-    if(GlobalVariableCheck(basisGvarName)) {
-        g_calculationBasisOverride = (int)GlobalVariableGet(basisGvarName);
-        GlobalVariableTemp(basisGvarName); // Ignore failure - not critical
+    {
+        double val = GlobalVariableGet(basisGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            g_calculationBasisOverride = (int)val;
+        }
     }
     
     // Restore TH3 frequency override state (persist across timeframe changes)
     // بازیابی وضعیت فرکانس TH3 (پایدار در تغییر تایم‌فریم)
     string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-    if(GlobalVariableCheck(freqGvarName)) {
+    {
         double restoredFreq = GlobalVariableGet(freqGvarName);
-        // Validate restored frequency (must be positive and reasonable)
-        if(restoredFreq > 0 && restoredFreq <= 100.0) {
-            g_th3FrequencyOverride = restoredFreq;
-        } else {
-            // Invalid frequency - reset to default
-            g_th3FrequencyOverride = 0;
-            GlobalVariableDel(freqGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            // Validate restored frequency (must be positive and reasonable)
+            if(restoredFreq > 0 && restoredFreq <= 100.0) {
+                g_th3FrequencyOverride = restoredFreq;
+            } else {
+                // Invalid frequency - reset to default
+                g_th3FrequencyOverride = 0;
+                GlobalVariableDel(freqGvarName);
+            }
         }
-        GlobalVariableTemp(freqGvarName);
     }
     
     string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
-    if(GlobalVariableCheck(indexGvarName)) {
-        int restoredIndex = (int)GlobalVariableGet(indexGvarName);
-        // Validate restored index (must be within array bounds)
-        if(restoredIndex >= 0 && restoredIndex < TH3_FREQUENCY_COUNT) {
-            g_th3FrequencyIndex = restoredIndex;
-        } else {
-            // Invalid index - reset to default frequency (28.125%)
-            g_th3FrequencyIndex = 16;
-            GlobalVariableDel(indexGvarName);
+    {
+        double val = GlobalVariableGet(indexGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            int restoredIndex = (int)val;
+            // Validate restored index (must be within array bounds)
+            if(restoredIndex >= 0 && restoredIndex < TH3_FREQUENCY_COUNT) {
+                g_th3FrequencyIndex = restoredIndex;
+            } else {
+                // Invalid index - reset to default frequency (28.125%)
+                g_th3FrequencyIndex = 16;
+                GlobalVariableDel(indexGvarName);
+            }
         }
-        GlobalVariableTemp(indexGvarName);
     }
     
     // Initialize ATR cache system
@@ -326,32 +328,30 @@ int OnInitHandler() {
     
     // Check if TH3 objects need update (after settings change)
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
-    if(GlobalVariableCheck(th3UpdateFlag) && GlobalVariableGet(th3UpdateFlag) > 0)
     {
-        // Update all existing TH3 objects with new settings
-        UpdateAllTH3Objects();
-        
-        // Clear the flag
-        GlobalVariableDel(th3UpdateFlag);
-        
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("🔄 Updated all TH3 objects with new settings");
-        #endif
+        double val = GlobalVariableGet(th3UpdateFlag);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND && val > 0)
+        {
+            // Update all existing TH3 objects with new settings
+            UpdateAllTH3Objects();
+            
+            // Clear the flag
+            GlobalVariableDel(th3UpdateFlag);
+            
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("🔄 Updated all TH3 objects with new settings");
+            #endif
+        }
     }
     
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ AUDIT COMPLETE: All critical memory leaks fixed");
     Print("⚡ OPTIMIZED: API calls cached (Symbol, Digits, Point)");
     Print("🧹 MEMORY: BasePriceManager cleanup added");
-    #ifdef ENABLE_DEBUG_LOGS
     Print("🔧 BUILD: Debug/Production modes with compile-time optimization");
-    #endif
-    // Print("📊 MONITORING: PerformanceMonitor.mqh added for profiling"); // Removed
-    #ifdef ENABLE_DEBUG_LOGS
     Print("🔧 FEATURES: Multiple step modes (TH, SS/LS, M, TP, Combo)");
-    Print("💾 PERSISTENT: GlobalVariableTemp for settings across restarts");
+    Print("💾 PERSISTENT: Settings saved to GlobalVariables (survive terminal restart)");
     Print("To enable 'Chart Shift': Right-click chart > Chart Shift (or F11)");
-    #endif
     #endif
     
     // ========================================
@@ -481,9 +481,7 @@ void HideAllTHObjects()
     datetime currentTime = TimeGMT();
     // Throttle logging to once per 5 seconds
     if(currentTime - s_lastHideLog > 5) {
-        #ifdef ENABLE_DEBUG_LOGS
         Print("🔒 HideAllTHObjects: Hidden ", hiddenCount, " objects (levels + labels + custom price)");
-        #endif
         s_lastHideLog = currentTime;
     }
     #endif
@@ -508,12 +506,9 @@ void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = 
         string symbolName = Symbol();
         string gvarName = "Biotak_CustomPrice_" + symbolName;
         string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
-        if(GlobalVariableCheck(gvarName)) {
-            GlobalVariableDel(gvarName);
-        }
-        if(GlobalVariableCheck(overrideFlagName)) {
-            GlobalVariableDel(overrideFlagName);
-        }
+        // PERF FIX: GlobalVariableDel safely returns false if not found
+        GlobalVariableDel(gvarName);
+        GlobalVariableDel(overrideFlagName);
         g_customTHStartPrice = 0.0;
         g_thStartPointType = inpTHStartPointType;
         g_customPriceKeyboardOverride = false; // Reset keyboard override flag
@@ -596,22 +591,17 @@ void OnDeinitHandler(const int reason) {
         
         // Reset Custom Price override
         string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
-        if(GlobalVariableCheck(overrideFlagName)) {
-            GlobalVariableSet(overrideFlagName, 0.0);
-        }
+        // PERF FIX: GlobalVariableSet creates the variable if not found - no check needed
+        GlobalVariableSet(overrideFlagName, 0.0);
         
         // Reset Factor override (keyboard +/- keys)
         string factorGvarName = "Biotak_Factor_" + chartIdStrLocal;
-        if(GlobalVariableCheck(factorGvarName)) {
-            GlobalVariableDel(factorGvarName);
-        }
+        GlobalVariableDel(factorGvarName);
         g_factorValueOverride = 0.0;  // Clear in-memory override
         
         // Reset Lines visibility override (keyboard L key)
         string linesGvarName = "Biotak_LinesVisible_" + chartIdStrLocal;
-        if(GlobalVariableCheck(linesGvarName)) {
-            GlobalVariableDel(linesGvarName);
-        }
+        GlobalVariableDel(linesGvarName);
         // Note: g_linesVisible will be reset to inpShowLines in OnInit
         
         // Set flag to update TH3 objects in OnInit
@@ -1417,7 +1407,7 @@ void RedrawAllObjects(bool force_redraw=false)
     //   1. force_redraw is true
     //   2. custom price line is active (for live dragging)
     //   3. base price just changed (CRITICAL for timely updates)
-    if(!force_redraw && !customPriceLineExists && !basePriceChanged && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
+    if(!force_redraw && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
     g_lastCalculation = currentTime;
     
     // Define objectPrefix early for use in cleanup
@@ -1518,7 +1508,9 @@ void RedrawAllObjects(bool force_redraw=false)
         static datetime s_lastHiddenCheckTime = 0;
         if(currentTime - s_lastHiddenCheckTime >= 2) {
             string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-            s_isHiddenCached = (GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name));
+            // PERF FIX: Single Get + GetLastError instead of Check+Get
+            double val = GlobalVariableGet(gvar_name);
+            s_isHiddenCached = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND && (bool)val);
             s_lastHiddenCheckTime = currentTime;
         }
         if(s_isHiddenCached) {
@@ -1552,15 +1544,13 @@ void RedrawAllObjects(bool force_redraw=false)
             
             // Save override flag to GlobalVariable for persistence
             GlobalVariableSet(overrideFlagName, 1.0);
-            GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
             
             // Update custom price
             g_customTHStartPrice = currentLinePrice;
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             
-            // Save to GlobalVariable with temp (persistent)
+            // Save to GlobalVariable for persistence
             GlobalVariableSet(gvarName, currentLinePrice);
-            GlobalVariableTemp(gvarName); // Ignore failure - not critical
             
             // Update tooltip to show it's confirmed
             ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
@@ -1580,11 +1570,9 @@ void RedrawAllObjects(bool force_redraw=false)
             
             // Save override flag to GlobalVariable for persistence
             GlobalVariableSet(overrideFlagName, 1.0);
-            GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
             
-            // Save to GlobalVariable with temp (persistent)
+            // Save to GlobalVariable for persistence
             GlobalVariableSet(gvarName, currentLinePrice);
-            GlobalVariableTemp(gvarName); // Ignore failure - not critical
             
             // Update tooltip to show current price during drag
             ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
@@ -1642,7 +1630,6 @@ void RedrawAllObjects(bool force_redraw=false)
                 
                 // Save to GlobalVariable for persistence
                 GlobalVariableSet(gvarName, g_customTHStartPrice);
-                GlobalVariableTemp(gvarName); // Ignore failure - not critical
                 
                 // Update or create the custom price horizontal line
                 if(!lineExists) {
@@ -1749,13 +1736,15 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     if(rates_total > 0)
     {
         // Only redraw on new bar, or if tick throttle expired
+        // EXCEPTION: Always redraw if levels need updating (keyboard/settings change)
         // This reduces CPU from ~100% to <5% on fast-moving markets
-        if(tickThrottled && !isNewBar) {
+        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw) {
             return rates_total;
         }
         s_lastTickMs = nowMs;
         
-        RedrawAllObjects();
+        // Force redraw when levels need updating (settings change / keyboard)
+        RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
         
         // Track bar changes for object count monitoring
         if(currentBars > s_lastBars || s_lastBars == 0) {
@@ -1898,7 +1887,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 Print("⚠️ F key: Failed to set GlobalVariable, Error: ", GetLastError());
                 #endif
             }
-            GlobalVariableTemp(gvar_name); // Ignore failure - not critical
             
             // PERFORMANCE: Immediately refresh the cached hidden state
             RefreshIsHiddenCache();
@@ -2003,7 +1991,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // PERFORMANCE: Use cached ChartID string
             string gvar_name = "Biotak_LinesVisible_" + GetCachedChartIdStr();
             GlobalVariableSet(gvar_name, g_linesVisible ? 1.0 : 0.0);
-            GlobalVariableTemp(gvar_name);
             
             // CRITICAL: Update existing line objects immediately (fast path)
             // بروزرسانی فوری اشیاء موجود (مسیر سریع)
@@ -2057,7 +2044,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // Save override flag to GlobalVariable for persistence across timeframe changes
             string overrideFlagName = "Biotak_CustomPriceOverride_" + Symbol();
             GlobalVariableSet(overrideFlagName, 1.0);
-            GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
             
             #ifdef ENABLE_DEBUG_LOGS
             Print("Press anywhere on the chart to set custom TH start price");
@@ -2077,7 +2063,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // Save to GlobalVariable for persistence
             string gvarName = "Biotak_CustomPrice_" + Symbol();
             GlobalVariableSet(gvarName, currentPrice);
-            GlobalVariableTemp(gvarName); // Ignore failure - not critical
             
             if(!ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, currentPrice)) {
                 #ifdef ENABLE_DEBUG_LOGS
@@ -2121,7 +2106,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 
                 // Clear override flag from GlobalVariable
                 GlobalVariableSet(overrideFlagName, 0.0);
-                GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
                 
                 g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
@@ -2147,7 +2131,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // PERFORMANCE: Use cached ChartID string
             string triggerGvarName = "Biotak_TriggerLevels_" + GetCachedChartIdStr();
             GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled);
-            GlobalVariableTemp(triggerGvarName); // Ignore failure - not critical
             
             if(g_triggerLevelsEnabled) {
                 #ifdef ENABLE_DEBUG_LOGS
@@ -2212,7 +2195,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // PERFORMANCE: Use cached ChartID string
             string stepModeGvarName = "Biotak_StepMode_" + GetCachedChartIdStr();
             GlobalVariableSet(stepModeGvarName, g_stepModeOverride);
-            GlobalVariableTemp(stepModeGvarName); // Ignore failure - not critical
             
             // Update step mode label on chart
             UpdateStepModeLabel();
@@ -2269,7 +2251,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                     Print("WARNING: Failed to persist Factor value to GlobalVariable");
                     #endif
                 }
-                GlobalVariableTemp(factorGvarName);
                 
                 // Show label on chart (auto-hide)
                 UpdateFactorLabel(newFactor);
@@ -2327,7 +2308,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                     Print("WARNING: Failed to persist Factor value to GlobalVariable");
                     #endif
                 }
-                GlobalVariableTemp(factorGvarName);
                 
                 // Show label on chart (auto-hide)
                 UpdateFactorLabel(newFactor);
@@ -2357,7 +2337,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // PERFORMANCE: Use cached ChartID string
             string basisGvarName = "Biotak_CalcBasis_" + GetCachedChartIdStr();
             GlobalVariableSet(basisGvarName, g_calculationBasisOverride);
-            GlobalVariableTemp(basisGvarName); // Ignore failure - not critical
             
             // Invalidate ATR cache when switching to ATR basis
             if(newBasis == CALC_BASIS_ATR) {
@@ -2538,7 +2517,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             if(inpCustomTHStartPrice > 0.0) {
                 // Restore custom price line from input parameter
                 GlobalVariableSet("Biotak_CustomPrice_" + symbolName, inpCustomTHStartPrice);
-                GlobalVariableTemp("Biotak_CustomPrice_" + symbolName);
                 CreateCustomPriceLine(inpCustomTHStartPrice, Digits);
             } else {
                 // No custom price in settings - clear it
@@ -2597,10 +2575,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             string lockChartIdStr = GetCachedChartIdStr();
             string lockFlagName = "Biotak_LockTF_" + lockChartIdStr;
             GlobalVariableSet(lockFlagName, g_timeframeLocked);
-            GlobalVariableTemp(lockFlagName); // Ignore failure - not critical
             string lockPeriodName = "Biotak_LockTFPeriod_" + lockChartIdStr;
             GlobalVariableSet(lockPeriodName, g_lockedPeriod);
-            GlobalVariableTemp(lockPeriodName); // Ignore failure - not critical
             
             // Trigger full redraw with new lock state
             g_forceClearOnNextDraw = true;
@@ -2707,15 +2683,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 // Set TH start point type to custom price
                 g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                 
-                // IMPORTANT: Save to GlobalVariable with temp (persistent)
+                // IMPORTANT: Save to GlobalVariable for persistence
                 string symbolName = Symbol();
                 string gvarName = "Biotak_CustomPrice_" + symbolName;
                 string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
                 GlobalVariableSet(gvarName, selectedPrice);
-                GlobalVariableTemp(gvarName); // Ignore failure - not critical
                 // Save override flag
                 GlobalVariableSet(overrideFlagName, 1.0);
-                GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
                 
                 // Keep the horizontal line for future adjustments
                 // No need to delete vertical line as it's not created anymore
@@ -2760,15 +2734,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // Set TH start point type to custom price
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             
-            // IMPORTANT: Save to GlobalVariable with temp (persistent)
+            // IMPORTANT: Save to GlobalVariable for persistence
             string symbolName = Symbol();
             string gvarName = "Biotak_CustomPrice_" + symbolName;
             string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
             GlobalVariableSet(gvarName, selectedPrice);
-            GlobalVariableTemp(gvarName); // Ignore failure - not critical
             // Save override flag
             GlobalVariableSet(overrideFlagName, 1.0);
-            GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
             
             // Keep the horizontal line for future adjustments
             // No need to delete vertical line as it's not created anymore
@@ -2830,15 +2802,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
         g_customPriceKeyboardOverride = true; // User dragged line - override input parameter
         
-        // Save to GlobalVariable with temp IMMEDIATELY for live preview
+        // Save to GlobalVariable IMMEDIATELY for live preview
         string symbolName = Symbol();
         string gvarName = "Biotak_CustomPrice_" + symbolName;
         string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
         GlobalVariableSet(gvarName, draggedPrice);
-        GlobalVariableTemp(gvarName); // Ignore failure - not critical
         // Save override flag
         GlobalVariableSet(overrideFlagName, 1.0);
-        GlobalVariableTemp(overrideFlagName); // Ignore failure - not critical
         
         // If we're still in the initial custom price selection mode
         if (g_waitingForCustomPriceClick) {

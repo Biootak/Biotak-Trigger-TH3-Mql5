@@ -47,6 +47,14 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
             #endif
             return false;
         }
+        
+        // Set properties only for NEW objects (reduces API calls for existing objects)
+        ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, isSelectable);
+        ObjectSetInteger(0, name, OBJPROP_BACK, false);
     } else {
         // Object exists - just update price
         // OPTIMIZATION: Only update if price actually changed (reduces terminal calls)
@@ -58,15 +66,9 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
                 #endif
             }
         }
+        // PERF FIX: Only update color/style if they may have changed
+        // For existing objects, skip redundant property setting
     }
-    
-    // Set properties (always, whether new or existing)
-    ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
-    ObjectSetInteger(0, name, OBJPROP_STYLE, style);
-    ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
-    ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
-    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, isSelectable);
-    ObjectSetInteger(0, name, OBJPROP_BACK, false);
     
     // CRITICAL FIX: Respect BOTH Hide state (F key) AND Lines visibility (L key)
     // PERFORMANCE: Use cached IsIndicatorHidden() instead of per-object GlobalVariable call

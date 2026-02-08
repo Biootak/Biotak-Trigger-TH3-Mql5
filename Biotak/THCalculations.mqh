@@ -84,9 +84,7 @@ double CalculateTH(const double price, const int digits, const double percentage
         static int s_cacheHits = 0;
         s_cacheHits++;
         if(s_cacheHits % 100 == 0) {
-            #ifdef ENABLE_DEBUG_LOGS
             Print("✅ CalculateTH: Cache hit #", s_cacheHits);
-            #endif
         }
         #endif
         return s_lastResult;
@@ -265,7 +263,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     // CRITICAL FIX #2: Validate range (prevent precision loss)
     // ═══════════════════════════════════════════════════════════════
     double range = highPrice - lowPrice;
-    double minRange = Point * 10; // At least 10 pips
+    double minRange = GetCachedPoint() * 10; // At least 10 pips
     if(range < minRange) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits), 
@@ -358,7 +356,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         #endif
         return 0;
     }
-    if(stepSize < Point * 0.1) {
+    if(stepSize < GetCachedPoint() * 0.1) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
         #endif

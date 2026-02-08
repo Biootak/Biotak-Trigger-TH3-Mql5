@@ -121,70 +121,94 @@ string GetCachedChartIdStr() {
 //+------------------------------------------------------------------+
 //| GOLD FIX #13: Function Call Caching System                       |
 //| Cache frequently called functions to reduce CPU overhead         |
+//| PERF FIX: Hash-based lookup instead of linear O(n) scan         |
 //+------------------------------------------------------------------+
 
-// Cache structure for expensive function results
-struct FunctionCache {
+// Hash-based cache structure for O(1) average lookup
+#define FUNC_CACHE_BUCKETS 128  // Power of 2 for fast modulo
+
+struct FunctionCacheSlot {
     string key;
     double value;
     datetime lastUpdate;
     int ttl;  // Time to live in seconds
+    bool occupied;
 };
 
-static FunctionCache g_functionCache[];
-static int g_cacheSize = 0;
-static const int MAX_CACHE_SIZE = 100;
+static FunctionCacheSlot g_functionCache[FUNC_CACHE_BUCKETS];
+static bool g_functionCacheInitialized = false;
+
+// Simple string hash function (DJB2 variant)
+int HashString(const string str) {
+    int hash = 5381;
+    int len = StringLen(str);
+    for(int i = 0; i < len; i++) {
+        hash = ((hash << 5) + hash) + StringGetCharacter(str, i);
+    }
+    // Ensure positive and within bounds
+    if(hash < 0) hash = -hash;
+    return hash % FUNC_CACHE_BUCKETS;
+}
+
+void InitializeFunctionCache() {
+    if(g_functionCacheInitialized) return;
+    for(int i = 0; i < FUNC_CACHE_BUCKETS; i++) {
+        g_functionCache[i].key = "";
+        g_functionCache[i].value = 0.0;
+        g_functionCache[i].lastUpdate = 0;
+        g_functionCache[i].ttl = 0;
+        g_functionCache[i].occupied = false;
+    }
+    g_functionCacheInitialized = true;
+}
 
 //+------------------------------------------------------------------+
 //| Get cached function result or compute if expired                 |
-//| Note: Due to MQL4 limitations, pass function name as string      |
+//| PERF FIX: O(1) average via hash, O(n) worst case with probing   |
 //+------------------------------------------------------------------+
 double GetCachedResult(const string functionName, const string params, 
                        double computedValue, int ttl = 60) {
+    if(!g_functionCacheInitialized) InitializeFunctionCache();
+    
     string cacheKey = functionName + "_" + params;
     datetime currentTime = TimeCurrent();
+    int slot = HashString(cacheKey);
     
-    // Search cache
-    for(int i = 0; i < g_cacheSize; i++) {
-        if(g_functionCache[i].key == cacheKey) {
-            // Check if still valid
-            if(currentTime - g_functionCache[i].lastUpdate < g_functionCache[i].ttl) {
-                return g_functionCache[i].value;
+    // Linear probing with max 8 attempts
+    for(int probe = 0; probe < 8; probe++) {
+        int idx = (slot + probe) % FUNC_CACHE_BUCKETS;
+        
+        if(!g_functionCache[idx].occupied) {
+            // Empty slot - store new entry
+            g_functionCache[idx].key = cacheKey;
+            g_functionCache[idx].value = computedValue;
+            g_functionCache[idx].lastUpdate = currentTime;
+            g_functionCache[idx].ttl = ttl;
+            g_functionCache[idx].occupied = true;
+            return computedValue;
+        }
+        
+        if(g_functionCache[idx].key == cacheKey) {
+            // Found - check if still valid
+            if(currentTime - g_functionCache[idx].lastUpdate < g_functionCache[idx].ttl) {
+                return g_functionCache[idx].value;
             }
-            // Expired - update with new value
-            g_functionCache[i].value = computedValue;
-            g_functionCache[i].lastUpdate = currentTime;
-            return g_functionCache[i].value;
+            // Expired - update
+            g_functionCache[idx].value = computedValue;
+            g_functionCache[idx].lastUpdate = currentTime;
+            return computedValue;
         }
     }
     
-    // Not in cache - add new entry
-    if(g_cacheSize < MAX_CACHE_SIZE) {
-        ArrayResize(g_functionCache, g_cacheSize + 1);
-        g_functionCache[g_cacheSize].key = cacheKey;
-        g_functionCache[g_cacheSize].value = computedValue;
-        g_functionCache[g_cacheSize].lastUpdate = currentTime;
-        g_functionCache[g_cacheSize].ttl = ttl;
-        g_cacheSize++;
-        return g_functionCache[g_cacheSize - 1].value;
-    }
+    // All probed slots occupied - overwrite first probed slot (LRU-like)
+    int overwriteIdx = slot % FUNC_CACHE_BUCKETS;
+    g_functionCache[overwriteIdx].key = cacheKey;
+    g_functionCache[overwriteIdx].value = computedValue;
+    g_functionCache[overwriteIdx].lastUpdate = currentTime;
+    g_functionCache[overwriteIdx].ttl = ttl;
+    g_functionCache[overwriteIdx].occupied = true;
     
-    // Cache full - replace oldest
-    int oldestIndex = 0;
-    datetime oldestTime = g_functionCache[0].lastUpdate;
-    for(int i = 1; i < g_cacheSize; i++) {
-        if(g_functionCache[i].lastUpdate < oldestTime) {
-            oldestTime = g_functionCache[i].lastUpdate;
-            oldestIndex = i;
-        }
-    }
-    
-    g_functionCache[oldestIndex].key = cacheKey;
-    g_functionCache[oldestIndex].value = computedValue;
-    g_functionCache[oldestIndex].lastUpdate = currentTime;
-    g_functionCache[oldestIndex].ttl = ttl;
-    
-    return g_functionCache[oldestIndex].value;
+    return computedValue;
 }
 
 //+------------------------------------------------------------------+
@@ -205,10 +229,10 @@ string BuildTooltipOptimized(const string prefix, const double price,
     
     if(StringLen(suffix) > 0) {
         return StringFormat("%s: %s, Distance: %.1f pips%s", 
-                          prefix, DoubleToString(price, Digits), pips, suffix);
+                          prefix, DoubleToString(price, GetCachedDigits()), pips, suffix);
     }
     return StringFormat("%s: %s, Distance: %.1f pips", 
-                       prefix, DoubleToString(price, Digits), pips);
+                       prefix, DoubleToString(price, GetCachedDigits()), pips);
 }
 
 // Optimized object name generation
@@ -229,45 +253,67 @@ string BuildLabelText(const string timeframe, double value, const string unit = 
 //+------------------------------------------------------------------+
 //| GOLD FIX #15: ObjectFind Cache System                            |
 //| Cache ObjectFind results to avoid repeated MT4 API calls         |
-//| NOTE: Uses existing g_objectCache from ZoneConstants.mqh         |
+//| PERF FIX: Hash-based O(1) lookup instead of linear scan         |
 //+------------------------------------------------------------------+
 
-// Cache structure already defined in ZoneConstants.mqh:
-// static SObjectCacheEntry g_objectCache[];
-// static int g_objectCacheSize = 0;
+#define OBJ_CACHE_BUCKETS 512   // Power of 2 for fast modulo
 
-static const int MAX_OBJECT_CACHE = 500;
+struct ObjectCacheSlot {
+    string name;
+    bool exists;
+    datetime lastCheck;
+    bool occupied;
+};
+
+static ObjectCacheSlot g_objCacheHash[OBJ_CACHE_BUCKETS];
+static bool g_objCacheHashInitialized = false;
 static const int OBJECT_CACHE_TTL = 5;  // 5 seconds
 
+void InitializeObjectCacheHash() {
+    if(g_objCacheHashInitialized) return;
+    for(int i = 0; i < OBJ_CACHE_BUCKETS; i++) {
+        g_objCacheHash[i].name = "";
+        g_objCacheHash[i].exists = false;
+        g_objCacheHash[i].lastCheck = 0;
+        g_objCacheHash[i].occupied = false;
+    }
+    g_objCacheHashInitialized = true;
+}
+
 bool ObjectExistsCached(const string name) {
-    datetime currentTime = TimeCurrent();
+    if(!g_objCacheHashInitialized) InitializeObjectCacheHash();
     
-    // Search cache
-    for(int i = 0; i < g_objectCacheSize; i++) {
-        if(g_objectCache[i].name == name) {
-            // Check if still valid
-            if(currentTime - g_objectCache[i].lastCheck < OBJECT_CACHE_TTL) {
-                return g_objectCache[i].exists;
+    datetime currentTime = TimeCurrent();
+    int slot = HashString(name);
+    
+    // Linear probing with max 8 attempts
+    for(int probe = 0; probe < 8; probe++) {
+        int idx = (slot + probe) % OBJ_CACHE_BUCKETS;
+        
+        if(!g_objCacheHash[idx].occupied) {
+            // Empty slot - not in cache, check and store
+            bool exists = (ObjectFind(0, name) >= 0);
+            g_objCacheHash[idx].name = name;
+            g_objCacheHash[idx].exists = exists;
+            g_objCacheHash[idx].lastCheck = currentTime;
+            g_objCacheHash[idx].occupied = true;
+            return exists;
+        }
+        
+        if(g_objCacheHash[idx].name == name) {
+            // Found - check if still valid
+            if(currentTime - g_objCacheHash[idx].lastCheck < OBJECT_CACHE_TTL) {
+                return g_objCacheHash[idx].exists;
             }
             // Expired - recheck
-            g_objectCache[i].exists = (ObjectFind(0, name) >= 0);
-            g_objectCache[i].lastCheck = currentTime;
-            return g_objectCache[i].exists;
+            g_objCacheHash[idx].exists = (ObjectFind(0, name) >= 0);
+            g_objCacheHash[idx].lastCheck = currentTime;
+            return g_objCacheHash[idx].exists;
         }
     }
     
-    // Not in cache - add
-    bool exists = (ObjectFind(0, name) >= 0);
-    
-    if(g_objectCacheSize < MAX_OBJECT_CACHE) {
-        ArrayResize(g_objectCache, g_objectCacheSize + 1);
-        g_objectCache[g_objectCacheSize].name = name;
-        g_objectCache[g_objectCacheSize].exists = exists;
-        g_objectCache[g_objectCacheSize].lastCheck = currentTime;
-        g_objectCacheSize++;
-    }
-    
-    return exists;
+    // All probed slots occupied - just do direct lookup
+    return (ObjectFind(0, name) >= 0);
 }
 
 //+------------------------------------------------------------------+
@@ -317,6 +363,7 @@ struct BatchObjectOperation {
 
 static BatchObjectOperation g_batchQueue[];
 static int g_batchQueueSize = 0;
+static int g_batchQueueCapacity = 0;
 static const int MAX_BATCH_SIZE = 50;
 
 // Add operation to batch queue
@@ -326,7 +373,12 @@ void QueueObjectOperation(const string name, int operation, double price = 0,
         ExecuteBatchOperations();  // Flush if full
     }
     
-    ArrayResize(g_batchQueue, g_batchQueueSize + 1);
+    // PERF FIX: Pre-allocate with reserve instead of +1 each time
+    if(g_batchQueueSize >= g_batchQueueCapacity) {
+        g_batchQueueCapacity = MathMax(g_batchQueueCapacity * 2, 16);
+        if(g_batchQueueCapacity > MAX_BATCH_SIZE) g_batchQueueCapacity = MAX_BATCH_SIZE;
+        ArrayResize(g_batchQueue, g_batchQueueCapacity);
+    }
     g_batchQueue[g_batchQueueSize].name = name;
     g_batchQueue[g_batchQueueSize].operation = operation;
     g_batchQueue[g_batchQueueSize].price = price;
@@ -424,14 +476,31 @@ void ReleaseMemoryPool(int poolIndex) {
 //| Cleanup function (call from OnDeinit)                            |
 //+------------------------------------------------------------------+
 void CleanupPerformanceOptimizations() {
-    ArrayResize(g_functionCache, 0);
-    g_cacheSize = 0;
+    // Reset hash-based function cache
+    if(g_functionCacheInitialized) {
+        for(int i = 0; i < FUNC_CACHE_BUCKETS; i++) {
+            g_functionCache[i].key = "";
+            g_functionCache[i].occupied = false;
+        }
+    }
+    g_functionCacheInitialized = false;
     
+    // Reset hash-based object cache
+    if(g_objCacheHashInitialized) {
+        for(int i = 0; i < OBJ_CACHE_BUCKETS; i++) {
+            g_objCacheHash[i].name = "";
+            g_objCacheHash[i].occupied = false;
+        }
+    }
+    g_objCacheHashInitialized = false;
+    
+    // Legacy object cache from ZoneConstants.mqh
     ArrayResize(g_objectCache, 0);
     g_objectCacheSize = 0;
     
     ArrayResize(g_batchQueue, 0);
     g_batchQueueSize = 0;
+    g_batchQueueCapacity = 0;
     
     for(int i = 0; i < 10; i++) {
         ArrayResize(g_memoryPools[i].buffer, 0);

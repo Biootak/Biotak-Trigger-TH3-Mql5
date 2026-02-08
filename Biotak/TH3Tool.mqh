@@ -2004,9 +2004,9 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
                               + accelerationScore + strengthScore + confidencePenalty
                               + harmonicMeanScore + phiRatioScore;  // ← 2 فاکتور علمی جدید
             
-            // ذخیره نتیجه
+            // ذخیره نتیجه - PERF FIX: Reserve extra slots
             int size = ArraySize(results);
-            ArrayResize(results, size + 1);
+            ArrayResize(results, size + 1, 128);
             
             results[size].frequency = testFreq;
             results[size].frequencyIndex = freqIdx;
@@ -2241,8 +2241,6 @@ bool AutoSelectBestFrequency(string patternName)
     string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
     GlobalVariableSet(freqGvarName, bestFreq);
     GlobalVariableSet(indexGvarName, bestIndex);
-    GlobalVariableTemp(freqGvarName);
-    GlobalVariableTemp(indexGvarName);
     
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Frequency applied successfully");
@@ -2987,8 +2985,6 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                     string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
                     GlobalVariableSet(freqGvarName, g_th3FrequencyOverride);
                     GlobalVariableSet(indexGvarName, g_th3FrequencyIndex);
-                    GlobalVariableTemp(freqGvarName);
-                    GlobalVariableTemp(indexGvarName);
                     
                     #ifdef ENABLE_DEBUG_LOGS
                     Print("========================================");

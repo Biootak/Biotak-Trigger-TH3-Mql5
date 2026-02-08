@@ -86,31 +86,39 @@ static bool g_learningDataInitialized = false;
 
 //+------------------------------------------------------------------+
 //| GOLD FIX #2: Safe array append with circular buffer overflow     |
+//| PERF FIX: Use write index instead of O(n) array shift           |
 //+------------------------------------------------------------------+
+// Circular buffer head index (points to oldest entry)
+static int g_learningDataHead = 0;
+// Total entries ever written (for CSV row tracking)
+static int g_learningDataTotalWritten = 0;
+
 bool SafeAppendLearningData(const PatternLearningData &newData) {
     // Initialize if needed
     if(!g_learningDataInitialized) {
         ArrayResize(g_learningData, 0);
         g_learningDataCount = 0;
+        g_learningDataHead = 0;
+        g_learningDataTotalWritten = 0;
         g_learningDataInitialized = true;
     }
     
-    // CRITICAL: Check for overflow BEFORE resize
+    // PERF FIX: Use circular write instead of O(n) array shift
     if(g_learningDataCount >= MAX_LEARNING_DATA_SIZE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Learning data buffer full, implementing circular buffer");
+        Print("⚠️ Learning data buffer full, overwriting oldest entry at index ", g_learningDataHead);
         #endif
         
-        // Shift all elements left (remove oldest)
-        for(int i = 0; i < MAX_LEARNING_DATA_SIZE - 1; i++) {
-            g_learningData[i] = g_learningData[i + 1];
-        }
-        g_learningDataCount = MAX_LEARNING_DATA_SIZE - 1;
+        // Overwrite oldest entry directly (O(1) instead of O(n))
+        g_learningData[g_learningDataHead] = newData;
+        g_learningDataHead = (g_learningDataHead + 1) % MAX_LEARNING_DATA_SIZE;
+        g_learningDataTotalWritten++;
+        return true;
     }
     
-    // Safe resize with bounds check
+    // Safe resize with reserve to avoid +1 pattern
     int newSize = g_learningDataCount + 1;
-    if(ArrayResize(g_learningData, newSize) != newSize) {
+    if(ArrayResize(g_learningData, newSize, 256) < newSize) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ Failed to resize learning data array");
         #endif
@@ -120,6 +128,7 @@ bool SafeAppendLearningData(const PatternLearningData &newData) {
     // Append new data
     g_learningData[g_learningDataCount] = newData;
     g_learningDataCount++;
+    g_learningDataTotalWritten++;
     
     return true;
 }
@@ -602,8 +611,8 @@ LEARNING_ERROR_CODE LoadLearningDataFromCSV()
         data.actualErrorPercent = StringToDouble(FileReadString(handle));
         data.screenshotFilename = FileReadString(handle);
         
-        // افزودن به آرایه
-        ArrayResize(g_learningData, g_learningDataCount + 1);
+        // افزودن به آرایه - PERF FIX: Reserve extra slots
+        ArrayResize(g_learningData, g_learningDataCount + 1, 256);
         g_learningData[g_learningDataCount] = data;
         g_learningDataCount++;
     }
@@ -711,7 +720,9 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     data.timeframe = Period();
     
     // ویژگی‌های موج - Validate positive values
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    int cachedDig = GetCachedDigits();
+    double cachedPt = GetCachedPoint();
+    double pipSize = (cachedDig == 3 || cachedDig == 5) ? cachedPt * 10 : cachedPt;
     if(pipSize <= 0) pipSize = 0.0001; // Fallback
     
     data.XA_Pips = MathAbs(waves.XA_Distance) / pipSize;
@@ -774,9 +785,9 @@ LEARNING_ERROR_CODE SavePatternForLearning(
     data.screenshotFilename = patternFolder + "\\screenshot.gif";
     
     // ========================================
-    // افزودن به آرایه
+    // افزودن به آرایه - PERF FIX: Reserve extra
     // ========================================
-    ArrayResize(g_learningData, g_learningDataCount + 1);
+    ArrayResize(g_learningData, g_learningDataCount + 1, 256);
     g_learningData[g_learningDataCount] = data;
     g_currentPatternIndex = g_learningDataCount;
     g_learningDataCount++;

@@ -131,12 +131,18 @@ void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime)
     datetime blockTime = StructToTime(dt);
     
     // Generate blocks up to current time
+    // PERF FIX: Pre-calculate expected block count to avoid ArrayResize in loop
+    int estimatedBlocks = (int)((currentTime - blockTime) / (30 * 60)) + 2;
     ArrayResize(blocks, 0);
+    ArrayResize(blocks, estimatedBlocks);
+    int blockCount = 0;
     while(blockTime <= currentTime)
     {
-        int size = ArraySize(blocks);
-        ArrayResize(blocks, size + 1);
-        blocks[size] = blockTime;
+        if(blockCount >= ArraySize(blocks))
+            ArrayResize(blocks, blockCount + 1, 16);
+        blocks[blockCount] = blockTime;
+        blockCount++;
         blockTime += 30 * 60;
     }
+    ArrayResize(blocks, blockCount);  // Trim to actual size
 }
