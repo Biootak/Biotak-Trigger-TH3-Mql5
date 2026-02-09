@@ -11,6 +11,7 @@ input string S1 = "---------- DISPLAY ----------";
 input bool inpShowLines = true;
 input bool inpShowTHLevels = true;
 input bool inpShowTHLabels = true;
+input bool inpShowTHTargets = true;
 input bool inpShowPipDistanceLabels = true;
 input bool inpShowMidpointLine = true;
 input bool inpShowTimeframeInLabels = true;
@@ -18,7 +19,7 @@ input bool inpShowFractalTHs = false;
 input bool inpShowStandardTHs = false;
 input int inpMaxTHLevelsAbove = 100;
 input int inpMaxTHLevelsBelow = 100;
-input string inpFontName = "Arial Black";
+input string inpFontName = "JetBrains Mono Bold";
 input int inpFontSize = 8;
 
 input string S2 = "---------- CALCULATION ----------";

@@ -625,6 +625,21 @@ void OnDeinitHandler(const int reason) {
         ObjectsDeleteAll(0, inpObjectPrefix);
         ObjectsDeleteAll(0, "TH3_Structure_");
         
+        // Delete ATR and TH title labels from ALL timeframes
+        string objectPrefix = inpObjectPrefix + "_";
+        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
+        for(int p = 0; p < ArraySize(allPeriods); p++) {
+            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
+            ObjectDelete(0, tfPrefix + "ATR_Title");
+            ObjectDelete(0, tfPrefix + "TH_Title");
+            
+            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+            for(int i = 0; i < ArraySize(timeframes); i++) {
+                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
+                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
+            }
+        }
+        
         // Delete all zone objects from all modes
         ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
         ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
@@ -668,6 +683,53 @@ void OnDeinitHandler(const int reason) {
         // Delete TH levels but keep TH3 structures (user drawings should persist)
         ObjectsDeleteAll(0, inpObjectPrefix);
         
+        // Delete ATR and TH title labels from ALL timeframes
+        string objectPrefix = inpObjectPrefix + "_";
+        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
+        for(int p = 0; p < ArraySize(allPeriods); p++) {
+            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
+            ObjectDelete(0, tfPrefix + "ATR_Title");
+            ObjectDelete(0, tfPrefix + "TH_Title");
+            
+            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+            for(int i = 0; i < ArraySize(timeframes); i++) {
+                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
+                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
+            }
+        }
+        
+        // Delete all zone objects from all modes
+        ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
+    }
+    else if(reason == REASON_RECOMPILE)
+    {
+        // Recompile detected - clean up ALL labels from ALL timeframes
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("🔄 OnDeinit (REASON_RECOMPILE) - cleaning all ATR/TH labels from all timeframes");
+        #endif
+        
+        // Delete TH levels but keep TH3 structures (user drawings should persist)
+        ObjectsDeleteAll(0, inpObjectPrefix);
+        
+        // Delete ATR and TH title labels from ALL timeframes
+        string objectPrefix = inpObjectPrefix + "_";
+        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
+        for(int p = 0; p < ArraySize(allPeriods); p++) {
+            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
+            ObjectDelete(0, tfPrefix + "ATR_Title");
+            ObjectDelete(0, tfPrefix + "TH_Title");
+            
+            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+            for(int i = 0; i < ArraySize(timeframes); i++) {
+                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
+                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
+            }
+        }
+        
         // Delete all zone objects from all modes
         ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
         ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
@@ -684,6 +746,21 @@ void OnDeinitHandler(const int reason) {
         
         // Delete TH levels but keep TH3 structures (user drawings should persist)
         ObjectsDeleteAll(0, inpObjectPrefix);
+        
+        // Delete ATR and TH title labels from ALL timeframes (not just current)
+        string objectPrefix = inpObjectPrefix + "_";
+        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
+        for(int p = 0; p < ArraySize(allPeriods); p++) {
+            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
+            ObjectDelete(0, tfPrefix + "ATR_Title");
+            ObjectDelete(0, tfPrefix + "TH_Title");
+            
+            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+            for(int i = 0; i < ArraySize(timeframes); i++) {
+                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
+                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
+            }
+        }
         
         // Delete all zone objects from all modes
         ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
@@ -1584,6 +1661,10 @@ void RedrawAllObjects(bool force_redraw=false)
         }
         if(inpShowTHLabels && inpShowFractalTHs) DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
         if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        
+        // نمایش لیبل‌های ATR برای همه تایم‌فریم‌ها
+        DisplayATRLabels(objectPrefix);
+        
         if(inpShowTHLevels) g_redrawTHLevelsNeeded = true;
         g_calculatedOnce = true;
     }
@@ -1955,28 +2036,40 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             s_lastChartHeight = currentHeight;
             
             // Chart size changed - redraw labels only if they should be visible
-            if(!IsIndicatorHidden() && inpShowTHLabels && (inpShowFractalTHs || inpShowStandardTHs) && g_dailyClosePriceForTH > 0)
+            if(!IsIndicatorHidden() && g_dailyClosePriceForTH > 0)
             {
-                // Delete all existing TH labels
+                // Delete all existing TH and ATR labels
                 string objectPrefix = inpObjectPrefix + "_";
+                
+                // حذف عناوین
+                ObjectDelete(0, objectPrefix + "ATR_Title");
+                ObjectDelete(0, objectPrefix + "TH_Title");
+                
                 for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
                 {
                     string objName = ObjectName(0, i, 0, -1);
-                    if(StringFind(objName, objectPrefix + "TH_") >= 0)
+                    if(StringFind(objName, objectPrefix + "TH_") >= 0 || 
+                       StringFind(objName, objectPrefix + "ATR_") >= 0)
                     {
                         ObjectDelete(0, objName);
                     }
                 }
                 
-                // Redraw labels with current data
-                if(inpShowFractalTHs)
+                // Redraw TH labels with current data
+                if(inpShowTHLabels)
                 {
-                    DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
+                    if(inpShowFractalTHs)
+                    {
+                        DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
+                    }
+                    if(inpShowStandardTHs)
+                    {
+                        DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
+                    }
                 }
-                if(inpShowStandardTHs)
-                {
-                    DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
-                }
+                
+                // Redraw ATR labels (always shown independently)
+                DisplayATRLabels(objectPrefix);
                 
                 ThrottledChartRedraw();
             }
@@ -2414,11 +2507,15 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // کلید تغییر مبنای محاسبات (W) - تغییر بین TH و ATR
         if(lparam == 'W' || lparam == 'w')
         {
+            Print("=== KEY W PRESSED: Toggling calculation basis ===");
+            
             // Get current basis
             ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
+            Print("=== Current basis: ", currentBasis, " (0=TH, 1=ATR) ===");
             
             // Toggle between TH and ATR
             ENUM_CALCULATION_BASIS newBasis = (currentBasis == CALC_BASIS_TH) ? CALC_BASIS_ATR : CALC_BASIS_TH;
+            Print("=== New basis: ", newBasis, " (0=TH, 1=ATR) ===");
             
             // Set override
             g_calculationBasisOverride = (int)newBasis;
@@ -2430,6 +2527,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             
             // Invalidate ATR cache when switching to ATR basis
             if(newBasis == CALC_BASIS_ATR) {
+                Print("=== Invalidating ATR cache ===");
                 InvalidateATRCache();
             }
             
@@ -2438,13 +2536,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             
             // Also print to log
             if(newBasis == CALC_BASIS_TH) {
-                #ifdef ENABLE_DEBUG_LOGS
                 Print("📐 Calculation Basis: TH (Theoretical)");
-                #endif
             } else {
-                #ifdef ENABLE_DEBUG_LOGS
                 Print("📊 Calculation Basis: ATR (Actual)");
-                #endif
             }
             
             // Force redraw to apply the change
@@ -2452,6 +2546,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
             ThrottledChartRedraw();
+            
+            Print("=== Basis toggle complete ===");
         }
         
         // Handle TH3 Frequency Decrease (Key 3) - previous frequency

@@ -535,6 +535,329 @@ string GetBaseTimeframeName(const string fullName) {
     return fullName;
 }
 
+// نمایش لیبل ATR در بالای چارت (مثل لیبل‌های TH اما بدون SS-LS)
+bool CreateATRLabel(const double atrValue) {
+    Print("CreateATRLabel called with atrValue: ", atrValue);
+    
+    if (!inpShowTHLabels) {
+        Print("CreateATRLabel: inpShowTHLabels is false");
+        return true;
+    }
+    if (atrValue <= 0) {
+        Print("CreateATRLabel: atrValue <= 0");
+        return false;
+    }
+    
+    // محاسبه مقادیر
+    double atrPips = NormalizeDouble(atrValue / (Point * 10), 1);
+    double target3x = MathFloor(atrPips * 3.0);
+    double target5x = MathFloor(atrPips * 5.0);
+    double target15x = MathFloor(atrPips * 15.0);
+    
+    Print("CreateATRLabel: atrPips=", atrPips, " targets=", target3x, ",", target5x, ",", target15x);
+    
+    string mainObjName = "ATR_Label_Main";
+    string targetsObjName = "ATR_Label_Targets";
+    
+    // حذف لیبل تارگت‌ها اگر خاموش باشد
+    if(!inpShowTHTargets && ObjectFind(0, targetsObjName) >= 0) {
+        ObjectDelete(0, targetsObjName);
+    }
+    
+    if (ObjectFind(0, mainObjName) < 0) {
+        if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) {
+            Print("CreateATRLabel: Failed to create mainObjName");
+            return false;
+        }
+        Print("CreateATRLabel: Created mainObjName");
+    }
+    if (inpShowTHTargets && ObjectFind(0, targetsObjName) < 0) {
+        if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) {
+            Print("CreateATRLabel: Failed to create targetsObjName");
+            return false;
+        }
+        Print("CreateATRLabel: Created targetsObjName");
+    }
+    
+    // فرمت دو خطی:
+    // خط اول (بالا): تارگت‌ها 122 - 200 - 500
+    // خط دوم (پایین): ATR: 21
+    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+    string mainText = StringFormat("ATR: %.1f", atrPips);
+    
+    Print("CreateATRLabel: mainText='", mainText, "' targetsText='", targetsText, "'");
+    
+    if(inpShowTHTargets) {
+        ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, clrDodgerBlue);
+        SetLabelFont(targetsObjName);
+    }
+    ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
+    ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, clrDodgerBlue);
+    SetLabelFont(mainObjName);
+    
+    ENUM_BASE_CORNER corner = CORNER_LEFT_UPPER; // همیشه بالای چارت
+    ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
+    
+    if(inpShowTHTargets) {
+        ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_ANCHOR, anchor);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_HIDDEN, false);
+    }
+    ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
+    ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
+    ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
+    
+    int labelXDistance = 10;
+    int lineGap = 16;
+    int singleLineHeight = inpFontSize + lineGap;
+    int baseY = 25; // موقعیت در بالای چارت
+    
+    Print("CreateATRLabel: labelXDistance=", labelXDistance, " baseY=", baseY, " singleLineHeight=", singleLineHeight);
+    
+    // محاسبه عرض تقریبی برای مرکز کردن
+    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
+    int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+    
+    // مرکز کردن خط اول (تارگت‌ها) روی خط دوم (ATR)
+    int targetsOffset = (mainTextWidth - targetsTextWidth) / 2;
+    if(targetsOffset < 0) targetsOffset = 0;
+    
+    // تنظیم موقعیت - از بالا به پایین
+    if(inpShowTHTargets) {
+        ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY);
+        Print("CreateATRLabel: targetsObjName position X=", labelXDistance + targetsOffset, " Y=", baseY);
+    }
+    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance);
+    ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
+    Print("CreateATRLabel: mainObjName position X=", labelXDistance, " Y=", baseY + singleLineHeight);
+    
+    // احترام به حالت Hide (کلید F)
+    if(IsIndicatorHidden()) {
+        Print("CreateATRLabel: Indicator is hidden, setting OBJ_NO_PERIODS");
+        if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        Print("CreateATRLabel: Indicator is visible, setting OBJ_ALL_PERIODS");
+        if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
+    
+    Print("CreateATRLabel: Completed successfully");
+    return true;
+}
+
+// ساخت لیبل ATR (بدون SS-LS)
+bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
+    // ATR labels are always shown independently of TH labels
+    
+    // محاسبه مقادیر
+    double atrPips = NormalizeDouble(atrValuePoints / 10.0, 1);
+    double target3x = MathFloor(atrPips * 3.0);
+    double target5x = MathFloor(atrPips * 5.0);
+    double target15x = MathFloor(atrPips * 15.0);
+    
+    string mainObjName = objectPrefix + "ATR_" + timeframeName;
+    string targetsObjName = objectPrefix + "ATR_Targets_" + timeframeName;
+    
+    // حذف لیبل تارگت‌ها اگر خاموش باشد
+    if(!inpShowTHTargets && ObjectFind(0, targetsObjName) >= 0) {
+        ObjectDelete(0, targetsObjName);
+    }
+    
+    if (ObjectFind(0, mainObjName) < 0) {
+        if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    }
+    if (inpShowTHTargets && ObjectFind(0, targetsObjName) < 0) {
+        if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    }
+    
+    // فرمت دو خطی (بدون SS-LS):
+    // خط اول (بالا): M1: 21
+    // خط دوم (پایین): تارگت‌ها 122 - 200 - 500
+    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+    string mainText = StringFormat("%s: %.1f", timeframeName, atrPips);
+    
+    ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
+    ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
+    SetLabelFont(mainObjName);
+    
+    if(inpShowTHTargets) {
+        ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
+        SetLabelFont(targetsObjName);
+    }
+    
+    ENUM_BASE_CORNER corner = CORNER_LEFT_UPPER;
+    ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
+    
+    ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
+    ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
+    ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
+    
+    if(inpShowTHTargets) {
+        ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_ANCHOR, anchor);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_HIDDEN, false);
+    }
+    
+    int labelXDistance = xPos;
+    int lineGap = verticalSpacing; // استفاده از پارامتر verticalSpacing
+    int singleLineHeight = inpFontSize + lineGap;
+    int baseY = yPos;
+    
+    // محاسبه عرض تقریبی برای مرکز کردن
+    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
+    int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+    
+    // مرکز کردن خط دوم (تارگت‌ها) روی خط اول (نام)
+    int targetsOffset = (mainTextWidth - targetsTextWidth) / 2;
+    if(targetsOffset < 0) targetsOffset = 0;
+    
+    // تنظیم موقعیت - نام بالا، تارگت‌ها پایین
+    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance);
+    ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY);
+    
+    if(inpShowTHTargets) {
+        ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
+    }
+    
+    // احترام به حالت Hide (کلید F)
+    if(IsIndicatorHidden()) {
+        if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
+    
+    return true;
+}
+
+// نمایش لیبل‌های ATR برای همه تایم‌فریم‌ها در بالای صفحه
+void DisplayATRLabels(const string objectPrefix) {
+    // ATR labels are always shown independently of TH labels
+    
+    ATR_PRINT("=== DisplayATRLabels: Starting ===");
+    
+    // اضافه کردن تایم‌فریم فعلی به prefix برای جلوگیری از تداخل
+    string currentTFStr = IntegerToString(Period());
+    string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
+    
+    // حذف فقط لیبل‌های تایم‌فریم فعلی
+    string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+    ObjectDelete(0, uniquePrefix + "ATR_Title");
+    for(int i = 0; i < ArraySize(allTimeframes); i++) {
+        ObjectDelete(0, uniquePrefix + "ATR_" + allTimeframes[i]);
+        ObjectDelete(0, uniquePrefix + "ATR_Targets_" + allTimeframes[i]);
+    }
+    
+    // تایم‌فریم‌های استاندارد MT4 (بدون M30)
+    string timeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
+    ENUM_TIMEFRAMES periods[] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1};
+    // رنگ‌های مطابق با لیبل‌های TH در پایین
+    color colors[] = {
+        clrBlack,    // M1 - سیاه
+        clrBlack,    // M5 - سیاه
+        clrBlack,    // M15 - سیاه
+        clrBlue,     // H1 - آبی
+        clrRed,      // H4 - قرمز
+        clrGreen,    // D1 - سبز
+        clrBlack,    // W1 - سیاه
+        clrBlack     // MN1 - سیاه
+    };
+    
+    // محاسبه Y position برای لیبل "ATR:" - باید با خط اول لیبل‌های ATR هماهنگ باشد
+    int verticalSpacing = 16; // فاصله عمودی بین خطوط
+    int lineGap = verticalSpacing;
+    int singleLineHeight = inpFontSize + lineGap;
+    
+    // موقعیت در بالای صفحه (بعد از عنوان)
+    int startXPos = 60; // شروع بعد از "ATR:"
+    int startYPos = 25; // موقعیت ثابت Y برای خط اول ATR
+    int currentXPos = startXPos;
+    int currentYPos = startYPos;
+    int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - 50;
+    
+    // نمایش عنوان "ATR:" در ابتدای خط - همیشه متصل به خط اول
+    string titleObjName = uniquePrefix + "ATR_Title";
+    ObjectCreate(0, titleObjName, OBJ_LABEL, 0, 0, 0);
+    ObjectSetString(0, titleObjName, OBJPROP_TEXT, "ATR:");
+    ObjectSetInteger(0, titleObjName, OBJPROP_COLOR, clrDarkBlue);
+    ObjectSetString(0, titleObjName, OBJPROP_FONT, inpFontName);
+    ObjectSetInteger(0, titleObjName, OBJPROP_FONTSIZE, inpFontSize);
+    ObjectSetInteger(0, titleObjName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, titleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    ObjectSetInteger(0, titleObjName, OBJPROP_XDISTANCE, 10);
+    ObjectSetInteger(0, titleObjName, OBJPROP_YDISTANCE, startYPos); // همان Y که در CreateATRLabelSimple استفاده می‌شود
+    ObjectSetInteger(0, titleObjName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, titleObjName, OBJPROP_HIDDEN, false);
+    ObjectSetInteger(0, titleObjName, OBJPROP_BACK, false);
+    
+    ATR_PRINTF("ATR Title created: ", titleObjName);
+    
+    // احترام به حالت Hide
+    if(IsIndicatorHidden()) {
+        ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
+    
+    // نمایش لیبل ATR برای هر تایم‌فریم - افقی در بالای صفحه
+    for(int i = 0; i < ArraySize(timeframes); i++) {
+        string timeframeName = timeframes[i];
+        ENUM_TIMEFRAMES period = periods[i];
+        
+        // محاسبه ATR برای این تایم‌فریم (14 period ATR)
+        double atrValue = iATRMQL4(_Symbol, period, 14, 0);
+        
+        if(atrValue <= 0 || atrValue == EMPTY_VALUE) {
+            ATR_PRINTF2("=== DisplayATRLabels: Invalid ATR for ", timeframeName, " ===");
+            continue;
+        }
+        
+        // تبدیل به points
+        double atrPoints = atrValue / Point;
+        
+        // محاسبه عرض لیبل برای این تایم‌فریم
+        double atrPips = NormalizeDouble(atrPoints / 10.0, 1);
+        string mainText = StringFormat("%s: %.1f", timeframeName, atrPips);
+        
+        // محاسبه عرض تقریبی لیبل (شامل تارگت‌ها)
+        int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
+        
+        int labelWidth = mainTextWidth;
+        if(inpShowTHTargets) {
+            double target3x = MathFloor(atrPips * 3.0);
+            double target5x = MathFloor(atrPips * 5.0);
+            double target15x = MathFloor(atrPips * 15.0);
+            string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+            int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+            labelWidth = MathMax(mainTextWidth, targetsTextWidth);
+        }
+        
+        // بررسی اگر از عرض صفحه خارج می‌شود
+        if(currentXPos + labelWidth > maxWidth && currentXPos > startXPos) {
+            currentXPos = startXPos;
+            currentYPos += (inpShowTHTargets ? (inpFontSize + verticalSpacing) * 2 : inpFontSize) + 20;
+        }
+        
+        // ساخت لیبل ATR با prefix یکتا (بدون SS-LS)
+        if(!CreateATRLabelSimple(uniquePrefix, timeframeName, atrPoints, currentXPos, currentYPos, colors[i], inpLabelSpacing, verticalSpacing)) continue;
+        
+        // حرکت به موقعیت بعدی با فاصله مناسب
+        currentXPos += labelWidth + inpLabelSpacing + 50;
+    }
+    
+    ATR_PRINT("=== DisplayATRLabels: Completed ===");
+}
+
 bool CreateTHLabel(const string objectPrefix, const string timeframeName, const double thValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
     if (!inpShowTHLabels) return true;
     
@@ -543,8 +866,19 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
     double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
     
+    // Calculate targets: 3x, 5x, 15x (گرد کردن به سمت پایین)
+    double target3x = MathFloor(thValuePips * 3.0);
+    double target5x = MathFloor(thValuePips * 5.0);
+    double target15x = MathFloor(thValuePips * 15.0);
+    
     string mainObjName = objectPrefix + "TH_" + timeframeName;
     string stepsObjName = objectPrefix + "TH_Steps_" + timeframeName;
+    string targetsObjName = objectPrefix + "TH_Targets_" + timeframeName;
+    
+    // حذف لیبل تارگت‌ها اگر خاموش باشد
+    if(!inpShowTHTargets && ObjectFind(0, targetsObjName) >= 0) {
+        ObjectDelete(0, targetsObjName);
+    }
     
     if (ObjectFind(0, mainObjName) < 0) {
         if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
@@ -552,12 +886,23 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     if (ObjectFind(0, stepsObjName) < 0) {
         if (!ObjectCreate(0, stepsObjName, OBJ_LABEL, 0, 0, 0)) return false;
     }
+    if (inpShowTHTargets && ObjectFind(0, targetsObjName) < 0) {
+        if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    }
     
-    // فرمت دو خطی: M1: 21
-    //              (10 - 12)
+    // فرمت سه خطی:
+    // خط اول (بالا): تارگت‌ها 122 - 200 - 500
+    // خط دوم (وسط): M1: 21
+    // خط سوم (پایین): (10 - 12)
+    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
     string mainText = StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips);
     string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
     
+    if(inpShowTHTargets) {
+        ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
+        SetLabelFont(targetsObjName);
+    }
     ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
     ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
     ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
@@ -566,8 +911,14 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     SetLabelFont(stepsObjName);
     
     ENUM_BASE_CORNER corner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP) ? CORNER_LEFT_UPPER : CORNER_LEFT_LOWER;
-    ENUM_ANCHOR_POINT anchor = (inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP) ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER;
+    ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER; // همیشه از بالا anchor می‌شود
     
+    if(inpShowTHTargets) {
+        ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_ANCHOR, anchor);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, targetsObjName, OBJPROP_HIDDEN, false);
+    }
     ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
     ObjectSetInteger(0, stepsObjName, OBJPROP_CORNER, corner);
@@ -578,36 +929,64 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     ObjectSetInteger(0, stepsObjName, OBJPROP_HIDDEN, false);
     
     int labelXDistance = MathAbs(xPos) + 5;
-    int labelYDistance;
     int bottomPadding = 20;
-    int lineSpacing = inpFontSize + 16; // فاصله عمودی بین دو خط
+    // فاصله بین هر خط (gap بین خطوط)
+    int lineGap = 16; // فاصله خالی بین خطوط - افزایش برای خوانایی بهتر
+    int singleLineHeight = inpFontSize + lineGap; // ارتفاع یک خط + gap
     
-    // محاسبه عرض تقریبی برای مرکز کردن سطر اول روی سطر دوم
+    // محاسبه عرض تقریبی برای مرکز کردن
     int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
     int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
-    int centerOffset = (stepsTextWidth - mainTextWidth) / 2;
-    if(centerOffset < 0) centerOffset = 0;
+    
+    // مرکز کردن خط دوم (نام) روی خط سوم (SS-LS)
+    int mainOffset = (stepsTextWidth - mainTextWidth) / 2;
+    if(mainOffset < 0) mainOffset = 0;
+    
+    int targetsOffset = 0;
+    if(inpShowTHTargets) {
+        int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+        // مرکز کردن خط اول (تارگت‌ها) روی خط دوم (نام)
+        targetsOffset = (mainTextWidth - targetsTextWidth) / 2 + mainOffset;
+        if(targetsOffset < 0) targetsOffset = 0;
+    }
     
     if (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM) {
         // از پایین به بالا
-        labelYDistance = MathAbs(yPos) + inpFontSize + verticalSpacing + bottomPadding;
-        ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, labelYDistance);
-        ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, labelYDistance - lineSpacing);
+        int baseY = MathAbs(yPos) + bottomPadding;
+        if(inpShowTHTargets) {
+            // سه خط: تارگت (پایین)، SS-LS (وسط)، نام (بالا)
+            ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY);
+            ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
+            ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight * 2);
+        } else {
+            // دو خط: SS-LS (پایین)، نام (بالا)
+            ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, baseY);
+            ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
+        }
     } else {
         // از بالا به پایین
-        labelYDistance = MathAbs(yPos) + verticalSpacing;
-        ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, labelYDistance);
-        ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, labelYDistance + lineSpacing);
+        int baseY = MathAbs(yPos) + verticalSpacing;
+        // سه خط: نام (بالا)، SS-LS (وسط)، تارگت (پایین)
+        ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY);
+        ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
+        if(inpShowTHTargets) {
+            ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight * 2);
+        }
     }
     
-    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance + centerOffset); // مرکز کردن سطر اول
-    ObjectSetInteger(0, stepsObjName, OBJPROP_XDISTANCE, labelXDistance); // سطر دوم ثابت
+    if(inpShowTHTargets) {
+        ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
+    }
+    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance + mainOffset);
+    ObjectSetInteger(0, stepsObjName, OBJPROP_XDISTANCE, labelXDistance); // سطر سوم ثابت
     
     // CRITICAL FIX: Respect Hide state (F key)
     if(IsIndicatorHidden()) {
+        if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         ObjectSetInteger(0, stepsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {
+        if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
         ObjectSetInteger(0, stepsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     }
@@ -621,16 +1000,68 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     int digits = GetCachedDigits();
     // CRITICAL FIX: Use IsZero for float comparison instead of == 0
     if(IsZero(point, EPSILON_PRICE) || digits == 0) return;
-    int startXPos = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 5 : inpInitialX;
+    
+    int startXPos = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 50 : inpInitialX + 10; // فاصله بیشتر بعد از "TH:"
     int startYPos = inpInitialY;
+    
+    // محاسبه Y position برای لیبل "TH:" - باید با خط اول لیبل‌های TH هماهنگ باشد
+    int lineGap = 16; // همان مقدار در CreateTHLabel
+    int singleLineHeight = inpFontSize + lineGap;
+    int bottomPadding = 20;
+    
+    // نمایش عنوان "TH:" در کنار لیبل‌های TH - همیشه متصل به خط اول
+    string thTitleObjName = objectPrefix + "TH_Title";
+    ObjectDelete(0, thTitleObjName);
+    ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+    ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
+    ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
+    
+    ENUM_BASE_CORNER corner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP) ? CORNER_LEFT_UPPER : CORNER_LEFT_LOWER;
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, corner);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    
+    // X position: 5 pixels از لبه چپ
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, 5);
+    
+    // Y position: دقیقاً همان Y که برای خط اول (mainObjName) در CreateTHLabel استفاده می‌شود
+    int thTitleY;
+    if (corner == CORNER_LEFT_LOWER) {
+        // از پایین: baseY + تعداد خطوط برای رسیدن به خط اول (بالایی)
+        int baseY = bottomPadding;
+        if(inpShowTHTargets) {
+            // سه خط: تارگت (پایین)، SS-LS (وسط)، نام (بالا)
+            thTitleY = baseY + singleLineHeight * 2 + 10; // +10 برای تراز شدن دقیق
+        } else {
+            // دو خط: SS-LS (پایین)، نام (بالا)
+            thTitleY = baseY + singleLineHeight + 10; // +10 برای تراز شدن دقیق
+        }
+    } else {
+        // از بالا: baseY در CreateTHLabel = MathAbs(yPos) + verticalSpacing
+        // که yPos = startYPos و verticalSpacing = inpLabelSpacing
+        thTitleY = startYPos + inpLabelSpacing - 10; // -10 برای بالاتر رفتن
+    }
+    
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, thTitleY);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_BACK, false);
+    
+    if(IsIndicatorHidden()) {
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
+    
     int currentXPos = startXPos;
     int currentYPos = startYPos;
     int yStep = inpLabelSpacing + 5;
     // فاصله افقی بین لیبل‌ها
     int xStep = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 8 : inpLabelSpacing * 2;
     int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
-    // دو خطی: نام و TH در خط اول، SS و LS در خط دوم
-    int lineHeight = (inpFontSize + inpLabelSpacing) * 2;
+    // سه خطی یا دو خطی بسته به تنظیمات
+    int lineHeight = inpShowTHTargets ? (inpFontSize + inpLabelSpacing) * 3 : (inpFontSize + inpLabelSpacing) * 2;
     ArrayResize(g_storedTHs, 0); // Clear existing stored THs before displaying fractal THs
     ArrayResize(g_labelPositions, 0); // Clear label positions
     string thLabelPrefix = objectPrefix + "TH_";
@@ -681,8 +1112,8 @@ void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH,
     // فاصله افقی بین لیبل‌ها
     int xStep = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 8 : inpLabelSpacing * 2;
     int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
-    // دو خطی: نام و TH در خط اول، SS و LS در خط دوم
-    int lineHeight = (inpFontSize + inpLabelSpacing) * 2;
+    // سه خطی یا دو خطی بسته به تنظیمات
+    int lineHeight = inpShowTHTargets ? (inpFontSize + inpLabelSpacing) * 3 : (inpFontSize + inpLabelSpacing) * 2;
     if(inpShowFractalTHs) {
         if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
             currentYPos += ArraySize(FRACTAL_TIMEFRAMES) * lineHeight;

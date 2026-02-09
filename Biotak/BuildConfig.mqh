@@ -25,8 +25,7 @@
 //| Automatic flag setup - DO NOT MODIFY BELOW                       |
 //+------------------------------------------------------------------+
 #ifdef DEBUG_BUILD
-    #define ENABLE_DEBUG_LOGS
-    // Performance logs disabled permanently
+    #define ENABLE_ATR_LOGS  // Only ATR logs active
     #define ENABLE_VERBOSE_ERRORS
     #define ENABLE_ASSERTIONS
     #define BUILD_MODE_STR "DEBUG"
@@ -39,6 +38,18 @@
 //+------------------------------------------------------------------+
 //| Debug Macros - Zero overhead in Production                       |
 //+------------------------------------------------------------------+
+
+#ifdef ENABLE_ATR_LOGS
+    #define ATR_PRINT(msg) Print("[ATR] ", msg)
+    #define ATR_PRINTF(msg, p1) Print("[ATR] ", msg, p1)
+    #define ATR_PRINTF2(msg, p1, p2) Print("[ATR] ", msg, p1, p2)
+    #define ATR_PRINTF3(msg, p1, p2, p3) Print("[ATR] ", msg, p1, p2, p3)
+#else
+    #define ATR_PRINT(msg)
+    #define ATR_PRINTF(msg, p1)
+    #define ATR_PRINTF2(msg, p1, p2)
+    #define ATR_PRINTF3(msg, p1, p2, p3)
+#endif
 
 #ifdef ENABLE_DEBUG_LOGS
     #define DEBUG_PRINT(msg) Print("[DEBUG] ", msg)
