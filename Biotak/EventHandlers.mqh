@@ -1935,6 +1935,54 @@ void ApplyLinesVisibility()
 
 void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+    // ═══════════════════════════════════════════════════════════════
+    // CHART RESIZE HANDLER: Redraw labels when chart size changes
+    // رفع مشکل: بازسازی لیبل‌ها هنگام تغییر اندازه چارت
+    // ═══════════════════════════════════════════════════════════════
+    static int s_lastChartWidth = 0;
+    static int s_lastChartHeight = 0;
+    
+    if(id == CHARTEVENT_CHART_CHANGE)
+    {
+        // Get current chart dimensions
+        int currentWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+        int currentHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+        
+        // Only redraw if dimensions actually changed
+        if(currentWidth != s_lastChartWidth || currentHeight != s_lastChartHeight)
+        {
+            s_lastChartWidth = currentWidth;
+            s_lastChartHeight = currentHeight;
+            
+            // Chart size changed - redraw labels only if they should be visible
+            if(!IsIndicatorHidden() && inpShowTHLabels && (inpShowFractalTHs || inpShowStandardTHs) && g_dailyClosePriceForTH > 0)
+            {
+                // Delete all existing TH labels
+                string objectPrefix = inpObjectPrefix + "_";
+                for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+                {
+                    string objName = ObjectName(0, i, 0, -1);
+                    if(StringFind(objName, objectPrefix + "TH_") >= 0)
+                    {
+                        ObjectDelete(0, objName);
+                    }
+                }
+                
+                // Redraw labels with current data
+                if(inpShowFractalTHs)
+                {
+                    DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
+                }
+                if(inpShowStandardTHs)
+                {
+                    DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
+                }
+                
+                ThrottledChartRedraw();
+            }
+        }
+    }
+    
     // Handle key press events
     if(id == CHARTEVENT_KEYDOWN)
     {

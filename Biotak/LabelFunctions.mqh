@@ -526,56 +526,48 @@ void SetLabelFont(const string name) {
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpFontSize);
 }
 
+// استخراج نام اصلی تایم‌فریم (قبل از +)
+string GetBaseTimeframeName(const string fullName) {
+    int plusPos = StringFind(fullName, "+");
+    if(plusPos > 0) {
+        return StringSubstr(fullName, 0, plusPos);
+    }
+    return fullName;
+}
+
 bool CreateTHLabel(const string objectPrefix, const string timeframeName, const double thValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
     if (!inpShowTHLabels) return true;
+    
+    // Calculate TH, SS, LS values
     double thValuePips = NormalizeDouble(thValuePoints / 10.0, 1);
-    double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
     double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
+    double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
+    
     string mainObjName = objectPrefix + "TH_" + timeframeName;
     string stepsObjName = objectPrefix + "TH_Steps_" + timeframeName;
+    
     if (ObjectFind(0, mainObjName) < 0) {
         if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
     }
     if (ObjectFind(0, stepsObjName) < 0) {
         if (!ObjectCreate(0, stepsObjName, OBJ_LABEL, 0, 0, 0)) return false;
     }
-    string mainText, stepsText;
-    if (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
-        if (inpShowTimeframeInLabels) {
-            mainText = StringFormat("%s: %.1f (S:%.1f L:%.1f)",
-                timeframeName, thValuePips, shortStepPips, longStepPips);
-        } else {
-            mainText = StringFormat("%.1f (S:%.1f L:%.1f)",
-                thValuePips, shortStepPips, longStepPips);
-        }
-        ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
-        ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
-        SetLabelFont(mainObjName);
-        ObjectSetString(0, stepsObjName, OBJPROP_TEXT, "");
-        ObjectSetInteger(0, stepsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        if (inpShowTimeframeInLabels) {
-            // استخدام الاسم المختصر للإطار الزمني في التسميات الأفقية
-            string shortTimeframeName = GetShortTimeframeName(timeframeName);
-            mainText = StringFormat("%s:  %.1f", shortTimeframeName, thValuePips);
-        } else {
-            mainText = StringFormat("%.1f", thValuePips);
-        }
-        int mainWidth = (int)CalculateTextWidth(mainText);
-        string shortStepStr = StringFormat("S: %.1f", shortStepPips);
-        string longStepStr = StringFormat("L: %.1f", longStepPips);
-        int padding = (mainWidth - (int)CalculateTextWidth(shortStepStr + longStepStr)) / 4;
-        string paddingStr = StringRepeat(" ", padding);
-        stepsText = shortStepStr + "  " + longStepStr;
-        ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
-        ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
-        ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
-        ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
-        SetLabelFont(mainObjName);
-        SetLabelFont(stepsObjName);
-    }
+    
+    // فرمت دو خطی: M1: 21
+    //              (10 - 12)
+    string mainText = StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips);
+    string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
+    
+    ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
+    ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
+    ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
+    ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
+    SetLabelFont(mainObjName);
+    SetLabelFont(stepsObjName);
+    
     ENUM_BASE_CORNER corner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP) ? CORNER_LEFT_UPPER : CORNER_LEFT_LOWER;
     ENUM_ANCHOR_POINT anchor = (inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP) ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER;
+    
     ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
     ObjectSetInteger(0, stepsObjName, OBJPROP_CORNER, corner);
@@ -584,40 +576,40 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     ObjectSetInteger(0, stepsObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
     ObjectSetInteger(0, stepsObjName, OBJPROP_HIDDEN, false);
-    int labelXDistance = MathAbs(xPos) + 5; // Reduced from horizontalSpacing + 10
+    
+    int labelXDistance = MathAbs(xPos) + 5;
     int labelYDistance;
     int bottomPadding = 20;
-    int labelSpacing = inpFontSize + 12;
-    if (inpLabelArrangement == LABEL_ARRANGEMENT_HORIZONTAL) {
-        if (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM) {
-            labelYDistance = MathAbs(yPos) + inpFontSize + verticalSpacing + bottomPadding;
-            ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, labelYDistance);
-            ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, labelYDistance - (inpFontSize + labelSpacing));
-        } else {
-            labelYDistance = MathAbs(yPos) + verticalSpacing;
-            ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, labelYDistance);
-            ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, labelYDistance + inpFontSize + labelSpacing);
-        }
-    } else {
-        if (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM) {
-            labelYDistance = MathAbs(yPos) + inpFontSize + verticalSpacing + bottomPadding;
-        } else {
-            labelYDistance = MathAbs(yPos) + verticalSpacing;
-        }
+    int lineSpacing = inpFontSize + 16; // فاصله عمودی بین دو خط
+    
+    // محاسبه عرض تقریبی برای مرکز کردن سطر اول روی سطر دوم
+    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
+    int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
+    int centerOffset = (stepsTextWidth - mainTextWidth) / 2;
+    if(centerOffset < 0) centerOffset = 0;
+    
+    if (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM) {
+        // از پایین به بالا
+        labelYDistance = MathAbs(yPos) + inpFontSize + verticalSpacing + bottomPadding;
         ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, labelYDistance);
+        ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, labelYDistance - lineSpacing);
+    } else {
+        // از بالا به پایین
+        labelYDistance = MathAbs(yPos) + verticalSpacing;
+        ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, labelYDistance);
+        ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, labelYDistance + lineSpacing);
     }
-    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance);
-    ObjectSetInteger(0, stepsObjName, OBJPROP_XDISTANCE, labelXDistance);
+    
+    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance + centerOffset); // مرکز کردن سطر اول
+    ObjectSetInteger(0, stepsObjName, OBJPROP_XDISTANCE, labelXDistance); // سطر دوم ثابت
     
     // CRITICAL FIX: Respect Hide state (F key)
-    // Labels should be hidden when indicator is hidden
-    // PERFORMANCE: Use cached IsIndicatorHidden()
     if(IsIndicatorHidden()) {
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         ObjectSetInteger(0, stepsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        // stepsObjName visibility is already handled above based on arrangement
+        ObjectSetInteger(0, stepsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     }
     
     return true;
@@ -634,9 +626,11 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     int currentXPos = startXPos;
     int currentYPos = startYPos;
     int yStep = inpLabelSpacing + 5;
-    int xStep = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 8 : inpLabelSpacing * 2 + 5;
+    // فاصله افقی بین لیبل‌ها
+    int xStep = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 8 : inpLabelSpacing * 2;
     int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
-    int lineHeight = inpFontSize + inpLabelSpacing;
+    // دو خطی: نام و TH در خط اول، SS و LS در خط دوم
+    int lineHeight = (inpFontSize + inpLabelSpacing) * 2;
     ArrayResize(g_storedTHs, 0); // Clear existing stored THs before displaying fractal THs
     ArrayResize(g_labelPositions, 0); // Clear label positions
     string thLabelPrefix = objectPrefix + "TH_";
@@ -667,7 +661,8 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
                 currentYPos += lineHeight;
             }
             if(!CreateTHLabel(objectPrefix, timeframeName, thPoints, currentXPos, currentYPos, FRACTAL_COLORS[i], xStep, yStep)) continue;
-            currentXPos += labelWidth + xStep + 10;
+            // فاصله افقی بین لیبل‌ها
+            currentXPos += labelWidth + xStep + 20;
         }
     }
 }
@@ -683,9 +678,11 @@ void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH,
     int currentXPos = startXPos;
     int currentYPos = startYPos;
     int yStep = inpLabelSpacing + inpFontSize + 5;
-    int xStep = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 8 : inpLabelSpacing * 2 + 5;
+    // فاصله افقی بین لیبل‌ها
+    int xStep = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) ? 8 : inpLabelSpacing * 2;
     int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
-    int lineHeight = inpFontSize + inpLabelSpacing;
+    // دو خطی: نام و TH در خط اول، SS و LS در خط دوم
+    int lineHeight = (inpFontSize + inpLabelSpacing) * 2;
     if(inpShowFractalTHs) {
         if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
             currentYPos += ArraySize(FRACTAL_TIMEFRAMES) * lineHeight;
@@ -736,7 +733,8 @@ void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH,
                 currentYPos += lineHeight;
             }
             if(!CreateTHLabel(objectPrefix, timeframeName, thPoints, currentXPos, currentYPos, STANDARD_COLORS[0], xStep, yStep)) continue;
-            currentXPos += labelWidth + xStep + 20;
+            // فاصله افقی بین لیبل‌ها
+            currentXPos += labelWidth + xStep + 25;
         }
     }
 }
