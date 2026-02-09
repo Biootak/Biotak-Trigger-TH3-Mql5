@@ -32,6 +32,7 @@ const int ERR_ZONE_INVALID_CONFIG = 3;
 const int ERR_ZONE_RENDER_FAILED = 4;
 const int ERR_ZONE_MEMORY_LIMIT = 5;
 const int ERR_ZONE_ARRAY_MISMATCH = 6;
+const int ERR_ZONE_NO_DATA = 7;            // ✅ NEW: No bars available yet
 
 // Debug Flags
 #ifdef ENABLE_DEBUG_LOGS

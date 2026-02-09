@@ -4,11 +4,14 @@
 #property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
 
+// Include centralized math constants
+#include "MathConstants.mqh"
+
 //+------------------------------------------------------------------+
 //| DEPRECATED: These functions are kept for backward compatibility  |
 //| Use simple multipliers instead:                                  |
-//| - Short Step (SS) = structureTH * 1.5                           |
-//| - Long Step (LS) = structureTH * 2.0                            |
+//| - Short Step (SS) = structureTH * SS_MULTIPLIER (1.5)           |
+//| - Long Step (LS) = structureTH * LS_MULTIPLIER (2.0)            |
 //|                                                                  |
 //| Note: When Pattern = 0.5 * Structure, the structural formulas   |
 //| simplify to the same result as simple multipliers:              |
@@ -17,8 +20,8 @@
 //+------------------------------------------------------------------+
 
 // Deprecated functions removed - use simple multipliers instead:
-// - Short Step (SS) = structureTH * 1.5
-// - Long Step (LS) = structureTH * 2.0
+// - Short Step (SS) = structureTH * SS_MULTIPLIER
+// - Long Step (LS) = structureTH * LS_MULTIPLIER
 
 // GOLD FIX #3: Enhanced epsilon-based validation with proper floating-point comparison
 // Note: EPSILON constants are defined in FloatingPointHelper.mqh
@@ -64,7 +67,7 @@ double CalculateTH(const double price, const int digits, const double percentage
         return 0;
     }
     
-    // GOLD FIX: Enhanced cache with epsilon-based comparison
+    // ✅ FIXED: Enhanced cache with DYNAMIC epsilon scaling
     static double s_lastPrice = 0.0;
     static int s_lastDigits = -1;
     static double s_lastPercentage = 0.0;
@@ -74,8 +77,9 @@ double CalculateTH(const double price, const int digits, const double percentage
     double normalizedPrice = NormalizeDouble(price, digits);
     double normalizedPercentage = NormalizeDouble(percentage, 6);
     
-    // CRITICAL: Use epsilon for floating-point comparison (not ==)
-    bool priceMatch = MathAbs(normalizedPrice - s_lastPrice) < EPSILON_PRICE;
+    // CRITICAL FIX: Use DYNAMIC epsilon based on price magnitude
+    double priceEpsilon = GetDynamicEpsilonForPrice(normalizedPrice);
+    bool priceMatch = MathAbs(normalizedPrice - s_lastPrice) < priceEpsilon;
     bool percentageMatch = MathAbs(normalizedPercentage - s_lastPercentage) < EPSILON_PERCENTAGE;
     bool digitsMatch = (digits == s_lastDigits);
     
@@ -147,10 +151,11 @@ double CalculateTimeframeTH(const string timeframe) {
 //| New calculation functions for extended step modes                |
 //+------------------------------------------------------------------+
 
-// Constants for calculations (matching MotiveWave implementation)
-#define SS_MULTIPLIER 1.5      // Short Step = 1.5 * TH
-#define LS_MULTIPLIER 2.0      // Long Step = 2.0 * TH
-#define ATR_FACTOR 3.0         // ATR factor for M calculations
+// ✅ FIXED: Removed duplicate constant definitions
+// Constants are now in MathConstants.mqh:
+// - SS_MULTIPLIER (1.5)
+// - LS_MULTIPLIER (2.0)
+// - ATR_FACTOR_M (3.0)
 
 double CalculateShortStep(const double thValue) {
     return thValue * SS_MULTIPLIER;
@@ -161,12 +166,12 @@ double CalculateLongStep(const double thValue) {
 }
 
 double CalculateEStep(const double thValue) {
-    // Formula from EventHandlers.mqh: E = TH * 0.75
-    return thValue * 0.75;
+    // Formula from EventHandlers.mqh: E = TH * E_MULTIPLIER
+    return thValue * E_MULTIPLIER;
 }
 
 double CalculateTPStep(const double eValue) {
-    // Formula from EventHandlers.mqh: TP = E * 3
+    // Formula from EventHandlers.mqh: TP = E * 3 = TH * TP_MULTIPLIER
     return eValue * 3.0;
 }
 
@@ -398,7 +403,7 @@ void CalculateFractalValues(const double thValue, double &structureValue, double
 //| محاسبه فاصله M بر اساس مقدار کنترل                               |
 //+------------------------------------------------------------------+
 double CalculateMDistance(const double controlValue) {
-    // M Distance is Control Value divided by ATR_FACTOR (3.0)
+    // M Distance is Control Value divided by ATR_FACTOR_M (3.0)
     // If Control Value is SS (1.5 * Structure), then M Distance = 0.5 * Structure (Pattern)
-    return controlValue / ATR_FACTOR;
+    return controlValue / ATR_FACTOR_M;
 }

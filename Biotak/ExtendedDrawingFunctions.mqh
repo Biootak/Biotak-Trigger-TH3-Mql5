@@ -45,6 +45,11 @@ bool CreateOrUpdateHLine(const string name, double price,
         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
         ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        
+        // CRITICAL: Respect g_linesVisible state
+        if(!g_linesVisible) {
+            ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
         return true;
     } else {
         ObjectSetDouble(0, name, OBJPROP_PRICE, price);
@@ -3152,15 +3157,38 @@ bool GetPathForLevelOptimized(const int stepCount, color &outColor, ENUM_LINE_ST
         }
     }
     
-    // If Trigger lines are enabled, all steps use trigger path (matching Java line 139-140)
+    // Trigger lines: ONLY show non-structure levels (levels between structure levels)
+    // خطوط Trigger: فقط سطوح غیر ساختاری (سطوح بین سطوح ساختاری) را نشان بده
+    // This allows Structure and Trigger to work independently
     if(triggerEnabled) {
-        outColor = inpTriggerColor;
-        outStyle = inpTriggerStyle;
-        outWidth = inpTriggerWidth;
-        return true;
+        // Check if this step is NOT a structure level
+        bool isStructureLevel = false;
+        
+        if(inpShowStructure) {
+            int baseMultiplier = GetValidatedBaseMultiplier();
+            int intervals[];
+            GetCachedIntervals(baseMultiplier, intervals);
+            
+            // Check if step matches any structure interval
+            if((intervals[4] > 0 && stepCount % intervals[4] == 0 && inpShowStructureL5) ||
+               (intervals[3] > 0 && stepCount % intervals[3] == 0 && inpShowStructureL4) ||
+               (intervals[2] > 0 && stepCount % intervals[2] == 0 && inpShowStructureL3) ||
+               (intervals[1] > 0 && stepCount % intervals[1] == 0 && inpShowStructureL2) ||
+               (intervals[0] > 0 && stepCount % intervals[0] == 0 && inpShowStructureL1)) {
+                isStructureLevel = true;
+            }
+        }
+        
+        // Only draw as trigger if it's NOT a structure level
+        if(!isStructureLevel) {
+            outColor = inpTriggerColor;
+            outStyle = inpTriggerStyle;
+            outWidth = inpTriggerWidth;
+            return true;
+        }
     }
     
-    // Don't draw anything if neither structure nor trigger lines are enabled (matching Java line 143)
+    // Don't draw anything if neither structure nor trigger lines are enabled
     return false;
 }
 
@@ -3289,7 +3317,25 @@ void DrawSSLSLevels(const string objectPrefix, const double midpointPrice,
         midpointWidth = inpLSLevelWidth;
     }
     
-    string midpointName = objectPrefix + \"SSLS_Midpoint_0\";\n    if(ObjectFind(0, midpointName) < 0) {\n        ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);\n        ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);\n        ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);\n        ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);\n        ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);\n        ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);\n        ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, \n                       \"Midpoint (Start) - \" + DoubleToString(midpointPrice, GetCachedDigits()));\n    } else {\n        ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);\n    }
+    string midpointName = objectPrefix + "SSLS_Midpoint_0";
+    if(ObjectFind(0, midpointName) < 0) {
+        ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);
+        ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
+        ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
+        ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
+        
+        // CRITICAL: Respect g_linesVisible state
+        if(!g_linesVisible) {
+            ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
+        
+        ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
+                       "Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
+    } else {
+        ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
+    }
     
     int drawnAbove = 0;
     int logicalStep = 0;
@@ -3722,6 +3768,12 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
         ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
         ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
+        
+        // CRITICAL: Respect g_linesVisible state
+        if(!g_linesVisible) {
+            ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
+        
         ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
                        "Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
     } else {
@@ -5191,7 +5243,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         bool objectExists = (ObjectFind(0, levelName) >= 0);
         
         if(shouldShowLine) {
-            // Trigger ON: Create or update level
+            // Trigger OFF: Create or update level
             if(!objectExists) {
                 if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
                     #ifdef ENABLE_DEBUG_LOGS
@@ -5210,7 +5262,13 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
             ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
             ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);  // Draw above zones
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);  // Show on all timeframes
+            
+            // Set visibility (respect g_linesVisible state)
+            if(!g_linesVisible) {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            } else {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            }
             
             // Set tooltip
             ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
@@ -5219,7 +5277,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             
             levelsDrawn++;
         } else {
-            // Trigger OFF: Hide level if it exists
+            // Trigger ON: Hide level if it exists
             if(objectExists) {
                 ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);  // Hide on all timeframes
             }
@@ -5337,7 +5395,11 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             ObjectSetInteger(0, centerName, OBJPROP_WIDTH, 2);
             ObjectSetInteger(0, centerName, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(0, centerName, OBJPROP_BACK, false);
-            ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            if(!g_linesVisible) {
+                ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            } else {
+                ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            }
             ObjectSetString(0, centerName, OBJPROP_TOOLTIP,
                 StringFormat("Harmonic Center | %s | F=%.2f | R=%.3f",
                     DoubleToString(normalizedCenter, GetCachedDigits()), factor, harmonicRatio));
@@ -5366,22 +5428,23 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         return;  // Abort if initialization failed
     }
     
+    int logicalStepAbove = 0;  // Track logical step outside loop for cleanup
     for(int i = 0; i < safeMaxAbove; i++) {
         double step = (i % 2 == 0) ? baseStepSize : largeStepSize;
         cumulative += step;
         double priceLevel = centerPrice + cumulative;
         
-        int logicalStep = i + 1;  // Harmonic uses sequential steps
+        logicalStepAbove = i + 1;  // Harmonic uses sequential steps
         
         // Check if this step should be drawn (matching M Mode logic)
         // Note: Harmonic pattern is special, but still respects Structure/Trigger
         if(structureEnabled || triggerEnabled) {
-            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+            if(!ShouldDrawStepOptimized(logicalStepAbove, triggerEnabled, baseMultiplier)) {
                 continue;  // Skip this step but don't break the pattern
             }
         } else {
             // Neither structure nor trigger enabled - draw every baseMultiplier-th step
-            if(logicalStep % baseMultiplier != 0) {
+            if(logicalStepAbove % baseMultiplier != 0) {
                 continue;
             }
         }
@@ -5394,7 +5457,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         ENUM_LINE_STYLE levelStyle;
         int levelWidth;
         
-        if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+        if(GetPathForLevelOptimized(logicalStepAbove, levelColor, levelStyle, levelWidth, triggerEnabled)) {
             // Got path from structure levels
         } else if(triggerEnabled) {
             // Use Trigger color (matching M Mode exactly)
@@ -5408,7 +5471,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
         }
         
-        string levelName = objectPrefix + "Factor_Harmonic_Above_" + IntegerToString(logicalStep);
+        string levelName = objectPrefix + "Factor_Harmonic_Above_" + IntegerToString(logicalStepAbove);
         
         if(shouldShowLine && ObjectFind(0, levelName) < 0) {
             if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
@@ -5417,10 +5480,14 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
                 ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                if(!g_linesVisible) {
+                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                } else {
+                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                }
                 ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                     StringFormat("Harmonic +%d (%s) | %s | F=%.2f",
-                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
+                        logicalStepAbove, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
                 levelsDrawn++;
                 levelsAboveCount++;
             }
@@ -5435,14 +5502,14 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 GetCachedIntervals(baseMultiplier, intervals);
                 
                 for(int j = 0; j < 5; j++) {
-                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                    if(intervals[j] > 0 && logicalStepAbove % intervals[j] == 0) {
                         isCurrentStructure = true;
                         break;
                     }
                 }
             }
             
-            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Above_" + IntegerToString(logicalStep);
+            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Above_" + IntegerToString(logicalStepAbove);
             // CRITICAL FIX: Pass avgStepSize for consistent zone height
             if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -5454,9 +5521,9 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     }
     
     // PERF FIX: Cleanup surplus lines/zones from previous draws (above)
-    CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Above_", logicalStep + 1);
+    CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Above_", logicalStepAbove + 1);
     if(inpShowMidZones) {
-        CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Above_", logicalStep + 1);
+        CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Above_", logicalStepAbove + 1);
     }
     
     // Draw levels below center (alternating pattern, respects maxLevelsBelow)
@@ -5474,21 +5541,22 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         return;  // Abort if initialization failed
     }
     
+    int logicalStepBelow = 0;  // Track logical step outside loop for cleanup
     for(int i = 0; i < safeMaxBelow; i++) {
         double step = (i % 2 == 0) ? baseStepSize : largeStepSize;
         cumulative += step;
         double priceLevel = centerPrice - cumulative;
         
-        int logicalStep = i + 1;  // Harmonic uses sequential steps
+        logicalStepBelow = i + 1;  // Harmonic uses sequential steps
         
         // Check if this step should be drawn (matching M Mode logic)
         if(structureEnabled || triggerEnabled) {
-            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+            if(!ShouldDrawStepOptimized(logicalStepBelow, triggerEnabled, baseMultiplier)) {
                 continue;  // Skip this step but don't break the pattern
             }
         } else {
             // Neither structure nor trigger enabled - draw every baseMultiplier-th step
-            if(logicalStep % baseMultiplier != 0) {
+            if(logicalStepBelow % baseMultiplier != 0) {
                 continue;
             }
         }
@@ -5501,7 +5569,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         ENUM_LINE_STYLE levelStyle;
         int levelWidth;
         
-        if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+        if(GetPathForLevelOptimized(logicalStepBelow, levelColor, levelStyle, levelWidth, triggerEnabled)) {
             // Got path from structure levels
         } else if(triggerEnabled) {
             // Use Trigger color (matching M Mode exactly)
@@ -5515,7 +5583,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
         }
         
-        string levelName = objectPrefix + "Factor_Harmonic_Below_" + IntegerToString(logicalStep);
+        string levelName = objectPrefix + "Factor_Harmonic_Below_" + IntegerToString(logicalStepBelow);
         
         if(shouldShowLine && ObjectFind(0, levelName) < 0) {
             if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
@@ -5524,10 +5592,14 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
                 ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                if(!g_linesVisible) {
+                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                } else {
+                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                }
                 ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                     StringFormat("Harmonic -%d (%s) | %s | F=%.2f",
-                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
+                        logicalStepBelow, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
                 levelsDrawn++;
                 levelsBelowCount++;
             }
@@ -5542,14 +5614,14 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 GetCachedIntervals(baseMultiplier, intervals);
                 
                 for(int j = 0; j < 5; j++) {
-                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                    if(intervals[j] > 0 && logicalStepBelow % intervals[j] == 0) {
                         isCurrentStructure = true;
                         break;
                     }
                 }
             }
             
-            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Below_" + IntegerToString(logicalStep);
+            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Below_" + IntegerToString(logicalStepBelow);
             // CRITICAL FIX: Pass avgStepSize for consistent zone height
             if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -5561,9 +5633,9 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     }
     
     // PERF FIX: Cleanup surplus lines/zones from previous draws (below)
-    CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Below_", logicalStep + 1);
+    CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Below_", logicalStepBelow + 1);
     if(inpShowMidZones) {
-        CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Below_", logicalStep + 1);
+        CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Below_", logicalStepBelow + 1);
     }
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -5675,7 +5747,11 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                 ObjectSetInteger(0, centerLevelName, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(0, centerLevelName, OBJPROP_BACK, false);
                 ObjectSetInteger(0, centerLevelName, OBJPROP_ZORDER, 1);
-                ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                if(!g_linesVisible) {
+                    ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                } else {
+                    ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                }
                 ObjectSetString(0, centerLevelName, OBJPROP_TOOLTIP, 
                     StringFormat("Factor Center | %s | F=%.2f", 
                         DoubleToString(normalizedCenter, GetCachedDigits()), factor));
@@ -5803,7 +5879,11 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
                     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
                     ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
-                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                    if(!g_linesVisible) {
+                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                    } else {
+                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                    }
                     ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                         StringFormat("Factor +%d | %s | F=%.2f",
                             logicalStep, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
@@ -5937,7 +6017,11 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
                     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
                     ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
-                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                    if(!g_linesVisible) {
+                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                    } else {
+                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                    }
                     ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                         StringFormat("Factor -%d | %s | F=%.2f",
                             logicalStep, DoubleToString(normalizedPrice, GetCachedDigits()), factor));

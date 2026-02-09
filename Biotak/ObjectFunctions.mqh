@@ -32,7 +32,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     // OPTIMIZATION: Check if object exists first, only update properties instead of recreate
     double normalizedPrice = NormalizePrice(price);
     datetime currentTime = TimeCurrent();
-    datetime futureTime = currentTime + PeriodSeconds(GetCachedPeriod()) * ZONE_EXTENSION_MULTIPLIER;
+    datetime futureTime = currentTime + PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod()) * ZONE_EXTENSION_MULTIPLIER;
     ENUM_OBJECT objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
     
     // Check if object already exists
@@ -132,7 +132,23 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
     
     ObjectSetString(0, name, OBJPROP_TEXT, labelText);
     ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
-    ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
+    
+    // ✅ SECURITY FIX: Validate font name before use
+    string safeFontName = inpFontName;
+    string validFonts[9] = {"Arial", "Arial Black", "Courier New", "Tahoma", "Verdana",
+                            "Times New Roman", "Calibri", "Segoe UI", "Consolas"};
+    bool fontValid = false;
+    for(int i = 0; i < 9; i++) {
+        if(safeFontName == validFonts[i]) {
+            fontValid = true;
+            break;
+        }
+    }
+    if(!fontValid) {
+        safeFontName = "Arial";  // Fallback to safe default
+    }
+    
+    ObjectSetString(0, name, OBJPROP_FONT, safeFontName);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpFontSize);
     ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, name, OBJPROP_ALIGN, ALIGN_RIGHT);

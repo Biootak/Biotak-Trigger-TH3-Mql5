@@ -14,6 +14,21 @@
 #include "ZoneFactory.mqh"
 
 //+------------------------------------------------------------------+
+//| Throttled ChartRedraw() to prevent excessive CPU usage           |
+//| استفاده throttled از ChartRedraw برای جلوگیری از CPU بالا        |
+//| GOLD FIX: Prevents 17 rapid ChartRedraw calls in OnChartEvent   |
+//+------------------------------------------------------------------+
+void ThrottledChartRedraw() {
+    uint nowMs = GetTickCount();
+    // Allow immediate redraw if > 100ms passed
+    if(nowMs - g_lastChartRedrawTime > CHART_REDRAW_THROTTLE_MS) {
+        ChartRedraw();
+        g_lastChartRedrawTime = nowMs;
+    }
+    // Else skip - chart will redraw on next OnCalculate anyway
+}
+
+//+------------------------------------------------------------------+
 //| Get Symbol Point (Cached)                                        |
 //+------------------------------------------------------------------+
 double GetSymbolPoint() {

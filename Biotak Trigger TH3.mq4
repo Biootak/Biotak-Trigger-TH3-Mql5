@@ -10,7 +10,7 @@
 #property description "Race conditions fixed | Memory leaks eliminated | Buffer overflow prevented"
 
 // ═══════════════════════════════════════════════════════════════════
-// BUILD CONFIG - Must be first include!
+// BUILD CONFIG - Must be FIRST include! (MQ4 doesn't need MQL5Compat)
 // برای تغییر مود، فایل BuildConfig.mqh را ویرایش کنید
 // ═══════════════════════════════════════════════════════════════════
 #include "Biotak\BuildConfig.mqh"

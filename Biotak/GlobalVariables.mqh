@@ -78,6 +78,10 @@ static string g_lockStatusLabelName = "Biotak_LockStatus_Label"; // Name for loc
 static string g_stepModeLabelName = "Biotak_StepMode_Label"; // Name for step mode label on chart
 static string g_basisModeLabelName = "Biotak_BasisMode_Label"; // Name for calculation basis label on chart
 static string g_factorLabelName = "Biotak_Factor_Label"; // Name for Factor value label on chart
+
+// GOLD FIX: ChartRedraw throttling to prevent excessive redraws
+static datetime g_lastChartRedrawTime = 0;
+#define CHART_REDRAW_THROTTLE_MS 100  // Minimum 100ms between ChartRedraw calls
 static string g_frequencyLabelName = "Biotak_Frequency_Label"; // Name for TH3 frequency label on chart
 
 // TH3 Frequency Cycling System

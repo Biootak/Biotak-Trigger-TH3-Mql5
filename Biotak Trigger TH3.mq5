@@ -11,22 +11,21 @@
 #property description "MQL5 Compatible Version"
 
 // ═══════════════════════════════════════════════════════════════════
-// MQL5 COMPATIBILITY LAYER - Must be included BEFORE everything else
-// لایه سازگاری MQL5 - باید قبل از همه چیز include شود
-// ═══════════════════════════════════════════════════════════════════
-#include "Biotak\MQL5Compat.mqh"
-
-// ═══════════════════════════════════════════════════════════════════
-// BUILD CONFIG - Must be first include!
+// BUILD CONFIG - Must be FIRST include!
 // برای تغییر مود، فایل BuildConfig.mqh را ویرایش کنید
 // ═══════════════════════════════════════════════════════════════════
 #include "Biotak\BuildConfig.mqh"
+
+// ═══════════════════════════════════════════════════════════════════
+// MQL5 COMPATIBILITY LAYER - Must be included AFTER BuildConfig
+// لایه سازگاری MQL5 - باید بعد از BuildConfig include شود
+// ═══════════════════════════════════════════════════════════════════
+#include "Biotak\MQL5Compat.mqh"
 
 #include "Biotak\PropertiesAndInputs.mqh"
 #include "Biotak\ConstantsAndEnums.mqh"
 #include "Biotak\ProjectConstants.mqh"
 #include "Biotak\InputValidator.mqh"
-#include "Biotak\GlobalVariables.mqh"
 
 // ═══════════════════════════════════════════════════════════════════
 // GOLD FIX: Security & Performance Enhancements
@@ -35,6 +34,9 @@
 #include "Biotak\ObjectCountManager.mqh"
 #include "Biotak\PerformanceOptimizations.mqh"
 #include "Biotak\InputValidationEnhanced.mqh"
+
+// GlobalVariables.mqh requires HIDDEN_CACHE_TTL_MS from PerformanceOptimizations.mqh
+#include "Biotak\GlobalVariables.mqh"
 
 #ifdef DEBUG_BUILD
 #include "Biotak\Tests\SecurityAuditTests.mqh"

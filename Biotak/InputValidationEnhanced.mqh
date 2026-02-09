@@ -247,10 +247,18 @@ string SanitizeFilename(const string filename) {
         safe = "default";
     }
     
-    // Limit length
-    if(StringLen(safe) > 200) {
-        safe = StringSubstr(safe, 0, 200);
+    // ✅ SECURITY FIX: Limit length to prevent buffer overflow
+    // Reserve space for path (BiotakReports\\ + Pattern_ + timestamp)
+    #ifdef MAX_PATTERN_NAME_LENGTH
+    if(StringLen(safe) > MAX_PATTERN_NAME_LENGTH) {
+        safe = StringSubstr(safe, 0, MAX_PATTERN_NAME_LENGTH);
     }
+    #else
+    // Fallback: use 100 chars if constant not defined
+    if(StringLen(safe) > 100) {
+        safe = StringSubstr(safe, 0, 100);
+    }
+    #endif
     
     return safe;
 }

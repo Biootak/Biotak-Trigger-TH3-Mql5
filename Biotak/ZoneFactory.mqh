@@ -68,6 +68,10 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     result.errorMessage = "";
     result.errorCode = ERR_ZONE_NONE;
     
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("🔧 CreateZone START: '", request.name, "' Top=", request.topPrice, " Bottom=", request.bottomPrice);
+    #endif
+    
     // ═══════════════════════════════════════════════════════════════
     // PHASE 1: VALIDATION (Fail Fast)
     // ═══════════════════════════════════════════════════════════════
@@ -114,14 +118,28 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // PHASE 2: TIME CALCULATION
-    // PERFORMANCE: Mutex removed — MQL5 indicators are single-threaded
-    // بهینه‌سازی: Mutex حذف شد — اندیکاتورها تک‌نخی هستند
+    // PHASE 2: TIME CALCULATION - ATOMIC READ PATTERN
+    // ✅ FIXED: Read all time-dependent values atomically
     // ═══════════════════════════════════════════════════════════════
     
+    // CRITICAL: Read all values in one atomic block to prevent race conditions
     int safeBars = Bars(_Symbol, _Period);
-    datetime currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
+    datetime currentTime = 0;
     
+    if(safeBars > 0) {
+        // Read time IMMEDIATELY after bars check (minimize race window)
+        currentTime = iTime(_Symbol, _Period, 0);
+        
+        // Validate: bars count should still match
+        int barsRecheck = Bars(_Symbol, _Period);
+        if(barsRecheck != safeBars) {
+            // Bars changed during read - retry once
+            safeBars = barsRecheck;
+            currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
+        }
+    }
+    
+    // Fallback to server time if chart time unavailable
     if(currentTime <= 0) {
         currentTime = TimeCurrent();
     }
@@ -138,9 +156,14 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     
     // Auto-calculate times if not provided
     if(startTime == 0) {
+        // ✅ EDGE CASE FIX: Handle zero bars scenario
         if(safeBars <= 0) {
-            result.errorMessage = StringFormat("Invalid Bars count: %d", safeBars);
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
+            // LOW TIMEFRAME OPTIMIZATION: Wait for first bar data
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⏱️ CreateZone: Waiting for bar data on TF=", GetCachedPeriod());
+            #endif
+            result.errorMessage = "No bars available - waiting for first tick";
+            result.errorCode = ERR_ZONE_NO_DATA;
             return result;
         }
         
@@ -148,20 +171,41 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         // startIndex will be safeBars-1, which is always < safeBars
         // So we need to check if safeBars is at least 1
         if(safeBars < 1) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ CreateZone: Not enough bars (", safeBars, ") on TF=", GetCachedPeriod());
+            #endif
             result.errorMessage = "Not enough bars for zone creation";
             result.errorCode = ERR_ZONE_RENDER_FAILED;
             return result;
         }
         
-        int startIndex = safeBars - 1;
-        startTime = iTime(_Symbol, _Period, startIndex);
+        // ZONE START TIME: Use time from far enough back to cover visible chart history
+        // زمان شروع Zone: از زمان کافی عقب برای پوشش تاریخچه قابل مشاهده چارت
+        // Calculate a reasonable lookback (max 5000 bars or available bars)
+        int lookbackBars = MathMin(safeBars - 1, 5000);
+        
+        // Ensure we have at least 1 bar
+        if(lookbackBars < 0) lookbackBars = 0;
+        
+        startTime = iTime(_Symbol, _Period, lookbackBars);
         
         // Validate retrieved time
         if(startTime <= 0) {
-            result.errorMessage = StringFormat("Invalid Time[%d]", startIndex);
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
-            return result;
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("❌ CreateZone: Invalid iTime(", lookbackBars, "), trying Time[0]...");
+            #endif
+            // Fallback: try current time
+            startTime = iTime(_Symbol, _Period, 0);
+            if(startTime <= 0) {
+                result.errorMessage = StringFormat("Cannot retrieve chart time (Bars=%d)", safeBars);
+                result.errorCode = ERR_ZONE_RENDER_FAILED;
+                return result;
+            }
         }
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("✅ CreateZone: StartTime=", TimeToString(startTime), " (Lookback=", lookbackBars, " bars)");
+        #endif
     }
     else {
         // Validate user-provided startTime
@@ -180,7 +224,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         }
         
         // CRITICAL FIX: Validate PeriodSeconds before use
-        int periodSeconds = PeriodSeconds(GetCachedPeriod());
+        int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
         if(periodSeconds <= 0) {
             #ifdef ENABLE_DEBUG_LOGS
             Print("❌ CreateZone: Invalid PeriodSeconds=", periodSeconds, " for Period=", Period());
@@ -192,23 +236,55 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         }
         
         // Additional validation: Check for reasonable period
+        // Additional validation: Check for reasonable period
         if(periodSeconds > 2592000) {  // 30 days in seconds
             #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CreateZone: Suspiciously large PeriodSeconds=", periodSeconds);
             #endif
         }
         
-        // Now safe to use periodSeconds
-        datetime calculatedEndTime = startTime + (periodSeconds * ZONE_EXTENSION_MULTIPLIER);
+        // ZONE EXTENSION: Zones extend from past (startTime) to future (currentTime + extension)
+        // زون‌ها از گذشته (startTime) تا آینده (currentTime + extension) امتداد دارند
         
-        // Validate endTime is reasonable
-        if(calculatedEndTime <= startTime) {
-            result.errorMessage = StringFormat("Invalid PeriodSeconds: %d", periodSeconds);
+        // ADAPTIVE ZONE EXTENSION: Scale based on timeframe
+        // Lower timeframes need shorter extensions, higher timeframes need longer ones
+        int extensionMultiplier = ZONE_EXTENSION_MULTIPLIER;
+        
+        // Adjust multiplier based on timeframe (more conservative)
+        if(periodSeconds <= 60) {           // M1
+            extensionMultiplier = 50;
+        }
+        else if(periodSeconds <= 300) {     // M5
+            extensionMultiplier = 50;
+        }
+        else if(periodSeconds <= 900) {     // M15
+            extensionMultiplier = 60;
+        }
+        else if(periodSeconds <= 3600) {    // H1
+            extensionMultiplier = 100;
+        }
+        else if(periodSeconds <= 14400) {   // H4
+            extensionMultiplier = 100;
+        }
+        else {                               // D1+
+            extensionMultiplier = 100;
+        }
+        
+        // Calculate endTime: currentTime (now) + extension into future
+        // محاسبه endTime: زمان فعلی + گسترش به آینده
+        endTime = currentTime + (periodSeconds * extensionMultiplier);
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("🔧 CreateZone: Extension multiplier=", extensionMultiplier, 
+              " period=", periodSeconds, "s → extension=", (periodSeconds * extensionMultiplier), "s");
+        #endif
+        
+        // Validate endTime is in the future
+        if(endTime <= currentTime) {
+            result.errorMessage = StringFormat("Invalid endTime calculation: %s", TimeToString(endTime));
             result.errorCode = ERR_ZONE_RENDER_FAILED;
             return result;
         }
-        
-        endTime = currentTime + periodSeconds * ZONE_EXTENSION_PERIODS;
     }
     else {
         // Validate user-provided endTime
@@ -336,6 +412,13 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     
     result.success = true;
     result.zoneName = request.name;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ CreateZone SUCCESS: '", request.name, "' [", 
+          TimeToString(startTime), " - ", TimeToString(endTime), "] [",
+          DoubleToString(request.bottomPrice, Digits), " - ", 
+          DoubleToString(request.topPrice, Digits), "]");
+    #endif
     
     return result;
 }

@@ -252,24 +252,56 @@ int OnInitHandler() {
     }
     
     // Restore step mode override state (persist across timeframe changes)
+    // GOLD FIX: Add validation to prevent corrupted values
     string stepModeGvarName = "Biotak_StepMode_" + chartIdStr;
     {
         double val = GlobalVariableGet(stepModeGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-            g_stepModeOverride = (int)val;
+            int tempMode = (int)val;
+            // Validate range: 0=TH, 1=SS/LS, 2=M, 3=TP, 4=Combo, 5=Factor
+            if(tempMode >= 0 && tempMode <= 5) {
+                g_stepModeOverride = tempMode;
+            } else {
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("⚠️ WARNING: Corrupted StepMode GlobalVariable (", tempMode, "), resetting to default");
+                #endif
+                GlobalVariableDel(stepModeGvarName);
+                g_stepModeOverride = -1;
+            }
         }
     }
     
     // Restore Factor value override state (persist across timeframe changes)
     // بازیابی مقدار فاکتور (پایدار در تغییر تایم‌فریم)
+    // GOLD FIX: Add validation to prevent invalid values
     string factorGvarName = "Biotak_Factor_" + chartIdStr;
     {
         double val = GlobalVariableGet(factorGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-            g_factorValueOverride = val;
+            // Validate: must be positive and within MAX_SAFE_FACTOR
+            if(val > 0 && val <= MAX_SAFE_FACTOR) {
+                g_factorValueOverride = val;
+            } else {
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("⚠️ WARNING: Invalid Factor GlobalVariable (", val, "), resetting to default");
+                #endif
+                GlobalVariableDel(factorGvarName);
+                g_factorValueOverride = 0.0;
+            }
         } else {
             // No saved override - reset to 0 (use settings)
             g_factorValueOverride = 0.0;
+        }
+    }
+    
+    // GOLD FIX: Validate manual factor input parameter
+    if(inpFactorMode == FACTOR_MODE_MANUAL) {
+        if(inpFactorValue <= 0 || inpFactorValue > MAX_SAFE_FACTOR) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ ERROR: Invalid inpFactorValue (", inpFactorValue, "), clamping to safe range");
+            #endif
+            // Don't override input, just warn and use safe fallback via override
+            g_factorValueOverride = 50.0;
         }
     }
     
@@ -814,10 +846,13 @@ void ClearAllLevels(const string objectPrefix)
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ WARNING: Multiple deletion failures (", totalFailed, ") - forcing manual cleanup");
         #endif
+        // GOLD FIX: Cache ObjectsTotal outside loop
         int total = ObjectsTotal(0, -1, -1);
+        int prefixLen = StringLen(objectPrefix);
         for(int i = total - 1; i >= 0; i--) {
             string name = ObjectName(0, i, -1, -1);
-            if(StringFind(name, objectPrefix) == 0) {
+            // OPTIMIZATION: Use StringSubstr for faster prefix check
+            if(StringLen(name) >= prefixLen && StringSubstr(name, 0, prefixLen) == objectPrefix) {
                 ObjectDelete(0, name);
             }
         }
@@ -913,15 +948,20 @@ bool CalculateCommonStepData(const double dailyClosePrice, StepCalculationData &
     static string s_lastTF = "";
     static int s_lastStartPointType = -1;
     static double s_lastCustomPrice = 0;
+    static int s_lastMaxAbove = 0;
+    static int s_lastMaxBelow = 0;
     
     string currentTF = GetFractalTimeframeForCurrent();
     ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
     
+    // GOLD FIX: Include max levels in cache dependency for complete invalidation
     if(dailyClosePrice == s_lastDailyClose && 
        currentBasis == s_lastBasis && 
        currentTF == s_lastTF &&
        g_thStartPointType == s_lastStartPointType &&
        (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || g_customTHStartPrice == s_lastCustomPrice) &&
+       inpMaxTHLevelsAbove == s_lastMaxAbove &&
+       inpMaxTHLevelsBelow == s_lastMaxBelow &&
        s_lastDailyClose != 0) {
         data = s_cachedData;
         return true;
@@ -1025,6 +1065,8 @@ bool CalculateCommonStepData(const double dailyClosePrice, StepCalculationData &
     s_lastTF = currentTF;
     s_lastStartPointType = g_thStartPointType;
     s_lastCustomPrice = g_customTHStartPrice;
+    s_lastMaxAbove = inpMaxTHLevelsAbove;
+    s_lastMaxBelow = inpMaxTHLevelsBelow;
     
     return true;
 }
@@ -1708,6 +1750,28 @@ void RedrawAllObjects(bool force_redraw=false)
     // Drawing functions (CreateTHLineObject, etc.) already respect g_linesVisible.
     // ApplyLinesVisibility is now ONLY called from the L key toggle handler.
 
+    // CRITICAL FIX: Apply g_linesVisible state to all line objects
+    // This ensures that when Trigger (T) is toggled, Lines (L) state is preserved
+    // اطمینان از اینکه وقتی Trigger (T) toggle می‌شود، وضعیت Lines (L) حفظ می‌شود
+    if(!g_linesVisible) {
+        int total = ObjectsTotal(0, -1, -1);
+        string cachedPrefix = objectPrefix;
+        int prefixLen = StringLen(cachedPrefix);
+        
+        for(int i = 0; i < total; i++) {
+            string objName = ObjectName(0, i, -1, -1);
+            
+            // Check if it's our object (has the prefix)
+            if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix) {
+                // Check if it's a line object (HLINE or TREND)
+                int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
+                if(objType == OBJ_HLINE || objType == OBJ_TREND) {
+                    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                }
+            }
+        }
+    }
+
     CheckAlerts(objectPrefix, g_currentPrice);
 }
 
@@ -1764,19 +1828,16 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
             else if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("🔴 CRITICAL: ", totalObjects, " objects approaching MT4 limit (64000)!");
-                Print("🧹 EMERGENCY: Forcing cleanup of old objects...");
+                Print("🧹 EMERGENCY: Using ObjectsDeleteAll for cleanup...");
                 #endif
-                // Emergency cleanup: delete all non-current objects
-                for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--) {
-                    string objName = ObjectName(0, i, -1, -1);
-                    // Only keep current prefix objects
-                    if(StringFind(objName, inpObjectPrefix) < 0) {
-                        ObjectDelete(0, objName);
-                    }
-                }
+                // GOLD FIX: Use ObjectsDeleteAll instead of loop - much faster!
+                int deleted = 0;
+                deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);  // Remove all zones
+                deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);   // Remove all mid-zones
+                
                 #ifdef ENABLE_DEBUG_LOGS
                 int afterCleanup = ObjectsTotal(0, -1, -1);
-                Print("✅ Emergency cleanup completed. Objects: ", totalObjects, " -> ", afterCleanup);
+                Print("✅ Emergency cleanup completed. Objects: ", totalObjects, " -> ", afterCleanup, " (deleted=", deleted, ")");
                 #endif
             }
         }
@@ -1802,56 +1863,26 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
 }
 
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| Apply Lines Visibility State to All Line Objects                 |
 //| اعمال وضعیت نمایش خطوط به همه اشیاء خط                          |
 //|                                                                  |
-//| Called after RedrawAllObjects to ensure g_linesVisible is       |
-//| respected for all line objects (HLINE and TREND)                 |
+//| GOLD FIX: Removed redundant loop - visibility now set during     |
+//| object creation in CreateTHLineObject()                         |
+//| This function kept as stub for backward compatibility           |
 //+------------------------------------------------------------------+
 void ApplyLinesVisibility()
 {
-    if(!g_initialized) return;
+    // GOLD FIX: This loop is now REDUNDANT because:
+    // 1. CreateTHLineObject() already sets OBJPROP_TIMEFRAMES based on g_linesVisible
+    // 2. Running this AFTER RedrawAllObjects() is wasteful
+    // 3. Visibility is more efficiently handled during object creation
     
-    int total = ObjectsTotal(0, -1, -1);
-    int linesUpdated = 0;
-    
-    // OPTIMIZATION: Cache prefix and length to avoid repeated StringFind
-    string cachedPrefix = inpObjectPrefix;
-    int prefixLen = StringLen(cachedPrefix);
-    
-    for(int i = 0; i < total; i++)
-    {
-        string objName = ObjectName(0, i, -1, -1);
-        
-        // OPTIMIZED: Use StringSubstr for faster prefix check
-        if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix)
-        {
-            // Check if it's a line object (HLINE or TREND)
-            int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
-            if(objType == OBJ_HLINE || objType == OBJ_TREND)
-            {
-                if(g_linesVisible)
-                {
-                    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-                }
-                else
-                {
-                    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                }
-                linesUpdated++;
-            }
-        }
-    }
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    if(linesUpdated > 0) {
-        Print("✅ ApplyLinesVisibility: Updated ", linesUpdated, " lines to ", 
-              (g_linesVisible ? "VISIBLE" : "HIDDEN"));
-    }
-    #endif
+    // Stub: Do nothing - handled in CreateTHLineObject()
+    return;
 }
 
-void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const double &dparam, const string &sparam)
+void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
     // Handle key press events
     if(id == CHARTEVENT_KEYDOWN)
@@ -1974,7 +2005,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
                       " Trigger objects (", failedCount, " failed)");
                 #endif
             }
-            ChartRedraw(); // Redraw chart to apply visual changes
+            ThrottledChartRedraw(); // Redraw chart to apply visual changes
         }
         
         // Handle lines toggle key (L)
@@ -2026,7 +2057,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             Print("📊 Lines ", (g_linesVisible ? "VISIBLE" : "HIDDEN"));
             #endif
             
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // Handle custom price key
@@ -2054,7 +2085,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             g_customPriceLineCreated = false;
             
             // Create a horizontal line at current price (original behavior - always reset to current price)
-            double currentPrice = iClose(_Symbol, GetCachedPeriod(), 0); // Get current price
+            double currentPrice = iClose(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0); // Get current price
             
             // IMPORTANT: Update global variables immediately so TH levels update
             g_customTHStartPrice = currentPrice;
@@ -2087,7 +2118,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             Print("📍 Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
             #endif
             
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // Handle Escape key to cancel/exit custom price mode
@@ -2113,7 +2144,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("Custom price mode cancelled - returned to Input Parameter setting");
                 #endif
-                ChartRedraw();
+                ThrottledChartRedraw();
             }
         }
         
@@ -2146,7 +2177,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             g_forceClearOnNextDraw = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // Handle TH3 Tool toggle key
@@ -2156,7 +2187,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
         if(lparam == th3KeyCode)
         {
             ToggleTH3Tool();
-            ChartRedraw(); // Force redraw to show/hide tool immediately
+            ThrottledChartRedraw(); // Force redraw to show/hide tool immediately
         }
         
         // Handle Frequency Analysis key (F) - analyze optimal default frequency
@@ -2203,7 +2234,9 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             g_forceClearOnNextDraw = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
-            ChartRedraw();
+            
+            // GOLD FIX: Use throttled redraw instead of direct ChartRedraw
+            ThrottledChartRedraw();
         }
         
         // Handle Factor decrease key (1) - only in Factor Mode
@@ -2259,7 +2292,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
                 g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true);
-                ChartRedraw();
+                ThrottledChartRedraw();
             }
         }
         
@@ -2316,7 +2349,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
                 g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true);
-                ChartRedraw();
+                ThrottledChartRedraw();
             }
         }
         
@@ -2361,7 +2394,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             g_forceClearOnNextDraw = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // Handle TH3 Frequency Decrease (Key 3) - previous frequency
@@ -2395,7 +2428,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             Print("⬇️ TH3 Frequency: ", DoubleToString(GetCurrentTH3Frequency(), 3), "%");
             #endif
             
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // Handle TH3 Frequency Increase (Key 4) - next frequency
@@ -2429,7 +2462,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             Print("⬆️ TH3 Frequency: ", DoubleToString(GetCurrentTH3Frequency(), 3), "%");
             #endif
             
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // ========================================
@@ -2535,7 +2568,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             g_calculatedOnce = false;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
         
         // Handle timeframe lock/unlock key
@@ -2603,7 +2636,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
                 }
             }
             
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
     }
     
@@ -2633,7 +2666,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             #ifdef ENABLE_DEBUG_LOGS
             Print("Custom price setting cancelled (right-click)");
             #endif
-            ChartRedraw();
+            ThrottledChartRedraw();
             return;
         }
         
@@ -2709,7 +2742,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
             }
         }
         
-        ChartRedraw();
+        ThrottledChartRedraw();
     }
     
     // Handle object click event for the horizontal line (replaces double-click event)
@@ -2785,7 +2818,7 @@ void OnChartEventHandler_LEGACY_REMOVE(const int id, const long &lparam, const d
                     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                     g_redrawTHLevelsNeeded = true;
                     RedrawAllObjects(true);
-                    ChartRedraw();
+                    ThrottledChartRedraw();
                 }
             }
         }

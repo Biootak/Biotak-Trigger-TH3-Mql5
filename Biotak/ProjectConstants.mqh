@@ -26,7 +26,10 @@ const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125; // 12.5%
 // MULTIPLIERS & FACTORS
 // ضرایب و فاکتورها
 // ═══════════════════════════════════════════════════════════════
-const int ZONE_EXTENSION_MULTIPLIER = 10000;    // برای محاسبه endTime
+// ADAPTIVE ZONE EXTENSION: Scales based on timeframe
+// M1: 100 bars = ~1.5 hours | M5: 100 bars = ~8 hours | M15: 100 bars = ~1 day
+// H1: 100 bars = ~4 days | H4: 100 bars = ~16 days | D1: 100 bars = ~3 months
+const int ZONE_EXTENSION_MULTIPLIER = 100;      // برای محاسبه endTime (کاهش از 10000 به 100)
 const int ALPHA_SCALE_FACTOR = 255;             // برای محاسبه alpha channel
 const int PERCENTAGE_TO_DECIMAL = 100;          // تبدیل درصد به اعشار
 
@@ -197,10 +200,10 @@ double GetFrequencyForStep(int step)
 }
 
 //+------------------------------------------------------------------+
-//| Validate Price Value                                             |
+//| Validate Price Value (Simple Check)                              |
 //| اعتبارسنجی مقدار قیمت                                            |
 //+------------------------------------------------------------------+
-bool IsValidPrice(double price)
+bool IsValidPriceSimple(double price)
 {
     return (price >= MIN_PRICE_VALUE && price < MAX_PRICE_MULTIPLIER);
 }

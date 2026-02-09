@@ -84,6 +84,25 @@ int ValidateInputs()
         return INIT_PARAMETERS_INCORRECT;
     }
     
+    // 4.1 Font Name Validation (Security Fix)
+    string validFonts[] = {"Arial", "Arial Black", "Courier New", "Tahoma", "Verdana", 
+                           "Times New Roman", "Calibri", "Segoe UI", "Consolas"};
+    bool fontValid = false;
+    for(int i = 0; i < ArraySize(validFonts); i++) {
+        if(inpFontName == validFonts[i]) {
+            fontValid = true;
+            break;
+        }
+    }
+    if(!fontValid) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ WARNING: Invalid font name: ", inpFontName);
+        Print("   Valid fonts: Arial, Arial Black, Courier New, Tahoma, Verdana");
+        Print("   🔧 Indicator will use Arial as fallback");
+        #endif
+        // Note: Cannot modify input parameter, but fallback will be used in code
+    }
+    
     // 5. Line Widths (1-10)
     if(inpCustomPriceLevelWidth <= 0 || inpCustomPriceLevelWidth > 10) {
         #ifdef ENABLE_DEBUG_LOGS

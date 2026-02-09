@@ -38,8 +38,7 @@ SecurityTestResult Test_BasePriceManager_MemoryCleanup()
     result.errorCode = 0;
     
     // Simulate symbol state creation
-    extern int g_symbolStateCount;
-    extern SymbolState g_symbolStates[];
+    // Note: Direct access to global variables (no extern needed in MQL5)
     
     int initialCount = g_symbolStateCount;
     
@@ -130,13 +129,12 @@ SecurityTestResult Test_FrequencyLearning_BufferOverflow()
     result.passed = false;
     result.errorCode = 0;
     
-    extern PatternLearningData g_learningData[];
-    extern int g_learningDataCount;
+    // Note: Direct access to global variables (no extern needed in MQL5)
     
     int initialCount = g_learningDataCount;
     
     // Simulate buffer overflow by adding MAX_LEARNING_DATA_SIZE + 100 entries
-    const int TEST_OVERFLOW_COUNT = 100;
+    // TEST_OVERFLOW_COUNT is defined in ProjectConstants.mqh
     int targetCount = MAX_LEARNING_DATA_SIZE + TEST_OVERFLOW_COUNT;
     
     for(int i = 0; i < targetCount; i++) {

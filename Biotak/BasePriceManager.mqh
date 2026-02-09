@@ -77,19 +77,78 @@ struct BasePriceState
     int lastHistoryDay;                                  // Track which day's history we have
     int lastHistoryYear;                                 // Track which year's history we have
     bool systemInitialized;                              // Track if system has been initialized
+    datetime lastAccessTime;                             // ✅ LRU: Track last access for eviction
 };
 
 // Global array to store state for each symbol
 static BasePriceState g_symbolStates[];
 static int g_symbolStateCount = 0;
 
+// ✅ PERFORMANCE: Cached symbol state index (declared early for use in EvictLRU)
+static int _g_cachedStateIdx = -1;
+static string _g_cachedStateSymbol = "";
+
 //+------------------------------------------------------------------+
-//| CONSTANTS - Buffer Overflow Prevention                           |
+//| CONSTANTS - Buffer Overflow Prevention (declared before use)     |
 //+------------------------------------------------------------------+
 #define MAX_SYMBOL_STATES 100              // Maximum symbols to track
 #define LOCK_TIMEOUT_SECONDS 2             // Stale lock timeout
 #define LOCK_MAX_ATTEMPTS 5                // Maximum lock acquisition attempts
 #define LOCK_RETRY_DELAY_MS 20             // Delay between lock attempts
+#define SYMBOL_STATE_LRU_THRESHOLD 50      // ✅ LRU: Cleanup when reaching this count
+#define SYMBOL_STATE_INACTIVE_HOURS 24     // ✅ LRU: Remove states inactive for 24h
+
+//+------------------------------------------------------------------+
+//| ✅ LRU Eviction: Remove least recently used symbol states        |
+//| حذف وضعیت سیمبل‌های کمتر استفاده شده (LRU)                      |
+//+------------------------------------------------------------------+
+void EvictLeastRecentlyUsedSymbolState() {
+    if(g_symbolStateCount <= 1) return;  // Keep at least one
+    
+    datetime currentTime = TimeCurrent();
+    int oldestIndex = -1;
+    datetime oldestTime = currentTime;
+    
+    // Find oldest state
+    for(int i = 0; i < g_symbolStateCount; i++) {
+        if(g_symbolStates[i].lastAccessTime < oldestTime) {
+            oldestTime = g_symbolStates[i].lastAccessTime;
+            oldestIndex = i;
+        }
+    }
+    
+    if(oldestIndex < 0) return;
+    
+    // Check if old enough to evict (24 hours)
+    if((currentTime - oldestTime) < SYMBOL_STATE_INACTIVE_HOURS * 3600) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ EvictLRU: Oldest state only ", 
+              (currentTime - oldestTime) / 3600, "h old - not evicting yet");
+        #endif
+        return;
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("🗑️ EvictLRU: Removing symbol '", g_symbolStates[oldestIndex].symbol, 
+          "' (inactive for ", (currentTime - oldestTime) / 3600, "h)");
+    #endif
+    
+    // Free history array memory
+    ArrayFree(g_symbolStates[oldestIndex].basePriceHistory);
+    
+    // Shift array left to remove element
+    for(int i = oldestIndex; i < g_symbolStateCount - 1; i++) {
+        g_symbolStates[i] = g_symbolStates[i + 1];
+    }
+    
+    // Resize array
+    g_symbolStateCount--;
+    ArrayResize(g_symbolStates, g_symbolStateCount);
+    
+    // Invalidate cache
+    _g_cachedStateIdx = -1;
+    _g_cachedStateSymbol = "";
+}
 
 //+------------------------------------------------------------------+
 //| Get index of state for current symbol (or create new)            |
@@ -132,8 +191,23 @@ int GetSymbolStateIndex()
     {
         if(g_symbolStates[i].symbol == currentSymbol)
         {
+            // ✅ LRU: Update last access time
+            g_symbolStates[i].lastAccessTime = TimeCurrent();
             return i;
         }
+    }
+    
+    // ✅ LRU: Check if we should evict before creating new state
+    if(g_symbolStateCount >= SYMBOL_STATE_LRU_THRESHOLD) {
+        EvictLeastRecentlyUsedSymbolState();
+    }
+    
+    // Double-check after eviction
+    if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ CRITICAL: Symbol state limit reached even after eviction");
+        #endif
+        return -1;
     }
     
     // Create new state for this symbol
@@ -152,6 +226,7 @@ int GetSymbolStateIndex()
     g_symbolStates[newIndex].basePriceCached = 0.0;
     g_symbolStates[newIndex].lastProcessedBlockTimestamp = 0;
     g_symbolStates[newIndex].referenceM1Power = 0.0;
+    g_symbolStates[newIndex].lastAccessTime = TimeCurrent();  // ✅ LRU: Initialize access time
     ArrayResize(g_symbolStates[newIndex].basePriceHistory, 0);
     g_symbolStates[newIndex].historyCount = 0;
     g_symbolStates[newIndex].lastHistoryDay = 0;
@@ -222,13 +297,11 @@ void SetHistoryArray(string &inputArray[], int count)
 // Legacy global variables for backward compatibility (now use GetSymbolStateIndex())
 // These are kept as macros that redirect to symbol-specific state
 //+------------------------------------------------------------------+
-//| PERFORMANCE: Cached symbol state index                           |
-//| بهینه‌سازی: ایندکس وضعیت سیمبل کش شده تا هر بار محاسبه نشود     |
-//| GetSymbolStateIndex() calls GlobalVariable (~100μs each).        |
-//| These macros called 50+ times/tick → now ONE call per tick.      |
+//| PERFORMANCE: Get Cached Symbol State Index                       |
+//| بهینه‌سازی: دریافت ایندکس کش شده                             |
+//| Called 50+ times/tick → now ONE call per tick via caching.      |
 //+------------------------------------------------------------------+
-static int _g_cachedStateIdx = -1;
-static string _g_cachedStateSymbol = "";
+// Variables declared at top of file (after g_symbolStateCount)
 
 int GetCachedSymbolStateIndex() {
     string sym = _Symbol;
@@ -1231,12 +1304,23 @@ bool UpdateBasePrice()
     // Apply M1 power gating logic
     // Use configurable threshold (default: 0.066% to match Java)
     double thresholdPercent = inpBasePriceThresholdEnabled ? inpBasePriceThresholdPercent : 0.0;
-    if(deltaAbsPct >= thresholdPercent)
+    
+    // GOLD FIX: Check if base price is too old (> 24 hours) - force update to prevent stuck price
+    datetime timeSinceLastUpdate = m30BarTime - g_lastProcessedBlockTimestamp;
+    bool forceUpdateDueToAge = (timeSinceLastUpdate > 86400); // 24 hours = 86400 seconds
+    
+    if(deltaAbsPct >= thresholdPercent || forceUpdateDueToAge)
     {
         // ACCEPT: Update base price
         double oldBasePrice = g_basePriceCached;
         g_basePriceCached = newBasePrice;
         g_referenceM1Power = newPowerM1;
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        if(forceUpdateDueToAge) {
+            Print("⏰ FORCED UPDATE: Base price too old (", timeSinceLastUpdate/3600, "h) - delta=", DoubleToString(deltaAbsPct, 3), "%");
+        }
+        #endif
         
         string okStatus = StringFormat("OK D=%.3f%%", deltaAbsPct);
         // Pass server time - AddBasePriceHistoryEntry will convert to GMT

@@ -191,15 +191,25 @@ int EmergencyCleanupObjects()
         phase2Deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
         
         // Delete all labels except mode labels
-        for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+        // GOLD FIX: Cache ObjectsTotal outside loop
+        int totalObjects = ObjectsTotal(0, -1, -1);
+        for(int i = totalObjects - 1; i >= 0; i--)
         {
             string objName = ObjectName(0, i, -1, -1);
             
+            // GOLD FIX: Optimize StringFind with early exit pattern
+            // Cache first char check for faster rejection
+            int nameLen = StringLen(objName);
+            if(nameLen < 12) continue;  // All labels are at least 12 chars
+            
             // Keep mode labels (important for user)
-            if(StringFind(objName, "StepMode_Label") >= 0 ||
-               StringFind(objName, "BasisMode_Label") >= 0 ||
-               StringFind(objName, "Factor_Label") >= 0 ||
-               StringFind(objName, "LockStatus_Label") >= 0) {
+            // OPTIMIZATION: Check most common first
+            bool isModeLabel = (StringFind(objName, "StepMode_Label") >= 0);
+            if(!isModeLabel) isModeLabel = (StringFind(objName, "Factor_Label") >= 0);
+            if(!isModeLabel) isModeLabel = (StringFind(objName, "BasisMode_Label") >= 0);
+            if(!isModeLabel) isModeLabel = (StringFind(objName, "LockStatus_Label") >= 0);
+            
+            if(isModeLabel) {
                 continue;
             }
             
@@ -237,8 +247,9 @@ int GetCurrentObjectCount()
 {
     datetime currentTime = TimeCurrent();
     
-    // Use cache if recent (< 5 seconds)
-    if(currentTime - g_lastObjectCountCheck < 5 && g_lastObjectCount > 0) {
+    // GOLD FIX: Increase cache timeout from 5s to 30s for better performance
+    // ObjectsTotal is expensive - only call when needed
+    if(currentTime - g_lastObjectCountCheck < 30 && g_lastObjectCount > 0) {
         return g_lastObjectCount;
     }
     

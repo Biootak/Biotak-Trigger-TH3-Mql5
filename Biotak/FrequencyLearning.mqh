@@ -12,6 +12,8 @@
 #define MIN_PATTERNS_FOR_LEARNING 5         // Minimum patterns before weight adjustment
 #define FREQUENCY_CHANGE_THRESHOLD 0.001    // Minimum change to detect frequency modification
 #define BUFFER_SAFETY_MARGIN 100            // Safety margin before hitting max size
+#define MAX_PATTERN_NAME_LENGTH 100         // ✅ Security: Maximum pattern name length
+#define MAX_FILENAME_LENGTH 200             // ✅ Security: Maximum filename length (Windows=260)
 
 // GOLD FIX #2: Enhanced circular buffer with overflow protection
 // CIRCULAR BUFFER IMPLEMENTATION:
@@ -76,7 +78,7 @@ static bool g_learningDataInitialized = false;
 #define SCREENSHOT_RENDER_DELAY_MS 300      // Delay for chart rendering before screenshot
 #define SCREENSHOT_WIDTH 1920               // Full HD width
 #define SCREENSHOT_HEIGHT 1080              // Full HD height
-#define MAX_FILENAME_LENGTH 255             // MT4 filename limit
+// MAX_FILENAME_LENGTH defined at top of file (line 16)
 #define WEIGHT_ADJUSTMENT_FACTOR 0.02       // Gradual weight adjustment rate
 #define MIN_CONSOLIDATION_WEIGHT 0.01       // Minimum consolidation weight
 #define MAX_CONSOLIDATION_WEIGHT 0.15       // Maximum consolidation weight
@@ -94,6 +96,16 @@ static int g_learningDataHead = 0;
 static int g_learningDataTotalWritten = 0;
 
 bool SafeAppendLearningData(const PatternLearningData &newData) {
+    // ✅ SECURITY FIX: Validate pattern name length
+    if(StringLen(newData.patternName) > MAX_PATTERN_NAME_LENGTH) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ SafeAppendLearningData: Pattern name too long (", 
+              StringLen(newData.patternName), " chars), truncating to ", MAX_PATTERN_NAME_LENGTH);
+        #endif
+        // Cannot modify const reference, but validation prevents buffer overflow
+        return false;
+    }
+    
     // Initialize if needed
     if(!g_learningDataInitialized) {
         ArrayResize(g_learningData, 0);

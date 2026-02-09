@@ -6,12 +6,31 @@
 
 //+------------------------------------------------------------------+
 //| EPSILON CONSTANTS - For Different Data Types                     |
+//| ✅ FIXED: Dynamic epsilon scaling based on magnitude             |
 //+------------------------------------------------------------------+
-#define EPSILON_PRICE 1e-10             // For price comparisons
+#define EPSILON_BASE 1e-10              // Base epsilon for small numbers
 #define EPSILON_PERCENTAGE 1e-10        // For percentage comparisons
 #define EPSILON_RATIO 1e-8              // For ratio comparisons
 #define EPSILON_ANGLE 1e-6              // For angle comparisons
 #define EPSILON_GENERAL 1e-9            // General purpose
+
+// Dynamic epsilon for price (scales with magnitude)
+#define EPSILON_PRICE_SCALE 1e-8        // 0.01 pips for typical forex
+
+double GetDynamicEpsilonForPrice(double price) {
+    // Scale epsilon based on price magnitude
+    // For XAUUSD (2600): epsilon = 2600 * 1e-8 = 0.000026 (0.26 pips)
+    // For EURUSD (1.08): epsilon = 1.08 * 1e-8 = 0.0000000108 (0.00011 pips)
+    double epsilon = MathAbs(price) * EPSILON_PRICE_SCALE;
+    
+    // Minimum epsilon to avoid zero
+    if(epsilon < EPSILON_BASE) epsilon = EPSILON_BASE;
+    
+    return epsilon;
+}
+
+// Backward compatibility
+#define EPSILON_PRICE EPSILON_BASE
 
 //+------------------------------------------------------------------+
 //| Safe Floating-Point Comparison Functions                         |

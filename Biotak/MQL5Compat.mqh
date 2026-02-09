@@ -148,20 +148,20 @@ struct ATRHandleCacheEntry {
     int period;
 };
 
-ATRHandleCacheEntry g_atrCache[];
-int g_atrCacheCount = 0;
-bool g_atrCacheInitialized = false;
+ATRHandleCacheEntry g_atrHandleCache[];
+int g_atrHandleCacheCount = 0;
+bool g_atrHandleCacheInitialized = false;
 
 void InitATRCache() {
-    if(!g_atrCacheInitialized) {
-        ArrayResize(g_atrCache, ATR_CACHE_SIZE);
+    if(!g_atrHandleCacheInitialized) {
+        ArrayResize(g_atrHandleCache, ATR_CACHE_SIZE);
         for(int i = 0; i < ATR_CACHE_SIZE; i++) {
-            g_atrCache[i].handle = INVALID_HANDLE;
-            g_atrCache[i].symbol = "";
-            g_atrCache[i].tf = PERIOD_CURRENT;
-            g_atrCache[i].period = 0;
+            g_atrHandleCache[i].handle = INVALID_HANDLE;
+            g_atrHandleCache[i].symbol = "";
+            g_atrHandleCache[i].tf = PERIOD_CURRENT;
+            g_atrHandleCache[i].period = 0;
         }
-        g_atrCacheInitialized = true;
+        g_atrHandleCacheInitialized = true;
     }
 }
 
@@ -172,11 +172,11 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
     
     // Search existing cache entries
     int handle = INVALID_HANDLE;
-    for(int i = 0; i < g_atrCacheCount; i++) {
-        if(g_atrCache[i].symbol == symbol &&
-           g_atrCache[i].tf == timeframe &&
-           g_atrCache[i].period == atr_period) {
-            handle = g_atrCache[i].handle;
+    for(int i = 0; i < g_atrHandleCacheCount; i++) {
+        if(g_atrHandleCache[i].symbol == symbol &&
+           g_atrHandleCache[i].tf == timeframe &&
+           g_atrHandleCache[i].period == atr_period) {
+            handle = g_atrHandleCache[i].handle;
             break;
         }
     }
@@ -192,20 +192,20 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
         
         // Store in cache (round-robin eviction when full)
         static int g_atrEvictSlot = 0; // Round-robin eviction cursor
-        int slot = g_atrCacheCount;
+        int slot = g_atrHandleCacheCount;
         if(slot >= ATR_CACHE_SIZE) {
             // Round-robin eviction: cycle through all slots fairly
             slot = g_atrEvictSlot;
-            if(g_atrCache[slot].handle != INVALID_HANDLE)
-                IndicatorRelease(g_atrCache[slot].handle);
+            if(g_atrHandleCache[slot].handle != INVALID_HANDLE)
+                IndicatorRelease(g_atrHandleCache[slot].handle);
             g_atrEvictSlot = (g_atrEvictSlot + 1) % ATR_CACHE_SIZE;
         } else {
-            g_atrCacheCount++;
+            g_atrHandleCacheCount++;
         }
-        g_atrCache[slot].handle = handle;
-        g_atrCache[slot].symbol = symbol;
-        g_atrCache[slot].tf = timeframe;
-        g_atrCache[slot].period = atr_period;
+        g_atrHandleCache[slot].handle = handle;
+        g_atrHandleCache[slot].symbol = symbol;
+        g_atrHandleCache[slot].tf = timeframe;
+        g_atrHandleCache[slot].period = atr_period;
     }
     
     double buffer[];
@@ -221,13 +221,13 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int sh
 
 // Call this from OnDeinit to release ALL cached ATR handles
 void ReleaseATRHandle() {
-    for(int i = 0; i < g_atrCacheCount; i++) {
-        if(g_atrCache[i].handle != INVALID_HANDLE) {
-            IndicatorRelease(g_atrCache[i].handle);
-            g_atrCache[i].handle = INVALID_HANDLE;
+    for(int i = 0; i < g_atrHandleCacheCount; i++) {
+        if(g_atrHandleCache[i].handle != INVALID_HANDLE) {
+            IndicatorRelease(g_atrHandleCache[i].handle);
+            g_atrHandleCache[i].handle = INVALID_HANDLE;
         }
     }
-    g_atrCacheCount = 0;
+    g_atrHandleCacheCount = 0;
 }
 
 //+------------------------------------------------------------------+
