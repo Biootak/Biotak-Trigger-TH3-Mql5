@@ -2816,19 +2816,75 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 
                 g_customPriceLineDragging = true;
                 
+                // Get current line price from object (MT4 updates it automatically during drag)
                 double currentLinePrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
+                
                 if(currentLinePrice > 0 && MathAbs(currentLinePrice - g_customTHStartPrice) > _Point * 0.5)
                 {
+                    // Apply magnet/snap to nearest OHLC if enabled
+                    double snappedPrice = currentLinePrice;
+                    
+                    if(inpEnableMagnet && inpMagnetSensitivityPips > 0)
+                    {
+                        // Get mouse position to find the bar
+                        int mouseX = (int)lparam;
+                        int mouseY = (int)dparam;
+                        datetime mouseTime;
+                        double mousePrice;
+                        int subWindow = 0;
+                        
+                        if(ChartXYToTimePrice(0, mouseX, mouseY, subWindow, mouseTime, mousePrice))
+                        {
+                            int barIndex = iBarShift(NULL, 0, mouseTime, false);
+                            if(barIndex >= 0)
+                            {
+                                // Get OHLC of current bar
+                                double barOpen = iOpen(NULL, 0, barIndex);
+                                double barHigh = iHigh(NULL, 0, barIndex);
+                                double barLow = iLow(NULL, 0, barIndex);
+                                double barClose = iClose(NULL, 0, barIndex);
+                                
+                                // Calculate threshold in price units
+                                double threshold = inpMagnetSensitivityPips * _Point;
+                                if(Digits == 3 || Digits == 5) threshold *= 10; // Adjust for 5-digit brokers
+                                
+                                // Find nearest OHLC
+                                double minDist = threshold + 1;
+                                double nearestPrice = currentLinePrice;
+                                
+                                double distOpen = MathAbs(currentLinePrice - barOpen);
+                                if(distOpen < minDist) { minDist = distOpen; nearestPrice = barOpen; }
+                                
+                                double distHigh = MathAbs(currentLinePrice - barHigh);
+                                if(distHigh < minDist) { minDist = distHigh; nearestPrice = barHigh; }
+                                
+                                double distLow = MathAbs(currentLinePrice - barLow);
+                                if(distLow < minDist) { minDist = distLow; nearestPrice = barLow; }
+                                
+                                double distClose = MathAbs(currentLinePrice - barClose);
+                                if(distClose < minDist) { minDist = distClose; nearestPrice = barClose; }
+                                
+                                // Snap if within threshold
+                                if(minDist <= threshold)
+                                {
+                                    snappedPrice = nearestPrice;
+                                    // Update line position immediately for smooth snap
+                                    ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0, snappedPrice);
+                                }
+                            }
+                        }
+                    }
+                    
                     // PERFORMANCE FIX: Throttle RedrawAllObjects to 50ms during drag
                     // بهینه‌سازی: محدود کردن بروزرسانی سطوح به 20 بار در ثانیه برای عملکرد روان
                     uint nowMs = GetTickCount();
                     if(nowMs - g_lastDragRedrawTime > DRAG_REDRAW_THROTTLE_MS)
                     {
                         #ifdef ENABLE_DEBUG_LOGS
-                        Print("🔄 DRAG UPDATE: price=", currentLinePrice, ", redrawing...");
+                        Print("🔄 DRAG UPDATE: price=", snappedPrice, ", redrawing...");
                         #endif
                         
-                        g_customTHStartPrice = currentLinePrice;
+                        g_customTHStartPrice = snappedPrice;
                         g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                         g_redrawTHLevelsNeeded = true;
                         RedrawAllObjects(true);

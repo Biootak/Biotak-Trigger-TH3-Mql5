@@ -34,6 +34,8 @@ input double inpCustomTHStartPrice = 0.0;
 input int inpCustomPriceMaxLevels = 20;
 input color inpCustomPriceLevelColor = clrDodgerBlue;
 input int inpCustomPriceLevelWidth = 1;
+input bool inpEnableMagnet = true;
+input int inpMagnetSensitivityPips = 10;
 
 input string S3 = "---------- M STEP ----------";
 input ENUM_MSTEP_BASIS_TYPE inpMStepBasisType = MSTEP_BASIS_C_BASED;
