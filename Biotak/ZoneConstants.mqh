@@ -63,22 +63,10 @@ struct SZonePerformanceMetrics {
 };
 
 //+------------------------------------------------------------------+
-//| STRUCTURE: Object Cache Entry                                    |
-//| ساختار: ورودی کش اشیاء                                           |
-//+------------------------------------------------------------------+
-struct SObjectCacheEntry {
-    string name;
-    bool exists;
-    datetime lastCheck;
-};
-
-//+------------------------------------------------------------------+
 //| GLOBAL VARIABLES: Performance Tracking                           |
 //| متغیرهای جهانی: ردیابی عملکرد                                    |
 //+------------------------------------------------------------------+
 static SZonePerformanceMetrics g_zoneMetrics;
-static SObjectCacheEntry g_objectCache[];
-static int g_objectCacheSize = 0;
 static datetime g_lastCacheCleanup = 0;
 
 // Market Price Cache (برای جلوگیری از محاسبات تکراری)
@@ -99,9 +87,6 @@ void InitializeZoneMetrics() {
     g_zoneMetrics.avgValidationTime = 0;
     g_zoneMetrics.avgRenderTime = 0;
     g_zoneMetrics.lastResetTime = TimeCurrent();
-    
-    ArrayResize(g_objectCache, OBJECT_CACHE_SIZE);
-    g_objectCacheSize = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -157,9 +142,6 @@ void CleanupZoneSystem() {
     g_zoneMetrics.avgValidationTime = 0;
     g_zoneMetrics.avgRenderTime = 0;
     
-    // Clear cache
-    ArrayResize(g_objectCache, 0);
-    g_objectCacheSize = 0;
     g_lastCacheCleanup = 0;
     
     // Clear market price cache
@@ -197,38 +179,12 @@ double GetCachedMarketPrice() {
 
 //+------------------------------------------------------------------+
 //| Cleanup Object Cache (پاک‌سازی دوره‌ای)                          |
-//| پاک‌سازی کش اشیاء                                                 |
+//| Note: This function is deprecated - use ObjectCache.mqh instead  |
 //+------------------------------------------------------------------+
 void CleanupObjectCache() {
-    datetime currentTime = TimeCurrent();
-    
-    // بررسی نیاز به cleanup
-    if(g_lastCacheCleanup > 0 && 
-       (currentTime - g_lastCacheCleanup) < CACHE_CLEANUP_INTERVAL) {
-        return;
-    }
-    
-    // CRITICAL: Validate array size before access
-    int cacheArraySize = ArraySize(g_objectCache);
-    int safeSize = MathMin(g_objectCacheSize, cacheArraySize);
-    
-    // پاک‌سازی ورودی‌های قدیمی
-    int validCount = 0;
-    for(int i = 0; i < safeSize; i++) {
-        if((currentTime - g_objectCache[i].lastCheck) < VALIDATION_CACHE_TTL) {
-            if(validCount != i) {
-                g_objectCache[validCount] = g_objectCache[i];
-            }
-            validCount++;
-        }
-    }
-    
-    g_objectCacheSize = validCount;
-    g_lastCacheCleanup = currentTime;
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ CleanupObjectCache: Cleaned ", (safeSize - validCount), " old entries");
-    #endif
+    // Deprecated: Object cache is now managed by ObjectCache.mqh
+    // This function is kept for backward compatibility but does nothing
+    g_lastCacheCleanup = TimeCurrent();
 }
 
 #endif // ZONE_CONSTANTS_MQH

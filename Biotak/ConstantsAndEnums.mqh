@@ -1,6 +1,15 @@
 #define MAX_LINES 10
 #define CACHE_TIMEOUT 60
 
+// Visibility Constants for OBJPROP_TIMEFRAMES
+// Used by VisibilityManager for hide/show without deletion
+#ifndef OBJ_ALL_PERIODS
+#define OBJ_ALL_PERIODS 0xFFFFFFFF  // Show on all timeframes
+#endif
+#ifndef OBJ_NO_PERIODS
+#define OBJ_NO_PERIODS 0            // Hide on all timeframes
+#endif
+
 // Performance & Safety Constants
 #define MAX_SAFE_LEVELS 200           // Maximum safe number of levels per side (was 2000 - too many objects)
 #define MAX_SAFE_OBJECTS 3000         // Warning threshold for total objects

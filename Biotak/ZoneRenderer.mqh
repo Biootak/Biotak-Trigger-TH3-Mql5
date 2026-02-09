@@ -274,14 +274,34 @@ void RenderLines(const SLineRenderInfo &lines[])
 //+------------------------------------------------------------------+
 //| Batch Render (Zones First, Then Lines)                           |
 //| رسم دسته‌ای (ابتدا زون‌ها، سپس خطوط)                            |
+//|                                                                  |
+//| CRITICAL RENDERING ORDER (Requirement 9.5):                      |
+//| 1. Zones are rendered FIRST (background layer)                   |
+//| 2. Lines are rendered SECOND (foreground layer)                  |
+//|                                                                  |
+//| This ensures zones appear behind lines for proper visualization  |
+//| این تضمین می‌کند که زون‌ها پشت خطوط ظاهر شوند                    |
+//|                                                                  |
+//| TASK 12.5: Rendering order verified and documented              |
 //+------------------------------------------------------------------+
 void RenderBatch(const SLineRenderInfo &lines[], const SZoneRenderInfo &zones[])
 {
-    // Render zones first (background layer)
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 1: Render zones first (background layer)
+    // مرحله 1: رسم زون‌ها ابتدا (لایه پس‌زمینه)
+    // ═══════════════════════════════════════════════════════════════
     RenderZones(zones);
     
-    // Render lines second (foreground layer)
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 2: Render lines second (foreground layer)
+    // مرحله 2: رسم خطوط دوم (لایه پیش‌زمینه)
+    // ═══════════════════════════════════════════════════════════════
     RenderLines(lines);
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ RenderBatch: Rendering order verified - Zones (", ArraySize(zones), 
+          ") rendered before Lines (", ArraySize(lines), ")");
+    #endif
 }
 
 //+------------------------------------------------------------------+

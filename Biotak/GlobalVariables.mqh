@@ -14,6 +14,10 @@ bool g_redrawTHLevelsNeeded = true;
 // Needed when object names/counts change but mode stays the same
 bool g_forceClearOnNextDraw = false;
 
+// Redraw flag for flickering fix optimization
+// Controls when drawing operations should occur in OnCalculate
+static bool g_redrawNeeded = true; // Default: true to draw on first load
+
 // GOLD FIX #8: Performance tracking with explicit initialization
 static int g_objectCountLast = 0;
 static datetime g_lastObjectCleanup = 0;
@@ -84,7 +88,7 @@ static datetime g_lastChartRedrawTime = 0;
 #define CHART_REDRAW_THROTTLE_MS 100  // Minimum 100ms between ChartRedraw calls
 
 static uint g_lastDragRedrawTime = 0;     // Last time RedrawAllObjects was called during drag
-#define DRAG_REDRAW_THROTTLE_MS 250       // Minimum 250ms between RedrawAllObjects during drag (4 fps)
+#define DRAG_REDRAW_THROTTLE_MS 50        // Minimum 50ms between RedrawAllObjects during drag (20 fps)
 static string g_frequencyLabelName = "Biotak_Frequency_Label"; // Name for TH3 frequency label on chart
 
 // TH3 Frequency Cycling System

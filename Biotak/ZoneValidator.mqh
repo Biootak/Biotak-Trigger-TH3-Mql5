@@ -200,6 +200,236 @@ SZoneValidationResult ValidateZoneGeometry(
 }
 
 //+------------------------------------------------------------------+
+//| Validate Object Name (Fast Failure)                              |
+//| اعتبارسنجی نام شیء (شکست سریع)                                   |
+//| Requirements: 13.1                                                |
+//+------------------------------------------------------------------+
+bool ValidateObjectName(const string name)
+{
+    // Fast failure: empty name
+    if(StringLen(name) == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateObjectName: Empty object name");
+        #endif
+        return false;
+    }
+    
+    // Fast failure: name too long (MT4 limit is 63 characters)
+    if(StringLen(name) > 63) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateObjectName: Name too long (", StringLen(name), " chars, max 63)");
+        #endif
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Price (Fast Failure)                                    |
+//| اعتبارسنجی قیمت (شکست سریع)                                      |
+//| Requirements: 13.2                                                |
+//+------------------------------------------------------------------+
+bool ValidatePrice(double price)
+{
+    // Fast failure: negative or zero price
+    if(price <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidatePrice: Invalid price (", DoubleToString(price, 8), "), must be positive");
+        #endif
+        return false;
+    }
+    
+    // Fast failure: price out of reasonable range
+    // Use cached market price for comparison
+    double marketPrice = GetCachedMarketPrice();
+    if(marketPrice > 0) {
+        // Price should be within 1000x of current market price
+        double maxReasonablePrice = marketPrice * 1000.0;
+        double minReasonablePrice = marketPrice / 1000.0;
+        
+        if(price > maxReasonablePrice || price < minReasonablePrice) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("❌ ValidatePrice: Price (", DoubleToString(price, 8), 
+                  ") out of reasonable range (", DoubleToString(minReasonablePrice, 8),
+                  " - ", DoubleToString(maxReasonablePrice, 8), ")");
+            #endif
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Color (Fast Failure)                                    |
+//| اعتبارسنجی رنگ (شکست سریع)                                       |
+//| Requirements: 13.3                                                |
+//+------------------------------------------------------------------+
+bool ValidateColor(color clr)
+{
+    // Fast failure: clrNONE is invalid for visible objects
+    if(clr == clrNONE) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateColor: clrNONE is not a valid color for visible objects");
+        #endif
+        return false;
+    }
+    
+    // MT4/MT5 colors are stored as integers (0xBBGGRR format)
+    // Valid range: 0x000000 to 0xFFFFFF (16777215)
+    int colorValue = (int)clr;
+    if(colorValue < 0 || colorValue > 16777215) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateColor: Invalid color value (", colorValue, "), must be 0-16777215");
+        #endif
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Line Style (Fast Failure)                               |
+//| اعتبارسنجی استایل خط (شکست سریع)                                 |
+//| Requirements: 13.4                                                |
+//+------------------------------------------------------------------+
+bool ValidateLineStyle(int style)
+{
+    // Fast failure: invalid ENUM_LINE_STYLE
+    // Valid values: STYLE_SOLID (0), STYLE_DASH (1), STYLE_DOT (2), 
+    //               STYLE_DASHDOT (3), STYLE_DASHDOTDOT (4)
+    if(style < STYLE_SOLID || style > STYLE_DASHDOTDOT) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateLineStyle: Invalid style (", style, "), must be 0-4 (ENUM_LINE_STYLE)");
+        #endif
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Line Width (Fast Failure)                               |
+//| اعتبارسنجی عرض خط (شکست سریع)                                    |
+//| Requirements: 13.5                                                |
+//+------------------------------------------------------------------+
+bool ValidateLineWidth(int width)
+{
+    // Fast failure: invalid width
+    // Valid range: 1-5 for MT4/MT5
+    if(width < 1 || width > 5) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateLineWidth: Invalid width (", width, "), must be 1-5");
+        #endif
+        return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Drawing Parameters (Fast Failure - All at Once)         |
+//| اعتبارسنجی پارامترهای رسم (شکست سریع - همه با هم)                |
+//| Requirements: 9.2, 13.1, 13.2, 13.3, 13.4, 13.5                  |
+//|                                                                  |
+//| Returns false immediately on first validation failure            |
+//| This is the main validation entry point for drawing operations   |
+//+------------------------------------------------------------------+
+bool ValidateDrawingParameters(
+    const string objectName,
+    double price,
+    color clr,
+    int style,
+    int width)
+{
+    // Fast failure chain - return immediately on first failure
+    
+    // 1. Validate object name (non-empty)
+    if(!ValidateObjectName(objectName)) {
+        return false;
+    }
+    
+    // 2. Validate price (positive, within range)
+    if(!ValidatePrice(price)) {
+        return false;
+    }
+    
+    // 3. Validate color (valid MT4/MT5 color)
+    if(!ValidateColor(clr)) {
+        return false;
+    }
+    
+    // 4. Validate style (valid ENUM_LINE_STYLE)
+    if(!ValidateLineStyle(style)) {
+        return false;
+    }
+    
+    // 5. Validate width (1-5)
+    if(!ValidateLineWidth(width)) {
+        return false;
+    }
+    
+    // All validations passed
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Zone Drawing Parameters (Fast Failure)                  |
+//| اعتبارسنجی پارامترهای رسم زون (شکست سریع)                        |
+//| Requirements: 9.2, 13.1, 13.2, 13.3                              |
+//+------------------------------------------------------------------+
+bool ValidateZoneDrawingParameters(
+    const string objectName,
+    double topPrice,
+    double bottomPrice,
+    color clr,
+    int transparency)
+{
+    // Fast failure chain
+    
+    // 1. Validate object name
+    if(!ValidateObjectName(objectName)) {
+        return false;
+    }
+    
+    // 2. Validate top price
+    if(!ValidatePrice(topPrice)) {
+        return false;
+    }
+    
+    // 3. Validate bottom price
+    if(!ValidatePrice(bottomPrice)) {
+        return false;
+    }
+    
+    // 4. Validate price order (top must be > bottom)
+    if(topPrice <= bottomPrice) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneDrawingParameters: Top price (", DoubleToString(topPrice, 8),
+              ") must be greater than bottom price (", DoubleToString(bottomPrice, 8), ")");
+        #endif
+        return false;
+    }
+    
+    // 5. Validate color
+    if(!ValidateColor(clr)) {
+        return false;
+    }
+    
+    // 6. Validate transparency (0-100)
+    if(transparency < 0 || transparency > 100) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneDrawingParameters: Invalid transparency (", transparency, "), must be 0-100");
+        #endif
+        return false;
+    }
+    
+    // All validations passed
+    return true;
+}
+
+//+------------------------------------------------------------------+
 //| Validate Complete Configuration                                  |
 //| اعتبارسنجی کامل تنظیمات                                          |
 //+------------------------------------------------------------------+

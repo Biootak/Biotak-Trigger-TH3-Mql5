@@ -67,6 +67,9 @@ void DrawLevelsAndZones(
     // PHASE 5: BATCH RENDERING
     // مرحله 5: رسم دسته‌ای
     // ═══════════════════════════════════════════════════════════════
+    // CRITICAL: Rendering order is zones first, then lines (Requirement 9.5)
+    // This ensures zones appear in background and lines in foreground
+    // ترتیب رسم: ابتدا زون‌ها، سپس خطوط (الزام 9.5)
     RenderBatch(lines, zones);
     
     // MEMORY FIX: Free arrays after use

@@ -258,4 +258,20 @@ bool ObjectSetText(string name, string text, int font_size = 0, string font_name
     return result;
 }
 
+//+------------------------------------------------------------------+
+//| ObjectsTotal compatibility (MQL4 → MQL5)                         |
+//| MQL4: ObjectsTotal() - returns total objects on chart            |
+//| MQL5: ObjectsTotal(chart_id, sub_window, type) - more parameters |
+//| Note: Removed wrapper to avoid ambiguity - use explicit params   |
+//+------------------------------------------------------------------+
+// Wrapper removed - use ::ObjectsTotal(0, -1, -1) directly in MT5
+
+//+------------------------------------------------------------------+
+//| ObjectName compatibility (MQL4 → MQL5)                           |
+//| MQL4: ObjectName(index) - returns object name by index           |
+//| MQL5: ObjectName(chart_id, index, sub_window, type)              |
+//| Note: Removed wrapper to avoid ambiguity - use explicit params   |
+//+------------------------------------------------------------------+
+// Wrapper removed - use ::ObjectName(0, index, -1, -1) directly in MT5
+
 #endif // MQL5_COMPAT_MQH

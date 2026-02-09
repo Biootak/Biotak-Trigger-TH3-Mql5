@@ -41,6 +41,15 @@
 #include "Biotak\BasePriceManager.mqh"
 #include "Biotak\TH3Tool.mqh"
 #include "Biotak\FrequencyLearning.mqh"
+
+// ═══════════════════════════════════════════════════════════════════
+// FLICKERING FIX: Object Cache and Optimization Modules
+// ═══════════════════════════════════════════════════════════════════
+#include "Biotak\ObjectCache.mqh"
+#include "Biotak\PropertyChangeDetector.mqh"
+#include "Biotak\VisibilityManager.mqh"
+#include "Biotak\RedrawFlagManager.mqh"
+
 #include "Biotak\ObjectFunctions.mqh"
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\LabelFunctions.mqh"

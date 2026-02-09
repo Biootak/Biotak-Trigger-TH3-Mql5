@@ -43,6 +43,22 @@
 #endif
 
 #include "Biotak\UtilityFunctions.mqh"
+
+// ═══════════════════════════════════════════════════════════════════
+// ZONE SYSTEM: Factory and Validation
+// ═══════════════════════════════════════════════════════════════════
+#include "Biotak\ZoneFactory.mqh"
+#include "Biotak\ZoneValidator.mqh"
+#include "Biotak\ZoneConstants.mqh"
+
+// ═══════════════════════════════════════════════════════════════════
+// FLICKERING FIX: Object Cache and Optimization Modules
+// ═══════════════════════════════════════════════════════════════════
+#include "Biotak\ObjectCache.mqh"
+#include "Biotak\PropertyChangeDetector.mqh"
+#include "Biotak\VisibilityManager.mqh"
+#include "Biotak\RedrawFlagManager.mqh"
+
 #include "Biotak\TimeframeFunctions.mqh"
 #include "Biotak\FractalTimeframes.mqh"
 #include "Biotak\StandardTimeframes.mqh"
@@ -53,6 +69,11 @@
 #include "Biotak\FrequencyLearning.mqh"
 #include "Biotak\ObjectFunctions.mqh"
 #include "Biotak\ExtendedDrawingFunctions.mqh"
+#include "Biotak\UnifiedZoneSystem.mqh"
+#include "Biotak\ZoneTrackingHelpers.mqh"
+#include "Biotak\DrawingPipeline.mqh"
+#include "Biotak\ZoneCalculator.mqh"
+#include "Biotak\ZoneRenderer.mqh"
 #include "Biotak\LabelFunctions.mqh"
 #include "Biotak\AlertFunctions.mqh"
 #include "Biotak\HistoricalDataFunctions.mqh"

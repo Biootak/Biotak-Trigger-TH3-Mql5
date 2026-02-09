@@ -37,9 +37,7 @@ void InitializeGlobalCache() {
     g_globalCacheInitialized = true;
     
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Global cache initialized: Symbol=", g_cachedSymbol, 
-          ", Period=", g_cachedPeriod, 
-          ", ChartID=", g_cachedChartIdStr);
+        Print("Global cache initialized: Symbol=", g_cachedSymbol, ", Period=", g_cachedPeriod, ", ChartID=", g_cachedChartIdStr);
     #endif
 }
 
@@ -527,9 +525,7 @@ void CleanupPerformanceOptimizations() {
     }
     g_objCacheHashInitialized = false;
     
-    // Legacy object cache from ZoneConstants.mqh
-    ArrayResize(g_objectCache, 0);
-    g_objectCacheSize = 0;
+    // Note: Object cache is now managed by ObjectCache.mqh
     
     ArrayResize(g_batchQueue, 0);
     g_batchQueueSize = 0;

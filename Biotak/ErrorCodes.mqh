@@ -28,6 +28,9 @@ enum ENUM_ERROR_CATEGORY {
 #define ERR_INVALID_ARRAY_SIZE      1003
 #define ERR_INVALID_PARAMETER       1004
 #define ERR_OUT_OF_RANGE            1005
+#define ERR_INVALID_NAME            1006
+#define ERR_INVALID_COLOR           1007
+#define ERR_INVALID_STYLE           1008
 
 //+------------------------------------------------------------------+
 //| Calculation Errors (2000-2999)                                   |
@@ -72,6 +75,9 @@ string GetErrorMessage(int errorCode) {
         case ERR_INVALID_ARRAY_SIZE: return "Invalid array size";
         case ERR_INVALID_PARAMETER: return "Invalid parameter";
         case ERR_OUT_OF_RANGE: return "Value out of range";
+        case ERR_INVALID_NAME: return "Invalid object name";
+        case ERR_INVALID_COLOR: return "Invalid color value";
+        case ERR_INVALID_STYLE: return "Invalid line style";
         
         // Calculation
         case ERR_DIVISION_BY_ZERO: return "Division by zero";

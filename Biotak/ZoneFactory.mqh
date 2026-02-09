@@ -8,6 +8,9 @@
 
 #include "ConstantsAndEnums.mqh"
 #include "ZoneValidator.mqh"
+#include "ObjectCache.mqh"
+#include "PropertyChangeDetector.mqh"
+#include "VisibilityManager.mqh"
 
 //+------------------------------------------------------------------+
 //| Zone Factory - Centralized Zone Creation                         |
@@ -323,12 +326,28 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // PHASE 4: ZONE CREATION/UPDATE (Atomic Operation)
+    // PHASE 4: ZONE CREATION/UPDATE (Atomic Operation with Cache)
     // FIX BUG #10: Set properties ONCE, not twice
     // FIX BUG #11: Check all ObjectSet return values
+    // FLICKERING FIX: Use cache and change detection (Requirements 6.1, 6.2, 6.3, 6.4)
     // ═══════════════════════════════════════════════════════════════
     
-    bool objectExists = (ObjectFind(0, request.name) >= 0);
+    // Check cache first before ObjectFind (Requirement 6.2)
+    bool objectExists = CacheObjectExists(request.name);
+    
+    // If not in cache, verify with ObjectFind
+    if(!objectExists) {
+        objectExists = (ObjectFind(0, request.name) >= 0);
+        
+        // If object exists but not in cache, add it to cache
+        if(objectExists) {
+            // Get current properties and add to cache
+            double currentTopPrice = ObjectGetDouble(0, request.name, OBJPROP_PRICE, 0);
+            color currentColor = (color)ObjectGetInteger(0, request.name, OBJPROP_COLOR);
+            CacheAddObject(request.name, currentTopPrice, currentColor, 0, 0);
+        }
+    }
+    
     bool needsPropertyUpdate = true;
     
     if(!objectExists) {
@@ -361,34 +380,99 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             
             return result;
         }
+        
+        // Add to cache after successful creation (Requirement 6.2)
+        CacheAddObject(request.name, request.topPrice, request.zoneColor, 0, 0);
         needsPropertyUpdate = true;
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("✅ CreateZone: Created new zone '", request.name, "' and added to cache");
+        #endif
     }
     else {
-        // Update existing zone - geometry only
-        // FIX BUG #11: Check return values
-        bool updateSuccess = true;
-        updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
-        updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
-        updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
-        updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
+        // Object exists - use PropertyChangeDetector (Requirement 6.3)
+        SObjectCacheEntry cachedEntry;
+        bool hasCachedData = CacheGetObject(request.name, cachedEntry);
         
-        if(!updateSuccess) {
-            int error = GetLastError();
-            result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
-                                              request.name, error);
-            result.errorCode = error;
-            return result;
+        if(hasCachedData) {
+            // Check if properties have changed
+            // For zones, we track: topPrice, color (transparency affects color)
+            bool priceChanged = HasPriceChanged(cachedEntry.lastPrice, request.topPrice);
+            bool colorChanged = HasColorChanged(cachedEntry.lastColor, request.zoneColor);
+            
+            if(!priceChanged && !colorChanged) {
+                // No changes needed - skip all updates (Requirement 6.3)
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("⏭️ CreateZone: Zone '", request.name, "' unchanged, skipping update");
+                #endif
+                result.success = true;
+                result.zoneName = request.name;
+                return result;
+            }
+            
+            // Update only changed properties (Requirement 6.4)
+            // Requirement 8.3: Batch property setting - set all in sequence
+            bool updateSuccess = true;
+            
+            if(priceChanged) {
+                // Batch update all geometry properties together
+                updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
+                updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
+                updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
+                updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
+                
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("🔄 CreateZone: Updated zone '", request.name, "' geometry (price changed)");
+                #endif
+            }
+            
+            if(!updateSuccess) {
+                int error = GetLastError();
+                result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
+                                                  request.name, error);
+                result.errorCode = error;
+                return result;
+            }
+            
+            // Requirement 8.5: Update cache only if properties changed
+            CacheUpdateObject(request.name, request.topPrice, request.zoneColor, 0, 0);
+            
+            // needsPropertyUpdate will be set based on color change
+            needsPropertyUpdate = colorChanged;
         }
-        needsPropertyUpdate = true;
+        else {
+            // No cached data - update all properties
+            // Requirement 8.3: Batch property setting - set all in sequence
+            bool updateSuccess = true;
+            updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
+            updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
+            updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
+            updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
+            
+            if(!updateSuccess) {
+                int error = GetLastError();
+                result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
+                                                  request.name, error);
+                result.errorCode = error;
+                return result;
+            }
+            
+            // Add to cache (Requirement 8.5: avoid redundant operations)
+            CacheAddObject(request.name, request.topPrice, request.zoneColor, 0, 0);
+            needsPropertyUpdate = true;
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 5: APPLY VISUAL PROPERTIES (Once, with error checking)
     // FIX BUG #10: Properties set ONCE here for both create and update
     // FIX BUG #11: Check all return values
+    // FLICKERING FIX: Apply visibility state immediately (Requirement 10.1)
+    // BATCH OPTIMIZATION: Requirements 8.1, 8.3 - Set all properties in sequence
     // ═══════════════════════════════════════════════════════════════
     
     if(needsPropertyUpdate) {
+        // Requirement 8.3: Set all properties in sequence without intermediate operations
         bool propsSuccess = true;
         propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColorARGB);
         propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_BACK, true);
@@ -404,7 +488,18 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             #endif
             // Don't fail completely - zone is created, just properties might be incomplete
         }
+        
+        // Update cache with final color (Requirement 8.5: avoid redundant updates)
+        CacheUpdateObject(request.name, request.topPrice, request.zoneColor, 0, 0);
     }
+    
+    // Apply visibility state immediately (Requirement 10.1)
+    // Zones are not lines, so pass false for isLine parameter
+    ApplyVisibilityState(request.name, false);
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ CreateZone: Applied visibility state to '", request.name, "'");
+    #endif
     
     // ═══════════════════════════════════════════════════════════════
     // SUCCESS
@@ -446,21 +541,35 @@ int CreateZonesBatch(const SZoneCreationRequest &requests[],
 //+------------------------------------------------------------------+
 //| Delete Zone Safely                                               |
 //| حذف امن Zone                                                      |
+//| FLICKERING FIX: Remove from cache when deleted                   |
 //+------------------------------------------------------------------+
 bool DeleteZone(const string &zoneName)
 {
     if(StringLen(zoneName) == 0) return false;
     
     if(ObjectFind(0, zoneName) >= 0) {
-        return ObjectDelete(0, zoneName);
+        bool deleted = ObjectDelete(0, zoneName);
+        
+        // Remove from cache after successful deletion
+        if(deleted) {
+            CacheRemoveObject(zoneName);
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("✅ DeleteZone: Deleted '", zoneName, "' and removed from cache");
+            #endif
+        }
+        
+        return deleted;
     }
     
+    // Object doesn't exist, but ensure it's not in cache
+    CacheRemoveObject(zoneName);
     return true; // Already deleted
 }
 
 //+------------------------------------------------------------------+
 //| Delete Zones by Prefix                                           |
 //| حذف Zone‌ها با پیشوند                                             |
+//| FLICKERING FIX: Remove from cache when deleted                   |
 //+------------------------------------------------------------------+
 int DeleteZonesByPrefix(const string &prefix)
 {
@@ -474,10 +583,18 @@ int DeleteZonesByPrefix(const string &prefix)
         
         if(StringFind(name, prefix) == 0) {
             if(ObjectDelete(0, name)) {
+                // Remove from cache after successful deletion
+                CacheRemoveObject(name);
                 deletedCount++;
             }
         }
     }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    if(deletedCount > 0) {
+        Print("✅ DeleteZonesByPrefix: Deleted ", deletedCount, " zones with prefix '", prefix, "' and removed from cache");
+    }
+    #endif
     
     return deletedCount;
 }
