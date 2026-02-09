@@ -14,8 +14,15 @@
 //| PERF: Delete surplus zone/line objects beyond what was just drawn |
 //| حذف اشیاء zone/line اضافی فراتر از آنچه رسم شد                    |
 //| Uses consecutive-miss strategy: stops after 3 misses in a row    |
+//| ANTI-FLICKER: Skips cleanup if custom price is being dragged    |
 //+------------------------------------------------------------------+
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6) {
+    // ANTI-FLICKER FIX: Skip cleanup during custom price drag to prevent zone flickering
+    // رفع چشمک زدن: در حین درگ custom price، زون‌ها پاک نمی‌شوند
+    if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) {
+        return;  // Skip zone cleanup during drag
+    }
+    
     int misses = 0;
     for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
         string name = prefix + IntegerToString(idx);

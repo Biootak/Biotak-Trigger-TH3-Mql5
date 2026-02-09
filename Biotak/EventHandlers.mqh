@@ -733,11 +733,14 @@ void OnDeinitHandler(const int reason) {
 //| پاک کردن تمام سطوح از همه مودها برای جلوگیری از تداخل           |
 //| CRITICAL FIX: Added error handling and retry logic              |
 //+------------------------------------------------------------------+
-void ClearAllLevels(const string objectPrefix)
+void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 {
     // OPTIMIZATION: Instead of iterating all objects, use ObjectsDeleteAll with prefix
     // This is much faster than checking each object individually
     // Delete all level objects from all modes to prevent overlapping when switching modes
+    // 
+    // ANTI-FLICKER FIX: clearZones parameter allows skipping zone deletion during drag
+    // رفع چشمک زدن: پارامتر clearZones اجازه می‌دهد در هنگام درگ، زون‌ها پاک نشوند
     
     // CRITICAL FIX: Track deletion statistics for error recovery
     int totalDeleted = 0;
@@ -815,23 +818,26 @@ void ClearAllLevels(const string objectPrefix)
         }
     }
     
-    // Delete zone objects separately
-    string zonePrefixes[];
-    ArrayResize(zonePrefixes, 5);
-    zonePrefixes[0] = objectPrefix + "SSLS_Zone_";
-    zonePrefixes[1] = objectPrefix + "M_Zone_";
-    zonePrefixes[2] = objectPrefix + "TP_Zone_";
-    zonePrefixes[3] = objectPrefix + "Combo_Zone_";
-    zonePrefixes[4] = objectPrefix + "Factor_Zone_";
-    
-    // PERFORMANCE: Cache ArraySize before loop
-    int zonePrefixCount = ArraySize(zonePrefixes);
-    for(int i = 0; i < zonePrefixCount; i++) {
-        int result = ObjectsDeleteAll(0, zonePrefixes[i], -1, -1);
-        if(result >= 0) {
-            totalDeleted += result;
-        } else {
-            totalFailed++;
+    // Delete zone objects separately (only if clearZones=true)
+    // فقط در صورتی که clearZones=true باشد، زون‌ها پاک می‌شوند
+    if(clearZones) {
+        string zonePrefixes[];
+        ArrayResize(zonePrefixes, 5);
+        zonePrefixes[0] = objectPrefix + "SSLS_Zone_";
+        zonePrefixes[1] = objectPrefix + "M_Zone_";
+        zonePrefixes[2] = objectPrefix + "TP_Zone_";
+        zonePrefixes[3] = objectPrefix + "Combo_Zone_";
+        zonePrefixes[4] = objectPrefix + "Factor_Zone_";
+        
+        // PERFORMANCE: Cache ArraySize before loop
+        int zonePrefixCount = ArraySize(zonePrefixes);
+        for(int i = 0; i < zonePrefixCount; i++) {
+            int result = ObjectsDeleteAll(0, zonePrefixes[i], -1, -1);
+            if(result >= 0) {
+                totalDeleted += result;
+            } else {
+                totalFailed++;
+            }
         }
     }
     
@@ -1088,7 +1094,10 @@ void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePri
     bool modeChanged = (currentMode != s_lastDrawnMode || currentBasis != s_lastDrawnBasis);
     if(modeChanged || g_forceClearOnNextDraw) {
         // Mode changed, or keyboard handler requested a full clear
-        ClearAllLevels(objectPrefix);
+        // ANTI-FLICKER: Don't clear zones if custom price is being dragged
+        // رفع چشمک زدن: در حین درگ custom price، زون‌ها را پاک نکن
+        bool clearZones = !g_customPriceLineDragging;
+        ClearAllLevels(objectPrefix, clearZones);
         s_lastDrawnMode = currentMode;
         s_lastDrawnBasis = currentBasis;
         g_forceClearOnNextDraw = false;
@@ -1572,61 +1581,9 @@ void RedrawAllObjects(bool force_redraw=false)
     
     double currentLinePrice = lineExists ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0.0;
 
-    // Check if custom price line is being dragged (live update)
-    if(lineExists && currentLinePrice > 0) {
-        // Detect if dragging
-        if(MathAbs(currentLinePrice - g_lastCustomPriceLinePos) > s_cachedPoint * 0.1) {
-            g_customPriceLineDragging = true;
-            g_lastCustomPriceLinePos = currentLinePrice;
-        } else if(g_customPriceLineDragging) {
-            // Drag just ended (position stable) - auto-confirm
-            g_customPriceLineDragging = false;
-            g_waitingForCustomPriceClick = false;
-            g_customPriceKeyboardOverride = true; // User dragged line - override input parameter
-            
-            // Save override flag to GlobalVariable for persistence
-            GlobalVariableSet(overrideFlagName, 1.0);
-            
-            // Update custom price
-            g_customTHStartPrice = currentLinePrice;
-            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            
-            // Save to GlobalVariable for persistence
-            GlobalVariableSet(gvarName, currentLinePrice);
-            
-            // Update tooltip to show it's confirmed
-            ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                          "📍 Custom Price: " + DoubleToString(currentLinePrice, s_cachedDigits) + " | Click to adjust");
-            
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ Custom price confirmed at: ", DoubleToString(currentLinePrice, s_cachedDigits));
-            #endif
-            g_redrawTHLevelsNeeded = true;
-        }
-        
-        // If price changed during drag, update immediately
-        if(g_customPriceLineDragging && MathAbs(currentLinePrice - g_customTHStartPrice) > s_cachedPoint * 0.1) {
-            g_customTHStartPrice = currentLinePrice;
-            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            g_customPriceKeyboardOverride = true; // User is dragging - override input parameter
-            
-            // Save override flag to GlobalVariable for persistence
-            GlobalVariableSet(overrideFlagName, 1.0);
-            
-            // Save to GlobalVariable for persistence
-            GlobalVariableSet(gvarName, currentLinePrice);
-            
-            // Update tooltip to show current price during drag
-            ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                          "📍 Custom Price: " + DoubleToString(currentLinePrice, s_cachedDigits) + " | Dragging...");
-            
-            g_redrawTHLevelsNeeded = true;
-        }
-    } else if(!lineExists) {
-        // Line doesn't exist - reset drag state
-        g_customPriceLineDragging = false;
-        g_lastCustomPriceLinePos = 0.0;
-    }
+    // OPTIMIZATION: Old dragging detection logic removed
+    // Now using CHARTEVENT_MOUSE_MOVE for real-time drag detection (more accurate)
+    // منطق قدیمی تشخیص درگ حذف شد - حالا از CHARTEVENT_MOUSE_MOVE استفاده می‌شود
     
     // OPTIMIZATION: Only check GlobalVariable if not currently dragging
     // During drag, we already have the latest price from the line
@@ -1735,6 +1692,13 @@ void RedrawAllObjects(bool force_redraw=false)
             s_lastLevelRedrawLog = TimeCurrent();
         }
         #endif
+        
+        // CRITICAL FIX: Clear old levels BEFORE drawing new ones to prevent ghosting
+        // ANTI-FLICKER: Skip zone deletion if custom price is being dragged
+        // رفع مشکل: پاک کردن سطوح قبلی قبل از رسم سطوح جدید
+        // رفع چشمک زدن: در حین درگ، فقط خطوط پاک می‌شوند نه زون‌ها
+        bool skipZones = g_customPriceLineDragging;
+        ClearAllLevels(objectPrefix, !skipZones);
         
         DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
         g_redrawTHLevelsNeeded = false;
@@ -2798,6 +2762,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // بروزرسانی آنی سطوح هنگام درگ خط قیمت سفارشی
     // In MT5, CHARTEVENT_OBJECT_DRAG only fires on mouse RELEASE.
     // We use CHARTEVENT_MOUSE_MOVE + left-button check for real-time.
+    // PERFORMANCE: Throttled to 150ms (6-7 fps) to prevent lag
     // ═══════════════════════════════════════════════════════════════
     if(id == CHARTEVENT_MOUSE_MOVE && g_customPriceLineCreated)
     {
@@ -2811,15 +2776,40 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             bool lineSelected = (bool)ObjectGetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED);
             if(lineSelected)
             {
+                // ANTI-FLICKER FIX: Set dragging flag to prevent zone deletion
+                // رفع چشمک زدن: تنظیم پرچم درگ برای جلوگیری از پاک شدن زون‌ها
+                g_customPriceLineDragging = true;
+                
                 double currentLinePrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
                 if(currentLinePrice > 0 && MathAbs(currentLinePrice - g_customTHStartPrice) > _Point * 0.5)
                 {
-                    g_customTHStartPrice = currentLinePrice;
-                    g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-                    g_redrawTHLevelsNeeded = true;
-                    RedrawAllObjects(true);
-                    ThrottledChartRedraw();
+                    // PERFORMANCE FIX: Throttle RedrawAllObjects to 250ms during drag
+                    // بهینه‌سازی: محدود کردن بروزرسانی سطوح به 4 بار در ثانیه برای عملکرد روان
+                    uint nowMs = GetTickCount();
+                    if(nowMs - g_lastDragRedrawTime > DRAG_REDRAW_THROTTLE_MS)
+                    {
+                        g_customTHStartPrice = currentLinePrice;
+                        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+                        g_redrawTHLevelsNeeded = true;
+                        RedrawAllObjects(true);
+                        ThrottledChartRedraw();
+                        g_lastDragRedrawTime = nowMs;
+                    }
                 }
+            }
+        }
+        else
+        {
+            // Left button released - end dragging
+            // دکمه چپ رها شد - پایان درگ
+            if(g_customPriceLineDragging) {
+                g_customPriceLineDragging = false;
+                // Force final redraw with full cleanup (including zones)
+                // بروزرسانی نهایی با cleanup کامل (از جمله زون‌ها)
+                g_forceClearOnNextDraw = true;  // Ensure surplus zones are cleaned up
+                g_redrawTHLevelsNeeded = true;
+                RedrawAllObjects(true);
+                ThrottledChartRedraw();
             }
         }
     }
@@ -2827,6 +2817,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // Handle object drag event for custom price line (fires on mouse release)
     if(id == CHARTEVENT_OBJECT_DRAG && sparam == g_customPriceHorizontalLineName)
     {
+        // ANTI-FLICKER FIX: Clear dragging flag when drag ends
+        g_customPriceLineDragging = false;
+        
         // Get the current price from the horizontal line
         double draggedPrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
         
@@ -2860,6 +2853,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         }
         
         // Force redraw of TH levels (works for both preview and adjustment mode)
+        // ANTI-FLICKER: Since drag ended, force cleanup of surplus zones
+        // رفع چشمک زدن: چون درگ تمام شد، زون‌های اضافی را پاک کن
+        g_forceClearOnNextDraw = true;  // Ensure surplus zones are cleaned up after drag
         g_redrawTHLevelsNeeded = true;
         RedrawAllObjects(true);
     }

@@ -82,6 +82,9 @@ static string g_factorLabelName = "Biotak_Factor_Label"; // Name for Factor valu
 // GOLD FIX: ChartRedraw throttling to prevent excessive redraws
 static datetime g_lastChartRedrawTime = 0;
 #define CHART_REDRAW_THROTTLE_MS 100  // Minimum 100ms between ChartRedraw calls
+
+static uint g_lastDragRedrawTime = 0;     // Last time RedrawAllObjects was called during drag
+#define DRAG_REDRAW_THROTTLE_MS 250       // Minimum 250ms between RedrawAllObjects during drag (4 fps)
 static string g_frequencyLabelName = "Biotak_Frequency_Label"; // Name for TH3 frequency label on chart
 
 // TH3 Frequency Cycling System
