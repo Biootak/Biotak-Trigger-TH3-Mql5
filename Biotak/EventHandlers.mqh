@@ -1983,8 +1983,25 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             Print(isBecomingHidden ? "🔒 F key: Hiding all objects" : "👁️ F key: Showing all objects");
             #endif
             
+            // CRITICAL FIX: When showing, respect Lines visibility state (L key)
+            // رفع مشکل: وقتی نمایش داده می‌شود، وضعیت Lines را رعایت کن
+            if(!isBecomingHidden) {
+                // Restore Lines visibility state from GlobalVariable
+                string linesGvarName = "Biotak_LinesVisible_" + GetCachedChartIdStr();
+                if(GlobalVariableCheck(linesGvarName)) {
+                    g_linesVisible = (GlobalVariableGet(linesGvarName) > 0.5);
+                }
+            }
+            
             // Use VisibilityManager to toggle visibility without deletion
             SetAllTHObjectsVisibility(!isBecomingHidden);
+            
+            // CRITICAL FIX: Apply Lines visibility state after showing
+            // رفع مشکل: اعمال وضعیت Lines بعد از نمایش
+            if(!isBecomingHidden && !g_linesVisible) {
+                // Lines were hidden before - hide them again
+                SetAllLineObjectsVisibility(false);
+            }
             
             // Handle custom price line separately (no prefix)
             if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0) {
