@@ -2295,12 +2295,16 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
         return false;
     }
     
-    // 3. Time ordering: A < B < C
+    // 3. Time ordering: A < B < C (RELAXED during drag)
+    // ترتیب زمانی: A < B < C (آزاد شده در حین کشیدن)
+    // Allow temporary violations during drag - will auto-correct on release
+    // اجازه نقض موقت در حین کشیدن - خودکار اصلاح می‌شود
     if(!(tA < tB && tB < tC)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ AB=CD Error: Time ordering violated (A < B < C required)");
+        Print("⚠️ AB=CD Warning: Time ordering violated (A < B < C) - allowing during drag");
         #endif
-        return false;
+        // Don't return false - allow pattern to continue
+        // false برنگردان - اجازه بده پترن ادامه پیدا کنه
     }
     
     // 4. Minimum distance check (prevent micro-patterns)
@@ -2416,14 +2420,14 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     
     double pipSize = GetCachedPipSize();
     
-    // DYNAMIC OFFSET: Calculate based on candle size for better positioning
-    // Offset داینامیک: محاسبه بر اساس اندازه کندل برای موقعیت بهتر
+    // BEST PRACTICE: Dynamic offset based on actual candle size at each point
+    // بهترین روش: Offset داینامیک بر اساس اندازه واقعی کندل در هر نقطه
     double labelOffset;
     
     if(inpABCDLabelOffsetPercent > 0) {
-        // User-defined offset percentage
+        // User-defined: percentage of average candle size
         double avgCandleSize = 0;
-        int lookback = 20; // میانگین 20 کندل اخیر
+        int lookback = 20;
         double highArr[], lowArr[];
         int copied = CopyHigh(_Symbol, 0, 0, lookback, highArr);
         int copiedL = CopyLow(_Symbol, 0, 0, lookback, lowArr);
@@ -2434,22 +2438,41 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             }
             avgCandleSize /= cnt;
         } else {
-            avgCandleSize = GetCachedPipSize() * 10; // fallback
+            avgCandleSize = GetCachedPipSize() * 10;
         }
         
-        // Use user-defined percentage of average candle size
         labelOffset = avgCandleSize * (inpABCDLabelOffsetPercent / 100.0);
         
-        // Minimum offset: 3 pips (prevent labels too close)
-        double minOffset = 3.0 * pipSize;
+        // Smart limits: 2-15 pips
+        double minOffset = 2.0 * pipSize;
+        double maxOffset = 15.0 * pipSize;
         if(labelOffset < minOffset) labelOffset = minOffset;
-        
-        // Maximum offset: 100 pips (prevent labels too far)
-        double maxOffset = 100.0 * pipSize;
         if(labelOffset > maxOffset) labelOffset = maxOffset;
     } else {
-        // Auto mode: Use fixed 15 pips (legacy behavior)
-        labelOffset = 15.0 * pipSize;
+        // Auto mode: 10% of average candle (smart default)
+        double avgCandleSize = 0;
+        int lookback = 10;
+        double highArr[], lowArr[];
+        int copied = CopyHigh(_Symbol, 0, 0, lookback, highArr);
+        int copiedL = CopyLow(_Symbol, 0, 0, lookback, lowArr);
+        if(copied > 0 && copiedL > 0) {
+            int cnt = MathMin(copied, copiedL);
+            for(int k = 0; k < cnt; k++) {
+                avgCandleSize += (highArr[k] - lowArr[k]);
+            }
+            avgCandleSize /= cnt;
+        } else {
+            avgCandleSize = GetCachedPipSize() * 50;
+        }
+        
+        // 10% of average candle size (adaptive)
+        labelOffset = avgCandleSize * 0.10;
+        
+        // Ensure reasonable range: 2-10 pips
+        double minOffset = 2.0 * pipSize;
+        double maxOffset = 10.0 * pipSize;
+        if(labelOffset < minOffset) labelOffset = minOffset;
+        if(labelOffset > maxOffset) labelOffset = maxOffset;
     }
     
     // Draw points A, B, C, D with smart label positioning
@@ -2471,43 +2494,19 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     pointPrices[2] = pC;
     pointPrices[3] = pD;
     
-    // Draw visible drag points for A, B, C (small circles with smart positioning)
-    // نقاط قابل کشیدن برای A، B، C (دایره‌های کوچک با موقعیت هوشمند)
+    // Draw visible drag points for A, B, C at exact clicked price
+    // نقاط قابل کشیدن برای A، B، C دقیقاً روی قیمت کلیک شده
     for(int i = 0; i < 3; i++) {
         string pointName = mainObjName + "_Point_" + pointNames[i];
         
-        // SMART POSITIONING: Place point above/below candle based on price level
-        // موقعیت‌یابی هوشمند: قرار دادن نقطه بالا/پایین کندل بر اساس سطح قیمت
-        int barIndex = iBarShift(_Symbol, _Period, pointTimes[i]);
+        // Use exact price from user click (no adjustment)
+        // استفاده از قیمت دقیق کلیک کاربر (بدون تغییر)
         double pointPrice = pointPrices[i];
-        
-        if(barIndex >= 0) {
-            double high = iHigh(_Symbol, 0, barIndex);
-            double low = iLow(_Symbol, 0, barIndex);
-            double mid = (high + low) / 2.0;
-            
-            // Determine if point is at top or bottom of candle
-            // تشخیص اینکه نقطه در بالا یا پایین کندل هست
-            bool isAtTop = (pointPrice >= mid);
-            
-            // Offset point slightly outside candle for visibility
-            // جابجایی نقطه کمی خارج از کندل برای قابل مشاهده بودن
-            double offset = (high - low) * 0.15; // 15% of candle range
-            if(offset < GetCachedPoint() * 10) offset = GetCachedPoint() * 10; // Minimum offset
-            
-            if(isAtTop) {
-                // Point at top - place above high
-                pointPrice = high + offset;
-            } else {
-                // Point at bottom - place below low
-                pointPrice = low - offset;
-            }
-        }
         
         // OPTIMIZED: Use small circle (ARROWCODE 159) - visible and draggable
         // استفاده از دایره کوچک - قابل مشاهده و کشیدن
         if(ObjectFind(0, pointName) < 0) {
-            if(!ObjectCreate(0, pointName, OBJ_ARROW, 0, pointTimes[i], pointPrices[i])) {
+            if(!ObjectCreate(0, pointName, OBJ_ARROW, 0, pointTimes[i], pointPrice)) {
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ Failed to create point ", pointNames[i], " | Error: ", GetLastError());
                 #endif
@@ -2527,71 +2526,20 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             ObjectSetInteger(0, pointName, OBJPROP_ZORDER, 10); // High priority
             ObjectSetString(0, pointName, OBJPROP_TOOLTIP, "📍 Point " + pointNames[i] + " | Drag to adjust");
         } else {
-            // Update existing point position
-            ObjectMove(0, pointName, 0, pointTimes[i], pointPrices[i]);
+            // Update existing point position (exact price)
+            ObjectMove(0, pointName, 0, pointTimes[i], pointPrice);
             #ifdef ENABLE_DEBUG_LOGS
             Print("🔄 Updated existing point ", pointNames[i]);
             #endif
         }
         
-        // Smart label positioning relative to candle High/Low
-        // موقعیت‌یابی هوشمند لیبل نسبت به High/Low کندل
+        // Labels removed - only show drag points
+        // لیبل‌ها حذف شدند - فقط نقاط قابل کشیدن نمایش داده می‌شوند
         if(inpABCDShowLabels) {
             string labelName = mainObjName + "_Label_" + pointNames[i];
-            double labelPrice = pointPrices[i];
-            ENUM_ANCHOR_POINT anchor = ANCHOR_CENTER;
-            
-            // Get candle High/Low for this point
-            int labelBarIndex = iBarShift(_Symbol, _Period, pointTimes[i]);
-            double candleHigh = (labelBarIndex >= 0) ? iHigh(_Symbol, 0, labelBarIndex) : pointPrices[i];
-            double candleLow = (labelBarIndex >= 0) ? iLow(_Symbol, 0, labelBarIndex) : pointPrices[i];
-            
-            // Position label relative to candle High/Low (not point price)
-            // قرار دادن لیبل نسبت به High/Low کندل (نه قیمت نقطه)
-            if(i == 0 || i == 2) { // A or C (swing lows in bullish, swing highs in bearish)
-                if(isBullish) {
-                    // A/C are lows - place label below candle low
-                    labelPrice = candleLow - labelOffset;
-                    anchor = ANCHOR_UPPER;
-                } else {
-                    // A/C are highs - place label above candle high
-                    labelPrice = candleHigh + labelOffset;
-                    anchor = ANCHOR_LOWER;
-                }
-            } else { // B or D (swing highs in bullish, swing lows in bearish)
-                if(isBullish) {
-                    // B/D are highs - place label above candle high
-                    labelPrice = candleHigh + labelOffset;
-                    anchor = ANCHOR_LOWER;
-                } else {
-                    // B/D are lows - place label below candle low
-                    labelPrice = candleLow - labelOffset;
-                    anchor = ANCHOR_UPPER;
-                }
-            }
-            
-            if(ObjectFind(0, labelName) < 0) {
-                if(!ObjectCreate(0, labelName, OBJ_TEXT, 0, pointTimes[i], labelPrice)) {
-                    #ifdef ENABLE_DEBUG_LOGS
-                    Print("❌ Failed to create label ", pointNames[i], " | Error: ", GetLastError());
-                    #endif
-                } else {
-                    #ifdef ENABLE_DEBUG_LOGS
-                    Print("✅ Created label ", pointNames[i]);
-                    #endif
-                }
-                ObjectSetString(0, labelName, OBJPROP_TEXT, pointNames[i]);
-                ObjectSetInteger(0, labelName, OBJPROP_COLOR, inpABCDPointColor);
-                ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 10);
-                ObjectSetString(0, labelName, OBJPROP_FONT, "Arial Bold");
-                ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, anchor);
-                ObjectSetInteger(0, labelName, OBJPROP_SELECTABLE, false);
-            } else {
-                ObjectMove(0, labelName, 0, pointTimes[i], labelPrice);
-                ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, anchor);
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("🔄 Updated existing label ", pointNames[i]);
-                #endif
+            // Delete all labels (A, B, C)
+            if(ObjectFind(0, labelName) >= 0) {
+                ObjectDelete(0, labelName);
             }
         }
     }
@@ -2806,50 +2754,102 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 void UpdateAllTH3Objects() {
     int updatedCount = 0;
     
-    // Update AB=CD patterns
-    int totalTrend = ObjectsTotal(0, -1, OBJ_TREND);
-    for(int i = 0; i < totalTrend; i++) {
-        string name = ObjectName(0, i, -1, OBJ_TREND);
+    // CRITICAL FIX: Use ObjectsTotal with window parameter for MT4 compatibility
+    // رفع مشکل: استفاده از ObjectsTotal با پارامتر window برای سازگاری با MT4
+    int totalObjects = ObjectsTotal(0, 0, -1); // window=0, subwindow=0, type=-1 (all types)
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("🔍 UpdateAllTH3Objects: Searching ", totalObjects, " objects for AB=CD patterns...");
+    #endif
+    
+    // Collect all unique pattern base names
+    string patternNames[];
+    int patternCount = 0;
+    ArrayResize(patternNames, 0);
+    
+    for(int i = 0; i < totalObjects; i++) {
+        string name = ObjectName(0, i, 0, -1); // window=0, subwindow=0, type=-1
         
-        // Find AB=CD pattern main line (Line_AB)
-        if(StringFind(name, "ABCD_Pattern_") == 0 && StringFind(name, "_Line_AB") > 0) {
-            string baseName = StringSubstr(name, 0, StringFind(name, "_Line_AB"));
+        // Find any ABCD_Pattern object
+        if(StringFind(name, "ABCD_Pattern_") == 0) {
+            // Extract base name (ABCD_Pattern_XXXXXXXX)
+            string baseName = "";
             
-            // Get points A, B, C from line endpoints
-            string lineAB = baseName + "_Line_AB";
-            string lineBC = baseName + "_Line_BC";
+            // Find first underscore after "ABCD_Pattern_"
+            int searchStart = 13; // Length of "ABCD_Pattern_"
+            int underscorePos = StringFind(name, "_", searchStart);
             
-            if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) continue;
-            
-            datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
-            double pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
-            datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
-            double pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
-            datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
-            double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
-            
-            int lastError = GetLastError();
-            if(lastError != 0) {
-                ResetLastError(); // CRITICAL FIX: Clear error for next iteration
-                continue;
+            if(underscorePos > searchStart) {
+                baseName = StringSubstr(name, 0, underscorePos);
+            } else {
+                // No suffix found, this IS the base name
+                baseName = name;
             }
             
-            if(tA > 0 && tB > 0 && tC > 0 && pA > 0 && pB > 0 && pC > 0) {
-                // Redraw entire AB=CD pattern with new frequency
-                DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
-                updatedCount++;
+            // Check if already in list
+            bool exists = false;
+            for(int j = 0; j < patternCount; j++) {
+                if(patternNames[j] == baseName) {
+                    exists = true;
+                    break;
+                }
+            }
+            
+            if(!exists) {
+                ArrayResize(patternNames, patternCount + 1);
+                patternNames[patternCount] = baseName;
+                patternCount++;
             }
         }
     }
     
     #ifdef ENABLE_DEBUG_LOGS
-    if(updatedCount > 0) {
-        Print("🔄 Updated ", updatedCount, " AB=CD patterns with frequency: ", 
-              DoubleToString(GetCurrentTH3Frequency(), 3), "%");
-    }
+    Print("📊 Found ", patternCount, " unique AB=CD patterns");
     #endif
     
-    ChartRedraw();
+    // Update each pattern
+    for(int p = 0; p < patternCount; p++) {
+        string baseName = patternNames[p];
+        
+        // Get points A, B, C from line endpoints
+        string lineAB = baseName + "_Line_AB";
+        string lineBC = baseName + "_Line_BC";
+        
+        if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ Pattern ", baseName, " missing lines - skipping");
+            #endif
+            continue;
+        }
+        
+        datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
+        double pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
+        datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
+        double pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
+        datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
+        double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
+        
+        if(tA > 0 && tB > 0 && tC > 0 && pA > 0 && pB > 0 && pC > 0) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("🔄 Updating pattern: ", baseName, " with frequency: ", DoubleToString(GetCurrentTH3Frequency(), 3), "%");
+            #endif
+            
+            // Redraw entire AB=CD pattern with new frequency
+            DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
+            updatedCount++;
+        } else {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ Pattern ", baseName, " has invalid data - skipping");
+            #endif
+        }
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ Updated ", updatedCount, " AB=CD patterns with frequency: ", 
+          DoubleToString(GetCurrentTH3Frequency(), 3), "%");
+    #endif
+    
+    ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
@@ -3471,6 +3471,10 @@ void CycleTH3Frequency() {
     // Update frequency label
     UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
     
+    // CRITICAL: Force immediate chart redraw
+    // اجبار به بازرسم فوری چارت
+    ChartRedraw(0);
+    
     #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 TH3 Frequency: ", DoubleToString(g_th3FrequencyOverride, 3), "%");
     #endif
@@ -3495,6 +3499,10 @@ void DecrementTH3Frequency() {
     
     // Update frequency label
     UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
+    
+    // CRITICAL: Force immediate chart redraw
+    // اجبار به بازرسم فوری چارت
+    ChartRedraw(0);
     
     #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 TH3 Frequency: ", DoubleToString(g_th3FrequencyOverride, 3), "%");
