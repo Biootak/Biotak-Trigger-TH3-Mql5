@@ -1,13 +1,21 @@
 string GetFractalTimeframeForCurrent() {
     string currentTimeframe=GetCurrentTimeframe();
-    if(currentTimeframe=="M1") return "M1";
-    if(currentTimeframe=="M5") return "M4";
-    if(currentTimeframe=="M15"||currentTimeframe=="M30") return "M16";
-    if(currentTimeframe=="H1") return "H1+M4";
-    if(currentTimeframe=="H4") return "H4+M16";
-    if(currentTimeframe=="D1") return "H17+M4";
+    
+    // Minute timeframes
+    if(currentTimeframe=="M1" || currentTimeframe=="M2" || currentTimeframe=="M3") return "M1";
+    if(currentTimeframe=="M4" || currentTimeframe=="M5" || currentTimeframe=="M6") return "M4";
+    if(currentTimeframe=="M10" || currentTimeframe=="M12" || currentTimeframe=="M15" || 
+       currentTimeframe=="M20" || currentTimeframe=="M30") return "M16";
+       
+    // Hour timeframes
+    if(currentTimeframe=="H1" || currentTimeframe=="H2") return "H1+M4";
+    if(currentTimeframe=="H3" || currentTimeframe=="H4" || currentTimeframe=="H6" || currentTimeframe=="H8") return "H4+M16";
+    if(currentTimeframe=="H12" || currentTimeframe=="D1") return "H17+M4";
+    
+    // Higher timeframes
     if(currentTimeframe=="W1") return "D11+H9+M4";
     if(currentTimeframe=="MN1") return "D45+H12+M16";
+    
     return "UNKNOWN";
 }
 

@@ -341,6 +341,21 @@ bool CreateZoneWithSmartFallback(const string zoneName,
 {
     SUnifiedZoneConfig config = GetUnifiedZoneConfig();
     
+    // CRITICAL FIX: Check if zones are enabled globally
+    if(!config.enabled) {
+        // Zones disabled - still update tracking variables but don't draw
+        if(isStructure && structureEnabled) {
+            lastStructurePrice = currentPrice;
+        }
+        else if(!isStructure && triggerEnabled) {
+            lastTriggerPrice = currentPrice;
+        }
+        else {
+            lastFallbackPrice = currentPrice;
+        }
+        return true; // Not an error, just disabled
+    }
+    
     // Determine which tracking path to use
     double effectivePrevPrice = 0;
     bool shouldDraw = false;

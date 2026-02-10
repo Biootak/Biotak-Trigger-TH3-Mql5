@@ -267,8 +267,10 @@ double CalculateSimpleATR(const int period) {
     double sumTR = 0.0;
     int validBars = 0;
     
-    // Calculate ATR from most recent bars (index 0 = current bar)
-    for(int i = 0; i < period && i < barsAvailable; i++) {
+    // CRITICAL FIX: Start from bar 1 (completed bar), not bar 0 (current bar)
+    // Bar 0 is still forming and its High/Low/Close can change
+    // Calculate ATR from completed bars only (index 1 = last completed bar)
+    for(int i = 1; i <= period && i < barsAvailable; i++) {
         double tr = CalculateTrueRange(i);
         
         // AUDIT FIX: Use IsZero for comparison
@@ -308,17 +310,38 @@ void CalculateATRBatch(double &results[]) {
         return;
     }
     
-    if(barsAvailable <= ATR_PERIOD_6) {
-        // Not enough data - calculate what we can
+    // CRITICAL FIX: Calculate only periods we have enough data for
+    // محاسبه فقط دوره‌هایی که داده کافی داریم
+    // Need period + 1 bars: period bars for TR + 1 for prevClose
+    // But start from bar 1 (completed), so need period + 2 total bars
+    if(barsAvailable < ATR_PERIOD_1 + 2) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CalculateATRBatch: Limited bars (", barsAvailable, "), using fallback");
+        Print("⚠️ CalculateATRBatch: Not enough bars (", barsAvailable, "), need at least ", ATR_PERIOD_1 + 2);
         #endif
-        results[0] = CalculateSimpleATR(ATR_PERIOD_1);
-        results[1] = CalculateSimpleATR(ATR_PERIOD_2);
-        results[2] = CalculateSimpleATR(ATR_PERIOD_3);
-        results[3] = CalculateSimpleATR(ATR_PERIOD_4);
-        results[4] = CalculateSimpleATR(ATR_PERIOD_5);
-        results[5] = CalculateSimpleATR(ATR_PERIOD_6);
+        return;
+    }
+    
+    // If limited bars, calculate what we can and skip larger periods
+    if(barsAvailable <= ATR_PERIOD_6 + 2) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatch: Limited bars (", barsAvailable, "), calculating available periods only");
+        #endif
+        
+        int periods_limited[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
+                                 ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
+        
+        for(int p = 0; p < 6; p++) {
+            // Only calculate if we have enough bars (period + 2: period bars + 1 prevClose + skip bar 0)
+            if(barsAvailable >= periods_limited[p] + 2) {
+                results[p] = CalculateSimpleATR(periods_limited[p]);
+            } else {
+                results[p] = 0.0;
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("⚠️ CalculateATRBatch: Skipping ATR period ", periods_limited[p], 
+                      " (need ", periods_limited[p] + 2, " bars, have ", barsAvailable, ")");
+                #endif
+            }
+        }
         return;
     }
     
@@ -331,8 +354,14 @@ void CalculateATRBatch(double &results[]) {
     
     // Batch copy OHLC data in 4 calls instead of ~1000 individual calls
     double highArr[], lowArr[], closeArr[], openArr[];
-    // Need maxPeriod + 1 bars: [0..maxPeriod-1] for current bars + one extra for prevClose
-    int copyCount = maxPeriod + 1;
+    // CRITICAL FIX: Need maxPeriod + 3 bars for complete TR calculation
+    // - maxPeriod bars for TR calculation (bar 1 to bar maxPeriod)
+    // - 1 extra bar (bar 0, current - we'll skip it)
+    // - 1 extra bar for prevClose of bar maxPeriod (bar maxPeriod+1)
+    // Total: maxPeriod + 2 bars to copy, but we need maxPeriod + 3 to have prevClose for oldest
+    // Actually: We copy bars 0 to maxPeriod+1, which is maxPeriod+2 bars
+    // For bar maxPeriod, we need close of bar maxPeriod+1
+    int copyCount = MathMin(maxPeriod + 2, barsAvailable);
     
     int copiedHigh  = CopyHigh(_Symbol, etf, 0, copyCount, highArr);
     int copiedLow   = CopyLow(_Symbol, etf, 0, copyCount, lowArr);
@@ -346,18 +375,34 @@ void CalculateATRBatch(double &results[]) {
               " C:", copiedClose, " O:", copiedOpen, " needed:", copyCount, "), falling back");
         #endif
         // Fallback to per-bar method
+        // CRITICAL FIX: Use completed bars only (start from bar 1)
         double trFallback[];
         if(ArrayResize(trFallback, maxPeriod) != maxPeriod) return;
-        for(int i = 0; i < maxPeriod; i++) trFallback[i] = CalculateTrueRange(i);
+        
+        // Calculate TR for completed bars (bar 1 to bar maxPeriod)
+        for(int i = 1; i <= maxPeriod && i < barsAvailable; i++) {
+            trFallback[i-1] = CalculateTrueRange(i);  // Store at i-1
+        }
+        
         int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
                             ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
         for(int p = 0; p < 6; p++) {
             double sum_fb = 0.0; int count_fb = 0;
-            int limit_fb = (periods_fb[p] < maxPeriod) ? periods_fb[p] : maxPeriod;
+            int limit_fb = MathMin(periods_fb[p], maxPeriod);
+            
             for(int i = 0; i < limit_fb; i++) {
-                if(!IsZero(trFallback[i], EPSILON_PRICE)) { sum_fb += trFallback[i]; count_fb++; }
+                if(!IsZero(trFallback[i], EPSILON_PRICE)) { 
+                    sum_fb += trFallback[i]; 
+                    count_fb++; 
+                }
             }
-            results[p] = SafeDivide(sum_fb, (double)count_fb, 0.0, EPSILON_GENERAL);
+            
+            // Only calculate if we have at least 50% of required bars
+            if(count_fb >= periods_fb[p] / 2) {
+                results[p] = SafeDivide(sum_fb, (double)count_fb, 0.0, EPSILON_GENERAL);
+            } else {
+                results[p] = 0.0;
+            }
         }
         ArrayFree(trFallback);
         return;
@@ -374,24 +419,29 @@ void CalculateATRBatch(double &results[]) {
     }
     
     // Calculate TR from batch arrays (no more per-bar API calls)
-    for(int i = 0; i < maxPeriod; i++) {
-        int arrIdx = copyCount - 1 - i;  // newest bar = last element
+    // CRITICAL FIX: Start from bar 1 (completed bar), not bar 0 (current forming bar)
+    // Stop at copyCount - 1 to ensure we have prevClose available
+    for(int i = 1; i <= maxPeriod && i < copyCount - 1; i++) {
+        int arrIdx = copyCount - 1 - i;  // Convert bar index to array index
         
         double high = highArr[arrIdx];
         double low  = lowArr[arrIdx];
         double prevClose;
         
         // For prevClose, use previous bar's close (arrIdx-1 in chronological order)
+        // Since we stop at i < copyCount - 1, arrIdx will always be >= 1
+        // So arrIdx - 1 >= 0, which is safe
         if(arrIdx > 0) {
             prevClose = closeArr[arrIdx - 1];
         } else {
-            prevClose = openArr[arrIdx]; // First available bar, use its open
+            // This should never happen due to loop condition, but keep as safety
+            prevClose = openArr[arrIdx];
         }
         
         // Validate prices
         if(!IsValidPrice(high, EPSILON_PRICE) || !IsValidPrice(low, EPSILON_PRICE) || 
            !IsValidPrice(prevClose, EPSILON_PRICE) || IsLess(high, low, EPSILON_PRICE)) {
-            trValues[i] = 0.0;
+            trValues[i-1] = 0.0;  // Store at i-1 because we start from i=1
             continue;
         }
         
@@ -402,7 +452,7 @@ void CalculateATRBatch(double &results[]) {
         double tr = hl;
         if(hc > tr) tr = hc;
         if(lc > tr) tr = lc;
-        trValues[i] = tr;
+        trValues[i-1] = tr;  // Store at i-1 because we start from i=1
     }
     
     // Free batch arrays
@@ -417,13 +467,22 @@ void CalculateATRBatch(double &results[]) {
     
     for(int p = 0; p < 6; p++) {
         int period = periods[p];
+        
+        // CRITICAL FIX: Check if we have enough data (need period bars, not period+1)
+        // maxPeriod already includes the extra bar for prevClose calculation
+        if(period > maxPeriod) {
+            results[p] = 0.0;
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ CalculateATRBatch: Skipping period ", period, " (maxPeriod=", maxPeriod, ")");
+            #endif
+            continue;
+        }
+        
         double sum = 0.0;
         int count = 0;
         
-        // AUDIT FIX: Validate period bounds
-        int loopLimit = (period < maxPeriod) ? period : maxPeriod;
-        
-        for(int i = 0; i < loopLimit; i++) {
+        // Calculate average TR for this period
+        for(int i = 0; i < period && i < maxPeriod; i++) {
             // AUDIT FIX: Use IsZero for comparison
             if(!IsZero(trValues[i], EPSILON_PRICE)) {
                 sum += trValues[i];
@@ -431,8 +490,17 @@ void CalculateATRBatch(double &results[]) {
             }
         }
         
-        // AUDIT FIX: Use SafeDivide
-        results[p] = SafeDivide(sum, (double)count, 0.0, EPSILON_GENERAL);
+        // CRITICAL FIX: Only calculate if we have enough valid bars
+        // Need at least 50% of period for reliable ATR
+        if(count >= period / 2) {
+            results[p] = SafeDivide(sum, (double)count, 0.0, EPSILON_GENERAL);
+        } else {
+            results[p] = 0.0;
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ CalculateATRBatch: Insufficient valid bars for period ", period, 
+                  " (", count, "/", period, ")");
+            #endif
+        }
     }
     
     // Free array
@@ -524,6 +592,8 @@ double CalculateWeightedATR() {
         return 0.0;
     }
     
+    // CRITICAL FIX: Only use periods with valid ATR values
+    // If some periods are missing (not enough bars), adjust weights accordingly
     for(int i = 0; i < 6; i++) {
         // AUDIT FIX: Use IsZero for comparison
         if(!IsZero(atrValues[i], EPSILON_PRICE)) {
@@ -537,7 +607,24 @@ double CalculateWeightedATR() {
             }
             weightedSum += temp;
             totalWeight += weights[i];
+        } else {
+            #ifdef ENABLE_DEBUG_LOGS
+            static datetime s_lastSkipLog = 0;
+            datetime now = TimeCurrent();
+            if(now - s_lastSkipLog > 300) {  // Log every 5 minutes
+                Print("⚠️ CalculateWeightedATR: Skipping ATR period ", i, " (value is zero)");
+                s_lastSkipLog = now;
+            }
+            #endif
         }
+    }
+    
+    // CRITICAL FIX: If no valid ATR values, return 0
+    if(totalWeight == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ CalculateWeightedATR: No valid ATR values available");
+        #endif
+        return 0.0;
     }
     
     // AUDIT FIX: Use SafeDivide

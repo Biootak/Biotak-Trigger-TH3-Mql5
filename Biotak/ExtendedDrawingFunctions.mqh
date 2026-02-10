@@ -13,30 +13,24 @@
 //+------------------------------------------------------------------+
 //| PERF: Delete surplus zone/line objects beyond what was just drawn |
 //| حذف اشیاء zone/line اضافی فراتر از آنچه رسم شد                    |
-//| Uses consecutive-miss strategy: stops after maxConsecutiveMiss   |
+//| Uses consecutive-miss strategy: stops after 3 misses in a row    |
 //| ANTI-FLICKER: Skips cleanup if custom price is being dragged    |
-//| CACHE: Removes deleted objects from cache                        |
 //+------------------------------------------------------------------+
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6) {
-    // Consecutive-miss strategy: stop after N consecutive misses
-    // Requirements: 12.1, 12.4
+    // ANTI-FLICKER FIX: Skip cleanup during custom price drag to prevent zone flickering
+    // رفع چشمک زدن: در حین درگ custom price، زون‌ها پاک نمی‌شوند
+    if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) {
+        return;  // Skip zone cleanup during drag
+    }
+    
     int misses = 0;
     for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
         string name = prefix + IntegerToString(idx);
-        
-        // Check if object exists on chart
         if(ObjectFind(0, name) >= 0) {
-            // Object exists - delete it
-            // Requirement: 12.5 - Selective surplus deletion
             ObjectDelete(0, name);
-            
-            // CACHE FIX: Remove from cache after deletion
-            // Requirement: 11.2 - Cache synchronization on delete
-            CacheRemoveObject(name);
-            
-            misses = 0; // Reset consecutive miss counter on hit
+            misses = 0; // Reset on hit
         } else {
-            misses++; // Increment consecutive miss counter
+            misses++;
         }
     }
 }

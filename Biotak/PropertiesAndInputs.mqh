@@ -17,9 +17,9 @@ input bool inpShowMidpointLine = true;
 input bool inpShowTimeframeInLabels = true;
 input bool inpShowFractalTHs = false;
 input bool inpShowStandardTHs = false;
-input int inpMaxTHLevelsAbove = 100;
-input int inpMaxTHLevelsBelow = 100;
-input string inpFontName = "JetBrains Mono Bold";
+input int inpMaxTHLevelsAbove = 50;
+input int inpMaxTHLevelsBelow = 50;
+input string inpFontName = "Arial Bold";
 input int inpFontSize = 8;
 
 input string S2 = "---------- CALCULATION ----------";

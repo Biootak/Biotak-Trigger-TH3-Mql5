@@ -12,26 +12,6 @@ int OnInitHandler() {
     InitializeGlobalCache();
     
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 0.5: INITIALIZE OBJECT CACHE SYSTEM (FLICKERING FIX)
-    // ═══════════════════════════════════════════════════════════════════
-    // Clear any existing cache entries
-    CacheClear();
-    
-    // Rebuild cache from existing chart objects (if any from previous session)
-    // This handles cases where indicator is reloaded or terminal restarted
-    int existingObjects = ObjectsTotal(0, -1, -1);
-    if(existingObjects > 0) {
-        CacheRebuild();
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("🔄 Object cache rebuilt: ", CacheGetSize(), " objects cached from previous session");
-        #endif
-    } else {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("✅ Object cache initialized (empty - no existing objects)");
-        #endif
-    }
-    
-    // ═══════════════════════════════════════════════════════════════════
     // PHASE 1: CHECK HIDDEN STATE (but don't return early)
     // ═══════════════════════════════════════════════════════════════════
     // CRITICAL FIX: Always initialize indicator fully, even if hidden
@@ -625,21 +605,6 @@ void OnDeinitHandler(const int reason) {
         ObjectsDeleteAll(0, inpObjectPrefix);
         ObjectsDeleteAll(0, "TH3_Structure_");
         
-        // Delete ATR and TH title labels from ALL timeframes
-        string objectPrefix = inpObjectPrefix + "_";
-        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
-        for(int p = 0; p < ArraySize(allPeriods); p++) {
-            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
-            ObjectDelete(0, tfPrefix + "ATR_Title");
-            ObjectDelete(0, tfPrefix + "TH_Title");
-            
-            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
-            for(int i = 0; i < ArraySize(timeframes); i++) {
-                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
-                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
-            }
-        }
-        
         // Delete all zone objects from all modes
         ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
         ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
@@ -683,53 +648,6 @@ void OnDeinitHandler(const int reason) {
         // Delete TH levels but keep TH3 structures (user drawings should persist)
         ObjectsDeleteAll(0, inpObjectPrefix);
         
-        // Delete ATR and TH title labels from ALL timeframes
-        string objectPrefix = inpObjectPrefix + "_";
-        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
-        for(int p = 0; p < ArraySize(allPeriods); p++) {
-            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
-            ObjectDelete(0, tfPrefix + "ATR_Title");
-            ObjectDelete(0, tfPrefix + "TH_Title");
-            
-            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
-            for(int i = 0; i < ArraySize(timeframes); i++) {
-                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
-                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
-            }
-        }
-        
-        // Delete all zone objects from all modes
-        ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
-        ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
-        ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
-        ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
-        ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
-    }
-    else if(reason == REASON_RECOMPILE)
-    {
-        // Recompile detected - clean up ALL labels from ALL timeframes
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("🔄 OnDeinit (REASON_RECOMPILE) - cleaning all ATR/TH labels from all timeframes");
-        #endif
-        
-        // Delete TH levels but keep TH3 structures (user drawings should persist)
-        ObjectsDeleteAll(0, inpObjectPrefix);
-        
-        // Delete ATR and TH title labels from ALL timeframes
-        string objectPrefix = inpObjectPrefix + "_";
-        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
-        for(int p = 0; p < ArraySize(allPeriods); p++) {
-            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
-            ObjectDelete(0, tfPrefix + "ATR_Title");
-            ObjectDelete(0, tfPrefix + "TH_Title");
-            
-            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
-            for(int i = 0; i < ArraySize(timeframes); i++) {
-                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
-                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
-            }
-        }
-        
         // Delete all zone objects from all modes
         ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
         ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
@@ -746,21 +664,6 @@ void OnDeinitHandler(const int reason) {
         
         // Delete TH levels but keep TH3 structures (user drawings should persist)
         ObjectsDeleteAll(0, inpObjectPrefix);
-        
-        // Delete ATR and TH title labels from ALL timeframes (not just current)
-        string objectPrefix = inpObjectPrefix + "_";
-        int allPeriods[] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200}; // M1, M5, M15, M30, H1, H4, D1, W1, MN1
-        for(int p = 0; p < ArraySize(allPeriods); p++) {
-            string tfPrefix = objectPrefix + "TF" + IntegerToString(allPeriods[p]) + "_";
-            ObjectDelete(0, tfPrefix + "ATR_Title");
-            ObjectDelete(0, tfPrefix + "TH_Title");
-            
-            string timeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
-            for(int i = 0; i < ArraySize(timeframes); i++) {
-                ObjectDelete(0, tfPrefix + "ATR_" + timeframes[i]);
-                ObjectDelete(0, tfPrefix + "ATR_Targets_" + timeframes[i]);
-            }
-        }
         
         // Delete all zone objects from all modes
         ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
@@ -805,12 +708,6 @@ void OnDeinitHandler(const int reason) {
     // Cleanup Learning System
     CleanupLearningSystem();
     
-    // Cleanup Object Cache (FLICKERING FIX)
-    CacheClear();
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🧹 Object cache cleared");
-    #endif
-    
     // ═══════════════════════════════════════════════════════════════
     // PHASE 6: Reset all global state variables
     // ═══════════════════════════════════════════════════════════════
@@ -838,11 +735,6 @@ void OnDeinitHandler(const int reason) {
 //+------------------------------------------------------------------+
 void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 {
-    // DEBUG: Log when zones are being cleared
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🧹 ClearAllLevels called: prefix=", objectPrefix, ", clearZones=", clearZones, ", dragging=", g_customPriceLineDragging);
-    #endif
-    
     // OPTIMIZATION: Instead of iterating all objects, use ObjectsDeleteAll with prefix
     // This is much faster than checking each object individually
     // Delete all level objects from all modes to prevent overlapping when switching modes
@@ -947,10 +839,6 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
                 totalFailed++;
             }
         }
-        
-        // CRITICAL FIX: Clear object cache when zones are deleted
-        // This prevents "unchanged, skipping" when zones are recreated
-        CacheClear();
     }
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -1204,17 +1092,12 @@ void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePri
     ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
     
     bool modeChanged = (currentMode != s_lastDrawnMode || currentBasis != s_lastDrawnBasis);
-    
-    // ANTI-FLICKER FIX: Only clear if mode changed OR forceClear requested AND not dragging
-    // حین drag، فقط update می‌کنیم نه clear
-    if(modeChanged || (g_forceClearOnNextDraw && !g_customPriceLineDragging)) {
-        // DEBUG: Log why we're clearing
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("🎨 DrawLevelsBasedOnMode: modeChanged=", modeChanged, ", forceClear=", g_forceClearOnNextDraw, ", dragging=", g_customPriceLineDragging);
-        #endif
-        
-        // Mode changed, or keyboard handler requested a full clear (and not dragging)
-        ClearAllLevels(objectPrefix, true);  // Always clear zones when clearing
+    if(modeChanged || g_forceClearOnNextDraw) {
+        // Mode changed, or keyboard handler requested a full clear
+        // ANTI-FLICKER: Don't clear zones if custom price is being dragged
+        // رفع چشمک زدن: در حین درگ custom price، زون‌ها را پاک نکن
+        bool clearZones = !g_customPriceLineDragging;
+        ClearAllLevels(objectPrefix, clearZones);
         s_lastDrawnMode = currentMode;
         s_lastDrawnBasis = currentBasis;
         g_forceClearOnNextDraw = false;
@@ -1661,10 +1544,6 @@ void RedrawAllObjects(bool force_redraw=false)
         }
         if(inpShowTHLabels && inpShowFractalTHs) DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
         if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-        
-        // نمایش لیبل‌های ATR برای همه تایم‌فریم‌ها
-        DisplayATRLabels(objectPrefix);
-        
         if(inpShowTHLevels) g_redrawTHLevelsNeeded = true;
         g_calculatedOnce = true;
     }
@@ -1814,8 +1693,13 @@ void RedrawAllObjects(bool force_redraw=false)
         }
         #endif
         
-        // DrawLevelsBasedOnMode handles clearing internally based on mode changes
-        // No need to clear here - it causes zones to disappear after drag
+        // CRITICAL FIX: Clear old levels BEFORE drawing new ones to prevent ghosting
+        // ANTI-FLICKER: Skip zone deletion if custom price is being dragged
+        // رفع مشکل: پاک کردن سطوح قبلی قبل از رسم سطوح جدید
+        // رفع چشمک زدن: در حین درگ، فقط خطوط پاک می‌شوند نه زون‌ها
+        bool skipZones = g_customPriceLineDragging;
+        ClearAllLevels(objectPrefix, !skipZones);
+        
         DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
         g_redrawTHLevelsNeeded = false;
     }
@@ -1867,37 +1751,6 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         return(rates_total);
     }
     
-    // ═══════════════════════════════════════════════════════════════════
-    // TASK 10.1: Redraw Flag Check - Skip drawing if not needed
-    // ═══════════════════════════════════════════════════════════════════
-    // Check if redraw is needed before proceeding with drawing pipeline
-    // This prevents unnecessary redraws when prices haven't changed
-    if(!IsRedrawNeeded() && !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw) {
-        // No redraw needed - skip all drawing operations
-        return(rates_total);
-    }
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // TASK 10.1: Price Change Detection
-    // ═══════════════════════════════════════════════════════════════════
-    // Detect if price has changed significantly to trigger redraw
-    static double s_lastPrice = 0.0;
-    double currentPrice = (rates_total > 0) ? close[rates_total - 1] : 0.0;
-    bool priceChanged = false;
-    
-    if(s_lastPrice > 0 && currentPrice > 0) {
-        double priceChangePips = MathAbs(currentPrice - s_lastPrice) / Point;
-        // Only trigger redraw if price changed by more than 1 pip
-        if(priceChangePips > 1.0) {
-            priceChanged = true;
-            SetRedrawFlag(true);
-        }
-    }
-    
-    if(currentPrice > 0) {
-        s_lastPrice = currentPrice;
-    }
-    
     // PERFORMANCE: Tick-level throttle — skip if called faster than 500ms
     // بهینه‌سازی: اگر کمتر از ۵۰۰ میلی‌ثانیه گذشته، تیک را رد کن
     static uint s_lastTickMs = 0;
@@ -1910,37 +1763,16 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     
     if(rates_total > 0)
     {
-        // ═══════════════════════════════════════════════════════════════════
-        // TASK 10.4: Historical Object Update Skip for Incremental Updates
-        // ═══════════════════════════════════════════════════════════════════
-        // Check if only current bar is updating (incremental update)
-        // Skip historical object modifications to prevent unnecessary updates
-        bool isIncrementalUpdate = (prev_calculated > 0 && rates_total - prev_calculated <= 1);
-        
         // Only redraw on new bar, or if tick throttle expired
         // EXCEPTION: Always redraw if levels need updating (keyboard/settings change)
         // This reduces CPU from ~100% to <5% on fast-moving markets
-        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw && !priceChanged) {
-            return(rates_total);
+        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw) {
+            return rates_total;
         }
-        
-        // Skip historical object updates for incremental updates
-        // Only update when new bar forms or full redraw is needed
-        if(isIncrementalUpdate && !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw && !isNewBar) {
-            // Incremental update - skip historical object modifications
-            return(rates_total);
-        }
-        
         s_lastTickMs = nowMs;
         
         // Force redraw when levels need updating (settings change / keyboard)
         RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
-        
-        // ═══════════════════════════════════════════════════════════════════
-        // TASK 10.1: Clear Redraw Flag After Successful Draw
-        // ═══════════════════════════════════════════════════════════════════
-        // Reset the redraw flag after successful drawing operation
-        ClearRedrawFlag();
         
         // Track bar changes for object count monitoring
         if(currentBars > s_lastBars || s_lastBars == 0) {
@@ -1991,7 +1823,7 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         }
     }
 
-    return(rates_total);
+    return rates_total;
 }
 
 //+------------------------------------------------------------------+
@@ -2016,66 +1848,6 @@ void ApplyLinesVisibility()
 
 void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-    // ═══════════════════════════════════════════════════════════════
-    // CHART RESIZE HANDLER: Redraw labels when chart size changes
-    // رفع مشکل: بازسازی لیبل‌ها هنگام تغییر اندازه چارت
-    // ═══════════════════════════════════════════════════════════════
-    static int s_lastChartWidth = 0;
-    static int s_lastChartHeight = 0;
-    
-    if(id == CHARTEVENT_CHART_CHANGE)
-    {
-        // Get current chart dimensions
-        int currentWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-        int currentHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-        
-        // Only redraw if dimensions actually changed
-        if(currentWidth != s_lastChartWidth || currentHeight != s_lastChartHeight)
-        {
-            s_lastChartWidth = currentWidth;
-            s_lastChartHeight = currentHeight;
-            
-            // Chart size changed - redraw labels only if they should be visible
-            if(!IsIndicatorHidden() && g_dailyClosePriceForTH > 0)
-            {
-                // Delete all existing TH and ATR labels
-                string objectPrefix = inpObjectPrefix + "_";
-                
-                // حذف عناوین
-                ObjectDelete(0, objectPrefix + "ATR_Title");
-                ObjectDelete(0, objectPrefix + "TH_Title");
-                
-                for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
-                {
-                    string objName = ObjectName(0, i, 0, -1);
-                    if(StringFind(objName, objectPrefix + "TH_") >= 0 || 
-                       StringFind(objName, objectPrefix + "ATR_") >= 0)
-                    {
-                        ObjectDelete(0, objName);
-                    }
-                }
-                
-                // Redraw TH labels with current data
-                if(inpShowTHLabels)
-                {
-                    if(inpShowFractalTHs)
-                    {
-                        DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
-                    }
-                    if(inpShowStandardTHs)
-                    {
-                        DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, TimeCurrent());
-                    }
-                }
-                
-                // Redraw ATR labels (always shown independently)
-                DisplayATRLabels(objectPrefix);
-                
-                ThrottledChartRedraw();
-            }
-        }
-    }
-    
     // Handle key press events
     if(id == CHARTEVENT_KEYDOWN)
     {
@@ -2088,8 +1860,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         {
             // ═══════════════════════════════════════════════════════════════
             // F KEY HANDLER: HIDE/SHOW TOGGLE
-            // Requirements: 4.3, 10.3
-            // Uses VisibilityManager to toggle visibility without deletion
             // ═══════════════════════════════════════════════════════════════
             // PERFORMANCE: Use cached ChartID string
             string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
@@ -2116,63 +1886,89 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // PERFORMANCE: Immediately refresh the cached hidden state
             RefreshIsHiddenCache();
 
-            // ═══════════════════════════════════════════════════════════════
-            // OPTIMIZED: Use VisibilityManager instead of deletion/recreation
-            // This prevents flickering and maintains object properties
-            // ═══════════════════════════════════════════════════════════════
-            #ifdef ENABLE_DEBUG_LOGS
-            Print(isBecomingHidden ? "🔒 F key: Hiding all objects" : "👁️ F key: Showing all objects");
-            #endif
-            
-            // CRITICAL FIX: When showing, respect Lines visibility state (L key)
-            // رفع مشکل: وقتی نمایش داده می‌شود، وضعیت Lines را رعایت کن
-            if(!isBecomingHidden) {
-                // Restore Lines visibility state from GlobalVariable
-                string linesGvarName = "Biotak_LinesVisible_" + GetCachedChartIdStr();
-                if(GlobalVariableCheck(linesGvarName)) {
-                    g_linesVisible = (GlobalVariableGet(linesGvarName) > 0.5);
-                }
-            }
-            
-            // Use VisibilityManager to toggle visibility without deletion
-            SetAllTHObjectsVisibility(!isBecomingHidden);
-            
-            // CRITICAL FIX: Apply Lines visibility state after showing
-            // رفع مشکل: اعمال وضعیت Lines بعد از نمایش
-            if(!isBecomingHidden && !g_linesVisible) {
-                // Lines were hidden before - hide them again
-                SetAllLineObjectsVisibility(false);
-            }
-            
-            // Handle custom price line separately (no prefix)
-            if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0) {
-                SetObjectVisibility(g_customPriceHorizontalLineName, !isBecomingHidden);
-            }
-            
-            // Handle mode labels separately (no prefix)
-            if(ObjectFind(0, g_stepModeLabelName) >= 0) {
-                SetObjectVisibility(g_stepModeLabelName, !isBecomingHidden);
-            }
-            if(ObjectFind(0, g_basisModeLabelName) >= 0) {
-                SetObjectVisibility(g_basisModeLabelName, !isBecomingHidden);
-            }
-            if(ObjectFind(0, g_factorLabelName) >= 0) {
-                SetObjectVisibility(g_factorLabelName, !isBecomingHidden);
-            }
-            if(ObjectFind(0, g_frequencyLabelName) >= 0) {
-                SetObjectVisibility(g_frequencyLabelName, !isBecomingHidden);
-            }
-            if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
-                SetObjectVisibility(g_lockStatusLabelName, !isBecomingHidden);
-            }
-            
-            // Update redraw flag
-            if(isBecomingHidden) {
+            if(isBecomingHidden)
+            {
+                // ═══════════════════════════════════════════════════════════════
+                // HIDE ALL OBJECTS
+                // ═══════════════════════════════════════════════════════════════
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("🔒 F key: Hiding all objects");
+                #endif
+                
+                // GOLD FIX: Use centralized helper function (DRY)
+                HideAllTHObjects();
+                
+                // Clean up custom price selection objects (force delete the line)
+                CleanupCustomPriceObjects(false, true);
+                
+                // GOLD FIX: Set flag to prevent unnecessary redraws
                 g_redrawTHLevelsNeeded = false;
-            } else {
-                g_redrawTHLevelsNeeded = true;
             }
-            
+            else
+            {
+                // ═══════════════════════════════════════════════════════════════
+                // SHOW ALL OBJECTS (F key pressed while hidden)
+                // ═══════════════════════════════════════════════════════════════
+                // GOLD FIX: Complete recreation strategy for reliability
+                
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("👁️ F key: Showing all objects");
+                #endif
+                
+                // Step 1: Delete ALL TH level objects (force clean slate)
+                string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+                ClearAllLevels(objectPrefix);
+                
+                // Step 2: Reset state flags to force complete redraw
+                g_calculatedOnce = false;
+                g_redrawTHLevelsNeeded = true;
+                g_initialized = true; // Keep initialized state
+                
+                // Step 3: Immediately redraw all objects, bypassing the throttle
+                // This will recreate all zones, lines, and labels from scratch
+                RedrawAllObjects(true);
+                
+                // Step 4: Apply Trigger state filter to newly created objects
+                // GOLD FIX: Batch operation with error handling
+                int total = ObjectsTotal(0, -1, -1);
+                int shownCount = 0;
+                int hiddenCount = 0;
+                int failedCount = 0;
+                
+                // OPTIMIZATION: Cache prefix and length
+                string cachedPrefixF = inpObjectPrefix;
+                int prefixLenF = StringLen(cachedPrefixF);
+                
+                for(int i = total - 1; i >= 0; i--)
+                {
+                    string objName = ObjectName(0, i, -1, -1);
+                    
+                    // OPTIMIZED: Use StringSubstr for faster prefix check
+                    if(StringLen(objName) >= prefixLenF && StringSubstr(objName, 0, prefixLenF) == cachedPrefixF)
+                    {
+                        // GOLD FIX: Identify Trigger objects by NAME pattern (not color)
+                        bool isTriggerObject = (StringFind(objName, "TriggerTH_Up_") >= 0 || 
+                                               StringFind(objName, "TriggerTH_Down_") >= 0);
+                        
+                        // If Trigger is disabled, hide Trigger objects
+                        if(isTriggerObject && !g_triggerLevelsEnabled)
+                        {
+                            if(ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS)) {
+                                hiddenCount++;
+                            } else {
+                                failedCount++;
+                            }
+                        } else {
+                            shownCount++;
+                        }
+                    }
+                }
+                
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("✅ F key: Shown ", shownCount, " objects, hidden ", hiddenCount, 
+                      " Trigger objects (", failedCount, " failed)");
+                #endif
+            }
             ThrottledChartRedraw(); // Redraw chart to apply visual changes
         }
         
@@ -2183,12 +1979,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         
         if(lparam == linesKeyCode)
         {
-            // ═══════════════════════════════════════════════════════════════
-            // L KEY HANDLER: LINES VISIBILITY TOGGLE
-            // Requirements: 4.4, 10.4
-            // Uses VisibilityManager to toggle line visibility without deletion
-            // ═══════════════════════════════════════════════════════════════
-            
             // Toggle lines visibility
             g_linesVisible = !g_linesVisible;
             
@@ -2197,11 +1987,35 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             string gvar_name = "Biotak_LinesVisible_" + GetCachedChartIdStr();
             GlobalVariableSet(gvar_name, g_linesVisible ? 1.0 : 0.0);
             
-            // ═══════════════════════════════════════════════════════════════
-            // OPTIMIZED: Use VisibilityManager instead of manual iteration
-            // This ensures consistent behavior and prevents flickering
-            // ═══════════════════════════════════════════════════════════════
-            SetAllLineObjectsVisibility(g_linesVisible);
+            // CRITICAL: Update existing line objects immediately (fast path)
+            // بروزرسانی فوری اشیاء موجود (مسیر سریع)
+            // OPTIMIZATION: Cache prefix and length
+            int total = ObjectsTotal(0, -1, -1);
+            string cachedPrefixL = inpObjectPrefix;
+            int prefixLenL = StringLen(cachedPrefixL);
+            
+            for(int i = 0; i < total; i++)
+            {
+                string objName = ObjectName(0, i, -1, -1);
+                
+                // OPTIMIZED: Use StringSubstr for faster prefix check
+                if(StringLen(objName) >= prefixLenL && StringSubstr(objName, 0, prefixLenL) == cachedPrefixL)
+                {
+                    // Check if it's a line object (HLINE or TREND)
+                    int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
+                    if(objType == OBJ_HLINE || objType == OBJ_TREND)
+                    {
+                        if(g_linesVisible)
+                        {
+                            ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                        }
+                        else
+                        {
+                            ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                        }
+                    }
+                }
+            }
             
             #ifdef ENABLE_DEBUG_LOGS
             Print("📊 Lines ", (g_linesVisible ? "VISIBLE" : "HIDDEN"));
@@ -2507,15 +2321,11 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // کلید تغییر مبنای محاسبات (W) - تغییر بین TH و ATR
         if(lparam == 'W' || lparam == 'w')
         {
-            Print("=== KEY W PRESSED: Toggling calculation basis ===");
-            
             // Get current basis
             ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-            Print("=== Current basis: ", currentBasis, " (0=TH, 1=ATR) ===");
             
             // Toggle between TH and ATR
             ENUM_CALCULATION_BASIS newBasis = (currentBasis == CALC_BASIS_TH) ? CALC_BASIS_ATR : CALC_BASIS_TH;
-            Print("=== New basis: ", newBasis, " (0=TH, 1=ATR) ===");
             
             // Set override
             g_calculationBasisOverride = (int)newBasis;
@@ -2527,7 +2337,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             
             // Invalidate ATR cache when switching to ATR basis
             if(newBasis == CALC_BASIS_ATR) {
-                Print("=== Invalidating ATR cache ===");
                 InvalidateATRCache();
             }
             
@@ -2536,9 +2345,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             
             // Also print to log
             if(newBasis == CALC_BASIS_TH) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("📐 Calculation Basis: TH (Theoretical)");
+                #endif
             } else {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("📊 Calculation Basis: ATR (Actual)");
+                #endif
             }
             
             // Force redraw to apply the change
@@ -2546,8 +2359,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
             ThrottledChartRedraw();
-            
-            Print("=== Basis toggle complete ===");
         }
         
         // Handle TH3 Frequency Decrease (Key 3) - previous frequency
@@ -2967,85 +2778,17 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             {
                 // ANTI-FLICKER FIX: Set dragging flag to prevent zone deletion
                 // رفع چشمک زدن: تنظیم پرچم درگ برای جلوگیری از پاک شدن زون‌ها
-                
-                // DEBUG: Log drag state
-                #ifdef ENABLE_DEBUG_LOGS
-                if(!g_customPriceLineDragging) {
-                    Print("🖱️ DRAG STARTED: g_customPriceLineDragging set to TRUE");
-                }
-                #endif
-                
                 g_customPriceLineDragging = true;
                 
-                // Get current line price from object (MT4 updates it automatically during drag)
                 double currentLinePrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
-                
                 if(currentLinePrice > 0 && MathAbs(currentLinePrice - g_customTHStartPrice) > _Point * 0.5)
                 {
-                    // Apply magnet/snap to nearest OHLC if enabled
-                    double snappedPrice = currentLinePrice;
-                    
-                    if(inpEnableMagnet && inpMagnetSensitivityPips > 0)
-                    {
-                        // Get mouse position to find the bar
-                        int mouseX = (int)lparam;
-                        int mouseY = (int)dparam;
-                        datetime mouseTime;
-                        double mousePrice;
-                        int subWindow = 0;
-                        
-                        if(ChartXYToTimePrice(0, mouseX, mouseY, subWindow, mouseTime, mousePrice))
-                        {
-                            int barIndex = iBarShift(NULL, 0, mouseTime, false);
-                            if(barIndex >= 0)
-                            {
-                                // Get OHLC of current bar
-                                double barOpen = iOpen(NULL, 0, barIndex);
-                                double barHigh = iHigh(NULL, 0, barIndex);
-                                double barLow = iLow(NULL, 0, barIndex);
-                                double barClose = iClose(NULL, 0, barIndex);
-                                
-                                // Calculate threshold in price units
-                                double threshold = inpMagnetSensitivityPips * _Point;
-                                if(Digits == 3 || Digits == 5) threshold *= 10; // Adjust for 5-digit brokers
-                                
-                                // Find nearest OHLC
-                                double minDist = threshold + 1;
-                                double nearestPrice = currentLinePrice;
-                                
-                                double distOpen = MathAbs(currentLinePrice - barOpen);
-                                if(distOpen < minDist) { minDist = distOpen; nearestPrice = barOpen; }
-                                
-                                double distHigh = MathAbs(currentLinePrice - barHigh);
-                                if(distHigh < minDist) { minDist = distHigh; nearestPrice = barHigh; }
-                                
-                                double distLow = MathAbs(currentLinePrice - barLow);
-                                if(distLow < minDist) { minDist = distLow; nearestPrice = barLow; }
-                                
-                                double distClose = MathAbs(currentLinePrice - barClose);
-                                if(distClose < minDist) { minDist = distClose; nearestPrice = barClose; }
-                                
-                                // Snap if within threshold
-                                if(minDist <= threshold)
-                                {
-                                    snappedPrice = nearestPrice;
-                                    // Update line position immediately for smooth snap
-                                    ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0, snappedPrice);
-                                }
-                            }
-                        }
-                    }
-                    
-                    // PERFORMANCE FIX: Throttle RedrawAllObjects to 50ms during drag
-                    // بهینه‌سازی: محدود کردن بروزرسانی سطوح به 20 بار در ثانیه برای عملکرد روان
+                    // PERFORMANCE FIX: Throttle RedrawAllObjects to 250ms during drag
+                    // بهینه‌سازی: محدود کردن بروزرسانی سطوح به 4 بار در ثانیه برای عملکرد روان
                     uint nowMs = GetTickCount();
                     if(nowMs - g_lastDragRedrawTime > DRAG_REDRAW_THROTTLE_MS)
                     {
-                        #ifdef ENABLE_DEBUG_LOGS
-                        Print("🔄 DRAG UPDATE: price=", snappedPrice, ", redrawing...");
-                        #endif
-                        
-                        g_customTHStartPrice = snappedPrice;
+                        g_customTHStartPrice = currentLinePrice;
                         g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                         g_redrawTHLevelsNeeded = true;
                         RedrawAllObjects(true);
@@ -3060,14 +2803,12 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // Left button released - end dragging
             // دکمه چپ رها شد - پایان درگ
             if(g_customPriceLineDragging) {
-                // ANTI-FLICKER FIX: Detect drag state transition (true -> false)
-                // Requirement 7.3: Trigger single cleanup pass after drag ends
                 g_customPriceLineDragging = false;
-                
-                // DON'T force clear - just redraw normally
-                // فقط بازرسم عادی - بدون پاک کردن اجباری
+                // Force final redraw with full cleanup (including zones)
+                // بروزرسانی نهایی با cleanup کامل (از جمله زون‌ها)
+                g_forceClearOnNextDraw = true;  // Ensure surplus zones are cleaned up
                 g_redrawTHLevelsNeeded = true;
-                RedrawAllObjects(false);  // false = don't force clear
+                RedrawAllObjects(true);
                 ThrottledChartRedraw();
             }
         }
@@ -3076,8 +2817,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // Handle object drag event for custom price line (fires on mouse release)
     if(id == CHARTEVENT_OBJECT_DRAG && sparam == g_customPriceHorizontalLineName)
     {
-        // ANTI-FLICKER FIX: Detect drag state transition (true -> false)
-        // Requirement 7.3: Trigger single cleanup pass after drag ends
+        // ANTI-FLICKER FIX: Clear dragging flag when drag ends
         g_customPriceLineDragging = false;
         
         // Get the current price from the horizontal line
@@ -3113,9 +2853,11 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         }
         
         // Force redraw of TH levels (works for both preview and adjustment mode)
-        // بازرسم سطوح TH (برای هر دو حالت پیش‌نمایش و تنظیم)
+        // ANTI-FLICKER: Since drag ended, force cleanup of surplus zones
+        // رفع چشمک زدن: چون درگ تمام شد، زون‌های اضافی را پاک کن
+        g_forceClearOnNextDraw = true;  // Ensure surplus zones are cleaned up after drag
         g_redrawTHLevelsNeeded = true;
-        RedrawAllObjects(false);  // false = don't force clear zones
+        RedrawAllObjects(true);
     }
     
     // Handle Wave Analyzer toggle (W key) - REMOVED

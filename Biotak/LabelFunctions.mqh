@@ -112,6 +112,15 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         return;
     }
     double thStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,timeframePercentage);
+    
+    // CRITICAL FIX: Validate thStepSizePoints to prevent infinite loops
+    if(thStepSizePoints <= 0 || thStepSizePoints < s_cachedPointValue) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ DrawTHLevels: Invalid thStepSizePoints=", thStepSizePoints, " (must be > Point=", s_cachedPointValue, ")");
+        #endif
+        return;
+    }
+    
     double structureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[0]);
     double doubleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[1]);
     double tripleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[2]);
@@ -212,7 +221,15 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         int levelCountAbove = 0;
         
         // Loop condition: Custom Price = only count, Historical = count AND bounds
-        while ((checkHistoricalBounds ? (priceLevelAbove <= g_highestHigh) : true) && levelCountAbove < maxLevelsAbove) {
+        // CRITICAL FIX: Add safety counter to prevent infinite loops
+        int safetyCounterAbove = 0;
+        const int MAX_ITERATIONS_ABOVE = 1000; // Safety limit
+        
+        while ((checkHistoricalBounds ? (priceLevelAbove <= g_highestHigh) : true) && 
+               levelCountAbove < maxLevelsAbove && 
+               safetyCounterAbove < MAX_ITERATIONS_ABOVE) {
+            
+            safetyCounterAbove++; // Increment safety counter
             string lineNameAbove, tooltipAbove, levelInfoAbove;
             color lineColor;
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
@@ -373,7 +390,15 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         int levelCountBelow = 0;
         
         // Loop condition: Custom Price = only count, Historical = count AND bounds
-        while ((checkHistoricalBounds ? (priceLevelBelow >= g_lowestLow) : true) && levelCountBelow < maxLevelsBelow) {
+        // CRITICAL FIX: Add safety counter to prevent infinite loops
+        int safetyCounterBelow = 0;
+        const int MAX_ITERATIONS_BELOW = 1000; // Safety limit
+        
+        while ((checkHistoricalBounds ? (priceLevelBelow >= g_lowestLow) : true) && 
+               levelCountBelow < maxLevelsBelow && 
+               safetyCounterBelow < MAX_ITERATIONS_BELOW) {
+            
+            safetyCounterBelow++; // Increment safety counter
             string lineNameBelow, tooltipBelow, levelInfoBelow;
             color lineColor;
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
