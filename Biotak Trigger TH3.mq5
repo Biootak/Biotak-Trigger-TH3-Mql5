@@ -25,10 +25,6 @@
 #include "Biotak\InputValidationEnhanced.mqh"
 #include "Biotak\GlobalVariables.mqh"
 
-#ifdef DEBUG_BUILD
-#include "Biotak\Tests\SecurityAuditTests.mqh"
-#endif
-
 #include "Biotak\UtilityFunctions.mqh"
 
 // Zone System
