@@ -685,7 +685,7 @@ void OnDeinitHandler(const int reason) {
     #ifdef ENABLE_DEBUG_LOGS
     Print("🧹 Freeing arrays...");
     #endif
-    ArrayFree(g_thCache);
+    // NOTE: g_thCache is now a single struct in CalculationCache.mqh, not an array
     ArrayFree(g_storedTHs);
     ArrayFree(g_labelPositions);
     
@@ -1503,6 +1503,9 @@ void RedrawAllObjects(bool force_redraw=false)
     if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {
         // Timeframe changed - delete old objects with old prefix
         ClearAllLevels(s_lastPrefix);
+        
+        // ✅ OPTIMIZATION: Invalidate timeframe-dependent caches
+        InvalidateTimeframeDependentCaches();
     }
     s_lastPrefix = objectPrefix;
     
@@ -1745,38 +1748,127 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     static int s_cpuWarningCount = 0;
     uint startTime = GetTickCount();
     
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 1: EARLY EXIT FOR HIDDEN INDICATOR
+    // ═══════════════════════════════════════════════════════════════
     // OPTIMIZATION: Use centralized cached hidden state
+    // Validates: Requirements 6.4, 14.6
     if(IsIndicatorHidden())
     {
         return(rates_total);
     }
     
-    // PERFORMANCE: Tick-level throttle — skip if called faster than 500ms
-    // بهینه‌سازی: اگر کمتر از ۵۰۰ میلی‌ثانیه گذشته، تیک را رد کن
-    static uint s_lastTickMs = 0;
-    uint nowMs = GetTickCount();
-    bool tickThrottled = (nowMs - s_lastTickMs < 500 && s_lastTickMs != 0);
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 2: INTELLIGENT THROTTLING WITH CHANGE DETECTION
+    // ═══════════════════════════════════════════════════════════════
+    // Validates: Requirements 6.1, 6.2, 6.5, 6.6, 6.7
     
+    // Static state tracking for change detection
+    static uint s_lastTickMs = 0;
+    static double s_lastPrice = 0;
     static int s_lastBars = 0;
+    static int s_lastPeriod = -1;
+    static double s_lastCustomPrice = 0;
+    
+    // Current state
+    uint nowMs = GetTickCount();
+    double currentPrice = (rates_total > 0) ? close[rates_total-1] : 0;
     int currentBars = Bars(_Symbol, _Period);
-    bool isNewBar = (currentBars != s_lastBars && s_lastBars != 0);
+    int currentPeriod = _Period;
+    double currentCustomPrice = g_customTHStartPrice;
+    
+    // ═══════════════════════════════════════════════════════════════
+    // CHANGE DETECTION: Calculate all change flags
+    // ═══════════════════════════════════════════════════════════════
+    
+    // 1. Price change detection (0.1% threshold)
+    double priceChangePercent = 0;
+    if(s_lastPrice > 0 && currentPrice > 0) {
+        priceChangePercent = MathAbs((currentPrice - s_lastPrice) / s_lastPrice) * 100.0;
+    }
+    bool significantPriceChange = (priceChangePercent > 0.1);
+    
+    // 2. Bars count change detection
+    bool barsChanged = (currentBars != s_lastBars && s_lastBars != 0);
+    bool isNewBar = barsChanged;
+    
+    // 3. Timeframe change detection
+    bool timeframeChanged = (currentPeriod != s_lastPeriod && s_lastPeriod != -1);
+    
+    // 4. Custom price change detection
+    bool customPriceChanged = false;
+    if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
+        customPriceChanged = (MathAbs(currentCustomPrice - s_lastCustomPrice) > EPSILON_PRICE);
+    }
+    
+    // 5. Tick throttling (100ms minimum interval)
+    bool tickThrottled = (nowMs - s_lastTickMs < 100 && s_lastTickMs != 0);
+    
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 3: CACHE INVALIDATION ON DETECTED CHANGES
+    // ═══════════════════════════════════════════════════════════════
+    // Validates: Requirements 3.7, 4.6, 7.6, 11.5
+    
+    if(timeframeChanged) {
+        // Invalidate all timeframe-dependent caches
+        InvalidateTimeframeDependentCaches();
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("🔄 Timeframe changed: ", s_lastPeriod, " -> ", currentPeriod);
+        #endif
+    }
+    
+    if(barsChanged) {
+        // Invalidate bar-dependent caches (Factor cache)
+        InvalidateFactorCache();
+    }
+    
+    if(customPriceChanged) {
+        // Invalidate TH calculation cache when custom price changes
+        InvalidateTHCache();
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("🔄 Custom price changed: ", DoubleToString(s_lastCustomPrice, Digits), 
+              " -> ", DoubleToString(currentCustomPrice, Digits));
+        #endif
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // PHASE 4: EARLY EXIT FOR UNCHANGED STATE
+    // ═══════════════════════════════════════════════════════════════
+    // Validates: Requirements 6.2, 6.3
     
     if(rates_total > 0)
     {
-        // Only redraw on new bar, or if tick throttle expired
-        // EXCEPTION: Always redraw if levels need updating (keyboard/settings change)
-        // This reduces CPU from ~100% to <5% on fast-moving markets
-        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw) {
+        // Skip processing if:
+        // - Tick throttled (< 100ms since last call)
+        // - No new bar
+        // - No redraw flag set
+        // - No force clear needed
+        // - No significant price change (< 0.1%)
+        // - No timeframe change
+        // - No custom price change
+        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && 
+           !g_forceClearOnNextDraw && !significantPriceChange && 
+           !timeframeChanged && !customPriceChanged) {
             return rates_total;
         }
-        s_lastTickMs = nowMs;
         
+        // Update state tracking
+        s_lastTickMs = nowMs;
+        s_lastPrice = currentPrice;
+        s_lastBars = currentBars;
+        s_lastPeriod = currentPeriod;
+        s_lastCustomPrice = currentCustomPrice;
+        
+        // ═══════════════════════════════════════════════════════════════
+        // PHASE 5: REDRAW WITH CACHED CALCULATIONS
+        // ═══════════════════════════════════════════════════════════════
         // Force redraw when levels need updating (settings change / keyboard)
         RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
         
         // Track bar changes for object count monitoring
-        if(currentBars > s_lastBars || s_lastBars == 0) {
-            s_lastBars = currentBars;
+        if(barsChanged || s_lastBars == 0) {
             
             // OPTIMIZATION: Enhanced object count monitoring with auto-cleanup
             int totalObjects = ObjectsTotal(0, -1, -1);
@@ -2762,7 +2854,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // بروزرسانی آنی سطوح هنگام درگ خط قیمت سفارشی
     // In MT5, CHARTEVENT_OBJECT_DRAG only fires on mouse RELEASE.
     // We use CHARTEVENT_MOUSE_MOVE + left-button check for real-time.
-    // PERFORMANCE: Throttled to 150ms (6-7 fps) to prevent lag
+    // PERFORMANCE: Throttled to 50ms (20 fps) to prevent lag
     // ═══════════════════════════════════════════════════════════════
     if(id == CHARTEVENT_MOUSE_MOVE && g_customPriceLineCreated)
     {
@@ -2776,6 +2868,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             bool lineSelected = (bool)ObjectGetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED);
             if(lineSelected)
             {
+                // ═══════════════════════════════════════════════════════════
+                // 🔧 CRITICAL FIX: PREVENT ZONE DELETION DURING DRAG
+                // ═══════════════════════════════════════════════════════════
+                // OLD BUG: g_forceClearOnNextDraw=true caused zones to delete
+                // SOLUTION: Use g_customPriceLineDragging flag ONLY
+                // ═══════════════════════════════════════════════════════════
+                
                 // ANTI-FLICKER FIX: Set dragging flag to prevent zone deletion
                 // رفع چشمک زدن: تنظیم پرچم درگ برای جلوگیری از پاک شدن زون‌ها
                 g_customPriceLineDragging = true;
@@ -2783,14 +2882,17 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 double currentLinePrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
                 if(currentLinePrice > 0 && MathAbs(currentLinePrice - g_customTHStartPrice) > _Point * 0.5)
                 {
-                    // PERFORMANCE FIX: Throttle RedrawAllObjects to 250ms during drag
-                    // بهینه‌سازی: محدود کردن بروزرسانی سطوح به 4 بار در ثانیه برای عملکرد روان
+                    // PERFORMANCE FIX: Throttle RedrawAllObjects during drag
+                    // بهینه‌سازی: محدود کردن بروزرسانی سطوح برای عملکرد روان
                     uint nowMs = GetTickCount();
                     if(nowMs - g_lastDragRedrawTime > DRAG_REDRAW_THROTTLE_MS)
                     {
                         g_customTHStartPrice = currentLinePrice;
                         g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                         g_redrawTHLevelsNeeded = true;
+                        
+                        // CRITICAL: Do NOT set g_forceClearOnNextDraw during drag
+                        // This would cause zones to be deleted unnecessarily
                         RedrawAllObjects(true);
                         ThrottledChartRedraw();
                         g_lastDragRedrawTime = nowMs;
@@ -2806,7 +2908,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_customPriceLineDragging = false;
                 // Force final redraw with full cleanup (including zones)
                 // بروزرسانی نهایی با cleanup کامل (از جمله زون‌ها)
-                g_forceClearOnNextDraw = true;  // Ensure surplus zones are cleaned up
+                g_forceClearOnNextDraw = true;  // NOW safe to clear zones after drag ends
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true);
                 ThrottledChartRedraw();

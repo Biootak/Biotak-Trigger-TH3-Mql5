@@ -15,7 +15,7 @@
 
 // Global cached values - initialized once per chart
 static string g_cachedSymbol = "";           // Cached Symbol() - never changes
-static int g_cachedPeriod = 0;               // Cached Period() - changes on TF switch
+// NOTE: g_cachedPeriod is now managed by CalculationCache.mqh
 static int g_cachedDigits = -1;              // Cached Digits - never changes per symbol
 static double g_cachedPoint = 0.0;           // Cached Point - never changes per symbol
 static long g_cachedChartId = 0;             // Cached ChartID() - never changes
@@ -28,7 +28,7 @@ static bool g_globalCacheInitialized = false;
 //+------------------------------------------------------------------+
 void InitializeGlobalCache() {
     g_cachedSymbol = Symbol();
-    g_cachedPeriod = Period();
+    // NOTE: g_cachedPeriod is managed by CalculationCache.mqh
     g_cachedDigits = Digits;
     g_cachedPoint = Point;
     g_cachedChartId = ChartID();
@@ -37,16 +37,17 @@ void InitializeGlobalCache() {
     g_globalCacheInitialized = true;
     
     #ifdef ENABLE_DEBUG_LOGS
-        Print("Global cache initialized: Symbol=", g_cachedSymbol, ", Period=", g_cachedPeriod, ", ChartID=", g_cachedChartIdStr);
+        Print("Global cache initialized: Symbol=", g_cachedSymbol, ", ChartID=", g_cachedChartIdStr);
     #endif
 }
 
 //+------------------------------------------------------------------+
 //| Update Period Cache (call when timeframe changes)                |
 //| به‌روزرسانی کش دوره (وقتی تایم‌فریم تغییر می‌کند)               |
+//| NOTE: Period cache is now managed by CalculationCache.mqh        |
 //+------------------------------------------------------------------+
 void UpdatePeriodCache() {
-    g_cachedPeriod = Period();
+    // Period cache is now managed by CalculationCache.mqh
 }
 
 //+------------------------------------------------------------------+
@@ -63,12 +64,11 @@ string GetCachedSymbol() {
 //+------------------------------------------------------------------+
 //| Get Cached Period (use instead of Period())                      |
 //| دریافت دوره کش شده (به جای Period() استفاده کنید)              |
+//| NOTE: Period cache is now managed by CalculationCache.mqh        |
 //+------------------------------------------------------------------+
 int GetCachedPeriod() {
-    if(!g_globalCacheInitialized) {
-        return Period();  // Fallback if not initialized
-    }
-    return g_cachedPeriod;
+    // Period cache is now managed by CalculationCache.mqh
+    return Period();
 }
 
 //+------------------------------------------------------------------+
@@ -300,16 +300,8 @@ static ObjectCacheSlot g_objCacheHash[OBJ_CACHE_BUCKETS];
 static bool g_objCacheHashInitialized = false;
 static const int OBJECT_CACHE_TTL = 5;  // 5 seconds
 
-void InitializeObjectCacheHash() {
-    if(g_objCacheHashInitialized) return;
-    for(int i = 0; i < OBJ_CACHE_BUCKETS; i++) {
-        g_objCacheHash[i].name = "";
-        g_objCacheHash[i].exists = false;
-        g_objCacheHash[i].lastCheck = 0;
-        g_objCacheHash[i].occupied = false;
-    }
-    g_objCacheHashInitialized = true;
-}
+// NOTE: InitializeObjectCacheHash is now defined in ObjectCache.mqh
+// Removed duplicate function definition
 
 bool ObjectExistsCached(const string name) {
     if(!g_objCacheHashInitialized) InitializeObjectCacheHash();

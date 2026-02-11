@@ -21,6 +21,106 @@
 #include "ConstantsAndEnums.mqh"
 
 //+------------------------------------------------------------------+
+//| Visibility State Cache (Task 11 - Requirements 16.1-16.7)        |
+//| Caches visibility states to avoid repeated GlobalVariable reads  |
+//+------------------------------------------------------------------+
+
+// Cache for lines visibility state
+static bool g_linesVisibleCached = true;
+static uint g_linesVisibleCacheTime = 0;
+static const int LINES_VISIBLE_CACHE_TTL_MS = 500;  // 500ms TTL
+
+// Cache for trigger enabled state
+static bool g_triggerEnabledCached = true;
+static uint g_triggerEnabledCacheTime = 0;
+static const int TRIGGER_ENABLED_CACHE_TTL_MS = 500;  // 500ms TTL
+
+//+------------------------------------------------------------------+
+//| Get Cached Lines Visible State                                   |
+//| Requirement 16.2: Use cached state instead of GlobalVariable     |
+//| Requirement 16.5: Skip GlobalVariable reads when cache valid     |
+//+------------------------------------------------------------------+
+bool GetCachedLinesVisible() {
+    uint now = GetTickCount();
+    
+    // Check if cache is still valid
+    if((int)(now - g_linesVisibleCacheTime) > LINES_VISIBLE_CACHE_TTL_MS) {
+        // Cache expired - refresh from global variable
+        // Requirement 16.6: Refresh from GlobalVariable on invalidation
+        g_linesVisibleCached = g_linesVisible;
+        g_linesVisibleCacheTime = now;
+    }
+    
+    // Requirement 16.7: Use cached value for multiple checks
+    return g_linesVisibleCached;
+}
+
+//+------------------------------------------------------------------+
+//| Update Lines Visible Cache                                       |
+//| Requirement 16.4: Update cache immediately on state change       |
+//+------------------------------------------------------------------+
+void UpdateLinesVisibleCache(bool visible) {
+    g_linesVisibleCached = visible;
+    g_linesVisibleCacheTime = GetTickCount();
+}
+
+//+------------------------------------------------------------------+
+//| Invalidate Lines Visible Cache                                   |
+//| Forces cache refresh on next access                              |
+//+------------------------------------------------------------------+
+void InvalidateLinesVisibleCache() {
+    g_linesVisibleCacheTime = 0;
+}
+
+//+------------------------------------------------------------------+
+//| Get Cached Trigger Enabled State                                 |
+//| Requirement 16.3: Use cached state instead of GlobalVariable     |
+//| Requirement 16.5: Skip GlobalVariable reads when cache valid     |
+//+------------------------------------------------------------------+
+bool GetCachedTriggerEnabled() {
+    uint now = GetTickCount();
+    
+    // Check if cache is still valid
+    if((int)(now - g_triggerEnabledCacheTime) > TRIGGER_ENABLED_CACHE_TTL_MS) {
+        // Cache expired - refresh from global variable
+        // Requirement 16.6: Refresh from GlobalVariable on invalidation
+        // Note: Trigger enabled state is stored in g_triggerLevelsEnabled
+        g_triggerEnabledCached = g_triggerLevelsEnabled;
+        g_triggerEnabledCacheTime = now;
+    }
+    
+    // Requirement 16.7: Use cached value for multiple checks
+    return g_triggerEnabledCached;
+}
+
+//+------------------------------------------------------------------+
+//| Update Trigger Enabled Cache                                     |
+//| Requirement 16.4: Update cache immediately on state change       |
+//+------------------------------------------------------------------+
+void UpdateTriggerEnabledCache(bool enabled) {
+    g_triggerEnabledCached = enabled;
+    g_triggerEnabledCacheTime = GetTickCount();
+}
+
+//+------------------------------------------------------------------+
+//| Invalidate Trigger Enabled Cache                                 |
+//| Forces cache refresh on next access                              |
+//+------------------------------------------------------------------+
+void InvalidateTriggerEnabledCache() {
+    g_triggerEnabledCacheTime = 0;
+}
+
+//+------------------------------------------------------------------+
+//| Invalidate All Visibility Caches                                 |
+//| Call when major state changes occur                              |
+//+------------------------------------------------------------------+
+void InvalidateAllVisibilityCaches() {
+    InvalidateLinesVisibleCache();
+    InvalidateTriggerEnabledCache();
+    // Note: IsIndicatorHidden cache is managed in GlobalVariables.mqh
+}
+
+//+------------------------------------------------------------------+
 //| Set visibility for a single object using OBJPROP_TIMEFRAMES      |
 //| Requirements: 4.1, 4.2                                           |
 //|                                                                  |
@@ -137,7 +237,7 @@ void SetAllLineObjectsVisibility(const bool visible)
 
 //+------------------------------------------------------------------+
 //| Apply current Hide and Lines visibility state to an object       |
-//| Requirements: 10.1, 10.2                                         |
+//| Requirements: 10.1, 10.2, 16.1, 16.2, 16.7                       |
 //|                                                                  |
 //| Parameters:                                                      |
 //|   name - Object name                                             |
@@ -145,7 +245,7 @@ void SetAllLineObjectsVisibility(const bool visible)
 //|                                                                  |
 //| Implementation:                                                  |
 //|   - Checks global Hide state (g_isHidden via IsIndicatorHidden) |
-//|   - Checks global Lines visibility state (g_linesVisible)        |
+//|   - Checks global Lines visibility state (cached)                |
 //|   - Applies appropriate visibility based on object type          |
 //|   - Called immediately after object creation                     |
 //|   - Ensures consistent state application                         |
@@ -166,11 +266,14 @@ void ApplyVisibilityState(const string name, const bool isLine)
     bool shouldBeVisible = true;
     
     // Check Hide state (F key) - affects all objects
+    // Requirement 16.1: Use cached hidden state
     if(IsIndicatorHidden()) {
         shouldBeVisible = false;
     }
     // Check Lines visibility (L key) - affects only line objects
-    else if(isLine && !g_linesVisible) {
+    // Requirement 16.2: Use cached lines visible state
+    // Requirement 16.7: Multiple visibility checks use cached values
+    else if(isLine && !GetCachedLinesVisible()) {
         shouldBeVisible = false;
     }
     
@@ -181,7 +284,7 @@ void ApplyVisibilityState(const string name, const bool isLine)
 
 //+------------------------------------------------------------------+
 //| Check if an object should be visible based on current state      |
-//| Requirements: 10.1, 10.2                                         |
+//| Requirements: 10.1, 10.2, 16.1, 16.2, 16.7                       |
 //|                                                                  |
 //| Parameters:                                                      |
 //|   isLine - true if checking for a line object, false otherwise  |
@@ -191,7 +294,7 @@ void ApplyVisibilityState(const string name, const bool isLine)
 //|                                                                  |
 //| Implementation:                                                  |
 //|   - Checks global Hide state (cached via IsIndicatorHidden)     |
-//|   - Checks global Lines visibility state (g_linesVisible)        |
+//|   - Checks global Lines visibility state (cached)                |
 //|   - Returns visibility decision without modifying objects        |
 //|   - Used for pre-creation visibility checks                      |
 //|                                                                  |
@@ -203,12 +306,15 @@ void ApplyVisibilityState(const string name, const bool isLine)
 bool ShouldObjectBeVisible(const bool isLine)
 {
     // Check Hide state (F key) - affects all objects
+    // Requirement 16.1: Use cached hidden state
     if(IsIndicatorHidden()) {
         return false;
     }
     
     // Check Lines visibility (L key) - affects only line objects
-    if(isLine && !g_linesVisible) {
+    // Requirement 16.2: Use cached lines visible state
+    // Requirement 16.7: Multiple visibility checks use cached values
+    if(isLine && !GetCachedLinesVisible()) {
         return false;
     }
     

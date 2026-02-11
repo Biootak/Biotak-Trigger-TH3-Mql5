@@ -17,14 +17,44 @@
 //| Throttled ChartRedraw() to prevent excessive CPU usage           |
 //| استفاده throttled از ChartRedraw برای جلوگیری از CPU بالا        |
 //| GOLD FIX: Prevents 17 rapid ChartRedraw calls in OnChartEvent   |
+//| Task 13 - Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6, 14.7|
+//|                                                                  |
+//| Parameters:                                                      |
+//|   forceRedraw - true to bypass throttling for critical updates  |
+//|                                                                  |
+//| Requirements:                                                    |
+//|   14.1: Check if minimum interval has elapsed                   |
+//|   14.2: Skip ChartRedraw if interval not elapsed                |
+//|   14.3: Call ChartRedraw once when interval elapsed             |
+//|   14.4: Batch rapid redraw requests                             |
+//|   14.5: Force immediate redraw for critical updates             |
+//|   14.6: Skip all ChartRedraw when indicator hidden              |
+//|   14.7: Use configurable throttle interval                      |
 //+------------------------------------------------------------------+
-void ThrottledChartRedraw() {
+void ThrottledChartRedraw(bool forceRedraw = false) {
+    // Requirement 14.6: Skip all ChartRedraw calls when indicator hidden
+    if(IsIndicatorHidden()) {
+        return;
+    }
+    
     uint nowMs = GetTickCount();
-    // Allow immediate redraw if > 100ms passed
+    
+    // Requirement 14.5: Force immediate redraw for critical updates
+    if(forceRedraw) {
+        ChartRedraw();
+        g_lastChartRedrawTime = nowMs;
+        return;
+    }
+    
+    // Requirement 14.1: Check if minimum interval has elapsed
+    // Requirement 14.7: Use configurable throttle interval (CHART_REDRAW_THROTTLE_MS)
     if(nowMs - g_lastChartRedrawTime > CHART_REDRAW_THROTTLE_MS) {
+        // Requirement 14.3: Call ChartRedraw once when interval elapsed
         ChartRedraw();
         g_lastChartRedrawTime = nowMs;
     }
+    // Requirement 14.2: Skip ChartRedraw if minimum interval not elapsed
+    // Requirement 14.4: Rapid redraw requests are batched (chart redraws on next OnCalculate)
     // Else skip - chart will redraw on next OnCalculate anyway
 }
 
@@ -68,20 +98,13 @@ double GetArrayMin(const double &array[]) {
 }
 
 void CheckArraySizes() {
+    // NOTE: g_thCache is now a single struct in CalculationCache.mqh, not an array
+    // This function no longer needs to initialize g_thCache
+    
     // OPTIMIZATION: Use smarter initial sizing based on actual needs
-    // Cache arrays: size based on number of fractal timeframes + buffer
+    // Stored THs: size based on actual timeframe count
     int optimalCacheSize = ArraySize(FRACTAL_TIMEFRAMES) + ArraySize(STANDARD_TIMEFRAMES) + 5;
     
-    if(ArraySize(g_thCache) <= 0) {
-        ArrayResize(g_thCache, optimalCacheSize);
-        for(int i = 0; i < optimalCacheSize; i++) {
-            g_thCache[i].valid = false;
-            g_thCache[i].value = EMPTY_VALUE;
-            g_thCache[i].lastUpdate = 0;
-        }
-    }
-
-    // Stored THs: size based on actual timeframe count
     if(ArraySize(g_storedTHs) <= 0) {
         ArrayResize(g_storedTHs, optimalCacheSize);
     }

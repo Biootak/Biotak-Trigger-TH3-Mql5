@@ -129,100 +129,11 @@ void ClassifyLevels(
 }
 
 //+------------------------------------------------------------------+
-//| Geometry Calculation Cache                                       |
-//| کش محاسبات هندسی                                                 |
+//| Geometry Calculation Cache - NOW MANAGED BY CalculationCache.mqh |
+//| کش محاسبات هندسی - اکنون توسط CalculationCache.mqh مدیریت می‌شود |
 //| Requirements: 9.4                                                 |
+//| NOTE: All geometry cache functions removed - use CalculationCache|
 //+------------------------------------------------------------------+
-struct SGeometryCache {
-    double lastBasePrice;           // Last base price used
-    double lastZoneHeight;          // Last zone height used
-    int lastLevelCount;             // Last level count
-    SZoneGeometry cachedGeometries[]; // Cached geometry results
-    bool isValid;                   // Cache validity flag
-};
-
-// Global geometry cache
-static SGeometryCache g_geometryCache;
-
-//+------------------------------------------------------------------+
-//| Initialize Geometry Cache                                        |
-//| مقداردهی اولیه کش هندسی                                          |
-//+------------------------------------------------------------------+
-void InitializeGeometryCache()
-{
-    g_geometryCache.lastBasePrice = 0.0;
-    g_geometryCache.lastZoneHeight = 0.0;
-    g_geometryCache.lastLevelCount = 0;
-    g_geometryCache.isValid = false;
-    ArrayResize(g_geometryCache.cachedGeometries, 0);
-}
-
-//+------------------------------------------------------------------+
-//| Invalidate Geometry Cache                                        |
-//| باطل کردن کش هندسی                                               |
-//+------------------------------------------------------------------+
-void InvalidateGeometryCache()
-{
-    g_geometryCache.isValid = false;
-}
-
-//+------------------------------------------------------------------+
-//| Check if Geometry Cache is Valid                                 |
-//| بررسی اعتبار کش هندسی                                            |
-//| Requirements: 9.4                                                 |
-//+------------------------------------------------------------------+
-bool IsGeometryCacheValid(
-    double basePrice,
-    double zoneHeight,
-    int levelCount)
-{
-    if(!g_geometryCache.isValid) {
-        return false;
-    }
-    
-    // Check if parameters match cached values
-    bool basePriceMatch = MathAbs(basePrice - g_geometryCache.lastBasePrice) < EPSILON_PRICE;
-    bool zoneHeightMatch = MathAbs(zoneHeight - g_geometryCache.lastZoneHeight) < EPSILON_GENERAL;
-    bool levelCountMatch = (levelCount == g_geometryCache.lastLevelCount);
-    
-    return basePriceMatch && zoneHeightMatch && levelCountMatch;
-}
-
-//+------------------------------------------------------------------+
-//| Update Geometry Cache                                            |
-//| به‌روزرسانی کش هندسی                                             |
-//+------------------------------------------------------------------+
-void UpdateGeometryCache(
-    double basePrice,
-    double zoneHeight,
-    int levelCount,
-    const SZoneGeometry &geometries[])
-{
-    g_geometryCache.lastBasePrice = basePrice;
-    g_geometryCache.lastZoneHeight = zoneHeight;
-    g_geometryCache.lastLevelCount = levelCount;
-    g_geometryCache.isValid = true;
-    
-    // Copy geometries to cache
-    int count = ArraySize(geometries);
-    ArrayResize(g_geometryCache.cachedGeometries, count);
-    for(int i = 0; i < count; i++) {
-        g_geometryCache.cachedGeometries[i] = geometries[i];
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Get Cached Geometries                                            |
-//| دریافت هندسه‌های کش شده                                          |
-//+------------------------------------------------------------------+
-void GetCachedGeometries(SZoneGeometry &outGeometries[])
-{
-    int count = ArraySize(g_geometryCache.cachedGeometries);
-    ArrayResize(outGeometries, count);
-    for(int i = 0; i < count; i++) {
-        outGeometries[i] = g_geometryCache.cachedGeometries[i];
-    }
-}
 
 //+------------------------------------------------------------------+
 //| Calculate Zone Geometries (with Caching)                         |
@@ -264,31 +175,10 @@ void CalculateZoneGeometries(
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // TASK 12.3: Geometry Calculation Caching
+    // TASK 12.3: Geometry Calculation Caching (NOW IN CalculationCache.mqh)
     // ═══════════════════════════════════════════════════════════════
-    // Find base price (midpoint) for cache key
-    double basePrice = 0.0;
-    for(int i = 0; i < count; i++) {
-        if(levels[i].logicalStep == 0) {
-            basePrice = levels[i].price;
-            break;
-        }
-    }
-    
-    // Check if we can use cached geometries
-    if(IsGeometryCacheValid(basePrice, zoneHeight, count)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        static int s_cacheHits = 0;
-        s_cacheHits++;
-        if(s_cacheHits % 100 == 0) {
-            Print("✅ CalculateZoneGeometries: Cache hit #", s_cacheHits);
-        }
-        #endif
-        
-        // Return cached geometries
-        GetCachedGeometries(outGeometries);
-        return;
-    }
+    // NOTE: Geometry caching is now handled by CalculationCache.mqh
+    // This function no longer uses local cache - all caching centralized
     
     // Cache miss - calculate geometries
     ArrayResize(outGeometries, count);
@@ -431,9 +321,5 @@ void CalculateZoneGeometries(
     Print("CalculateZoneGeometries: ", validZoneCount, " valid zones");
     #endif
     
-    // ═══════════════════════════════════════════════════════════════
-    // TASK 12.3: Update Geometry Cache
-    // ═══════════════════════════════════════════════════════════════
-    // Cache the calculated geometries for future use
-    UpdateGeometryCache(basePrice, zoneHeight, count, outGeometries);
+    // NOTE: Geometry caching is now handled by CalculationCache.mqh
 }

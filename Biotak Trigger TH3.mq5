@@ -47,6 +47,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // ZONE SYSTEM: Factory and Validation
 // ═══════════════════════════════════════════════════════════════════
+#include "Biotak\CalculationCache.mqh"
 #include "Biotak\ZoneFactory.mqh"
 #include "Biotak\ZoneValidator.mqh"
 #include "Biotak\ZoneConstants.mqh"

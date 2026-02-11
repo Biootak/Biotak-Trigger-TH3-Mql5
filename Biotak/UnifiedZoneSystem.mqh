@@ -56,13 +56,28 @@ bool CreateUnifiedZone(const string zoneName,
     // PHASE 1: VALIDATION (Fail Fast)
     // ═══════════════════════════════════════════════════════════════
     
+    // CRITICAL DIAGNOSTIC: Always print (not just in debug mode)
+    static int callCount = 0;
+    callCount++;
+    if(callCount <= 5) {  // Only first 5 calls to avoid spam
+        Print("🔍 ZONE: '", zoneName, "' TF=", PeriodMinutes(), 
+              "min, Enabled=", (config.enabled ? "YES" : "NO"), 
+              ", Style=", (int)config.style);
+    }
+    
     // Check if zones are enabled
     if(!config.enabled) {
+        if(callCount <= 5) {
+            Print("⚠️ ZONE: DISABLED globally");
+        }
         return true; // Not an error, just disabled
     }
     
     // Check style: HIDDEN
     if(config.style == FACTOR_ZONE_HIDDEN) {
+        if(callCount <= 5) {
+            Print("⚠️ ZONE: Style is HIDDEN");
+        }
         // Delete zone if exists
         if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
         return true; // Not an error, just hidden
@@ -341,9 +356,29 @@ bool CreateZoneWithSmartFallback(const string zoneName,
 {
     SUnifiedZoneConfig config = GetUnifiedZoneConfig();
     
+    // CRITICAL DIAGNOSTIC - Track per timeframe
+    static int m15Count = 0, m30Count = 0;
+    int currentTF = PeriodMinutes();
+    
+    if(currentTF == 15 && m15Count < 5) {
+        m15Count++;
+        Print("🔍 M15-FALLBACK #", m15Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
+    }
+    else if(currentTF == 30 && m30Count < 5) {
+        m30Count++;
+        Print("🔍 M30-FALLBACK #", m30Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
+    }
+    
     // CRITICAL FIX: Check if zones are enabled globally
     if(!config.enabled) {
         // Zones disabled - still update tracking variables but don't draw
+        if(currentTF == 15 && m15Count <= 5) {
+            Print("🔍 M15-DISABLED: Returning early");
+        }
+        else if(currentTF == 30 && m30Count <= 5) {
+            Print("🔍 M30-DISABLED: Returning early");
+        }
+        
         if(isStructure && structureEnabled) {
             lastStructurePrice = currentPrice;
         }
@@ -380,18 +415,40 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         lastFallbackPrice = currentPrice;
     }
     
+    // CRITICAL DIAGNOSTIC
+    if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
+        Print("🔍 TF", currentTF, "-TRACK: shouldDraw=", (shouldDraw ? "YES" : "NO"), 
+              ", prevPrice=", DoubleToString(effectivePrevPrice, 5));
+    }
+    
     // Only create zone if we have a previous price
     if(!shouldDraw || effectivePrevPrice <= 0) {
+        if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
+            Print("🔍 TF", currentTF, "-SKIP: First level or no prev price");
+        }
         return true; // Not an error, just first level
+    }
+    
+    // CRITICAL DIAGNOSTIC
+    if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
+        Print("🔍 TF", currentTF, "-STEP: fixedStepSize=", DoubleToString(fixedStepSize, 5));
     }
     
     // CRITICAL FIX: Use fixed step size if provided
     if(fixedStepSize > 0) {
-        // Calculate zone with fixed step size (for consistent height)
-        double zoneHeight = fixedStepSize * config.heightPercent * 0.5;
+        // CRITICAL FIX: fixedStepSize is the STEP SIZE, not the distance
+        // We need to calculate zone height based on the ACTUAL distance between levels
+        double actualDistance = MathAbs(currentPrice - effectivePrevPrice);
+        double zoneHeight = actualDistance * config.heightPercent * 0.5;
         double midPoint = (effectivePrevPrice + currentPrice) / 2.0;
         double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
         double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
+        
+        // CRITICAL DIAGNOSTIC
+        if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
+            Print("🔍 TF", currentTF, "-ZONE: upper=", DoubleToString(upperPrice, 5), 
+                  ", lower=", DoubleToString(lowerPrice, 5), ", dist=", DoubleToString(actualDistance, 5));
+        }
         
         // Handle LINES style (special case)
         if(config.style == FACTOR_ZONE_LINES) {
@@ -418,6 +475,13 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         request.endTime = 0;
         
         SZoneCreationResult result = CreateZone(request);
+        
+        // CRITICAL DIAGNOSTIC
+        if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
+            Print("🔍 TF", currentTF, "-RESULT: success=", (result.success ? "YES" : "NO"), 
+                  ", error=", result.errorMessage);
+        }
+        
         return result.success;
     }
     

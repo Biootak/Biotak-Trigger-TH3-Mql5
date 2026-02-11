@@ -28,8 +28,30 @@ input ENUM_STEP_CALCULATION_MODE inpStepCalculationMode = M_STEP;
 input ENUM_TH_START_POINT_TYPE inpTHStartPointType = TH_START_POINT_CUSTOM_PRICE;
 input ENUM_APPLIED_PRICE inpTHPriceType = PRICE_CLOSE;
 input ENUM_LINE_STYLE inpTHLineStyle = STYLE_DOT;
+
+// ═══════════════════════════════════════════════════════════════════
+// 🔧 BASE PRICE THRESHOLD CONTROL
+// ═══════════════════════════════════════════════════════════════════
+// When ENABLED: Base price updates only if market moves >0.066% (default)
+//               This prevents minor noise from triggering level recalculations
+// When DISABLED: Base price updates at every 30-minute block boundary
+//                regardless of price movement (more responsive but noisier)
+// 
+// 💡 TIP: Keep ENABLED for stable trading. Disable only for testing.
 input bool inpBasePriceThresholdEnabled = true;
+
+// ═══════════════════════════════════════════════════════════════════
+// 📊 THRESHOLD SENSITIVITY (Default: 0.066%)
+// ═══════════════════════════════════════════════════════════════════
+// Minimum price change required to trigger base price update.
+// • Lower values (0.01-0.05%): More responsive, more frequent updates
+// • Higher values (0.1-0.5%): More stable, fewer updates
+// • Default (0.066%): Balanced (matches Java implementation)
+//
+// 💡 TIP: For volatile assets (crypto), consider 0.1-0.2%
+//         For stable forex pairs, 0.05-0.066% is optimal
 input double inpBasePriceThresholdPercent = 0.066;
+
 input bool inpUseDynamicTradingDay = true;
 input double inpCustomTHStartPrice = 0.0;
 input int inpCustomPriceMaxLevels = 20;

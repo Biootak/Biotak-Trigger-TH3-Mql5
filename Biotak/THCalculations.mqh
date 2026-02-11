@@ -6,6 +6,8 @@
 
 // Include centralized math constants
 #include "MathConstants.mqh"
+// Include calculation cache for performance optimization
+#include "CalculationCache.mqh"
 
 //+------------------------------------------------------------------+
 //| DEPRECATED: These functions are kept for backward compatibility  |
@@ -67,42 +69,24 @@ double CalculateTH(const double price, const int digits, const double percentage
         return 0;
     }
     
-    // ✅ FIXED: Enhanced cache with DYNAMIC epsilon scaling
-    static double s_lastPrice = 0.0;
-    static int s_lastDigits = -1;
-    static double s_lastPercentage = 0.0;
-    static double s_lastResult = 0.0;
+    // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
+    double cachedResult = GetCachedTHCalculation(price, percentage, digits);
+    if(cachedResult > 0) {
+        return cachedResult;
+    }
     
-    // Normalize values for comparison
+    // Normalize values for calculation
     double normalizedPrice = NormalizeDouble(price, digits);
     double normalizedPercentage = NormalizeDouble(percentage, 6);
     
-    // CRITICAL FIX: Use DYNAMIC epsilon based on price magnitude
-    double priceEpsilon = GetDynamicEpsilonForPrice(normalizedPrice);
-    bool priceMatch = MathAbs(normalizedPrice - s_lastPrice) < priceEpsilon;
-    bool percentageMatch = MathAbs(normalizedPercentage - s_lastPercentage) < EPSILON_PERCENTAGE;
-    bool digitsMatch = (digits == s_lastDigits);
-    
-    if(priceMatch && percentageMatch && digitsMatch) {
-        #ifdef ENABLE_DEBUG_LOGS
-        static int s_cacheHits = 0;
-        s_cacheHits++;
-        if(s_cacheHits % 100 == 0) {
-            Print("✅ CalculateTH: Cache hit #", s_cacheHits);
-        }
-        #endif
-        return s_lastResult;
-    }
-    
-    // Cache miss - calculate and update
-    s_lastPrice = normalizedPrice;
-    s_lastDigits = digits;
-    s_lastPercentage = normalizedPercentage;
-    
     // Formula matching MotiveWave EXACTLY:
     // thStepPriceUnits = (basePrice * percentage) / 100.0
-    s_lastResult = (normalizedPrice * normalizedPercentage) / 100.0;
-    return s_lastResult;
+    double result = (normalizedPrice * normalizedPercentage) / 100.0;
+    
+    // Store result in cache for future use
+    StoreTHCalculation(price, percentage, digits, result);
+    
+    return result;
 }
 
 double CalculateTHPoints(const double price, const int digits, const double percentage) {
@@ -118,33 +102,41 @@ double CalculateTHPoints(const double price, const int digits, const double perc
     return thStepPriceUnits <= 0 ? 0 : (thStepPriceUnits / s_pointValue);
 }
 
-// Cache timeframe TH calculations
-static string s_lastTimeframe = "";
-static double s_lastTimeframeTH = 0.0;
-
 double GetTimeframeTH() {
     return CalculateTimeframeTH(GetFractalTimeframeForCurrent());
 }
 
 double CalculateTimeframeTH(const string timeframe) {
-    if(timeframe == s_lastTimeframe)
-        return s_lastTimeframeTH;
-        
-    s_lastTimeframe = timeframe;
+    // ✅ OPTIMIZATION: Check cache first for fractal percentage
+    int currentPeriod = GetCachedPeriod();
+    double cachedPercentage = GetCachedFractalPercentage(currentPeriod);
+    if(cachedPercentage > 0) {
+        return cachedPercentage;
+    }
+    
+    // Cache miss - perform lookup
     int totalTimeframes = ArraySize(FRACTAL_TIMEFRAMES);
     
     // GOLD FIX: Use exact string comparison instead of StringFind
     // StringFind can cause false matches (e.g., "M1" matches "H1+M4")
     for(int i = 0; i < totalTimeframes; i++) {
         if(FRACTAL_TIMEFRAMES[i] == timeframe) {
-            s_lastTimeframeTH = MODIFIED_FRACTAL_PERCENTAGES[i];
-            return s_lastTimeframeTH;
+            double percentage = MODIFIED_FRACTAL_PERCENTAGES[i];
+            
+            // Store in cache for future use
+            int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)currentPeriod);
+            StoreTimeframeConversion(currentPeriod, timeframe, percentage, periodSeconds);
+            
+            return percentage;
         }
     }
     
     // Fallback: return 1.0% for unknown timeframes
-    s_lastTimeframeTH = 1.0;
-    return s_lastTimeframeTH;
+    double fallbackPercentage = 1.0;
+    int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)currentPeriod);
+    StoreTimeframeConversion(currentPeriod, timeframe, fallbackPercentage, periodSeconds);
+    
+    return fallbackPercentage;
 }
 
 //+------------------------------------------------------------------+
@@ -203,19 +195,6 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
 //| CRITICAL FIX: Complete overflow and division-by-zero protection  |
 //+------------------------------------------------------------------+
 
-// Cache for Factor calculations to avoid recalculation on every tick
-static double s_cachedFactorHigh = 0;
-static double s_cachedFactorLow = 0;
-static double s_cachedFactorValue = 0;
-static double s_cachedFactorStepSize = 0;
-static int s_cachedFactorPeriod = 0;  // Track timeframe for cache invalidation
-static int s_cachedHistoricalPeriods = -1;  // GOLD FIX v3: Track historical periods
-
-// Tolerance for cache comparison (relative to price)
-// Note: EPSILON is defined in FloatingPointHelper.mqh as EPSILON_GENERAL
-#ifndef FACTOR_CACHE_TOLERANCE
-#define FACTOR_CACHE_TOLERANCE 1e-9
-#endif
 #ifndef MAX_FACTOR_VALUE
 #define MAX_FACTOR_VALUE 10000.0
 #endif
@@ -223,28 +202,7 @@ static int s_cachedHistoricalPeriods = -1;  // GOLD FIX v3: Track historical per
 #define MIN_FACTOR_VALUE 0.01
 #endif
 
-//+------------------------------------------------------------------+
-//| Invalidate Factor cache (call on timeframe/range change)         |
-//+------------------------------------------------------------------+
-void InvalidateFactorCache() {
-    s_cachedFactorHigh = 0;
-    s_cachedFactorLow = 0;
-    s_cachedFactorValue = 0;
-    s_cachedFactorStepSize = 0;
-    s_cachedFactorPeriod = 0;
-}
-
 double CalculateFactorStepSize(const double highPrice, const double lowPrice, const double factor) {
-    // GOLD FIX v3: Enhanced cache invalidation with all conditions
-    bool periodChanged = (s_cachedFactorPeriod != GetCachedPeriod());
-    bool historicalPeriodsChanged = (s_cachedHistoricalPeriods != inpHistoricalPeriods);
-    
-    if(periodChanged || historicalPeriodsChanged) {
-        InvalidateFactorCache();
-        s_cachedFactorPeriod = GetCachedPeriod();
-        s_cachedHistoricalPeriods = inpHistoricalPeriods;
-    }
-    
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL FIX #1: Validate prices with epsilon
     // ═══════════════════════════════════════════════════════════════
@@ -305,17 +263,10 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         return 0;
     }
     
-    // Calculate relative tolerance based on price magnitude
-    double priceTolerance = highPrice * FACTOR_CACHE_TOLERANCE;
-    
-    // Check cache with tolerance AND validate historical range hasn't changed
-    bool rangeChanged = (MathAbs(highPrice - s_cachedFactorHigh) >= priceTolerance) || 
-                        (MathAbs(lowPrice - s_cachedFactorLow) >= priceTolerance);
-    
-    if(!rangeChanged && 
-       MathAbs(factor - s_cachedFactorValue) < 0.001 &&
-       s_cachedFactorStepSize > 0) {
-        return s_cachedFactorStepSize;
+    // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
+    double cachedResult = GetCachedFactorStepSize(highPrice, lowPrice, factor);
+    if(cachedResult > 0) {
+        return cachedResult;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -374,13 +325,11 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         return 0;
     }
     
-    // Cache validated values
-    s_cachedFactorHigh = highPrice;
-    s_cachedFactorLow = lowPrice;
-    s_cachedFactorValue = factor;
-    s_cachedFactorStepSize = stepSize;
+    // Store result in cache for future use
+    int currentPeriod = GetCachedPeriod();
+    StoreFactorStepSize(highPrice, lowPrice, factor, inpHistoricalPeriods, currentPeriod, stepSize);
     
-    return s_cachedFactorStepSize;
+    return stepSize;
 }
 
 //+------------------------------------------------------------------+

@@ -239,6 +239,86 @@ bool TestCacheBasedDetection() {
 }
 
 //+------------------------------------------------------------------+
+//| Test missing cache entry handling (Requirement 10.6)              |
+//+------------------------------------------------------------------+
+bool TestMissingCacheEntry() {
+    Print("Testing missing cache entry handling...");
+    
+    // Clear cache to ensure clean state
+    CacheClear();
+    
+    // Test 1: Missing cache entry should trigger full update
+    if(!HasAnyPropertyChangedWithCacheLookup("NonExistentObject", 1.12345, clrRed, STYLE_SOLID, 2)) {
+        Print("FAIL: Missing cache entry did not trigger full update");
+        return false;
+    }
+    
+    // Test 2: Add object to cache
+    CacheAddObject("TestObject", 1.12345, clrRed, STYLE_SOLID, 2);
+    
+    // Test 3: Existing cache entry with no changes should return false
+    if(HasAnyPropertyChangedWithCacheLookup("TestObject", 1.12345, clrRed, STYLE_SOLID, 2)) {
+        Print("FAIL: Cached object with no changes detected as changed");
+        return false;
+    }
+    
+    // Test 4: Existing cache entry with changes should return true
+    if(!HasAnyPropertyChangedWithCacheLookup("TestObject", 1.12346, clrRed, STYLE_SOLID, 2)) {
+        Print("FAIL: Cached object with price change not detected");
+        return false;
+    }
+    
+    // Clean up
+    CacheClear();
+    
+    Print("PASS: Missing cache entry handling tests passed");
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Test short-circuit evaluation (Requirement 10.4)                  |
+//+------------------------------------------------------------------+
+bool TestShortCircuitEvaluation() {
+    Print("Testing short-circuit evaluation...");
+    
+    // Note: We can't directly test short-circuit behavior in MQL4,
+    // but we can verify that the function returns true on first change
+    
+    // Test 1: Price change should return true (first check)
+    if(!HasAnyPropertyChanged(1.12345, 1.12346, clrRed, clrRed, STYLE_SOLID, STYLE_SOLID, 2, 2)) {
+        Print("FAIL: Price change not detected (should short-circuit)");
+        return false;
+    }
+    
+    // Test 2: Color change should return true (second check)
+    if(!HasAnyPropertyChanged(1.12345, 1.12345, clrRed, clrBlue, STYLE_SOLID, STYLE_SOLID, 2, 2)) {
+        Print("FAIL: Color change not detected (should short-circuit)");
+        return false;
+    }
+    
+    // Test 3: Style change should return true (third check)
+    if(!HasAnyPropertyChanged(1.12345, 1.12345, clrRed, clrRed, STYLE_SOLID, STYLE_DASH, 2, 2)) {
+        Print("FAIL: Style change not detected (should short-circuit)");
+        return false;
+    }
+    
+    // Test 4: Width change should return true (fourth check)
+    if(!HasAnyPropertyChanged(1.12345, 1.12345, clrRed, clrRed, STYLE_SOLID, STYLE_SOLID, 2, 3)) {
+        Print("FAIL: Width change not detected (should short-circuit)");
+        return false;
+    }
+    
+    // Test 5: No changes should return false (all checks complete)
+    if(HasAnyPropertyChanged(1.12345, 1.12345, clrRed, clrRed, STYLE_SOLID, STYLE_SOLID, 2, 2)) {
+        Print("FAIL: No changes detected as changed");
+        return false;
+    }
+    
+    Print("PASS: Short-circuit evaluation tests passed");
+    return true;
+}
+
+//+------------------------------------------------------------------+
 //| Run all PropertyChangeDetector tests                              |
 //+------------------------------------------------------------------+
 bool RunPropertyChangeDetectorTests() {
@@ -255,6 +335,8 @@ bool RunPropertyChangeDetectorTests() {
     allPassed = allPassed && TestHasAnyPropertyChanged();
     allPassed = allPassed && TestDetectPropertyChanges();
     allPassed = allPassed && TestCacheBasedDetection();
+    allPassed = allPassed && TestMissingCacheEntry();
+    allPassed = allPassed && TestShortCircuitEvaluation();
     
     Print("========================================");
     if(allPassed) {

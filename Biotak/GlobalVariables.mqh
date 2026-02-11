@@ -117,12 +117,8 @@ static uint g_abcdLastClickTime = 0;         // آخرین زمان کلیک (ب
 // ردیابی پترن فعال (برای نمایش info label)
 static string g_activeABCDPattern = "";      // فقط این پترن info label نشون میده
 
-struct CacheEntry {
-    double value;
-    datetime lastUpdate;
-    bool valid;
-};
-static CacheEntry g_thCache[];
+// NOTE: TH Cache is now managed by CalculationCache.mqh
+// Removed duplicate g_thCache definition
 
 struct TimeframeTH {
     string timeframeName;

@@ -3,6 +3,43 @@
 //| Base Price Management with 30-minute block updates                |
 //| Matches MotiveWave/Java implementation exactly                    |
 //+------------------------------------------------------------------+
+// 
+// ═══════════════════════════════════════════════════════════════════
+// 📖 STEPPED BASE PRICE LOGIC - CRITICAL DOCUMENTATION
+// ═══════════════════════════════════════════════════════════════════
+//
+// PURPOSE:
+// --------
+// This module implements a "Stepped Base Price" mechanism that updates
+// the reference price used for level calculations at fixed 30-minute
+// intervals. This is a DESIGN FEATURE, not a bug.
+//
+// BEHAVIOR:
+// ---------
+// • Base price is locked for 30-minute blocks (00:00, 00:30, 01:00, etc.)
+// • Price updates ONLY occur at block boundaries
+// • Within each block, the base price remains CONSTANT
+// • Historical base prices are persisted to disk and restored on reload
+//
+// REPAINTING ANALYSIS:
+// --------------------
+// ✅ NO HISTORICAL REPAINTING: Past blocks never change
+// ✅ CURRENT BAR REPAINTING: Expected (standard MT5 behavior)
+// ⚠️  STEPPED UPDATES: Levels "jump" at 30-min boundaries (by design)
+//
+// PERSISTENCE:
+// ------------
+// • History saved to: MQL5/Files/BasePriceHistory/[symbol]/[year]/[day].txt
+// • Format: "HH:mm|blockCount|basePrice|M1Power" (GMT timezone)
+// • Sanity check: Rejects restored prices >10% different from current market
+//
+// MULTI-SYMBOL SAFETY:
+// --------------------
+// • Each symbol maintains independent state in g_symbolStates[] array
+// • LRU eviction prevents memory bloat (max 100 symbols)
+// • State cached for performance (GetCachedSymbolStateIndex)
+//
+// ═══════════════════════════════════════════════════════════════════
 
 
 #include "BasePriceHistoryManager.mqh"

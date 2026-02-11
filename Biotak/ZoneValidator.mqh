@@ -8,6 +8,7 @@
 
 #include "ConstantsAndEnums.mqh"
 #include "ZoneConstants.mqh"
+#include "PerformanceOptimizations.mqh"
 
 //+------------------------------------------------------------------+
 //| Validate Input Arrays                                            |
@@ -485,4 +486,350 @@ bool ValidateCompleteConfig(
     #endif
     
     return true;
+}
+
+//+------------------------------------------------------------------+
+//| ENHANCED VALIDATION SYSTEM (Task 2)                              |
+//| سیستم اعتبارسنجی پیشرفته                                         |
+//| Requirements: 1.6, 2.1-2.7, 13.1-13.7, 17.1-17.7                |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Enhanced Validation Result Structure                             |
+//| ساختار نتیجه اعتبارسنجی پیشرفته                                  |
+//| Requirements: 2.5, 17.1-17.5                                     |
+//+------------------------------------------------------------------+
+struct SZoneValidationResultEnhanced {
+    bool valid;                 // Overall validation result
+    string errorMessage;        // Human-readable error message
+    int errorCode;              // Error code for programmatic handling
+    
+    // Diagnostic information
+    int barsCount;              // Number of bars available
+    int periodSeconds;          // Period in seconds
+    datetime startTime;         // Calculated start time
+    datetime endTime;           // Calculated end time
+    double topPrice;            // Top price boundary
+    double bottomPrice;         // Bottom price boundary
+    string timeframeName;       // Timeframe name for logging
+};
+
+//+------------------------------------------------------------------+
+//| Validate Zone Creation Preconditions                             |
+//| اعتبارسنجی پیش‌شرط‌های ایجاد زون                                 |
+//| Requirements: 1.6, 2.1, 2.2, 13.1                               |
+//|                                                                  |
+//| Fast-fail validation: checks name first, then Bars, then Period  |
+//+------------------------------------------------------------------+
+SZoneValidationResultEnhanced ValidateZoneCreationPreconditions(
+    int period,
+    string zoneName)
+{
+    SZoneValidationResultEnhanced result;
+    result.valid = false;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    result.errorMessage = "";
+    result.barsCount = 0;
+    result.periodSeconds = 0;
+    result.startTime = 0;
+    result.endTime = 0;
+    result.topPrice = 0;
+    result.bottomPrice = 0;
+    result.timeframeName = "";
+    
+    // FAST FAILURE 1: Validate object name (cheapest check)
+    // Requirement 13.1: Check name first
+    if(!ValidateObjectName(zoneName)) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = "Invalid zone name: empty or too long";
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // FAST FAILURE 2: Validate Bars count
+    // Requirements 1.6, 2.1: Bars must be > 0
+    result.barsCount = Bars(GetCachedSymbol(), (ENUM_TIMEFRAMES)period);
+    if(result.barsCount <= 0) {
+        result.errorCode = ERR_ZONE_NO_DATA;
+        result.errorMessage = StringFormat("No bars available (Bars=%d)", result.barsCount);
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage, 
+              " for zone '", zoneName, "'");
+        #endif
+        return result;
+    }
+    
+    // FAST FAILURE 3: Validate PeriodSeconds
+    // Requirement 2.2: PeriodSeconds must be positive and reasonable
+    result.periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)period);
+    if(result.periodSeconds <= 0) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid PeriodSeconds=%d (must be positive)", 
+                                          result.periodSeconds);
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // Check for unreasonably large period (> 30 days = 2,592,000 seconds)
+    const int MAX_REASONABLE_PERIOD_SECONDS = 2592000;
+    if(result.periodSeconds > MAX_REASONABLE_PERIOD_SECONDS) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("PeriodSeconds=%d exceeds reasonable bounds (max=%d)", 
+                                          result.periodSeconds, MAX_REASONABLE_PERIOD_SECONDS);
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // Store timeframe name for diagnostic logging
+    result.timeframeName = EnumToString((ENUM_TIMEFRAMES)period);
+    
+    // All preconditions passed
+    result.valid = true;
+    result.errorCode = ERR_ZONE_NONE;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ ValidateZoneCreationPreconditions: Passed for zone '", zoneName, 
+          "' (Bars=", result.barsCount, ", PeriodSeconds=", result.periodSeconds, 
+          ", Timeframe=", result.timeframeName, ")");
+    #endif
+    
+    return result;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Zone Geometry Parameters                                |
+//| اعتبارسنجی پارامترهای هندسی زون                                  |
+//| Requirements: 2.3, 2.4, 13.2, 13.3                              |
+//|                                                                  |
+//| Validates price range and time range for zone creation           |
+//+------------------------------------------------------------------+
+SZoneValidationResultEnhanced ValidateZoneGeometryEnhanced(
+    double topPrice,
+    double bottomPrice,
+    datetime startTime,
+    datetime endTime)
+{
+    SZoneValidationResultEnhanced result;
+    result.valid = false;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    result.errorMessage = "";
+    result.barsCount = 0;
+    result.periodSeconds = 0;
+    result.startTime = startTime;
+    result.endTime = endTime;
+    result.topPrice = topPrice;
+    result.bottomPrice = bottomPrice;
+    result.timeframeName = "";
+    
+    int cachedDigits = GetCachedDigits();
+    
+    // FAST FAILURE 1: Validate prices (before time calculations)
+    // Requirement 13.2: Check prices before time validation
+    if(!ValidatePrice(topPrice)) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid top price: %s", 
+                                          DoubleToString(topPrice, cachedDigits));
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    if(!ValidatePrice(bottomPrice)) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid bottom price: %s", 
+                                          DoubleToString(bottomPrice, cachedDigits));
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // FAST FAILURE 2: Validate price range
+    // Requirement 2.4: topPrice must be > bottomPrice
+    if(topPrice <= bottomPrice) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid price range: top=%s must be > bottom=%s",
+                                          DoubleToString(topPrice, cachedDigits),
+                                          DoubleToString(bottomPrice, cachedDigits));
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // FAST FAILURE 3: Validate time range
+    // Requirement 2.3: startTime must be < endTime
+    if(startTime >= endTime) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid time range: start=%s must be < end=%s",
+                                          TimeToString(startTime, TIME_DATE|TIME_MINUTES),
+                                          TimeToString(endTime, TIME_DATE|TIME_MINUTES));
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // All geometry validations passed
+    result.valid = true;
+    result.errorCode = ERR_ZONE_NONE;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ ValidateZoneGeometryEnhanced: Passed (top=", DoubleToString(topPrice, cachedDigits),
+          ", bottom=", DoubleToString(bottomPrice, cachedDigits),
+          ", start=", TimeToString(startTime, TIME_DATE|TIME_MINUTES),
+          ", end=", TimeToString(endTime, TIME_DATE|TIME_MINUTES), ")");
+    #endif
+    
+    return result;
+}
+
+//+------------------------------------------------------------------+
+//| Validate Zone Extension Parameters                               |
+//| اعتبارسنجی پارامترهای گسترش زون                                  |
+//| Requirements: 2.2, 13.4                                          |
+//|                                                                  |
+//| Validates extension calculation parameters                       |
+//+------------------------------------------------------------------+
+SZoneValidationResultEnhanced ValidateZoneExtension(
+    int periodSeconds,
+    datetime startTime,
+    datetime endTime)
+{
+    SZoneValidationResultEnhanced result;
+    result.valid = false;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    result.errorMessage = "";
+    result.barsCount = 0;
+    result.periodSeconds = periodSeconds;
+    result.startTime = startTime;
+    result.endTime = endTime;
+    result.topPrice = 0;
+    result.bottomPrice = 0;
+    result.timeframeName = "";
+    
+    // FAST FAILURE 1: Validate PeriodSeconds
+    // Requirement 2.2: Must be positive
+    if(periodSeconds <= 0) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid PeriodSeconds=%d (must be positive)", 
+                                          periodSeconds);
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneExtension: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // FAST FAILURE 2: Validate time range consistency
+    // Requirement 13.4: Extension validation after price validation
+    if(startTime >= endTime) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Invalid extension time range: start=%s >= end=%s",
+                                          TimeToString(startTime, TIME_DATE|TIME_MINUTES),
+                                          TimeToString(endTime, TIME_DATE|TIME_MINUTES));
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ ValidateZoneExtension: ", result.errorMessage);
+        #endif
+        return result;
+    }
+    
+    // Calculate extension duration
+    int extensionDuration = (int)(endTime - startTime);
+    
+    // Validate extension is reasonable (not too short or too long)
+    if(extensionDuration < periodSeconds) {
+        result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        result.errorMessage = StringFormat("Extension duration (%d sec) < PeriodSeconds (%d sec)",
+                                          extensionDuration, periodSeconds);
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ ValidateZoneExtension: ", result.errorMessage, " (warning only)");
+        #endif
+        // Don't fail, just warn
+    }
+    
+    // All extension validations passed
+    result.valid = true;
+    result.errorCode = ERR_ZONE_NONE;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ ValidateZoneExtension: Passed (PeriodSeconds=", periodSeconds,
+          ", duration=", extensionDuration, " sec)");
+    #endif
+    
+    return result;
+}
+
+//+------------------------------------------------------------------+
+//| Log Zone Creation Failure with Full Diagnostic Context           |
+//| ثبت شکست ایجاد زون با اطلاعات تشخیصی کامل                       |
+//| Requirements: 1.7, 17.1-17.6                                     |
+//|                                                                  |
+//| Comprehensive logging for debugging zone display issues          |
+//+------------------------------------------------------------------+
+void LogZoneCreationFailure(const SZoneValidationResultEnhanced &validation,
+                           const string zoneName = "")
+{
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("═══════════════════════════════════════════════════════════");
+    Print("❌ ZONE CREATION FAILURE DIAGNOSTIC");
+    Print("═══════════════════════════════════════════════════════════");
+    
+    if(StringLen(zoneName) > 0) {
+        Print("Zone Name: ", zoneName);
+    }
+    
+    Print("Error Code: ", validation.errorCode);
+    Print("Error Message: ", validation.errorMessage);
+    
+    // Requirement 17.1: Log timeframe information
+    if(StringLen(validation.timeframeName) > 0) {
+        Print("Timeframe: ", validation.timeframeName);
+    }
+    
+    // Requirement 17.2: Log Bars count
+    if(validation.barsCount > 0) {
+        Print("Bars Count: ", validation.barsCount);
+    } else if(validation.errorCode == ERR_ZONE_NO_DATA) {
+        Print("Bars Count: 0 (NO DATA AVAILABLE)");
+    }
+    
+    // Requirement 17.3: Log PeriodSeconds value
+    if(validation.periodSeconds > 0) {
+        Print("PeriodSeconds: ", validation.periodSeconds);
+    }
+    
+    // Requirement 17.5: Log price parameters
+    if(validation.topPrice > 0 || validation.bottomPrice > 0) {
+        int cachedDigits = GetCachedDigits();
+        Print("Price Range: top=", DoubleToString(validation.topPrice, cachedDigits),
+              ", bottom=", DoubleToString(validation.bottomPrice, cachedDigits));
+    }
+    
+    // Requirement 17.5: Log time parameters
+    if(validation.startTime > 0 || validation.endTime > 0) {
+        Print("Time Range: start=", TimeToString(validation.startTime, TIME_DATE|TIME_MINUTES),
+              ", end=", TimeToString(validation.endTime, TIME_DATE|TIME_MINUTES));
+    }
+    
+    Print("═══════════════════════════════════════════════════════════");
+    #endif
+}
+
+//+------------------------------------------------------------------+
+//| Log Zone Creation Success                                        |
+//| ثبت موفقیت ایجاد زون                                             |
+//| Requirement: 17.6                                                |
+//+------------------------------------------------------------------+
+void LogZoneCreationSuccess(const string zoneName)
+{
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("✅ Zone created successfully: '", zoneName, "'");
+    #endif
 }

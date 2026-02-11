@@ -59,7 +59,9 @@ bool UpdateHistoricalValues() {
     }
     
     g_lastHistoricalUpdate = currentTime;
-    ArrayFree(g_thCache); // Clear cache instead of iterating
+    // NOTE: g_thCache is now a single struct in CalculationCache.mqh, not an array
+    // Invalidate the cache instead of freeing it
+    InvalidateTHCache();
     
     return true;
 }
