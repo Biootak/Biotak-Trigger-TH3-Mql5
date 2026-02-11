@@ -1,35 +1,31 @@
+﻿#ifndef OBJECT_COUNT_MANAGER_MQH
+#define OBJECT_COUNT_MANAGER_MQH
+
 //+------------------------------------------------------------------+
 //|                                          ObjectCountManager.mqh  |
 //|                     Object Count Management & Overflow Prevention|
-//|                     مدیریت تعداد اشیاء و جلوگیری از Overflow      |
-//+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| CONSTANTS - Platform Object Limits                               |
-//+------------------------------------------------------------------+
+
 #ifndef MT4_OBJECT_LIMIT
 #define MT4_OBJECT_LIMIT 512000         // MQL5 has much higher limit (~512K)
 #endif
-#ifndef CRITICAL_OBJECT_LIMIT
+    #ifndef CRITICAL_OBJECT_LIMIT
 #define CRITICAL_OBJECT_LIMIT 400000    // Critical threshold (78% of limit)
 #endif
-#ifndef MAX_SAFE_OBJECTS
+    #ifndef MAX_SAFE_OBJECTS
 #define MAX_SAFE_OBJECTS 5000           // Warning threshold
 #endif
-#ifndef EMERGENCY_CLEANUP_AGE
+    #ifndef EMERGENCY_CLEANUP_AGE
 #define EMERGENCY_CLEANUP_AGE 3600      // 1 hour (seconds)
 #endif
-
-//+------------------------------------------------------------------+
-//| Global State                                                      |
-//+------------------------------------------------------------------+
-static datetime g_lastObjectCountCheck = 0;
-static int g_lastObjectCount = 0;
-static datetime g_lastEmergencyCleanup = 0;
+    static datetime g_lastObjectCountCheck = 0;
+    static int g_lastObjectCount = 0;
+    static datetime g_lastEmergencyCleanup = 0;
 
 //+------------------------------------------------------------------+
 //| Check if we can safely create new objects                        |
-//| بررسی امکان ایجاد اشیاء جدید                                     |
+
 //| Returns: true if safe, false if limit reached                   |
 //+------------------------------------------------------------------+
 bool CanCreateObject()
@@ -41,7 +37,7 @@ bool CanCreateObject()
     if(currentTime - g_lastObjectCountCheck < 5 && g_lastObjectCount > 0) {
         // Use cached count
         if(g_lastObjectCount < MAX_SAFE_OBJECTS) {
-            return true; // Fast path
+        return true; // Fast path
         }
     }
     
@@ -58,28 +54,26 @@ bool CanCreateObject()
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
-        Print("   Forcing emergency cleanup...");
-        #endif
+    Print("   Forcing emergency cleanup...");
+    #endif
         
         // Emergency cleanup
         int cleanedCount = EmergencyCleanupObjects();
         
         // Re-check after cleanup
         totalObjects = ObjectsTotal(0, -1, -1);
-        g_lastObjectCount = totalObjects;
-        
-        if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ FATAL: Cannot free objects (", totalObjects, " remaining)");
-            Print("   Please close some charts or remove other indicators");
-            #endif
-            return false;
-        }
-        
+    g_lastObjectCount = totalObjects;
+    if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
+            Print("❌ FATAL: Cannot free objects (", totalObjects, " remaining)");
+    Print("   Please close some charts or remove other indicators");
+    #endif
+    return false;
+        }
+    #ifdef ENABLE_DEBUG_LOGS
         Print("✅ Emergency cleanup successful: ", cleanedCount, " objects removed");
-        Print("   Current count: ", totalObjects);
-        #endif
+    Print("   Current count: ", totalObjects);
+    #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -88,26 +82,25 @@ bool CanCreateObject()
     if(totalObjects >= MAX_SAFE_OBJECTS) {
         // Throttle warning (once per minute)
         static datetime s_lastWarning = 0;
-        if(currentTime - s_lastWarning > 60) {
-            #ifdef ENABLE_DEBUG_LOGS
+    if(currentTime - s_lastWarning > 60) {
+        #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ WARNING: Approaching object limit (", totalObjects, "/", MAX_SAFE_OBJECTS, ")");
-            Print("   Consider reducing Max Levels in settings");
-            #endif
-            s_lastWarning = currentTime;
+    Print("   Consider reducing Max Levels in settings");
+    #endif
+    s_lastWarning = currentTime;
         }
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Emergency Object Cleanup                                         |
-//| پاکسازی اضطراری اشیاء                                            |
+
 //| Returns: Number of objects deleted                               |
 //+------------------------------------------------------------------+
 int EmergencyCleanupObjects()
 {
-    datetime currentTime = TimeCurrent();
+        datetime currentTime = TimeCurrent();
     
     // ═══════════════════════════════════════════════════════════════
     // Prevent cleanup spam (minimum 30 seconds between cleanups)
@@ -115,15 +108,13 @@ int EmergencyCleanupObjects()
     if(currentTime - g_lastEmergencyCleanup < 30) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ EmergencyCleanup: Too soon since last cleanup, skipping");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     g_lastEmergencyCleanup = currentTime;
-    
     int deletedCount = 0;
     datetime cutoffTime = currentTime - EMERGENCY_CLEANUP_AGE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("🧹 Emergency cleanup starting...");
     Print("   Cutoff time: ", TimeToString(cutoffTime, TIME_DATE|TIME_MINUTES));
@@ -135,7 +126,6 @@ int EmergencyCleanupObjects()
     // ═══════════════════════════════════════════════════════════════
     string cachedPrefix = inpObjectPrefix;
     int prefixLen = StringLen(cachedPrefix);
-    
     int totalObjects = ObjectsTotal(0, -1, -1);
     for(int i = totalObjects - 1; i >= 0; i--)
     {
@@ -163,12 +153,11 @@ int EmergencyCleanupObjects()
         // Delete if older than cutoff
         if(objTime > 0 && objTime < cutoffTime)
         {
-            if(ObjectDelete(0, objName)) {
+        if(ObjectDelete(0, objName)) {
                 deletedCount++;
             }
         }
     }
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("   Phase 1: Deleted ", deletedCount, " old objects");
     #endif
@@ -180,9 +169,8 @@ int EmergencyCleanupObjects()
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Still critical after Phase 1, starting Phase 2...");
-        #endif
-        
-        int phase2Deleted = 0;
+    #endif
+    int phase2Deleted = 0;
         
         // Delete all zones (can be recreated)
         phase2Deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);
@@ -193,59 +181,56 @@ int EmergencyCleanupObjects()
         // Delete all labels except mode labels
         // GOLD FIX: Cache ObjectsTotal outside loop
         int totalObjects = ObjectsTotal(0, -1, -1);
-        for(int i = totalObjects - 1; i >= 0; i--)
+    for(int i = totalObjects - 1; i >= 0; i--)
         {
-            string objName = ObjectName(0, i, -1, -1);
+        string objName = ObjectName(0, i, -1, -1);
             
             // GOLD FIX: Optimize StringFind with early exit pattern
             // Cache first char check for faster rejection
             int nameLen = StringLen(objName);
-            if(nameLen < 12) continue;  // All labels are at least 12 chars
+    if(nameLen < 12) continue;  // All labels are at least 12 chars
             
             // Keep mode labels (important for user)
             // OPTIMIZATION: Check most common first
             bool isModeLabel = (StringFind(objName, "StepMode_Label") >= 0);
-            if(!isModeLabel) isModeLabel = (StringFind(objName, "Factor_Label") >= 0);
-            if(!isModeLabel) isModeLabel = (StringFind(objName, "BasisMode_Label") >= 0);
-            if(!isModeLabel) isModeLabel = (StringFind(objName, "LockStatus_Label") >= 0);
-            
-            if(isModeLabel) {
+    if(!isModeLabel) isModeLabel = (StringFind(objName, "Factor_Label") >= 0);
+    if(!isModeLabel) isModeLabel = (StringFind(objName, "BasisMode_Label") >= 0);
+    if(!isModeLabel) isModeLabel = (StringFind(objName, "LockStatus_Label") >= 0);
+    if(isModeLabel) {
                 continue;
             }
             
             // Delete other labels
             if(ObjectGetInteger(0, objName, OBJPROP_TYPE) == OBJ_LABEL) {
-                if(ObjectDelete(0, objName)) {
+        if(ObjectDelete(0, objName)) {
                     phase2Deleted++;
                 }
             }
         }
         
         deletedCount += phase2Deleted;
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("   Phase 2: Deleted ", phase2Deleted, " non-essential objects");
-        #endif
+    #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 3: Force chart redraw
     // ═══════════════════════════════════════════════════════════════
     ChartRedraw();
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Emergency cleanup complete: ", deletedCount, " total objects removed");
     #endif
-    
     return deletedCount;
 }
 
 //+------------------------------------------------------------------+
 //| Get Current Object Count (cached)                                |
-//| دریافت تعداد فعلی اشیاء (با کش)                                  |
+
 //+------------------------------------------------------------------+
 int GetCurrentObjectCount()
 {
-    datetime currentTime = TimeCurrent();
+        datetime currentTime = TimeCurrent();
     
     // GOLD FIX: Increase cache timeout from 5s to 30s for better performance
     // ObjectsTotal is expensive - only call when needed
@@ -256,63 +241,58 @@ int GetCurrentObjectCount()
     // Update cache
     g_lastObjectCount = ObjectsTotal(0, -1, -1);
     g_lastObjectCountCheck = currentTime;
-    
     return g_lastObjectCount;
 }
 
 //+------------------------------------------------------------------+
 //| Cleanup Object Count Manager                                     |
-//| پاکسازی مدیر تعداد اشیاء                                         |
+
 //+------------------------------------------------------------------+
 void CleanupObjectCountManager()
 {
     g_lastObjectCountCheck = 0;
     g_lastObjectCount = 0;
     g_lastEmergencyCleanup = 0;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ ObjectCountManager cleaned up");
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
 //| Print Object Count Statistics                                    |
-//| چاپ آمار تعداد اشیاء                                             |
+
 //+------------------------------------------------------------------+
 void PrintObjectCountStats()
 {
-    int totalObjects = ObjectsTotal(0, -1, -1);
+        int totalObjects = ObjectsTotal(0, -1, -1);
     
     // Count by type
     int lines = 0, labels = 0, rectangles = 0, trends = 0, other = 0;
-    
     for(int i = 0; i < totalObjects; i++)
     {
         string objName = ObjectName(0, i, -1, -1);
-        int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
-        
-        switch(objType)
+    int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
+    switch(objType)
         {
             case OBJ_HLINE:
             case OBJ_VLINE:
                 lines++;
-                break;
-            case OBJ_LABEL:
+    break;
+    case OBJ_LABEL:
                 labels++;
-                break;
-            case OBJ_RECTANGLE:
+    break;
+    case OBJ_RECTANGLE:
             case OBJ_RECTANGLE_LABEL:
                 rectangles++;
-                break;
-            case OBJ_TREND:
+    break;
+    case OBJ_TREND:
                 trends++;
-                break;
-            default:
+    break;
+    default:
                 other++;
-                break;
+    break;
         }
     }
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  OBJECT COUNT STATISTICS                                      ║");
@@ -327,4 +307,6 @@ void PrintObjectCountStats()
     Print("║  Other:      ", other);
     Print("╚═══════════════════════════════════════════════════════════════╝");
     #endif
-}
+    }
+    #endif
+    // OBJECT_COUNT_MANAGER_MQH

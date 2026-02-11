@@ -1,241 +1,83 @@
-//+------------------------------------------------------------------+
-//|                                        FloatingPointHelper.mqh   |
-//|                     Floating-Point Precision & Comparison Helpers|
-//|                     کمک‌کننده‌های دقت و مقایسه اعشاری             |
-//+------------------------------------------------------------------+
+﻿#ifndef FLOATING_POINT_HELPER_MQH
+#define FLOATING_POINT_HELPER_MQH
 
-//+------------------------------------------------------------------+
-//| EPSILON CONSTANTS - For Different Data Types                     |
-//| ✅ FIXED: Dynamic epsilon scaling based on magnitude             |
-//+------------------------------------------------------------------+
-#define EPSILON_BASE 1e-10              // Base epsilon for small numbers
-#define EPSILON_PERCENTAGE 1e-10        // For percentage comparisons
-#define EPSILON_RATIO 1e-8              // For ratio comparisons
-#define EPSILON_ANGLE 1e-6              // For angle comparisons
-#define EPSILON_GENERAL 1e-9            // General purpose
-
-// Dynamic epsilon for price (scales with magnitude)
-#define EPSILON_PRICE_SCALE 1e-8        // 0.01 pips for typical forex
+// Epsilon Constants
+#define EPSILON_BASE 1e-10
+#define EPSILON_PERCENTAGE 1e-10
+#define EPSILON_RATIO 1e-8
+#define EPSILON_ANGLE 1e-6
+#define EPSILON_GENERAL 1e-9
+#define EPSILON_PRICE_SCALE 1e-8
+#define EPSILON_PRICE EPSILON_BASE
 
 double GetDynamicEpsilonForPrice(double price) {
-    // Scale epsilon based on price magnitude
-    // For XAUUSD (2600): epsilon = 2600 * 1e-8 = 0.000026 (0.26 pips)
-    // For EURUSD (1.08): epsilon = 1.08 * 1e-8 = 0.0000000108 (0.00011 pips)
-    double epsilon = MathAbs(price) * EPSILON_PRICE_SCALE;
-    
-    // Minimum epsilon to avoid zero
+        double epsilon = MathAbs(price) * EPSILON_PRICE_SCALE;
     if(epsilon < EPSILON_BASE) epsilon = EPSILON_BASE;
-    
     return epsilon;
 }
 
-// Backward compatibility
-#define EPSILON_PRICE EPSILON_BASE
-
-//+------------------------------------------------------------------+
-//| Safe Floating-Point Comparison Functions                         |
-//| توابع مقایسه امن اعشاری                                          |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Check if value is effectively zero                               |
-//| بررسی صفر بودن مقدار                                             |
-//+------------------------------------------------------------------+
-bool IsZero(double value, double epsilon = EPSILON_GENERAL)
-{
-    return MathAbs(value) < epsilon;
+// Comparison Functions
+bool IsZero(double value, double epsilon = EPSILON_GENERAL) {
+        return MathAbs(value) < epsilon;
 }
-
-//+------------------------------------------------------------------+
-//| Check if two values are effectively equal                        |
-//| بررسی برابری دو مقدار                                            |
-//+------------------------------------------------------------------+
-bool AreEqual(double value1, double value2, double epsilon = EPSILON_GENERAL)
-{
-    return MathAbs(value1 - value2) < epsilon;
+    bool AreEqual(double value1, double value2, double epsilon = EPSILON_GENERAL) {
+        return MathAbs(value1 - value2) < epsilon;
 }
-
-//+------------------------------------------------------------------+
-//| Check if value1 > value2 (with epsilon tolerance)               |
-//| بررسی بزرگتر بودن                                                |
-//+------------------------------------------------------------------+
-bool IsGreater(double value1, double value2, double epsilon = EPSILON_GENERAL)
-{
+    bool IsGreater(double value1, double value2, double epsilon = EPSILON_GENERAL) {
     return (value1 - value2) > epsilon;
 }
-
-//+------------------------------------------------------------------+
-//| Check if value1 < value2 (with epsilon tolerance)               |
-//| بررسی کوچکتر بودن                                                |
-//+------------------------------------------------------------------+
-bool IsLess(double value1, double value2, double epsilon = EPSILON_GENERAL)
-{
+    bool IsLess(double value1, double value2, double epsilon = EPSILON_GENERAL) {
     return (value2 - value1) > epsilon;
 }
-
-//+------------------------------------------------------------------+
-//| Check if value1 >= value2 (with epsilon tolerance)              |
-//| بررسی بزرگتر یا مساوی بودن                                       |
-//+------------------------------------------------------------------+
-bool IsGreaterOrEqual(double value1, double value2, double epsilon = EPSILON_GENERAL)
-{
+    bool IsGreaterOrEqual(double value1, double value2, double epsilon = EPSILON_GENERAL) {
     return (value1 - value2) > -epsilon;
 }
-
-//+------------------------------------------------------------------+
-//| Check if value1 <= value2 (with epsilon tolerance)              |
-//| بررسی کوچکتر یا مساوی بودن                                       |
-//+------------------------------------------------------------------+
-bool IsLessOrEqual(double value1, double value2, double epsilon = EPSILON_GENERAL)
-{
+    bool IsLessOrEqual(double value1, double value2, double epsilon = EPSILON_GENERAL) {
     return (value2 - value1) > -epsilon;
 }
 
-//+------------------------------------------------------------------+
-//| Safe Division with Zero Check                                    |
-//| تقسیم امن با بررسی صفر                                           |
-//+------------------------------------------------------------------+
-double SafeDivide(double numerator, double denominator, double defaultValue = 0.0, double epsilon = EPSILON_GENERAL)
-{
-    if(IsZero(denominator, epsilon)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ SafeDivide: Division by zero avoided (denominator=", 
-              DoubleToString(denominator, 10), ")");
-        #endif
-        return defaultValue;
-    }
-    
+// Safe Math
+double SafeDivide(double numerator, double denominator, double defaultValue = 0.0, double epsilon = EPSILON_GENERAL) {
+        if(IsZero(denominator, epsilon)) return defaultValue;
     return numerator / denominator;
 }
-
-//+------------------------------------------------------------------+
-//| Safe Square Root with Negative Check                             |
-//| جذر امن با بررسی منفی                                            |
-//+------------------------------------------------------------------+
-double SafeSqrt(double value, double defaultValue = 0.0, double epsilon = EPSILON_GENERAL)
-{
-    if(value < -epsilon) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ SafeSqrt: Negative value (", DoubleToString(value, 10), 
-              "), returning default: ", defaultValue);
-        #endif
-        return defaultValue;
-    }
-    
-    // Treat small negative values as zero (floating-point errors)
-    if(value < 0 && value > -epsilon) {
-        value = 0;
-    }
-    
+    double SafeSqrt(double value, double defaultValue = 0.0, double epsilon = EPSILON_GENERAL) {
+        if(value < -epsilon) return defaultValue;
+    if(value < 0) value = 0;
     return MathSqrt(value);
 }
-
-//+------------------------------------------------------------------+
-//| Clamp Value to Range                                             |
-//| محدود کردن مقدار به بازه                                         |
-//+------------------------------------------------------------------+
-double ClampValue(double value, double minVal, double maxVal)
-{
-    if(value < minVal) return minVal;
+    double ClampValue(double value, double minVal, double maxVal) {
+        if(value < minVal) return minVal;
     if(value > maxVal) return maxVal;
     return value;
 }
-
-//+------------------------------------------------------------------+
-//| Normalize Price to Symbol Digits                                 |
-//| نرمال‌سازی قیمت به تعداد ارقام سیمبل                             |
-//+------------------------------------------------------------------+
-double NormalizePrice(double price)
-{
-    return NormalizeDouble(price, Digits);
+    double NormalizePrice(double price) {
+        return NormalizeDouble(price, Digits);
 }
-
-//+------------------------------------------------------------------+
-//| Check if Price is Valid                                          |
-//| بررسی معتبر بودن قیمت                                            |
-//+------------------------------------------------------------------+
-bool IsValidPrice(double price, double epsilon = EPSILON_PRICE)
-{
-    // Price must be positive and not too large
-    if(price < epsilon) return false;
-    if(price > 1000000000.0) return false; // 1 billion
-    
-    return true;
+    bool IsValidPrice(double price, double epsilon = EPSILON_PRICE) {
+    return (price >= epsilon && price <= 1000000000.0);
 }
-
-//+------------------------------------------------------------------+
-//| Check if Percentage is Valid                                     |
-//| بررسی معتبر بودن درصد                                            |
-//+------------------------------------------------------------------+
-bool IsValidPercentage(double percentage, double minPercent = 0.0, double maxPercent = 100.0)
-{
-    if(percentage < minPercent - EPSILON_PERCENTAGE) return false;
-    if(percentage > maxPercent + EPSILON_PERCENTAGE) return false;
-    
-    return true;
+    bool IsValidPercentage(double percentage, double minPercent = 0.0, double maxPercent = 100.0) {
+    return (percentage >= minPercent - EPSILON_PERCENTAGE && percentage <= maxPercent + EPSILON_PERCENTAGE);
 }
-
-//+------------------------------------------------------------------+
-//| Check if Ratio is Valid                                          |
-//| بررسی معتبر بودن نسبت                                            |
-//+------------------------------------------------------------------+
-bool IsValidRatio(double ratio, double minRatio = 0.0, double maxRatio = 10.0)
-{
-    if(ratio < minRatio - EPSILON_RATIO) return false;
-    if(ratio > maxRatio + EPSILON_RATIO) return false;
-    
-    return true;
+    bool IsValidRatio(double ratio, double minRatio = 0.0, double maxRatio = 10.0) {
+    return (ratio >= minRatio - EPSILON_RATIO && ratio <= maxRatio + EPSILON_RATIO);
 }
-
-//+------------------------------------------------------------------+
-//| Safe Percentage Calculation                                      |
-//| محاسبه امن درصد                                                  |
-//+------------------------------------------------------------------+
-double CalculatePercentage(double part, double whole, double defaultValue = 0.0)
-{
-    if(IsZero(whole, EPSILON_GENERAL)) {
-        return defaultValue;
-    }
-    
+    double CalculatePercentage(double part, double whole, double defaultValue = 0.0) {
+        if(IsZero(whole, EPSILON_GENERAL)) return defaultValue;
     return (part / whole) * 100.0;
 }
-
-//+------------------------------------------------------------------+
-//| Safe Ratio Calculation                                           |
-//| محاسبه امن نسبت                                                  |
-//+------------------------------------------------------------------+
-double CalculateRatio(double numerator, double denominator, double defaultValue = 1.0)
-{
-    if(IsZero(denominator, EPSILON_GENERAL)) {
-        return defaultValue;
-    }
-    
+    double CalculateRatio(double numerator, double denominator, double defaultValue = 1.0) {
+        if(IsZero(denominator, EPSILON_GENERAL)) return defaultValue;
     return numerator / denominator;
 }
-
-//+------------------------------------------------------------------+
-//| Round to Nearest Pip                                             |
-//| گرد کردن به نزدیک‌ترین پیپ                                       |
-//+------------------------------------------------------------------+
-double RoundToPip(double value)
-{
-    double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
-    
-    if(IsZero(pipSize, EPSILON_GENERAL)) {
-        return value; // Cannot round
-    }
-    
+    double RoundToPip(double value) {
+        double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+    if(IsZero(pipSize, EPSILON_GENERAL)) return value;
     return MathRound(value / pipSize) * pipSize;
 }
-
-//+------------------------------------------------------------------+
-//| Check if value is within range (inclusive)                       |
-//| بررسی قرار گرفتن مقدار در بازه                                   |
-//+------------------------------------------------------------------+
-bool IsInRange(double value, double minVal, double maxVal, double epsilon = EPSILON_GENERAL)
-{
-    return IsGreaterOrEqual(value, minVal, epsilon) && 
-           IsLessOrEqual(value, maxVal, epsilon);
+    bool IsInRange(double value, double minVal, double maxVal, double epsilon = EPSILON_GENERAL) {
+        return IsGreaterOrEqual(value, minVal, epsilon) && IsLessOrEqual(value, maxVal, epsilon);
 }
-
-//+------------------------------------------------------------------+
+    #endif
+    // FLOATING_POINT_HELPER_MQH

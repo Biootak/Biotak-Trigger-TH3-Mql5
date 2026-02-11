@@ -1,32 +1,18 @@
-//+------------------------------------------------------------------+
-//|                                        PropertyChangeDetector.mqh |
-//|                                      Biotak Trigger TH3 Indicator |
-//|                    Property Change Detection for Flicker Prevention |
-//+------------------------------------------------------------------+
+﻿#ifndef PROPERTY_CHANGE_DETECTOR_MQH
+#define PROPERTY_CHANGE_DETECTOR_MQH
+
 #property copyright "Biotak"
 #property strict
 
-//+------------------------------------------------------------------+
-//| Property Change Result Structure                                  |
-//| Tracks which properties have changed during an update operation   |
-//+------------------------------------------------------------------+
 struct SPropertyChangeResult {
-    bool priceChanged;     // Price property changed
+        bool priceChanged;     // Price property changed
     bool colorChanged;     // Color property changed
     bool styleChanged;     // Style property changed
     bool widthChanged;     // Width property changed
     bool anyChanged;       // Any property changed
 };
 
-//+------------------------------------------------------------------+
-//| Check if price changed significantly                              |
-//| Uses epsilon comparison to handle floating-point precision        |
-//| Parameters:                                                       |
-//|   oldPrice - Previous price value                                |
-//|   newPrice - New price value                                     |
-//| Returns: true if prices differ by more than epsilon              |
-//+------------------------------------------------------------------+
-bool HasPriceChanged(const double oldPrice, const double newPrice) {
+    bool HasPriceChanged(const double oldPrice, const double newPrice) {
     // Handle special cases
     if(oldPrice == 0.0 && newPrice == 0.0) {
         return false;
@@ -36,60 +22,16 @@ bool HasPriceChanged(const double oldPrice, const double newPrice) {
     double diff = MathAbs(oldPrice - newPrice);
     return diff > EPSILON_PRICE;
 }
-
-//+------------------------------------------------------------------+
-//| Check if color changed                                            |
-//| Uses exact integer comparison (no epsilon) per Requirement 10.2  |
-//| Parameters:                                                       |
-//|   oldColor - Previous color value                                |
-//|   newColor - New color value                                     |
-//| Returns: true if colors are different                            |
-//+------------------------------------------------------------------+
-bool HasColorChanged(const color oldColor, const color newColor) {
-    return oldColor != newColor;
+    bool HasColorChanged(const color oldColor, const color newColor) {
+        return oldColor != newColor;
 }
-
-//+------------------------------------------------------------------+
-//| Check if style changed                                            |
-//| Uses exact integer comparison (no epsilon) per Requirement 10.3  |
-//| Parameters:                                                       |
-//|   oldStyle - Previous style value (ENUM_LINE_STYLE)              |
-//|   newStyle - New style value (ENUM_LINE_STYLE)                   |
-//| Returns: true if styles are different                            |
-//+------------------------------------------------------------------+
-bool HasStyleChanged(const int oldStyle, const int newStyle) {
-    return oldStyle != newStyle;
+    bool HasStyleChanged(const int oldStyle, const int newStyle) {
+        return oldStyle != newStyle;
 }
-
-//+------------------------------------------------------------------+
-//| Check if width changed                                            |
-//| Parameters:                                                       |
-//|   oldWidth - Previous width value                                |
-//|   newWidth - New width value                                     |
-//| Returns: true if widths are different                            |
-//+------------------------------------------------------------------+
-bool HasWidthChanged(const int oldWidth, const int newWidth) {
-    return oldWidth != newWidth;
+    bool HasWidthChanged(const int oldWidth, const int newWidth) {
+        return oldWidth != newWidth;
 }
-
-//+------------------------------------------------------------------+
-//| Check if any visual property changed                              |
-//| Comprehensive check for all object properties                     |
-//| Uses short-circuit evaluation for performance optimization        |
-//| Parameters:                                                       |
-//|   oldPrice - Previous price value                                |
-//|   newPrice - New price value                                     |
-//|   oldColor - Previous color value                                |
-//|   newColor - New color value                                     |
-//|   oldStyle - Previous style value                                |
-//|   newStyle - New style value                                     |
-//|   oldWidth - Previous width value                                |
-//|   newWidth - New width value                                     |
-//| Returns: true if any property has changed                        |
-//| Note: Checks properties in order of likelihood to change         |
-//|       Returns immediately on first change detected (short-circuit)|
-//+------------------------------------------------------------------+
-bool HasAnyPropertyChanged(const double oldPrice, const double newPrice,
+    bool HasAnyPropertyChanged(const double oldPrice, const double newPrice,
                            const color oldColor, const color newColor,
                            const int oldStyle, const int newStyle,
                            const int oldWidth, const int newWidth) {
@@ -118,94 +60,41 @@ bool HasAnyPropertyChanged(const double oldPrice, const double newPrice,
     return false;
 }
 
-//+------------------------------------------------------------------+
-//| Detect all property changes and return detailed result            |
-//| Analyzes all properties and returns structured change information |
-//| Parameters:                                                       |
-//|   oldPrice - Previous price value                                |
-//|   newPrice - New price value                                     |
-//|   oldColor - Previous color value                                |
-//|   newColor - New color value                                     |
-//|   oldStyle - Previous style value                                |
-//|   newStyle - New style value                                     |
-//|   oldWidth - Previous width value                                |
-//|   newWidth - New width value                                     |
-//| Returns: SPropertyChangeResult with detailed change flags        |
-//+------------------------------------------------------------------+
 SPropertyChangeResult DetectPropertyChanges(const double oldPrice, const double newPrice,
                                             const color oldColor, const color newColor,
                                             const int oldStyle, const int newStyle,
                                             const int oldWidth, const int newWidth) {
     SPropertyChangeResult result;
-    
     result.priceChanged = HasPriceChanged(oldPrice, newPrice);
     result.colorChanged = HasColorChanged(oldColor, newColor);
     result.styleChanged = HasStyleChanged(oldStyle, newStyle);
     result.widthChanged = HasWidthChanged(oldWidth, newWidth);
     result.anyChanged = result.priceChanged || result.colorChanged || 
                         result.styleChanged || result.widthChanged;
-    
     return result;
 }
 
-//+------------------------------------------------------------------+
-//| Overloaded version using SObjectCacheEntry                        |
-//| Convenience function for cache-based change detection             |
-//| Parameters:                                                       |
-//|   cached - Cached object entry with old property values          |
-//|   newPrice - New price value                                     |
-//|   newColor - New color value                                     |
-//|   newStyle - New style value                                     |
-//|   newWidth - New width value                                     |
-//| Returns: SPropertyChangeResult with detailed change flags        |
-//+------------------------------------------------------------------+
 SPropertyChangeResult DetectPropertyChanges(const SObjectCacheEntry &cached,
                                             const double newPrice,
                                             const color newColor,
                                             const int newStyle,
                                             const int newWidth) {
-    return DetectPropertyChanges(cached.lastPrice, newPrice,
+        return DetectPropertyChanges(cached.lastPrice, newPrice,
                                  cached.lastColor, newColor,
                                  cached.lastStyle, newStyle,
                                  cached.lastWidth, newWidth);
 }
-
-//+------------------------------------------------------------------+
-//| Check if any property changed (cache-based convenience function)  |
-//| Parameters:                                                       |
-//|   cached - Cached object entry with old property values          |
-//|   newPrice - New price value                                     |
-//|   newColor - New color value                                     |
-//|   newStyle - New style value                                     |
-//|   newWidth - New width value                                     |
-//| Returns: true if any property has changed                        |
-//| Note: If cache entry is missing or invalid, caller should assume |
-//|       properties changed and perform full update                 |
-//+------------------------------------------------------------------+
-bool HasAnyPropertyChanged(const SObjectCacheEntry &cached,
+    bool HasAnyPropertyChanged(const SObjectCacheEntry &cached,
                            const double newPrice,
                            const color newColor,
                            const int newStyle,
                            const int newWidth) {
-    return HasAnyPropertyChanged(cached.lastPrice, newPrice,
+        return HasAnyPropertyChanged(cached.lastPrice, newPrice,
                                  cached.lastColor, newColor,
                                  cached.lastStyle, newStyle,
                                  cached.lastWidth, newWidth);
 }
-
-//+------------------------------------------------------------------+
-//| Check if properties changed with cache lookup                     |
-//| Handles missing cache entries by assuming properties changed      |
-//| Parameters:                                                       |
-//|   objectName - Name of the object to check                       |
-//|   newPrice - New price value                                     |
-//|   newColor - New color value                                     |
-//|   newStyle - New style value                                     |
-//|   newWidth - New width value                                     |
-//| Returns: true if any property has changed or cache entry missing |
-//| Note: Missing cache entries trigger full update (Requirement 10.6)|
-//+------------------------------------------------------------------+
-bool HasAnyPropertyChangedWithCacheLookup(const string objectName,
+    bool HasAnyPropertyChangedWithCacheLookup(const string objectName,
                                           const double newPrice,
                                           const color newColor,
                                           const int newStyle,
@@ -223,3 +112,6 @@ bool HasAnyPropertyChangedWithCacheLookup(const string objectName,
 }
 
 //+------------------------------------------------------------------+
+
+#endif
+    // PROPERTY_CHANGE_DETECTOR_MQH

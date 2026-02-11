@@ -1,9 +1,4 @@
-//+------------------------------------------------------------------+
-//|                                                ZoneValidator.mqh |
-//|                                  Copyright 2025, Biotak Project  |
-//|                                    Zone Validation & Safety      |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2025, Biotak Project"
+﻿#property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 
 #include "ConstantsAndEnums.mqh"
@@ -12,43 +7,41 @@
 
 //+------------------------------------------------------------------+
 //| Validate Input Arrays                                            |
-//| اعتبارسنجی آرایه‌های ورودی                                        |
+
 //+------------------------------------------------------------------+
 bool ValidateInputArrays(const SLevelRawData &levels[], int &outCount)
 {
     outCount = ArraySize(levels);
-    
     if(outCount <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateInputArrays: Empty levels array");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Check for NULL prices
     for(int i = 0; i < outCount; i++) {
         if(levels[i].price <= 0) {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             Print("❌ ValidateInputArrays: Invalid price at index ", i, ": ", levels[i].price);
-            #endif
-            return false;
+    #endif
+    return false;
         }
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Step Size                                               |
-//| اعتبارسنجی اندازه گام                                             |
+
 //+------------------------------------------------------------------+
 bool ValidateStepSize(double stepSize)
 {
-    if(stepSize <= 0) {
+        if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateStepSize: Invalid stepSize=", stepSize);
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Check for unreasonably large step (> 50% of typical price)
@@ -57,16 +50,15 @@ bool ValidateStepSize(double stepSize)
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ ValidateStepSize: Suspiciously large stepSize=", stepSize, 
               " (> 50% of price=", typicalPrice, ")");
-        #endif
+    #endif
         // Don't fail, just warn
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Style Config                                            |
-//| اعتبارسنجی تنظیمات استایل                                         |
+
 //+------------------------------------------------------------------+
 bool ValidateStyleConfig(const SStyleConfig &config)
 {
@@ -75,8 +67,8 @@ bool ValidateStyleConfig(const SStyleConfig &config)
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateStyleConfig: Invalid zoneHeightPercent=", config.zoneHeightPercent,
               " (must be 0.0-1.0)");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Validate transparency
@@ -84,8 +76,8 @@ bool ValidateStyleConfig(const SStyleConfig &config)
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateStyleConfig: Invalid zoneTransparency=", config.zoneTransparency,
               " (must be 0-100)");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Validate base multiplier (CRITICAL: prevent division by zero)
@@ -93,24 +85,23 @@ bool ValidateStyleConfig(const SStyleConfig &config)
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateStyleConfig: Invalid baseMultiplier=", config.baseMultiplier,
               " (must be >= 1)");
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Zone Height                                             |
-//| اعتبارسنجی ارتفاع زون                                            |
+
 //+------------------------------------------------------------------+
 bool ValidateZoneHeight(double zoneHeight, double stepSize)
 {
-    if(zoneHeight <= 0) {
+        if(zoneHeight <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneHeight: Invalid zoneHeight=", zoneHeight);
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Zone height should not exceed step size
@@ -118,16 +109,15 @@ bool ValidateZoneHeight(double zoneHeight, double stepSize)
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ ValidateZoneHeight: Zone height (", zoneHeight, 
               ") exceeds step size (", stepSize, ")");
-        #endif
+    #endif
         // Don't fail, just warn
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Zone Geometry                                           |
-//| اعتبارسنجی هندسه زون                                             |
+
 //+------------------------------------------------------------------+
 SZoneValidationResult ValidateZoneGeometry(
     double prevPrice, 
@@ -146,23 +136,23 @@ SZoneValidationResult ValidateZoneGeometry(
     // Check for invalid prices
     if(prevPrice <= 0 || currentPrice <= 0) {
         result.errorCode = ZONE_ERROR_INVALID_PRICES;
-        result.errorMessage = "Invalid prices: prev=" + DoubleToString(prevPrice, s_cachedDigits) +
+    result.errorMessage = "Invalid prices: prev=" + DoubleToString(prevPrice, s_cachedDigits) +
                             ", current=" + DoubleToString(currentPrice, s_cachedDigits);
-        return result;
+    return result;
     }
     
     // Check for equal prices (use cached Point)
     if(MathAbs(prevPrice - currentPrice) < s_cachedPoint) {
         result.errorCode = ZONE_ERROR_EQUAL_PRICES;
-        result.errorMessage = "Prices are equal (no zone needed)";
-        return result;
+    result.errorMessage = "Prices are equal (no zone needed)";
+    return result;
     }
     
     // Check zone height
     if(zoneHeight <= 0) {
         result.errorCode = ZONE_ERROR_INVALID_HEIGHT;
-        result.errorMessage = "Invalid zone height: " + DoubleToString(zoneHeight, s_cachedDigits);
-        return result;
+    result.errorMessage = "Invalid zone height: " + DoubleToString(zoneHeight, s_cachedDigits);
+    return result;
     }
     
     // Calculate midpoint and boundaries
@@ -173,13 +163,13 @@ SZoneValidationResult ValidateZoneGeometry(
     // Check for inverted bounds
     if(topPrice <= bottomPrice) {
         result.errorCode = ZONE_ERROR_INVERTED_BOUNDS;
-        result.errorMessage = "Inverted bounds: top=" + DoubleToString(topPrice, s_cachedDigits) +
+    result.errorMessage = "Inverted bounds: top=" + DoubleToString(topPrice, s_cachedDigits) +
                             ", bottom=" + DoubleToString(bottomPrice, s_cachedDigits);
-        return result;
+    return result;
     }
     
     // Check for reasonable range (not too far from current price)
-    // استفاده از cached market price برای بهینه‌سازی
+    
     double currentMarketPrice = GetCachedMarketPrice();
     if(currentMarketPrice > 0) {
         double maxReasonableDistance = currentMarketPrice * 2.0; // 200% of current price
@@ -187,12 +177,12 @@ SZoneValidationResult ValidateZoneGeometry(
         if(MathAbs(topPrice - currentMarketPrice) > maxReasonableDistance ||
            MathAbs(bottomPrice - currentMarketPrice) > maxReasonableDistance) {
             result.errorCode = ZONE_ERROR_OUT_OF_RANGE;
-            result.errorMessage = "Zone too far from current price";
+    result.errorMessage = "Zone too far from current price";
             // Don't fail, just warn
             #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ ValidateZoneGeometry: ", result.errorMessage);
-            #endif
-        }
+    #endif
+    }
     }
     
     // All checks passed
@@ -202,7 +192,7 @@ SZoneValidationResult ValidateZoneGeometry(
 
 //+------------------------------------------------------------------+
 //| Validate Object Name (Fast Failure)                              |
-//| اعتبارسنجی نام شیء (شکست سریع)                                   |
+
 //| Requirements: 13.1                                                |
 //+------------------------------------------------------------------+
 bool ValidateObjectName(const string name)
@@ -211,24 +201,23 @@ bool ValidateObjectName(const string name)
     if(StringLen(name) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateObjectName: Empty object name");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Fast failure: name too long (MT4 limit is 63 characters)
     if(StringLen(name) > 63) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateObjectName: Name too long (", StringLen(name), " chars, max 63)");
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Price (Fast Failure)                                    |
-//| اعتبارسنجی قیمت (شکست سریع)                                      |
+
 //| Requirements: 13.2                                                |
 //+------------------------------------------------------------------+
 bool ValidatePrice(double price)
@@ -237,8 +226,8 @@ bool ValidatePrice(double price)
     if(price <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidatePrice: Invalid price (", DoubleToString(price, 8), "), must be positive");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Fast failure: price out of reasonable range
@@ -247,24 +236,22 @@ bool ValidatePrice(double price)
     if(marketPrice > 0) {
         // Price should be within 1000x of current market price
         double maxReasonablePrice = marketPrice * 1000.0;
-        double minReasonablePrice = marketPrice / 1000.0;
-        
-        if(price > maxReasonablePrice || price < minReasonablePrice) {
-            #ifdef ENABLE_DEBUG_LOGS
+    double minReasonablePrice = marketPrice / 1000.0;
+    if(price > maxReasonablePrice || price < minReasonablePrice) {
+        #ifdef ENABLE_DEBUG_LOGS
             Print("❌ ValidatePrice: Price (", DoubleToString(price, 8), 
                   ") out of reasonable range (", DoubleToString(minReasonablePrice, 8),
                   " - ", DoubleToString(maxReasonablePrice, 8), ")");
-            #endif
-            return false;
+    #endif
+    return false;
         }
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Color (Fast Failure)                                    |
-//| اعتبارسنجی رنگ (شکست سریع)                                       |
+
 //| Requirements: 13.3                                                |
 //+------------------------------------------------------------------+
 bool ValidateColor(color clr)
@@ -273,8 +260,8 @@ bool ValidateColor(color clr)
     if(clr == clrNONE) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateColor: clrNONE is not a valid color for visible objects");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // MT4/MT5 colors are stored as integers (0xBBGGRR format)
@@ -283,16 +270,15 @@ bool ValidateColor(color clr)
     if(colorValue < 0 || colorValue > 16777215) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateColor: Invalid color value (", colorValue, "), must be 0-16777215");
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Line Style (Fast Failure)                               |
-//| اعتبارسنجی استایل خط (شکست سریع)                                 |
+
 //| Requirements: 13.4                                                |
 //+------------------------------------------------------------------+
 bool ValidateLineStyle(int style)
@@ -303,16 +289,15 @@ bool ValidateLineStyle(int style)
     if(style < STYLE_SOLID || style > STYLE_DASHDOTDOT) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateLineStyle: Invalid style (", style, "), must be 0-4 (ENUM_LINE_STYLE)");
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Line Width (Fast Failure)                               |
-//| اعتبارسنجی عرض خط (شکست سریع)                                    |
+
 //| Requirements: 13.5                                                |
 //+------------------------------------------------------------------+
 bool ValidateLineWidth(int width)
@@ -322,16 +307,15 @@ bool ValidateLineWidth(int width)
     if(width < 1 || width > 5) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateLineWidth: Invalid width (", width, "), must be 1-5");
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Drawing Parameters (Fast Failure - All at Once)         |
-//| اعتبارسنجی پارامترهای رسم (شکست سریع - همه با هم)                |
+
 //| Requirements: 9.2, 13.1, 13.2, 13.3, 13.4, 13.5                  |
 //|                                                                  |
 //| Returns false immediately on first validation failure            |
@@ -377,7 +361,7 @@ bool ValidateDrawingParameters(
 
 //+------------------------------------------------------------------+
 //| Validate Zone Drawing Parameters (Fast Failure)                  |
-//| اعتبارسنجی پارامترهای رسم زون (شکست سریع)                        |
+
 //| Requirements: 9.2, 13.1, 13.2, 13.3                              |
 //+------------------------------------------------------------------+
 bool ValidateZoneDrawingParameters(
@@ -409,8 +393,8 @@ bool ValidateZoneDrawingParameters(
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneDrawingParameters: Top price (", DoubleToString(topPrice, 8),
               ") must be greater than bottom price (", DoubleToString(bottomPrice, 8), ")");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // 5. Validate color
@@ -422,8 +406,8 @@ bool ValidateZoneDrawingParameters(
     if(transparency < 0 || transparency > 100) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneDrawingParameters: Invalid transparency (", transparency, "), must be 0-100");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // All validations passed
@@ -432,7 +416,7 @@ bool ValidateZoneDrawingParameters(
 
 //+------------------------------------------------------------------+
 //| Validate Complete Configuration                                  |
-//| اعتبارسنجی کامل تنظیمات                                          |
+
 //+------------------------------------------------------------------+
 bool ValidateCompleteConfig(
     const SLevelRawData &levels[],
@@ -441,30 +425,30 @@ bool ValidateCompleteConfig(
     int &outCount,
     double &outZoneHeight)
 {
-    // GOLD FIX v3: Use existing validation functions (DRY principle)
+    // Use existing validation functions (DRY principle)
     
     // Validate input arrays
     if(!ValidateInputArrays(levels, outCount)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateCompleteConfig: Input array validation failed");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Validate step size
     if(!ValidateStepSize(stepSize)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateCompleteConfig: Step size validation failed");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Validate style config
     if(!ValidateStyleConfig(config)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateCompleteConfig: Style config validation failed");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Calculate and validate zone height (unique to this function)
@@ -472,35 +456,32 @@ bool ValidateCompleteConfig(
     if(outZoneHeight <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateCompleteConfig: Invalid zoneHeight=", outZoneHeight);
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     #ifdef ENABLE_DEBUG_LOGS
     // OPTIMIZATION: Use centralized cached Digits value
     int s_cachedDigitsConfig = GetCachedDigits();
-    
     Print("✅ ValidateCompleteConfig: All validations passed");
     Print("   Count=", outCount, ", StepSize=", DoubleToString(stepSize, s_cachedDigitsConfig),
           ", ZoneHeight=", DoubleToString(outZoneHeight, s_cachedDigitsConfig));
     #endif
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| ENHANCED VALIDATION SYSTEM (Task 2)                              |
-//| سیستم اعتبارسنجی پیشرفته                                         |
+
 //| Requirements: 1.6, 2.1-2.7, 13.1-13.7, 17.1-17.7                |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| Enhanced Validation Result Structure                             |
-//| ساختار نتیجه اعتبارسنجی پیشرفته                                  |
+
 //| Requirements: 2.5, 17.1-17.5                                     |
 //+------------------------------------------------------------------+
 struct SZoneValidationResultEnhanced {
-    bool valid;                 // Overall validation result
+        bool valid;                 // Overall validation result
     string errorMessage;        // Human-readable error message
     int errorCode;              // Error code for programmatic handling
     
@@ -516,7 +497,7 @@ struct SZoneValidationResultEnhanced {
 
 //+------------------------------------------------------------------+
 //| Validate Zone Creation Preconditions                             |
-//| اعتبارسنجی پیش‌شرط‌های ایجاد زون                                 |
+
 //| Requirements: 1.6, 2.1, 2.2, 13.1                               |
 //|                                                                  |
 //| Fast-fail validation: checks name first, then Bars, then Period  |
@@ -538,14 +519,13 @@ SZoneValidationResultEnhanced ValidateZoneCreationPreconditions(
     result.timeframeName = "";
     
     // FAST FAILURE 1: Validate object name (cheapest check)
-    // Requirement 13.1: Check name first
     if(!ValidateObjectName(zoneName)) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = "Invalid zone name: empty or too long";
-        #ifdef ENABLE_DEBUG_LOGS
+    result.errorMessage = "Invalid zone name: empty or too long";
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // FAST FAILURE 2: Validate Bars count
@@ -553,37 +533,36 @@ SZoneValidationResultEnhanced ValidateZoneCreationPreconditions(
     result.barsCount = Bars(GetCachedSymbol(), (ENUM_TIMEFRAMES)period);
     if(result.barsCount <= 0) {
         result.errorCode = ERR_ZONE_NO_DATA;
-        result.errorMessage = StringFormat("No bars available (Bars=%d)", result.barsCount);
-        #ifdef ENABLE_DEBUG_LOGS
+    result.errorMessage = StringFormat("No bars available (Bars=%d)", result.barsCount);
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage, 
               " for zone '", zoneName, "'");
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // FAST FAILURE 3: Validate PeriodSeconds
-    // Requirement 2.2: PeriodSeconds must be positive and reasonable
     result.periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)period);
     if(result.periodSeconds <= 0) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid PeriodSeconds=%d (must be positive)", 
+    result.errorMessage = StringFormat("Invalid PeriodSeconds=%d (must be positive)", 
                                           result.periodSeconds);
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // Check for unreasonably large period (> 30 days = 2,592,000 seconds)
     const int MAX_REASONABLE_PERIOD_SECONDS = 2592000;
     if(result.periodSeconds > MAX_REASONABLE_PERIOD_SECONDS) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("PeriodSeconds=%d exceeds reasonable bounds (max=%d)", 
+    result.errorMessage = StringFormat("PeriodSeconds=%d exceeds reasonable bounds (max=%d)", 
                                           result.periodSeconds, MAX_REASONABLE_PERIOD_SECONDS);
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneCreationPreconditions: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // Store timeframe name for diagnostic logging
@@ -592,19 +571,17 @@ SZoneValidationResultEnhanced ValidateZoneCreationPreconditions(
     // All preconditions passed
     result.valid = true;
     result.errorCode = ERR_ZONE_NONE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ ValidateZoneCreationPreconditions: Passed for zone '", zoneName, 
           "' (Bars=", result.barsCount, ", PeriodSeconds=", result.periodSeconds, 
           ", Timeframe=", result.timeframeName, ")");
     #endif
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Zone Geometry Parameters                                |
-//| اعتبارسنجی پارامترهای هندسی زون                                  |
+
 //| Requirements: 2.3, 2.4, 13.2, 13.3                              |
 //|                                                                  |
 //| Validates price range and time range for zone creation           |
@@ -626,74 +603,68 @@ SZoneValidationResultEnhanced ValidateZoneGeometryEnhanced(
     result.topPrice = topPrice;
     result.bottomPrice = bottomPrice;
     result.timeframeName = "";
-    
     int cachedDigits = GetCachedDigits();
     
     // FAST FAILURE 1: Validate prices (before time calculations)
-    // Requirement 13.2: Check prices before time validation
     if(!ValidatePrice(topPrice)) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid top price: %s", 
+    result.errorMessage = StringFormat("Invalid top price: %s", 
                                           DoubleToString(topPrice, cachedDigits));
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     if(!ValidatePrice(bottomPrice)) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid bottom price: %s", 
+    result.errorMessage = StringFormat("Invalid bottom price: %s", 
                                           DoubleToString(bottomPrice, cachedDigits));
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // FAST FAILURE 2: Validate price range
-    // Requirement 2.4: topPrice must be > bottomPrice
     if(topPrice <= bottomPrice) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid price range: top=%s must be > bottom=%s",
+    result.errorMessage = StringFormat("Invalid price range: top=%s must be > bottom=%s",
                                           DoubleToString(topPrice, cachedDigits),
                                           DoubleToString(bottomPrice, cachedDigits));
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // FAST FAILURE 3: Validate time range
-    // Requirement 2.3: startTime must be < endTime
     if(startTime >= endTime) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid time range: start=%s must be < end=%s",
+    result.errorMessage = StringFormat("Invalid time range: start=%s must be < end=%s",
                                           TimeToString(startTime, TIME_DATE|TIME_MINUTES),
                                           TimeToString(endTime, TIME_DATE|TIME_MINUTES));
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneGeometryEnhanced: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // All geometry validations passed
     result.valid = true;
     result.errorCode = ERR_ZONE_NONE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ ValidateZoneGeometryEnhanced: Passed (top=", DoubleToString(topPrice, cachedDigits),
           ", bottom=", DoubleToString(bottomPrice, cachedDigits),
           ", start=", TimeToString(startTime, TIME_DATE|TIME_MINUTES),
           ", end=", TimeToString(endTime, TIME_DATE|TIME_MINUTES), ")");
     #endif
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Validate Zone Extension Parameters                               |
-//| اعتبارسنجی پارامترهای گسترش زون                                  |
+
 //| Requirements: 2.2, 13.4                                          |
 //|                                                                  |
 //| Validates extension calculation parameters                       |
@@ -716,28 +687,26 @@ SZoneValidationResultEnhanced ValidateZoneExtension(
     result.timeframeName = "";
     
     // FAST FAILURE 1: Validate PeriodSeconds
-    // Requirement 2.2: Must be positive
     if(periodSeconds <= 0) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid PeriodSeconds=%d (must be positive)", 
+    result.errorMessage = StringFormat("Invalid PeriodSeconds=%d (must be positive)", 
                                           periodSeconds);
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneExtension: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // FAST FAILURE 2: Validate time range consistency
-    // Requirement 13.4: Extension validation after price validation
     if(startTime >= endTime) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Invalid extension time range: start=%s >= end=%s",
+    result.errorMessage = StringFormat("Invalid extension time range: start=%s >= end=%s",
                                           TimeToString(startTime, TIME_DATE|TIME_MINUTES),
                                           TimeToString(endTime, TIME_DATE|TIME_MINUTES));
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ ValidateZoneExtension: ", result.errorMessage);
-        #endif
-        return result;
+    #endif
+    return result;
     }
     
     // Calculate extension duration
@@ -746,29 +715,27 @@ SZoneValidationResultEnhanced ValidateZoneExtension(
     // Validate extension is reasonable (not too short or too long)
     if(extensionDuration < periodSeconds) {
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        result.errorMessage = StringFormat("Extension duration (%d sec) < PeriodSeconds (%d sec)",
+    result.errorMessage = StringFormat("Extension duration (%d sec) < PeriodSeconds (%d sec)",
                                           extensionDuration, periodSeconds);
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ ValidateZoneExtension: ", result.errorMessage, " (warning only)");
-        #endif
+    #endif
         // Don't fail, just warn
     }
     
     // All extension validations passed
     result.valid = true;
     result.errorCode = ERR_ZONE_NONE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ ValidateZoneExtension: Passed (PeriodSeconds=", periodSeconds,
           ", duration=", extensionDuration, " sec)");
     #endif
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Log Zone Creation Failure with Full Diagnostic Context           |
-//| ثبت شکست ایجاد زون با اطلاعات تشخیصی کامل                       |
+
 //| Requirements: 1.7, 17.1-17.6                                     |
 //|                                                                  |
 //| Comprehensive logging for debugging zone display issues          |
@@ -776,43 +743,32 @@ SZoneValidationResultEnhanced ValidateZoneExtension(
 void LogZoneCreationFailure(const SZoneValidationResultEnhanced &validation,
                            const string zoneName = "")
 {
-    #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════");
     Print("❌ ZONE CREATION FAILURE DIAGNOSTIC");
     Print("═══════════════════════════════════════════════════════════");
-    
     if(StringLen(zoneName) > 0) {
         Print("Zone Name: ", zoneName);
     }
     
     Print("Error Code: ", validation.errorCode);
     Print("Error Message: ", validation.errorMessage);
-    
-    // Requirement 17.1: Log timeframe information
     if(StringLen(validation.timeframeName) > 0) {
         Print("Timeframe: ", validation.timeframeName);
     }
-    
-    // Requirement 17.2: Log Bars count
     if(validation.barsCount > 0) {
         Print("Bars Count: ", validation.barsCount);
     } else if(validation.errorCode == ERR_ZONE_NO_DATA) {
         Print("Bars Count: 0 (NO DATA AVAILABLE)");
     }
-    
-    // Requirement 17.3: Log PeriodSeconds value
     if(validation.periodSeconds > 0) {
         Print("PeriodSeconds: ", validation.periodSeconds);
     }
-    
-    // Requirement 17.5: Log price parameters
     if(validation.topPrice > 0 || validation.bottomPrice > 0) {
         int cachedDigits = GetCachedDigits();
-        Print("Price Range: top=", DoubleToString(validation.topPrice, cachedDigits),
+    Print("Price Range: top=", DoubleToString(validation.topPrice, cachedDigits),
               ", bottom=", DoubleToString(validation.bottomPrice, cachedDigits));
     }
-    
-    // Requirement 17.5: Log time parameters
     if(validation.startTime > 0 || validation.endTime > 0) {
         Print("Time Range: start=", TimeToString(validation.startTime, TIME_DATE|TIME_MINUTES),
               ", end=", TimeToString(validation.endTime, TIME_DATE|TIME_MINUTES));
@@ -820,16 +776,16 @@ void LogZoneCreationFailure(const SZoneValidationResultEnhanced &validation,
     
     Print("═══════════════════════════════════════════════════════════");
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
 //| Log Zone Creation Success                                        |
-//| ثبت موفقیت ایجاد زون                                             |
+
 //| Requirement: 17.6                                                |
 //+------------------------------------------------------------------+
 void LogZoneCreationSuccess(const string zoneName)
 {
-    #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Zone created successfully: '", zoneName, "'");
     #endif
-}
+    }

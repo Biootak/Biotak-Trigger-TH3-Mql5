@@ -1,7 +1,4 @@
-//+------------------------------------------------------------------+
-//|                                           THCalculations.mqh     |
-//+------------------------------------------------------------------+
-#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
+﻿#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
 
 // Include centralized math constants
@@ -9,55 +6,42 @@
 // Include calculation cache for performance optimization
 #include "CalculationCache.mqh"
 
-//+------------------------------------------------------------------+
-//| DEPRECATED: These functions are kept for backward compatibility  |
-//| Use simple multipliers instead:                                  |
-//| - Short Step (SS) = structureTH * SS_MULTIPLIER (1.5)           |
-//| - Long Step (LS) = structureTH * LS_MULTIPLIER (2.0)            |
-//|                                                                  |
-//| Note: When Pattern = 0.5 * Structure, the structural formulas   |
-//| simplify to the same result as simple multipliers:              |
-//| - SS = (2*S) - P = (2*S) - (0.5*S) = 1.5*S                     |
-//| - LS = (3*S) - (2*P) = (3*S) - (2*0.5*S) = 2.0*S              |
-//+------------------------------------------------------------------+
-
 // Deprecated functions removed - use simple multipliers instead:
 // - Short Step (SS) = structureTH * SS_MULTIPLIER
 // - Long Step (LS) = structureTH * LS_MULTIPLIER
 
-// GOLD FIX #3: Enhanced epsilon-based validation with proper floating-point comparison
+// #3: Enhanced epsilon-based validation with proper floating-point comparison
 // Note: EPSILON constants are defined in FloatingPointHelper.mqh
 #ifndef MAX_SAFE_PRICE
 #define MAX_SAFE_PRICE 1000000.0
 #endif
-#ifndef MAX_SAFE_PERCENTAGE
+    #ifndef MAX_SAFE_PERCENTAGE
 #define MAX_SAFE_PERCENTAGE 1000.0
 #endif
-
-double CalculateTH(const double price, const int digits, const double percentage) {
-    // CRITICAL FIX: Use epsilon for floating-point comparison
+    double CalculateTH(const double price, const int digits, const double percentage) {
+    // Use epsilon for floating-point comparison
     if(price < EPSILON_PRICE || percentage < EPSILON_PERCENTAGE) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateTH: Invalid input - price=", DoubleToString(price, 10), 
               ", percentage=", DoubleToString(percentage, 10));
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // SECURITY: Prevent overflow with proper bounds
     if(price > MAX_SAFE_PRICE) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateTH: Price too large (", DoubleToString(price, 5), "), exceeds MAX_SAFE_PRICE");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // VALIDATION: Digits range check
     if(digits < 0 || digits > 8) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateTH: Invalid digits (", digits, "), must be 0-8");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // VALIDATION: Percentage range with hard limit
@@ -65,8 +49,8 @@ double CalculateTH(const double price, const int digits, const double percentage
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateTH: Percentage too large (", DoubleToString(percentage, 3), 
               "%), exceeds MAX_SAFE_PERCENTAGE");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
@@ -85,28 +69,22 @@ double CalculateTH(const double price, const int digits, const double percentage
     
     // Store result in cache for future use
     StoreTHCalculation(price, percentage, digits, result);
-    
     return result;
 }
-
-double CalculateTHPoints(const double price, const int digits, const double percentage) {
-    if(price <= 0 || percentage <= 0) return 0;
+    double CalculateTHPoints(const double price, const int digits, const double percentage) {
+        if(price <= 0 || percentage <= 0) return 0;
     
-    // CRITICAL FIX: Use IsZero for float comparison instead of == 0.0
+    // Use IsZero for float comparison instead of == 0.0
     static double s_pointValue = 0.0;
     if(IsZero(s_pointValue, EPSILON_PRICE)) s_pointValue = GetSymbolPoint();
     if(IsZero(s_pointValue, EPSILON_PRICE)) return 0;
-    
-    // محاسبه با دقت کامل (بدون NormalizeDouble برای تطابق با MotiveWave)
     double thStepPriceUnits = (price * percentage) / 100.0;
     return thStepPriceUnits <= 0 ? 0 : (thStepPriceUnits / s_pointValue);
 }
-
-double GetTimeframeTH() {
-    return CalculateTimeframeTH(GetFractalTimeframeForCurrent());
+    double GetTimeframeTH() {
+        return CalculateTimeframeTH(GetFractalTimeframeForCurrent());
 }
-
-double CalculateTimeframeTH(const string timeframe) {
+    double CalculateTimeframeTH(const string timeframe) {
     // ✅ OPTIMIZATION: Check cache first for fractal percentage
     int currentPeriod = GetCachedPeriod();
     double cachedPercentage = GetCachedFractalPercentage(currentPeriod);
@@ -117,17 +95,16 @@ double CalculateTimeframeTH(const string timeframe) {
     // Cache miss - perform lookup
     int totalTimeframes = ArraySize(FRACTAL_TIMEFRAMES);
     
-    // GOLD FIX: Use exact string comparison instead of StringFind
+    // Use exact string comparison instead of StringFind
     // StringFind can cause false matches (e.g., "M1" matches "H1+M4")
     for(int i = 0; i < totalTimeframes; i++) {
         if(FRACTAL_TIMEFRAMES[i] == timeframe) {
-            double percentage = MODIFIED_FRACTAL_PERCENTAGES[i];
+        double percentage = MODIFIED_FRACTAL_PERCENTAGES[i];
             
             // Store in cache for future use
             int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)currentPeriod);
-            StoreTimeframeConversion(currentPeriod, timeframe, percentage, periodSeconds);
-            
-            return percentage;
+    StoreTimeframeConversion(currentPeriod, timeframe, percentage, periodSeconds);
+    return percentage;
         }
     }
     
@@ -135,13 +112,8 @@ double CalculateTimeframeTH(const string timeframe) {
     double fallbackPercentage = 1.0;
     int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)currentPeriod);
     StoreTimeframeConversion(currentPeriod, timeframe, fallbackPercentage, periodSeconds);
-    
     return fallbackPercentage;
 }
-
-//+------------------------------------------------------------------+
-//| New calculation functions for extended step modes                |
-//+------------------------------------------------------------------+
 
 // ✅ FIXED: Removed duplicate constant definitions
 // Constants are now in MathConstants.mqh:
@@ -150,24 +122,20 @@ double CalculateTimeframeTH(const string timeframe) {
 // - ATR_FACTOR_M (3.0)
 
 double CalculateShortStep(const double thValue) {
-    return thValue * SS_MULTIPLIER;
+        return thValue * SS_MULTIPLIER;
 }
-
-double CalculateLongStep(const double thValue) {
-    return thValue * LS_MULTIPLIER;
+    double CalculateLongStep(const double thValue) {
+        return thValue * LS_MULTIPLIER;
 }
-
-double CalculateEStep(const double thValue) {
+    double CalculateEStep(const double thValue) {
     // Formula from EventHandlers.mqh: E = TH * E_MULTIPLIER
     return thValue * E_MULTIPLIER;
 }
-
-double CalculateTPStep(const double eValue) {
+    double CalculateTPStep(const double eValue) {
     // Formula from EventHandlers.mqh: TP = E * 3 = TH * TP_MULTIPLIER
     return eValue * 3.0;
 }
-
-double CalculateControlValue(const double shortStep, const double longStep) {
+    double CalculateControlValue(const double shortStep, const double longStep) {
     // Logic deduced from typical Biotak patterns
     return shortStep;
 }
@@ -175,7 +143,7 @@ double CalculateControlValue(const double shortStep, const double longStep) {
 // Reconstructed CalculateSharedPatternStep
 double CalculateSharedPatternStep(const double currentStructure, const double currentPattern,
                                  const double higherPatternStructure, const double higherPatternPattern) {
-    #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
     Print("CalculateSharedPatternStep: currentS=", currentStructure, 
           ", currentP=", currentPattern, ", higherS=", higherPatternStructure, 
           ", higherP=", higherPatternPattern);
@@ -190,19 +158,18 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
 
 //+------------------------------------------------------------------+
 //| Calculate Factor Step Size                                        |
-//| محاسبه اندازه گام فاکتور                                          |
+
 //| Simple Formula: Step = (High - Low) / (Factor × 2)               |
-//| CRITICAL FIX: Complete overflow and division-by-zero protection  |
+//| Complete overflow and division-by-zero protection  |
 //+------------------------------------------------------------------+
 
 #ifndef MAX_FACTOR_VALUE
 #define MAX_FACTOR_VALUE 10000.0
 #endif
-#ifndef MIN_FACTOR_VALUE
+    #ifndef MIN_FACTOR_VALUE
 #define MIN_FACTOR_VALUE 0.01
 #endif
-
-double CalculateFactorStepSize(const double highPrice, const double lowPrice, const double factor) {
+    double CalculateFactorStepSize(const double highPrice, const double lowPrice, const double factor) {
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL FIX #1: Validate prices with epsilon
     // ═══════════════════════════════════════════════════════════════
@@ -210,16 +177,15 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, Digits), 
               ", Low=", DoubleToString(lowPrice, Digits));
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
-    
     if(highPrice <= lowPrice) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, Digits), 
               ") must be greater than Low (", DoubleToString(lowPrice, Digits), ")");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -231,8 +197,8 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits), 
               ") - minimum ", DoubleToString(minRange, Digits), " required");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -242,15 +208,15 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Factor too small (", DoubleToString(factor, 2), 
               ") - minimum ", DoubleToString(MIN_FACTOR_VALUE, 2), " required");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     if(factor > MAX_FACTOR_VALUE) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Factor too large (", DoubleToString(factor, 2), 
               ") - maximum ", DoubleToString(MAX_FACTOR_VALUE, 2), " allowed");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
@@ -260,7 +226,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // GOLD FIX v3: Enhanced safe division with proper threshold
+    // Enhanced safe division with proper threshold
     // ═══════════════════════════════════════════════════════════════
     double divisions = factor * 2.0;
     
@@ -270,16 +236,16 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Divisions too small (", DoubleToString(divisions, 10), 
               ") - minimum required: ", DoubleToString(MIN_SAFE_DIVISIONS, 10));
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // Validate divisions result for overflow
     if(divisions > 1000000.0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Invalid divisions calculated (too large): ", divisions);
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // Use SafeDivide from FloatingPointHelper for additional safety
@@ -289,8 +255,8 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: SafeDivide returned invalid result");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -299,32 +265,31 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Invalid step size result: ", stepSize);
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     if(stepSize < GetCachedPoint() * 0.1) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     if(stepSize > range) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateFactorStepSize: Step size (", stepSize, ") exceeds range (", range, ")");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     // Store result in cache for future use
     int currentPeriod = GetCachedPeriod();
     StoreFactorStepSize(highPrice, lowPrice, factor, inpHistoricalPeriods, currentPeriod, stepSize);
-    
     return stepSize;
 }
 
 //+------------------------------------------------------------------+
 //| Calculate Fractal Values (Structure, Pattern, Trigger) from TH  |
-//| محاسبه مقادیر فراکتال (ساختار، الگو، تریگر) از TH               |
+
 //+------------------------------------------------------------------+
 void CalculateFractalValues(const double thValue, double &structureValue, double &patternValue, double &triggerValue) {
     // In TH Basis, Structure = TH
@@ -339,7 +304,7 @@ void CalculateFractalValues(const double thValue, double &structureValue, double
 
 //+------------------------------------------------------------------+
 //| Calculate M Distance based on Control Value                      |
-//| محاسبه فاصله M بر اساس مقدار کنترل                               |
+
 //+------------------------------------------------------------------+
 double CalculateMDistance(const double controlValue) {
     // M Distance is Control Value divided by ATR_FACTOR_M (3.0)

@@ -1,9 +1,4 @@
-//+------------------------------------------------------------------+
-//|                                                ZoneConstants.mqh |
-//|                                  Copyright 2025, Biotak Project  |
-//|                                    Global Constants & Settings   |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2025, Biotak Project"
+﻿#property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 
 // CRITICAL: Include guard to prevent duplicate symbols
@@ -12,27 +7,27 @@
 
 //+------------------------------------------------------------------+
 //| GLOBAL CONSTANTS: Zone Drawing Configuration                     |
-//| ثوابت جهانی: تنظیمات رسم زون                                     |
+
 //+------------------------------------------------------------------+
 
 // Performance Constants — duplicates moved to ProjectConstants.mqh (single source of truth)\n// ZONE_EXTENSION_PERIODS, MAX_ZONES_PER_CHART, OBJECT_CACHE_SIZE → ProjectConstants.mqh
-const int VALIDATION_CACHE_TTL = 60;           // مدت اعتبار کش اعتبارسنجی (ثانیه)
-const int CACHE_CLEANUP_INTERVAL = 300;        // فاصله cleanup کش (5 دقیقه)
-const int MAX_ALPHA_VALUE = 255;               // حداکثر مقدار آلفا برای transparency
-const int MIN_ALPHA_VALUE = 0;                 // حداقل مقدار آلفا
+const int VALIDATION_CACHE_TTL = 60;
+    const int CACHE_CLEANUP_INTERVAL = 300;
+    const int MAX_ALPHA_VALUE = 255;
+    const int MIN_ALPHA_VALUE = 0;                 
 
 // Safety Limits — duplicates moved to ProjectConstants.mqh (single source of truth)\n// MAX_ZONE_HEIGHT_PERCENT, MIN_ZONE_HEIGHT_PERCENT, MAX_PRICE_DEVIATION → ProjectConstants.mqh
-const double MIN_STEP_SIZE_RATIO = 0.000001;   // حداقل نسبت اندازه گام به قیمت
+const double MIN_STEP_SIZE_RATIO = 0.000001;   
 
 // Error Codes
 const int ERR_ZONE_NONE = 0;
-const int ERR_ZONE_INVALID_ARRAY = 1;
-const int ERR_ZONE_INVALID_STEP = 2;
-const int ERR_ZONE_INVALID_CONFIG = 3;
-const int ERR_ZONE_RENDER_FAILED = 4;
-const int ERR_ZONE_MEMORY_LIMIT = 5;
-const int ERR_ZONE_ARRAY_MISMATCH = 6;
-const int ERR_ZONE_NO_DATA = 7;            // ✅ NEW: No bars available yet
+    const int ERR_ZONE_INVALID_ARRAY = 1;
+    const int ERR_ZONE_INVALID_STEP = 2;
+    const int ERR_ZONE_INVALID_CONFIG = 3;
+    const int ERR_ZONE_RENDER_FAILED = 4;
+    const int ERR_ZONE_MEMORY_LIMIT = 5;
+    const int ERR_ZONE_ARRAY_MISMATCH = 6;
+    const int ERR_ZONE_NO_DATA = 7;            // ✅ NEW: No bars available yet
 
 // Debug Flags
 #ifdef ENABLE_DEBUG_LOGS
@@ -49,10 +44,10 @@ const int ERR_ZONE_NO_DATA = 7;            // ✅ NEW: No bars available yet
 
 //+------------------------------------------------------------------+
 //| STRUCTURE: Performance Metrics                                    |
-//| ساختار: معیارهای عملکرد                                          |
+
 //+------------------------------------------------------------------+
 struct SZonePerformanceMetrics {
-    int totalZonesCreated;
+        int totalZonesCreated;
     int totalZonesUpdated;
     int totalZonesFailed;
     int totalValidationCalls;
@@ -64,19 +59,17 @@ struct SZonePerformanceMetrics {
 
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES: Performance Tracking                           |
-//| متغیرهای جهانی: ردیابی عملکرد                                    |
+
 //+------------------------------------------------------------------+
 static SZonePerformanceMetrics g_zoneMetrics;
-static datetime g_lastCacheCleanup = 0;
-
-// Market Price Cache (برای جلوگیری از محاسبات تکراری)
-static double g_cachedMarketPrice = 0;
-static datetime g_cachedMarketPriceTime = 0;
-static int g_cachedMarketPriceTTL = 1; // 1 ثانیه
+    static datetime g_lastCacheCleanup = 0;
+    static double g_cachedMarketPrice = 0;
+    static datetime g_cachedMarketPriceTime = 0;
+    static int g_cachedMarketPriceTTL = 1; 
 
 //+------------------------------------------------------------------+
 //| Initialize Performance Metrics                                    |
-//| مقداردهی اولیه معیارهای عملکرد                                   |
+
 //+------------------------------------------------------------------+
 void InitializeZoneMetrics() {
     g_zoneMetrics.totalZonesCreated = 0;
@@ -91,18 +84,18 @@ void InitializeZoneMetrics() {
 
 //+------------------------------------------------------------------+
 //| Get Performance Metrics                                           |
-//| دریافت معیارهای عملکرد                                            |
+
 //+------------------------------------------------------------------+
 SZonePerformanceMetrics GetZoneMetrics() {
-    return g_zoneMetrics;
+        return g_zoneMetrics;
 }
 
 //+------------------------------------------------------------------+
 //| Print Performance Report                                          |
-//| چاپ گزارش عملکرد                                                  |
+
 //+------------------------------------------------------------------+
 void PrintZonePerformanceReport() {
-    #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
     Print("═══════════════════════════════════════════════════════════");
     Print("📊 Zone Drawing Performance Report");
     Print("═══════════════════════════════════════════════════════════");
@@ -116,11 +109,10 @@ void PrintZonePerformanceReport() {
     Print("📅 Last Reset: ", TimeToString(g_zoneMetrics.lastResetTime));
     Print("═══════════════════════════════════════════════════════════");
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
-//| Cleanup Zone System (برای OnDeinit)                              |
-//| پاک‌سازی سیستم زون                                               |
+
 //+------------------------------------------------------------------+
 void CleanupZoneSystem() {
     // Reset metrics
@@ -131,26 +123,21 @@ void CleanupZoneSystem() {
     g_zoneMetrics.totalRenderCalls = 0;
     g_zoneMetrics.avgValidationTime = 0;
     g_zoneMetrics.avgRenderTime = 0;
-    
     g_lastCacheCleanup = 0;
     
     // Clear market price cache
     g_cachedMarketPrice = 0;
     g_cachedMarketPriceTime = 0;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ CleanupZoneSystem: System cleaned up successfully");
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
-//| Get Cached Market Price (با TTL)                                 |
-//| دریافت قیمت بازار از کش                                          |
+
 //+------------------------------------------------------------------+
 double GetCachedMarketPrice() {
-    datetime currentTime = TimeCurrent();
-    
-    // بررسی اعتبار کش
+        datetime currentTime = TimeCurrent();
     if(g_cachedMarketPriceTime > 0 && 
        (currentTime - g_cachedMarketPriceTime) < g_cachedMarketPriceTTL) {
         return g_cachedMarketPrice;
@@ -159,16 +146,13 @@ double GetCachedMarketPrice() {
     // CRITICAL: Cache Bid/Ask to avoid race condition
     double cachedBid = Bid;
     double cachedAsk = Ask;
-    
-    // محاسبه و ذخیره در کش
     g_cachedMarketPrice = (cachedBid + cachedAsk) / 2.0;
     g_cachedMarketPriceTime = currentTime;
-    
     return g_cachedMarketPrice;
 }
 
 //+------------------------------------------------------------------+
-//| Cleanup Object Cache (پاک‌سازی دوره‌ای)                          |
+
 //| Note: This function is deprecated - use ObjectCache.mqh instead  |
 //+------------------------------------------------------------------+
 void CleanupObjectCache() {
@@ -176,5 +160,5 @@ void CleanupObjectCache() {
     // This function is kept for backward compatibility but does nothing
     g_lastCacheCleanup = TimeCurrent();
 }
-
-#endif // ZONE_CONSTANTS_MQH
+    #endif
+    // ZONE_CONSTANTS_MQH

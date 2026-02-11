@@ -1,22 +1,10 @@
-//+------------------------------------------------------------------+
-//|                                   InputValidationEnhanced.mqh     |
-//|                                  GOLD FIX: Input Security Layer   |
-//|                                  Filename Sanitization            |
-//+------------------------------------------------------------------+
-#property copyright "© Biotak - Security Enhanced"
+﻿#ifndef INPUT_VALIDATION_ENHANCED_MQH
+#define INPUT_VALIDATION_ENHANCED_MQH
 
-//+------------------------------------------------------------------+
-//| Sanitize filename for safe file operations                       |
-//+------------------------------------------------------------------+
 string SanitizeFilename(const string filename) {
-    string safe = filename;
-    
-    // Remove path traversal
+        string safe = filename;
     StringReplace(safe, "..", "");
-    StringReplace(safe, "/", "_");
-    StringReplace(safe, "\\", "_");
-    
-    // Remove dangerous characters
+    StringReplace(safe, "/", "_");   StringReplace(safe, "\\", "_");
     StringReplace(safe, ":", "");
     StringReplace(safe, "*", "");
     StringReplace(safe, "?", "");
@@ -25,26 +13,14 @@ string SanitizeFilename(const string filename) {
     StringReplace(safe, ">", "");
     StringReplace(safe, "|", "");
     StringReplace(safe, "\0", "");
-    StringReplace(safe, "\n", "");
-    StringReplace(safe, "\r", "");
-    
-    // Ensure not empty
-    if(StringLen(safe) == 0) {
-        safe = "default";
-    }
-    
-    // ✅ SECURITY FIX: Limit length to prevent buffer overflow
-    // Reserve space for path (BiotakReports\\ + Pattern_ + timestamp)
+    StringReplace(safe, "\n", "");   StringReplace(safe, "\r", "");
+    if(StringLen(safe) == 0) safe = "default";
     #ifdef MAX_PATTERN_NAME_LENGTH
-    if(StringLen(safe) > MAX_PATTERN_NAME_LENGTH) {
-        safe = StringSubstr(safe, 0, MAX_PATTERN_NAME_LENGTH);
-    }
+    if(StringLen(safe) > MAX_PATTERN_NAME_LENGTH) safe = StringSubstr(safe, 0, MAX_PATTERN_NAME_LENGTH);
     #else
-    // Fallback: use 100 chars if constant not defined
-    if(StringLen(safe) > 100) {
-        safe = StringSubstr(safe, 0, 100);
-    }
+    if(StringLen(safe) > 100) safe = StringSubstr(safe, 0, 100);
     #endif
-    
     return safe;
 }
+    #endif
+    // INPUT_VALIDATION_ENHANCED_MQH

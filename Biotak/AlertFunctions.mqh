@@ -1,101 +1,68 @@
-// Helper function to check if alert should be triggered (prevents spam)
+﻿#ifndef ALERT_FUNCTIONS_MQH
+#define ALERT_FUNCTIONS_MQH
+
 bool ShouldTriggerAlert(const string levelName) {
-    if(!inpAlertOnce) return true; // Always trigger if AlertOnce is disabled
-    
-    datetime currentTime = TimeCurrent();
+    if(!inpAlertOnce) return true;
     datetime currentBarTime = iTime(_Symbol, Period(), 0);
-    
-    // Check if this is a new bar and different level than last alert
     if(currentBarTime > g_lastAlertTime || g_lastAlertLevel != levelName) {
         g_lastAlertTime = currentBarTime;
-        g_lastAlertLevel = levelName;
-        return true;
+    g_lastAlertLevel = levelName;
+    return true;
     }
-    
-    return false; // Same bar and same level, don't trigger
+    return false;
 }
+    void TriggerAlert(const string message) {
+        if(inpPlaySound) PlaySound(inpAlertSoundFile);
+    if(inpSendNotification) SendNotification(message);
+    if(inpSendEmail) SendMail("TH Indicator Alert", message);
+    Alert(message);
+}
+    void CheckAlerts(const string objectPrefix, double currentPrice) {
+        if(objectPrefix == "" || currentPrice <= 0) return;
 
-// بهینه‌سازی شده برای سرعت و امنیت بیشتر
-void CheckAlerts(const string objectPrefix, double currentPrice) {
-    // بررسی اعتبار پارامترهای ورودی
-    if(objectPrefix == "" || currentPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("CheckAlerts: Invalid parameters - objectPrefix: ", objectPrefix, ", currentPrice: ", currentPrice);
-        #endif
-        return;
-    }
-    
-    // هشدارهای سطوح بالا/پایین تاریخی
-    // Skip High/Low alerts when Custom Price mode is active
+    // High/Low alerts (skip in Custom Price mode)
     if(inpEnableHighLowAlerts && g_thStartPointType != TH_START_POINT_CUSTOM_PRICE) {
-        if(currentPrice >= g_highestHigh && ShouldTriggerAlert("HistoricalHigh")) {
-            if(inpPlaySound) PlaySound(inpAlertSoundFile);
-            if(inpSendNotification) SendNotification("Price reached Historical High Level: " + DoubleToString(g_highestHigh, Digits));
-            if(inpSendEmail) SendMail("TH Indicator Alert", "Price reached Historical High Level: " + DoubleToString(g_highestHigh, Digits));
-            Alert("Price reached Historical High Level: ", g_highestHigh);
-        }
-        if(currentPrice <= g_lowestLow && ShouldTriggerAlert("HistoricalLow")) {
-            if(inpPlaySound) PlaySound(inpAlertSoundFile);
-            if(inpSendNotification) SendNotification("Price reached Historical Low Level: " + DoubleToString(g_lowestLow, Digits));
-            if(inpSendEmail) SendMail("TH Indicator Alert", "Price reached Historical Low Level: " + DoubleToString(g_lowestLow, Digits));
-            Alert("Price reached Historical Low Level: ", g_lowestLow);
-        }
+        if(currentPrice >= g_highestHigh && ShouldTriggerAlert("HistoricalHigh"))
+            TriggerAlert("Price reached Historical High: " + DoubleToString(g_highestHigh, Digits));
+    if(currentPrice <= g_lowestLow && ShouldTriggerAlert("HistoricalLow"))
+            TriggerAlert("Price reached Historical Low: " + DoubleToString(g_lowestLow, Digits));
     }
-    
-    // هشدارهای سطوح TH
+
+    // TH Level alerts
     if(inpEnableTHAlerts && IsTriggerLevelsEnabled()) {
         string prefix = objectPrefix + "TH_Level_";
-        string lineNameMid = prefix + "Mid";
-        double midpointLevel = ObjectGetDouble(0, lineNameMid, OBJPROP_PRICE, 0);
-        
-        // بررسی سطح میانی
-        if(midpointLevel != EMPTY_VALUE && MathAbs(currentPrice - midpointLevel) < Point) {
-            if(ShouldTriggerAlert("MidpointLevel")) {
-                if(inpPlaySound) PlaySound(inpAlertSoundFile);
-                if(inpSendNotification) SendNotification("Price reached Trigger TH Midpoint Level: " + DoubleToString(midpointLevel, Digits));
-                if(inpSendEmail) SendMail("TH Indicator Alert", "Price reached Trigger TH Midpoint Level: " + DoubleToString(midpointLevel, Digits));
-                Alert("Price reached Trigger TH Midpoint Level: ", midpointLevel);
-            }
+    string lineNameMid = prefix + "Mid";
+    double midpointLevel = ObjectGetDouble(0, lineNameMid, OBJPROP_PRICE, 0);
+    if(midpointLevel != EMPTY_VALUE && MathAbs(currentPrice - midpointLevel) < Point) {
+        if(ShouldTriggerAlert("MidpointLevel"))
+                TriggerAlert("Price reached Midpoint: " + DoubleToString(midpointLevel, Digits));
         }
-        
-        // بهینه‌سازی: فقط سطوح فعال را بررسی کنید
-        int maxLevelsToCheck = MathMax(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow);
-        maxLevelsToCheck = MathMin(maxLevelsToCheck, 256); // محدودیت ایمنی
-        
-        for(int stepCount = 1; stepCount <= maxLevelsToCheck; stepCount++) {
-            // بررسی سطوح بالا
-            if(stepCount <= inpMaxTHLevelsAbove) {
-                string lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCount);
-                if(CacheObjectExists(lineNameAbove)) { // Use hash-cached object check
-                    double levelAbove = ObjectGetDouble(0, lineNameAbove, OBJPROP_PRICE, 0);
-                    if(levelAbove != EMPTY_VALUE && currentPrice >= levelAbove) {
-                        string alertKey = "TriggerTH_Up_" + IntegerToString(stepCount);
-                        if(ShouldTriggerAlert(alertKey)) {
-                            if(inpPlaySound) PlaySound(inpAlertSoundFile);
-                            if(inpSendNotification) SendNotification("Price reached Trigger TH Level Above " + IntegerToString(stepCount) + ": " + DoubleToString(levelAbove, Digits));
-                            if(inpSendEmail) SendMail("TH Indicator Alert", "Price reached Trigger TH Level Above " + IntegerToString(stepCount) + ": " + DoubleToString(levelAbove, Digits));
-                            Alert("Price reached Trigger TH Level Above: ", levelAbove);
-                        }
+    int maxLevels = MathMin(MathMax(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow), 256);
+    for(int step = 1; step <= maxLevels; step++) {
+        if(step <= inpMaxTHLevelsAbove) {
+        string nameAbove = prefix + "TriggerTH_Up_" + IntegerToString(step);
+    if(CacheObjectExists(nameAbove)) {
+        double lvl = ObjectGetDouble(0, nameAbove, OBJPROP_PRICE, 0);
+    if(lvl != EMPTY_VALUE && currentPrice >= lvl) {
+        string key = "TriggerTH_Up_" + IntegerToString(step);
+    if(ShouldTriggerAlert(key))
+                            TriggerAlert("Price reached TH Up " + IntegerToString(step) + ": " + DoubleToString(lvl, Digits));
                     }
                 }
             }
-            
-            // بررسی سطوح پایین
-            if(stepCount <= inpMaxTHLevelsBelow) {
-                string lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCount);
-                if(CacheObjectExists(lineNameBelow)) { // Use hash-cached object check
-                    double levelBelow = ObjectGetDouble(0, lineNameBelow, OBJPROP_PRICE, 0);
-                    if(levelBelow != EMPTY_VALUE && currentPrice <= levelBelow) {
-                        string alertKey = "TriggerTH_Down_" + IntegerToString(stepCount);
-                        if(ShouldTriggerAlert(alertKey)) {
-                            if(inpPlaySound) PlaySound(inpAlertSoundFile);
-                            if(inpSendNotification) SendNotification("Price reached Trigger TH Level Below " + IntegerToString(stepCount) + ": " + DoubleToString(levelBelow, Digits));
-                            if(inpSendEmail) SendMail("TH Indicator Alert", "Price reached Trigger TH Level Below " + IntegerToString(stepCount) + ": " + DoubleToString(levelBelow, Digits));
-                            Alert("Price reached Trigger TH Level Below: ", levelBelow);
-                        }
+    if(step <= inpMaxTHLevelsBelow) {
+        string nameBelow = prefix + "TriggerTH_Down_" + IntegerToString(step);
+    if(CacheObjectExists(nameBelow)) {
+        double lvl = ObjectGetDouble(0, nameBelow, OBJPROP_PRICE, 0);
+    if(lvl != EMPTY_VALUE && currentPrice <= lvl) {
+        string key = "TriggerTH_Down_" + IntegerToString(step);
+    if(ShouldTriggerAlert(key))
+                            TriggerAlert("Price reached TH Down " + IntegerToString(step) + ": " + DoubleToString(lvl, Digits));
                     }
                 }
             }
         }
     }
 }
+    #endif
+    // ALERT_FUNCTIONS_MQH

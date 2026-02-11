@@ -1,9 +1,4 @@
-//+------------------------------------------------------------------+
-//|                                                   ZoneFactory.mqh |
-//|                                  Copyright 2025, Biotak Project  |
-//|                          Factory Pattern for Zone Creation       |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2025, Biotak Project"
+﻿#property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 
 #include "ConstantsAndEnums.mqh"
@@ -15,7 +10,7 @@
 
 //+------------------------------------------------------------------+
 //| Zone Factory - Centralized Zone Creation                         |
-//| فکتوری Zone - ساخت متمرکز Zone‌ها                                |
+
 //|                                                                  |
 //| BENEFITS:                                                        |
 //| - Single point of zone creation (DRY)                           |
@@ -26,7 +21,7 @@
 
 //+------------------------------------------------------------------+
 //| Calculate Adaptive Extension Multiplier with Caching             |
-//| محاسبه ضریب گسترش تطبیقی با کش                                   |
+
 //| Task 7 - Requirements: 19.1, 19.2, 19.3, 19.4, 19.5, 19.6, 19.7 |
 //|                                                                  |
 //| ADAPTIVE EXTENSION LOGIC:                                        |
@@ -46,21 +41,17 @@
 //+------------------------------------------------------------------+
 int CalculateAdaptiveExtensionMultiplier(int periodSeconds)
 {
-    // Requirement 19.1: Check cache first
-    // Requirement 19.2: Return cached value if timeframe unchanged
-    int currentPeriod = GetCachedPeriod();
+        int currentPeriod = GetCachedPeriod();
     double cachedMultiplier = GetCachedExtensionMultiplier(currentPeriod, periodSeconds);
-    
     if(cachedMultiplier > 0) {
-        // Requirement 19.5: Skip all interpolation arithmetic on cache hit
         #ifdef ENABLE_DEBUG_LOGS
         static int s_extensionMultiplierCacheHits = 0;
-        s_extensionMultiplierCacheHits++;
-        if(s_extensionMultiplierCacheHits % 100 == 0) {
+    s_extensionMultiplierCacheHits++;
+    if(s_extensionMultiplierCacheHits % 100 == 0) {
             Print("✅ Extension Multiplier Cache Hit #", s_extensionMultiplierCacheHits);
         }
-        #endif
-        return (int)cachedMultiplier;
+    #endif
+    return (int)cachedMultiplier;
     }
     
     // Cache miss - calculate multiplier
@@ -77,14 +68,10 @@ int CalculateAdaptiveExtensionMultiplier(int periodSeconds)
         extensionMultiplier = 50;
     }
     else if(periodSeconds <= 1800) {                   // M5-M30 (300-1800s)
-        // Smooth interpolation: 50 at M5 → 60 at M30
-        // Requirement 19.4: Cache interpolation result
-        extensionMultiplier = (int)(50 + (periodSeconds - 300) * 10.0 / 1500.0);
+        // Smooth interpolation: 50 at M5 → 60 at M30        extensionMultiplier = (int)(50 + (periodSeconds - 300) * 10.0 / 1500.0);
     }
     else if(periodSeconds <= 3600) {                   // M30-H1 (1800-3600s)
-        // Smooth transition: 60 at M30 → 100 at H1
-        // Requirement 19.4: Cache interpolation result
-        extensionMultiplier = (int)(60 + (periodSeconds - 1800) * 40.0 / 1800.0);
+        // Smooth transition: 60 at M30 → 100 at H1        extensionMultiplier = (int)(60 + (periodSeconds - 1800) * 40.0 / 1800.0);
     }
     else if(periodSeconds <= 86400) {                  // H1-D1 (3600-86400s)
         // All hourly timeframes get 100
@@ -93,26 +80,20 @@ int CalculateAdaptiveExtensionMultiplier(int periodSeconds)
     else {                                             // D1+ (W1, MN1)
         extensionMultiplier = 100;
     }
-    
-    // Requirement 19.3: Store in cache for next time (timeframe change will invalidate)
-    // Requirement 19.6: Cache persists for reuse across multiple zone creations
-    // Requirement 19.7: Cache persists across indicator reinitialization (static variables)
     StoreExtensionMultiplier(currentPeriod, periodSeconds, (double)extensionMultiplier);
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("💾 Extension Multiplier Calculated and Cached: period=", currentPeriod, 
           ", periodSeconds=", periodSeconds, ", multiplier=", extensionMultiplier);
     #endif
-    
     return extensionMultiplier;
 }
 
 //+------------------------------------------------------------------+
 //| Zone Creation Request                                            |
-//| درخواست ساخت Zone                                                |
+
 //+------------------------------------------------------------------+
 struct SZoneCreationRequest {
-    string name;              // Zone name
+        string name;              // Zone name
     double topPrice;          // Top boundary
     double bottomPrice;       // Bottom boundary
     color zoneColor;          // Zone color
@@ -124,18 +105,18 @@ struct SZoneCreationRequest {
 
 //+------------------------------------------------------------------+
 //| Zone Creation Result                                             |
-//| نتیجه ساخت Zone                                                  |
+
 //+------------------------------------------------------------------+
 struct SZoneCreationResult {
-    bool success;             // Was creation successful?
+        bool success;             // Was creation successful?
     string zoneName;          // Created zone name
     string errorMessage;      // Error message if failed
     int errorCode;            // Error code
 };
 
 //+------------------------------------------------------------------+
-//| Create Zone with Full Validation - GOLD VERSION v3 FINAL         |
-//| ساخت Zone با اعتبارسنجی کامل - نسخه طلایی v3 نهایی               |
+//| Create Zone with Full Validation - |
+
 //|                                                                  |
 //| IMPROVEMENTS v3 (FINAL):                                         |
 //| - Fixed: Removed duplicate property setting (performance)       |
@@ -154,7 +135,6 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     result.zoneName = request.name;
     result.errorMessage = "";
     result.errorCode = ERR_ZONE_NONE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("🔧 CreateZone START: '", request.name, "' Top=", request.topPrice, " Bottom=", request.bottomPrice);
     #endif
@@ -166,8 +146,8 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // Validate name
     if(StringLen(request.name) == 0) {
         result.errorMessage = "Zone name cannot be empty";
-        result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        return result;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    return result;
     }
     
     // Validate prices
@@ -175,33 +155,31 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         result.errorMessage = StringFormat("Invalid zone prices: Top=%s, Bottom=%s",
                                           DoubleToString(request.topPrice, GetCachedDigits()),
                                           DoubleToString(request.bottomPrice, GetCachedDigits()));
-        result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        return result;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    return result;
     }
-    
     if(request.topPrice <= request.bottomPrice) {
         result.errorMessage = StringFormat("Top price (%s) must be greater than bottom price (%s)",
                                           DoubleToString(request.topPrice, GetCachedDigits()),
                                           DoubleToString(request.bottomPrice, GetCachedDigits()));
-        result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        return result;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    return result;
     }
     
     // Validate transparency with warning for clamping
     int originalTransparency = request.transparency;
     int clampedTransparency = request.transparency;
-    
     if(clampedTransparency < 0) {
         clampedTransparency = 0;
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CreateZone: Transparency clamped from ", originalTransparency, " to 0");
-        #endif
+    #endif
     }
     if(clampedTransparency > 100) {
         clampedTransparency = 100;
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CreateZone: Transparency clamped from ", originalTransparency, " to 100");
-        #endif
+    #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -212,17 +190,16 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // CRITICAL: Read all values in one atomic block to prevent race conditions
     int safeBars = Bars(_Symbol, _Period);
     datetime currentTime = 0;
-    
     if(safeBars > 0) {
         // Read time IMMEDIATELY after bars check (minimize race window)
         currentTime = iTime(_Symbol, _Period, 0);
         
         // Validate: bars count should still match
         int barsRecheck = Bars(_Symbol, _Period);
-        if(barsRecheck != safeBars) {
+    if(barsRecheck != safeBars) {
             // Bars changed during read - retry once
             safeBars = barsRecheck;
-            currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
+    currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
         }
     }
     
@@ -234,10 +211,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // Final validation
     if(currentTime <= 0) {
         result.errorMessage = StringFormat("Invalid time (Bars=%d)", safeBars);
-        result.errorCode = ERR_ZONE_RENDER_FAILED;
-        return result;
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    return result;
     }
-    
     datetime startTime = request.startTime;
     datetime endTime = request.endTime;
     
@@ -246,18 +222,14 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // ═══════════════════════════════════════════════════════════════
     // Check if we need to calculate times (both are 0 or auto-calculate)
     bool needsTimeCalculation = (startTime == 0 || endTime == 0);
-    
     if(needsTimeCalculation) {
         // Calculate extension multiplier parameters for cache key
-        // Task 7: Use cached extension multiplier (Requirements 19.1, 19.2, 19.5, 19.6)
         int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
-        int extensionMultiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
+    int extensionMultiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
         
         // Try to get cached geometry
-        // Requirement 4.1: Skip geometry recalculation when prices unchanged
-        // Requirement 4.2: Use cached geometry when extension parameters unchanged
         datetime cachedStartTime = 0;
-        datetime cachedEndTime = 0;
+    datetime cachedEndTime = 0;
         
         // Note: We don't have historicalPeriods in request, using 0 as placeholder
         // The cache will still work for same prices and extension multiplier
@@ -269,24 +241,20 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             cachedStartTime,
             cachedEndTime
         );
-        
-        if(cacheHit && cachedStartTime > 0 && cachedEndTime > 0) {
-            // Requirement 4.5: Skip all time and price calculations on cache hit
-            startTime = cachedStartTime;
-            endTime = cachedEndTime;
-            needsTimeCalculation = false;
-            
-            #ifdef ENABLE_DEBUG_LOGS
+    if(cacheHit && cachedStartTime > 0 && cachedEndTime > 0) {            startTime = cachedStartTime;
+    endTime = cachedEndTime;
+    needsTimeCalculation = false;
+    #ifdef ENABLE_DEBUG_LOGS
             Print("✅ CreateZone: Geometry cache HIT for '", request.name, 
                   "' - skipping time calculations");
-            #endif
-        }
+    #endif
+    }
         else {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             Print("🔍 CreateZone: Geometry cache MISS for '", request.name, 
                   "' - will calculate times");
-            #endif
-        }
+    #endif
+    }
     }
     
     // Auto-calculate times if not provided and not cached
@@ -296,36 +264,36 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             // LOW TIMEFRAME OPTIMIZATION: Wait for first bar data
             #ifdef ENABLE_DEBUG_LOGS
             Print("⏱️ CreateZone: Waiting for bar data on TF=", GetCachedPeriod());
-            #endif
-            result.errorMessage = "No bars available - waiting for first tick";
-            result.errorCode = ERR_ZONE_NO_DATA;
-            return result;
+    #endif
+    result.errorMessage = "No bars available - waiting for first tick";
+    result.errorCode = ERR_ZONE_NO_DATA;
+    return result;
         }
         
-        // FIX BUG #12: Correct validation logic
+        // Correct validation logic
         // startIndex will be safeBars-1, which is always < safeBars
         // So we need to check if safeBars is at least 1
         if(safeBars < 1) {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CreateZone: Not enough bars (", safeBars, ") on TF=", GetCachedPeriod());
-            #endif
-            result.errorMessage = "Not enough bars for zone creation";
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
-            return result;
+    #endif
+    result.errorMessage = "Not enough bars for zone creation";
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    return result;
         }
         
         // ZONE START TIME: Use time from far enough back to cover visible chart history
-        // زمان شروع Zone: از زمان کافی عقب برای پوشش تاریخچه قابل مشاهده چارت
-        // CRITICAL FIX: For ALL timeframes below H1, use extended lookback
-        // برای تمام تایم‌فریم‌های زیر H1، از lookback گسترده استفاده کن
-        int lookbackBars;
-        int periodMinutes = PeriodMinutes();
         
-        // CRITICAL FIX: Extended lookback for ALL sub-hourly timeframes
+        // For ALL timeframes below H1, use extended lookback
+        
+        int lookbackBars;
+    int periodMinutes = PeriodMinutes();
+        
+        // Extended lookback for ALL sub-hourly timeframes
         // This ensures zones are visible on M1, M2, M3, M4, M5, M6, M10, M12, M15, M20, M30
         if(periodMinutes < 60) {
             // Sub-hourly timeframes: Use maximum lookback for visibility
-            // تایم‌فریم‌های زیر یک ساعت: از حداکثر lookback برای نمایش استفاده کن
+            
             lookbackBars = MathMin(safeBars - 1, 20000);  // Increased from 10000 to 20000
         }
         else {
@@ -335,54 +303,51 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         
         // Ensure we have at least 1 bar
         if(lookbackBars < 0) lookbackBars = 0;
-        
-        startTime = iTime(_Symbol, _Period, lookbackBars);
+    startTime = iTime(_Symbol, _Period, lookbackBars);
         
         // Validate retrieved time
         if(startTime <= 0) {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             Print("❌ CreateZone: Invalid iTime(", lookbackBars, "), trying Time[0]...");
-            #endif
+    #endif
             // Fallback: try current time
             startTime = iTime(_Symbol, _Period, 0);
-            if(startTime <= 0) {
+    if(startTime <= 0) {
                 result.errorMessage = StringFormat("Cannot retrieve chart time (Bars=%d)", safeBars);
-                result.errorCode = ERR_ZONE_RENDER_FAILED;
-                return result;
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    return result;
             }
         }
-        
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("✅ CreateZone: StartTime=", TimeToString(startTime), " (Lookback=", lookbackBars, 
               " bars, TF=", periodMinutes, "min, Bars=", safeBars, ")");
-        #endif
+    #endif
     }
     else {
         // Validate user-provided startTime
         if(startTime <= 0) {
             result.errorMessage = StringFormat("Invalid user-provided startTime: %s", TimeToString(startTime));
-            result.errorCode = ERR_ZONE_INVALID_CONFIG;
-            return result;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    return result;
         }
     }
-    
     if(endTime == 0 && needsTimeCalculation) {
         if(currentTime <= 0) {
             result.errorMessage = "Invalid Time[0]";
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
-            return result;
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    return result;
         }
         
-        // CRITICAL FIX: Validate PeriodSeconds before use
+        // Validate PeriodSeconds before use
         int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
-        if(periodSeconds <= 0) {
-            #ifdef ENABLE_DEBUG_LOGS
+    if(periodSeconds <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
             Print("❌ CreateZone: Invalid PeriodSeconds=", periodSeconds, " for Period=", Period());
-            #endif
-            result.success = false;
-            result.errorCode = ZONE_ERROR_INVALID_PRICES;
-            result.errorMessage = "Invalid timeframe period";
-            return result;
+    #endif
+    result.success = false;
+    result.errorCode = ZONE_ERROR_INVALID_PRICES;
+    result.errorMessage = "Invalid timeframe period";
+    return result;
         }
         
         // Additional validation: Check for reasonable period
@@ -390,20 +355,18 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         if(periodSeconds > 2592000) {  // 30 days in seconds
             #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CreateZone: Suspiciously large PeriodSeconds=", periodSeconds);
-            #endif
-        }
+    #endif
+    }
         
         // ZONE EXTENSION: Zones extend from past (startTime) to future (currentTime + extension)
-        // زون‌ها از گذشته (startTime) تا آینده (currentTime + extension) امتداد دارند
+        
         
         // ═══════════════════════════════════════════════════════════════
-        // 🔧 CRITICAL FIX: ADAPTIVE ZONE EXTENSION FOR ALL TIMEFRAMES
+        // 🔧 ADAPTIVE ZONE EXTENSION FOR ALL TIMEFRAMES
         // ═══════════════════════════════════════════════════════════════
         // OLD BUG: Hard-coded if-else only worked on M1/M5/M15/H1/H4/D1
         // PROBLEM: Zones disappeared on M2,M3,M4,M6,M10,M12,M20,M30,H2,H3,H6,H8,W1,MN1
-        // SOLUTION: Use adaptive calculation based on periodSeconds
-        // Task 7: Use cached extension multiplier (Requirements 19.1, 19.2, 19.5, 19.6)
-        // ═══════════════════════════════════════════════════════════════
+        // SOLUTION: Use adaptive calculation based on periodSeconds        // ═══════════════════════════════════════════════════════════════
         
         int extensionMultiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
         
@@ -420,27 +383,26 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         // ═══════════════════════════════════════════════════════════════
         
         // Calculate endTime: currentTime (now) + extension into future
-        // محاسبه endTime: زمان فعلی + گسترش به آینده
-        endTime = currentTime + (periodSeconds * extensionMultiplier);
         
-        #ifdef ENABLE_DEBUG_LOGS
+        endTime = currentTime + (periodSeconds * extensionMultiplier);
+    #ifdef ENABLE_DEBUG_LOGS
         Print("🔧 CreateZone: Extension multiplier=", extensionMultiplier, 
               " period=", periodSeconds, "s → extension=", (periodSeconds * extensionMultiplier), "s");
-        #endif
+    #endif
         
         // Validate endTime is in the future
         if(endTime <= currentTime) {
             result.errorMessage = StringFormat("Invalid endTime calculation: %s", TimeToString(endTime));
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
-            return result;
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    return result;
         }
     }
     else {
         // Validate user-provided endTime
         if(endTime <= 0) {
             result.errorMessage = StringFormat("Invalid user-provided endTime: %s", TimeToString(endTime));
-            result.errorCode = ERR_ZONE_INVALID_CONFIG;
-            return result;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    return result;
         }
     }
     
@@ -449,8 +411,8 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         result.errorMessage = StringFormat("Invalid time range: Start=%s, End=%s",
                                           TimeToString(startTime),
                                           TimeToString(endTime));
-        result.errorCode = ERR_ZONE_RENDER_FAILED;
-        return result;
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    return result;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -460,9 +422,8 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // Only store if we actually calculated it (not from user-provided values)
     if(needsTimeCalculation && request.startTime == 0 && request.endTime == 0) {
         // Calculate extension multiplier for cache key
-        // Task 7: Use cached extension multiplier (Requirements 19.1, 19.2, 19.5, 19.6)
         int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
-        int extensionMultiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
+    int extensionMultiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
         
         // Store in cache for next time
         StoreZoneGeometry(
@@ -473,10 +434,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             startTime,
             endTime
         );
-        
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("💾 CreateZone: Stored geometry in cache for '", request.name, "'");
-        #endif
+    #endif
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -492,16 +452,15 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         
         // CRITICAL: clamp alpha bounds (defense in depth)
         if(alpha < (uchar)MIN_ALPHA_VALUE) alpha = (uchar)MIN_ALPHA_VALUE;
-        if(alpha > (uchar)MAX_ALPHA_VALUE) alpha = (uchar)MAX_ALPHA_VALUE;
-        
-        finalColorARGB = (long)ColorToARGB(request.zoneColor, alpha);
+    if(alpha > (uchar)MAX_ALPHA_VALUE) alpha = (uchar)MAX_ALPHA_VALUE;
+    finalColorARGB = (long)ColorToARGB(request.zoneColor, alpha);
     }
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 4: ZONE CREATION/UPDATE (Atomic Operation with Cache)
-    // FIX BUG #10: Set properties ONCE, not twice
-    // FIX BUG #11: Check all ObjectSet return values
-    // FLICKERING FIX: Use cache and change detection (Requirements 6.1, 6.2, 6.3, 6.4)
+    // Set properties ONCE, not twice
+    // Check all ObjectSet return values
+    // Use cache and change detection (Requirements 6.1, 6.2, 6.3, 6.4)
     // ═══════════════════════════════════════════════════════════════
     
     // Check cache first before ObjectFind (Requirement 6.2)
@@ -515,151 +474,134 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         if(objectExists) {
             // Get current properties and add to cache
             double currentTopPrice = ObjectGetDouble(0, request.name, OBJPROP_PRICE, 0);
-            color currentColor = (color)ObjectGetInteger(0, request.name, OBJPROP_COLOR);
-            CacheAddObject(request.name, currentTopPrice, currentColor, 0, 0);
+    color currentColor = (color)ObjectGetInteger(0, request.name, OBJPROP_COLOR);
+    CacheAddObject(request.name, currentTopPrice, currentColor, 0, 0);
         }
     }
-    
     bool needsPropertyUpdate = true;
-    
     if(!objectExists) {
-        // GOLD FIX #4: Enhanced atomic zone creation with rollback
-        // CRITICAL FIX: Use ChartID() instead of 0 for current chart
+        // #4: Enhanced atomic zone creation with rollback
+        // Use ChartID() instead of 0 for current chart
         long chartId = ChartID();
-        bool createSuccess = ObjectCreate(chartId, request.name, OBJ_RECTANGLE, 0, 
+    bool createSuccess = ObjectCreate(chartId, request.name, OBJ_RECTANGLE, 0, 
                                          startTime, request.topPrice, 
                                          endTime, request.bottomPrice);
-        
-        if(!createSuccess) {
-            int error = GetLastError();
-            result.errorMessage = StringFormat("Failed to create zone '%s': MT4 Error %d (ChartID=%d)", 
+    if(!createSuccess) {
+        int error = GetLastError();
+    result.errorMessage = StringFormat("Failed to create zone '%s': MT4 Error %d (ChartID=%d)", 
                                               request.name, error, chartId);
-            result.errorCode = error;
+    result.errorCode = error;
             
             // CRITICAL: Atomic cleanup - ensure no partial objects remain
             int cleanupAttempts = 0;
-            while(ObjectFind(chartId, request.name) >= 0 && cleanupAttempts < 3) {
+    while(ObjectFind(chartId, request.name) >= 0 && cleanupAttempts < 3) {
                 ObjectDelete(chartId, request.name);
-                cleanupAttempts++;
-                if(cleanupAttempts > 1) {
+    cleanupAttempts++;
+    if(cleanupAttempts > 1) {
                     // Sleep removed for MQL5 indicator compatibility
                 }
             }
-            
-            if(ObjectFind(chartId, request.name) >= 0) {
-                #ifdef ENABLE_DEBUG_LOGS
+    if(ObjectFind(chartId, request.name) >= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ Failed to cleanup partial zone object after ", cleanupAttempts, " attempts");
-                #endif
-            }
-            
-            return result;
+    #endif
+    }
+    return result;
         }
         
         // Add to cache after successful creation (Requirement 6.2)
         CacheAddObject(request.name, request.topPrice, request.zoneColor, 0, 0);
-        needsPropertyUpdate = true;
-        
-        #ifdef ENABLE_DEBUG_LOGS
+    needsPropertyUpdate = true;
+    #ifdef ENABLE_DEBUG_LOGS
         Print("✅ CreateZone: Created new zone '", request.name, "' and added to cache");
-        #endif
+    #endif
     }
     else {
         // Object exists - use PropertyChangeDetector (Requirement 6.3)
         SObjectCacheEntry cachedEntry;
-        bool hasCachedData = CacheGetObject(request.name, cachedEntry);
-        
-        if(hasCachedData) {
+    bool hasCachedData = CacheGetObject(request.name, cachedEntry);
+    if(hasCachedData) {
             // Check if properties have changed
             // For zones, we track: topPrice, color (transparency affects color)
             bool priceChanged = HasPriceChanged(cachedEntry.lastPrice, request.topPrice);
-            bool colorChanged = HasColorChanged(cachedEntry.lastColor, request.zoneColor);
-            
-            if(!priceChanged && !colorChanged) {
+    bool colorChanged = HasColorChanged(cachedEntry.lastColor, request.zoneColor);
+    if(!priceChanged && !colorChanged) {
                 // No changes needed - skip all updates (Requirement 6.3)
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("⏭️ CreateZone: Zone '", request.name, "' unchanged, skipping update");
-                #endif
-                result.success = true;
-                result.zoneName = request.name;
-                return result;
+    #endif
+    result.success = true;
+    result.zoneName = request.name;
+    return result;
             }
             
             // Update only changed properties (Requirement 6.4)
-            // Requirement 8.3: Batch property setting - set all in sequence
             bool updateSuccess = true;
-            
-            if(priceChanged) {
+    if(priceChanged) {
                 // Batch update all geometry properties together
                 updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
-                updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
-                updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
-                updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
-                
-                #ifdef ENABLE_DEBUG_LOGS
+    updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
+    updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
+    updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
+    #ifdef ENABLE_DEBUG_LOGS
                 Print("🔄 CreateZone: Updated zone '", request.name, "' geometry (price changed)");
-                #endif
-            }
+    #endif
+    }
             
             if(!updateSuccess) {
-                int error = GetLastError();
-                result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
+        int error = GetLastError();
+    result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
                                                   request.name, error);
-                result.errorCode = error;
-                return result;
+    result.errorCode = error;
+    return result;
             }
-            
-            // Requirement 8.5: Update cache only if properties changed
-            CacheUpdateObject(request.name, request.topPrice, request.zoneColor, 0, 0);
+    CacheUpdateObject(request.name, request.topPrice, request.zoneColor, 0, 0);
             
             // needsPropertyUpdate will be set based on color change
             needsPropertyUpdate = colorChanged;
         }
         else {
             // No cached data - update all properties
-            // Requirement 8.3: Batch property setting - set all in sequence
             bool updateSuccess = true;
-            updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
-            updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
-            updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
-            updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
-            
-            if(!updateSuccess) {
-                int error = GetLastError();
-                result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
+    updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
+    updateSuccess = updateSuccess && ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
+    updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
+    updateSuccess = updateSuccess && ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
+    if(!updateSuccess) {
+        int error = GetLastError();
+    result.errorMessage = StringFormat("Failed to update zone geometry '%s': MT4 Error %d", 
                                                   request.name, error);
-                result.errorCode = error;
-                return result;
+    result.errorCode = error;
+    return result;
             }
             
             // Add to cache (Requirement 8.5: avoid redundant operations)
             CacheAddObject(request.name, request.topPrice, request.zoneColor, 0, 0);
-            needsPropertyUpdate = true;
+    needsPropertyUpdate = true;
         }
     }
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 5: APPLY VISUAL PROPERTIES (Once, with error checking)
-    // FIX BUG #10: Properties set ONCE here for both create and update
-    // FIX BUG #11: Check all return values
-    // FLICKERING FIX: Apply visibility state immediately (Requirement 10.1)
+    // Properties set ONCE here for both create and update
+    // Check all return values
+    // Apply visibility state immediately (Requirement 10.1)
     // BATCH OPTIMIZATION: Requirements 8.1, 8.3 - Set all properties in sequence
     // ═══════════════════════════════════════════════════════════════
     
     if(needsPropertyUpdate) {
-        // Requirement 8.3: Set all properties in sequence without intermediate operations
         bool propsSuccess = true;
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColorARGB);
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_BACK, true);
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_FILL, request.filled);
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_SELECTABLE, false);
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_RAY_RIGHT, true);
-        propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
-        
-        if(!propsSuccess) {
-            int error = GetLastError();
-            #ifdef ENABLE_DEBUG_LOGS
+    propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColorARGB);
+    propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_BACK, true);
+    propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_FILL, request.filled);
+    propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_SELECTABLE, false);
+    propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_RAY_RIGHT, true);
+    propsSuccess = propsSuccess && ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
+    if(!propsSuccess) {
+        int error = GetLastError();
+    #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CreateZone: Failed to set some properties for '", request.name, "': MT4 Error ", error);
-            #endif
+    #endif
             // Don't fail completely - zone is created, just properties might be incomplete
         }
         
@@ -670,7 +612,6 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // Apply visibility state immediately (Requirement 10.1)
     // Zones are not lines, so pass false for isLine parameter
     ApplyVisibilityState(request.name, false);
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ CreateZone: Applied visibility state to '", request.name, "'");
     #endif
@@ -681,58 +622,51 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     
     result.success = true;
     result.zoneName = request.name;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ CreateZone SUCCESS: '", request.name, "' [", 
           TimeToString(startTime), " - ", TimeToString(endTime), "] [",
           DoubleToString(request.bottomPrice, Digits), " - ", 
           DoubleToString(request.topPrice, Digits), "]");
     #endif
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Batch Create Zones                                               |
-//| ساخت دسته‌ای Zone‌ها                                             |
+
 //+------------------------------------------------------------------+
 int CreateZonesBatch(const SZoneCreationRequest &requests[], 
                      SZoneCreationResult &results[])
 {
-    int count = ArraySize(requests);
+        int count = ArraySize(requests);
     ArrayResize(results, count);
-    
     int successCount = 0;
-    
     for(int i = 0; i < count; i++) {
         results[i] = CreateZone(requests[i]);
-        if(results[i].success) successCount++;
+    if(results[i].success) successCount++;
     }
-    
     return successCount;
 }
 
 //+------------------------------------------------------------------+
 //| Delete Zone Safely                                               |
-//| حذف امن Zone                                                      |
-//| FLICKERING FIX: Remove from cache when deleted                   |
+
+//| Remove from cache when deleted                   |
 //+------------------------------------------------------------------+
 bool DeleteZone(const string &zoneName)
 {
-    if(StringLen(zoneName) == 0) return false;
-    
+        if(StringLen(zoneName) == 0) return false;
     if(ObjectFind(0, zoneName) >= 0) {
         bool deleted = ObjectDelete(0, zoneName);
         
         // Remove from cache after successful deletion
         if(deleted) {
             CacheRemoveObject(zoneName);
-            #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
             Print("✅ DeleteZone: Deleted '", zoneName, "' and removed from cache");
-            #endif
-        }
-        
-        return deleted;
+    #endif
+    }
+    return deleted;
     }
     
     // Object doesn't exist, but ensure it's not in cache
@@ -742,46 +676,41 @@ bool DeleteZone(const string &zoneName)
 
 //+------------------------------------------------------------------+
 //| Delete Zones by Prefix                                           |
-//| حذف Zone‌ها با پیشوند                                             |
-//| FLICKERING FIX: Remove from cache when deleted                   |
+
+//| Remove from cache when deleted                   |
 //+------------------------------------------------------------------+
 int DeleteZonesByPrefix(const string &prefix)
 {
-    if(StringLen(prefix) == 0) return 0;
-    
+        if(StringLen(prefix) == 0) return 0;
     int deletedCount = 0;
     int totalObjects = ObjectsTotal(0, -1, -1);
-    
     for(int i = totalObjects - 1; i >= 0; i--) {
         string name = ObjectName(0, i, -1, -1);
-        
-        if(StringFind(name, prefix) == 0) {
-            if(ObjectDelete(0, name)) {
+    if(StringFind(name, prefix) == 0) {
+        if(ObjectDelete(0, name)) {
                 // Remove from cache after successful deletion
                 CacheRemoveObject(name);
-                deletedCount++;
+    deletedCount++;
             }
         }
     }
-    
     #ifdef ENABLE_DEBUG_LOGS
     if(deletedCount > 0) {
         Print("✅ DeleteZonesByPrefix: Deleted ", deletedCount, " zones with prefix '", prefix, "' and removed from cache");
     }
     #endif
-    
     return deletedCount;
 }
 
 //+------------------------------------------------------------------+
 //| ENHANCED ZONE CREATION WITH VALIDATION AND RETRY (Task 4)        |
-//| ایجاد زون پیشرفته با اعتبارسنجی و تلاش مجدد                      |
+
 //| Requirements: 1.7, 2.5, 2.6, 2.7, 17.1-17.7                     |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| Create Zone with Enhanced Validation                             |
-//| ایجاد زون با اعتبارسنجی پیشرفته                                  |
+
 //| Requirements: 1.7, 2.5, 2.6, 17.1-17.6                          |
 //|                                                                  |
 //| Performs comprehensive validation before zone creation           |
@@ -794,7 +723,6 @@ SZoneCreationResult CreateZoneWithValidation(const SZoneCreationRequest &request
     result.zoneName = request.name;
     result.errorMessage = "";
     result.errorCode = ERR_ZONE_NONE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("🔍 CreateZoneWithValidation START: '", request.name, "'");
     #endif
@@ -807,15 +735,12 @@ SZoneCreationResult CreateZoneWithValidation(const SZoneCreationRequest &request
         GetCachedPeriod(),
         request.name
     );
-    
-    if(!validation.valid) {
-        // Requirement 1.7: Log detailed diagnostic information
-        LogZoneCreationFailure(validation, request.name);
+    if(!validation.valid) {        LogZoneCreationFailure(validation, request.name);
         
         // Convert validation result to creation result
         result.errorCode = validation.errorCode;
-        result.errorMessage = validation.errorMessage;
-        return result;
+    result.errorMessage = validation.errorMessage;
+    return result;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -825,95 +750,82 @@ SZoneCreationResult CreateZoneWithValidation(const SZoneCreationRequest &request
     // Calculate times if not provided (same logic as CreateZone)
     datetime startTime = request.startTime;
     datetime endTime = request.endTime;
-    
     if(startTime == 0 || endTime == 0) {
         // Need to calculate times - use same logic as CreateZone
         int safeBars = Bars(_Symbol, _Period);
-        datetime currentTime = 0;
-        
-        if(safeBars > 0) {
+    datetime currentTime = 0;
+    if(safeBars > 0) {
             currentTime = iTime(_Symbol, _Period, 0);
             
             // Validate: bars count should still match
             int barsRecheck = Bars(_Symbol, _Period);
-            if(barsRecheck != safeBars) {
+    if(barsRecheck != safeBars) {
                 safeBars = barsRecheck;
-                currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
+    currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
             }
         }
-        
-        if(currentTime <= 0) {
+    if(currentTime <= 0) {
             currentTime = TimeCurrent();
         }
-        
-        if(startTime == 0) {
-            if(safeBars <= 0) {
+    if(startTime == 0) {
+        if(safeBars <= 0) {
                 result.errorMessage = "No bars available - waiting for first tick";
-                result.errorCode = ERR_ZONE_NO_DATA;
+    result.errorCode = ERR_ZONE_NO_DATA;
                 
                 // Log failure with diagnostic context
                 SZoneValidationResultEnhanced noBarsValidation;
-                noBarsValidation.valid = false;
-                noBarsValidation.errorCode = ERR_ZONE_NO_DATA;
-                noBarsValidation.errorMessage = result.errorMessage;
-                noBarsValidation.barsCount = safeBars;
-                noBarsValidation.periodSeconds = validation.periodSeconds;
-                noBarsValidation.timeframeName = validation.timeframeName;
-                LogZoneCreationFailure(noBarsValidation, request.name);
-                
-                return result;
+    noBarsValidation.valid = false;
+    noBarsValidation.errorCode = ERR_ZONE_NO_DATA;
+    noBarsValidation.errorMessage = result.errorMessage;
+    noBarsValidation.barsCount = safeBars;
+    noBarsValidation.periodSeconds = validation.periodSeconds;
+    noBarsValidation.timeframeName = validation.timeframeName;
+    LogZoneCreationFailure(noBarsValidation, request.name);
+    return result;
             }
-            
-            int lookbackBars = MathMin(safeBars - 1, 5000);
-            if(lookbackBars < 0) lookbackBars = 0;
-            
-            startTime = iTime(_Symbol, _Period, lookbackBars);
-            
-            if(startTime <= 0) {
+    int lookbackBars = MathMin(safeBars - 1, 5000);
+    if(lookbackBars < 0) lookbackBars = 0;
+    startTime = iTime(_Symbol, _Period, lookbackBars);
+    if(startTime <= 0) {
                 startTime = iTime(_Symbol, _Period, 0);
-                if(startTime <= 0) {
+    if(startTime <= 0) {
                     result.errorMessage = StringFormat("Cannot retrieve chart time (Bars=%d)", safeBars);
-                    result.errorCode = ERR_ZONE_RENDER_FAILED;
+    result.errorCode = ERR_ZONE_RENDER_FAILED;
                     
                     // Log failure
                     SZoneValidationResultEnhanced timeValidation;
-                    timeValidation.valid = false;
-                    timeValidation.errorCode = ERR_ZONE_RENDER_FAILED;
-                    timeValidation.errorMessage = result.errorMessage;
-                    timeValidation.barsCount = safeBars;
-                    timeValidation.periodSeconds = validation.periodSeconds;
-                    timeValidation.timeframeName = validation.timeframeName;
-                    LogZoneCreationFailure(timeValidation, request.name);
-                    
-                    return result;
+    timeValidation.valid = false;
+    timeValidation.errorCode = ERR_ZONE_RENDER_FAILED;
+    timeValidation.errorMessage = result.errorMessage;
+    timeValidation.barsCount = safeBars;
+    timeValidation.periodSeconds = validation.periodSeconds;
+    timeValidation.timeframeName = validation.timeframeName;
+    LogZoneCreationFailure(timeValidation, request.name);
+    return result;
                 }
             }
         }
-        
-        if(endTime == 0) {
-            int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
-            if(periodSeconds <= 0) {
+    if(endTime == 0) {
+        int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
+    if(periodSeconds <= 0) {
                 result.errorMessage = "Invalid timeframe period";
-                result.errorCode = ERR_ZONE_INVALID_CONFIG;
+    result.errorCode = ERR_ZONE_INVALID_CONFIG;
                 
                 // Log failure
                 SZoneValidationResultEnhanced periodValidation;
-                periodValidation.valid = false;
-                periodValidation.errorCode = ERR_ZONE_INVALID_CONFIG;
-                periodValidation.errorMessage = result.errorMessage;
-                periodValidation.barsCount = safeBars;
-                periodValidation.periodSeconds = periodSeconds;
-                periodValidation.timeframeName = validation.timeframeName;
-                LogZoneCreationFailure(periodValidation, request.name);
-                
-                return result;
+    periodValidation.valid = false;
+    periodValidation.errorCode = ERR_ZONE_INVALID_CONFIG;
+    periodValidation.errorMessage = result.errorMessage;
+    periodValidation.barsCount = safeBars;
+    periodValidation.periodSeconds = periodSeconds;
+    periodValidation.timeframeName = validation.timeframeName;
+    LogZoneCreationFailure(periodValidation, request.name);
+    return result;
             }
             
             // Calculate extension multiplier
-            // Task 7: Use cached extension multiplier (Requirements 19.1, 19.2, 19.5, 19.6)
             int extensionMultiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
-            
-            endTime = currentTime + (periodSeconds * extensionMultiplier);
+    endTime = currentTime + (periodSeconds * extensionMultiplier);
         }
     }
     
@@ -924,15 +836,12 @@ SZoneCreationResult CreateZoneWithValidation(const SZoneCreationRequest &request
         startTime,
         endTime
     );
-    
-    if(!validation.valid) {
-        // Requirement 1.7: Log detailed diagnostic information
-        LogZoneCreationFailure(validation, request.name);
+    if(!validation.valid) {        LogZoneCreationFailure(validation, request.name);
         
         // Convert validation result to creation result
         result.errorCode = validation.errorCode;
-        result.errorMessage = validation.errorMessage;
-        return result;
+    result.errorMessage = validation.errorMessage;
+    return result;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -943,20 +852,16 @@ SZoneCreationResult CreateZoneWithValidation(const SZoneCreationRequest &request
     SZoneCreationRequest updatedRequest = request;
     updatedRequest.startTime = startTime;
     updatedRequest.endTime = endTime;
-    
     result = CreateZone(updatedRequest);
-    
-    // Requirement 17.6: Log success
     if(result.success) {
         LogZoneCreationSuccess(request.name);
     }
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Create Zone with Retry Logic                                     |
-//| ایجاد زون با منطق تلاش مجدد                                      |
+
 //| Requirements: 2.7, 17.1-17.7                                     |
 //|                                                                  |
 //| Retries zone creation on ERR_ZONE_NO_DATA errors                 |
@@ -971,38 +876,33 @@ SZoneCreationResult CreateZoneWithRetry(
     result.zoneName = request.name;
     result.errorMessage = "";
     result.errorCode = ERR_ZONE_NONE;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 CreateZoneWithRetry START: '", request.name, "' (maxRetries=", maxRetries, ")");
     #endif
-    
     for(int attempt = 0; attempt < maxRetries; attempt++) {
         #ifdef ENABLE_DEBUG_LOGS
         if(attempt > 0) {
             Print("🔄 CreateZoneWithRetry: Attempt ", attempt + 1, " of ", maxRetries, 
                   " for zone '", request.name, "'");
         }
-        #endif
+    #endif
         
         // Try to create zone with validation
         result = CreateZoneWithValidation(request);
         
         // Success - return immediately
         if(result.success) {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             Print("✅ CreateZoneWithRetry: Success on attempt ", attempt + 1, 
                   " for zone '", request.name, "'");
-            #endif
-            return result;
-        }
-        
-        // Requirement 2.7: Retry only on ERR_ZONE_NO_DATA
-        // If failure is due to missing bars, wait and retry
+    #endif
+    return result;
+        }        // If failure is due to missing bars, wait and retry
         if(result.errorCode == ERR_ZONE_NO_DATA) {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             Print("⏱️ CreateZoneWithRetry: ERR_ZONE_NO_DATA on attempt ", attempt + 1,
                   " - will retry on next tick");
-            #endif
+    #endif
             
             // Return error to allow retry on next tick
             // Don't continue loop - let OnCalculate call us again
@@ -1013,19 +913,18 @@ SZoneCreationResult CreateZoneWithRetry(
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateZoneWithRetry: Non-retryable error (code=", result.errorCode,
               ") on attempt ", attempt + 1, " for zone '", request.name, "'");
-        #endif
-        break;
+    #endif
+    break;
     }
     
     // All retries exhausted or non-retryable error
     if(!result.success && result.errorCode == ERR_ZONE_NO_DATA) {
         result.errorMessage = StringFormat("Zone creation failed after %d retries: %s", 
                                           maxRetries, result.errorMessage);
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateZoneWithRetry: Failed after ", maxRetries, " retries for zone '", 
               request.name, "'");
-        #endif
+    #endif
     }
-    
     return result;
 }

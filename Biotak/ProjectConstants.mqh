@@ -1,130 +1,81 @@
-//+------------------------------------------------------------------+
-//|                                      ProjectConstants.mqh        |
-//|                     Centralized Constants - PLATINUM VERSION     |
-//|                     ثابت‌های متمرکز - نسخه پلاتینیوم              |
-//|                                                                  |
-//| BENEFITS:                                                        |
-//| - Single source of truth for all constants                      |
-//| - Easy to maintain and update                                   |
-//| - No magic numbers in code                                      |
-//| - Self-documenting with clear names                             |
-//+------------------------------------------------------------------+
+﻿#ifndef PROJECT_CONSTANTS_MQH
+#define PROJECT_CONSTANTS_MQH
 
-// ═══════════════════════════════════════════════════════════════
-// PERCENTAGE CONSTANTS
-// ثابت‌های درصدی
-// ═══════════════════════════════════════════════════════════════
+#property copyright " Biotak"
+
+// Transparency
 const int MIN_TRANSPARENCY_PERCENT = 0;
 const int MAX_TRANSPARENCY_PERCENT = 100;
 const int DEFAULT_TRANSPARENCY_PERCENT = 50;
 
-const double MIN_ZONE_HEIGHT_PERCENT = 0.01;    // 1%
-const double MAX_ZONE_HEIGHT_PERCENT = 1.0;     // 100%
-const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125; // 12.5%
+// Zone Height
+const double MIN_ZONE_HEIGHT_PERCENT = 0.01;
+const double MAX_ZONE_HEIGHT_PERCENT = 1.0;
+const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125;
 
-// ═══════════════════════════════════════════════════════════════
-// MULTIPLIERS & FACTORS
-// ضرایب و فاکتورها
-// ═══════════════════════════════════════════════════════════════
-// ADAPTIVE ZONE EXTENSION: Scales based on timeframe
-// M1: 100 bars = ~1.5 hours | M5: 100 bars = ~8 hours | M15: 100 bars = ~1 day
-// H1: 100 bars = ~4 days | H4: 100 bars = ~16 days | D1: 100 bars = ~3 months
-const int ZONE_EXTENSION_MULTIPLIER = 100;      // برای محاسبه endTime (کاهش از 10000 به 100)
-const int ALPHA_SCALE_FACTOR = 255;             // برای محاسبه alpha channel
-const int PERCENTAGE_TO_DECIMAL = 100;          // تبدیل درصد به اعشار
+// Multipliers
+const int ZONE_EXTENSION_MULTIPLIER = 100;
+const int ALPHA_SCALE_FACTOR = 255;
+const int PERCENTAGE_TO_DECIMAL = 100;
 
-// ═══════════════════════════════════════════════════════════════
-// PERFORMANCE CONSTANTS
-// ثابت‌های عملکردی
-// ═══════════════════════════════════════════════════════════════
-const int CACHE_LOG_INTERVAL = 100;             // فاصله لاگ cache hits
-const int ZONE_EXTENSION_PERIODS = 100;         // تعداد دوره‌های گسترش zone
-const int MAX_ZONES_PER_CHART = 500;            // حداکثر تعداد zone در چارت
-const int OBJECT_CACHE_SIZE = 1000;             // اندازه کش اشیاء
+// Performance
+const int CACHE_LOG_INTERVAL = 100;
+const int ZONE_EXTENSION_PERIODS = 100;
+const int MAX_ZONES_PER_CHART = 500;
+const int OBJECT_CACHE_SIZE = 1000;
 
-// ═══════════════════════════════════════════════════════════════
-// LIMITS & THRESHOLDS
-// محدودیت‌ها و آستانه‌ها
-// ═══════════════════════════════════════════════════════════════
-const int MAX_MOVEMENT_CANDLES = 10000;         // حداکثر کندل‌های حرکت
-const int MAX_REST_CANDLES = 1000;              // حداکثر کندل‌های استراحت
-const int MAX_LEARNING_DATA_SIZE = 10000;       // حداکثر اندازه داده‌های یادگیری
+// Limits
+const int MAX_MOVEMENT_CANDLES = 10000;
+const int MAX_REST_CANDLES = 1000;
+const int MAX_LEARNING_DATA_SIZE = 10000;
+const double MAX_PRICE_DEVIATION = 2.0;
+const double MAX_ZONE_HEIGHT_PERCENT_LIMIT = 1.0;
 
-const double MAX_PRICE_DEVIATION = 2.0;         // حداکثر انحراف قیمت (200%)
-const double MAX_ZONE_HEIGHT_PERCENT_LIMIT = 1.0; // محدودیت ارتفاع zone
+// Frequency
+const int FREQUENCY_BASE = 100;
+const double FREQUENCY_STEP_3 = 33.333;
+const double FREQUENCY_STEP_5 = 20.0;
+const double FREQUENCY_STEP_7 = 14.286;
 
-// ═══════════════════════════════════════════════════════════════
-// FREQUENCY CALCULATION
-// محاسبات فرکانس
-// ═══════════════════════════════════════════════════════════════
-const int FREQUENCY_BASE = 100;                 // برای Step N: frequency = 100/N
+// Consolidation Thresholds
+const double CONSOLIDATION_VERY_LOW = 0.6;
+const double CONSOLIDATION_LOW = 1.0;
+const double CONSOLIDATION_MEDIUM = 1.5;
 
-// Step-specific frequencies
-const double FREQUENCY_STEP_3 = 33.333;         // 100/3
-const double FREQUENCY_STEP_5 = 20.0;           // 100/5
-const double FREQUENCY_STEP_7 = 14.286;         // 100/7
+// Pattern Detection
+const double GANN_ANGLE_STRONG_IMPULSIVE = 75.0;
+const double GANN_ANGLE_MEDIUM_IMPULSIVE = 50.0;
+const double CONSOLIDATION_IMPULSIVE_MAX = 0.1;
+const double TIME_SYMMETRY_GOOD = 0.8;
 
-// ═══════════════════════════════════════════════════════════════
-// CONSOLIDATION THRESHOLDS
-// آستانه‌های consolidation
-// ═══════════════════════════════════════════════════════════════
-const double CONSOLIDATION_VERY_LOW = 0.6;      // 60% - انرژی خیلی کم
-const double CONSOLIDATION_LOW = 1.0;           // 100% - انرژی کافی
-const double CONSOLIDATION_MEDIUM = 1.5;        // 150% - انرژی زیاد
+// Sizing
+const int TEST_ARRAY_SIZE = 100;
+const int TEST_OVERFLOW_COUNT = 100;
+const int LABEL_OFFSET_MAX_PIPS = 100;
+const int PATTERN_BARS_PADDING = 100;
 
-// ═══════════════════════════════════════════════════════════════
-// PATTERN DETECTION THRESHOLDS
-// آستانه‌های تشخیص الگو
-// ═══════════════════════════════════════════════════════════════
-const double GANN_ANGLE_STRONG_IMPULSIVE = 75.0;    // زاویه Gann برای الگوی قوی
-const double GANN_ANGLE_MEDIUM_IMPULSIVE = 50.0;   // زاویه Gann برای الگوی متوسط
-const double CONSOLIDATION_IMPULSIVE_MAX = 0.1;    // حداکثر consolidation برای impulsive (10%)
-const double TIME_SYMMETRY_GOOD = 0.8;             // تقارن زمانی خوب (80%)
-
-// ═══════════════════════════════════════════════════════════════
-// LOGGING INTERVALS
-// فواصل لاگ‌گذاری
-// ═══════════════════════════════════════════════════════════════
-const int TEST_ARRAY_SIZE = 100;                // اندازه آرایه تست
-const int TEST_OVERFLOW_COUNT = 100;            // تعداد overflow در تست
-const int LABEL_OFFSET_MAX_PIPS = 100;          // حداکثر offset لیبل (pips)
-const int PATTERN_BARS_PADDING = 100;           // padding برای نمایش الگو
-
-// ═══════════════════════════════════════════════════════════════
-// TIME CONSTANTS
-// ثابت‌های زمانی
-// ═══════════════════════════════════════════════════════════════
+// Time
 const int SECONDS_PER_MINUTE = 60;
 const int SECONDS_PER_HOUR = 3600;
 const int SECONDS_PER_DAY = 86400;
-const int SECONDS_PER_MONTH = 2592000;          // 30 days
+const int SECONDS_PER_MONTH = 2592000;
+const int MUTEX_STALE_TIMEOUT_SECONDS = 2;
+const int MUTEX_RETRY_ATTEMPTS = 10;
+const int MUTEX_RETRY_DELAY_MS = 10;
 
-const int MUTEX_STALE_TIMEOUT_SECONDS = 2;      // timeout برای stale mutex
-const int MUTEX_RETRY_ATTEMPTS = 10;            // تعداد تلاش برای گرفتن mutex
-const int MUTEX_RETRY_DELAY_MS = 10;            // تأخیر بین تلاش‌ها (میلی‌ثانیه)
-
-// ═══════════════════════════════════════════════════════════════
-// ARRAY SIZES
-// اندازه‌های آرایه
-// ═══════════════════════════════════════════════════════════════
+// Array Sizes
 const int DEFAULT_ARRAY_SIZE = 10;
 const int SMALL_ARRAY_SIZE = 50;
 const int MEDIUM_ARRAY_SIZE = 100;
 const int LARGE_ARRAY_SIZE = 500;
 
-// ═══════════════════════════════════════════════════════════════
-// VALIDATION CONSTANTS
-// ثابت‌های اعتبارسنجی
-// ═══════════════════════════════════════════════════════════════
-const double MIN_PRICE_VALUE = 0.00001;         // حداقل قیمت معتبر
-const double MAX_PRICE_MULTIPLIER = 1000000.0;  // حداکثر ضریب قیمت
-const int MIN_BARS_REQUIRED = 1;                // حداقل تعداد کندل مورد نیاز
-const int MAX_BARS_LOOKBACK = 10000;            // حداکثر lookback
+// Validation
+const double MIN_PRICE_VALUE = 0.00001;
+const double MAX_PRICE_MULTIPLIER = 1000000.0;
+const int MIN_BARS_REQUIRED = 1;
+const int MAX_BARS_LOOKBACK = 10000;
 
-// ═══════════════════════════════════════════════════════════════
-// ERROR CODES (Centralized)
-// کدهای خطا (متمرکز)
-// ═══════════════════════════════════════════════════════════════
+// Error Codes (simple)
 const int ERROR_CODE_SUCCESS = 0;
 const int ERROR_CODE_INVALID_INPUT = -1;
 const int ERROR_CODE_MEMORY_LIMIT = -2;
@@ -132,98 +83,39 @@ const int ERROR_CODE_FILE_OPERATION = -3;
 const int ERROR_CODE_STATE_CONFLICT = -4;
 const int ERROR_CODE_OVERFLOW = -5;
 
-// ═══════════════════════════════════════════════════════════════
-// HELPER FUNCTIONS
-// توابع کمکی
-// ═══════════════════════════════════════════════════════════════
-
-//+------------------------------------------------------------------+
-//| Convert Percentage to Decimal                                    |
-//| تبدیل درصد به اعشار                                              |
-//+------------------------------------------------------------------+
-double PercentToDecimal(double percent)
-{
-    return percent / PERCENTAGE_TO_DECIMAL;
+// Helper Functions
+double PercentToDecimal(double percent) {
+        return percent / PERCENTAGE_TO_DECIMAL;
 }
-
-//+------------------------------------------------------------------+
-//| Convert Decimal to Percentage                                    |
-//| تبدیل اعشار به درصد                                              |
-//+------------------------------------------------------------------+
-double DecimalToPercent(double decimal)
-{
-    return decimal * PERCENTAGE_TO_DECIMAL;
+    double DecimalToPercent(double decimal) {
+        return decimal * PERCENTAGE_TO_DECIMAL;
 }
-
-//+------------------------------------------------------------------+
-//| Calculate Alpha from Transparency                                |
-//| محاسبه alpha از transparency                                     |
-//+------------------------------------------------------------------+
-int TransparencyToAlpha(int transparency)
-{
-    // Clamp transparency
-    if(transparency < MIN_TRANSPARENCY_PERCENT) transparency = MIN_TRANSPARENCY_PERCENT;
+    int TransparencyToAlpha(int transparency) {
+        if(transparency < MIN_TRANSPARENCY_PERCENT) transparency = MIN_TRANSPARENCY_PERCENT;
     if(transparency > MAX_TRANSPARENCY_PERCENT) transparency = MAX_TRANSPARENCY_PERCENT;
-    
-    // Calculate alpha
     return (int)((MAX_TRANSPARENCY_PERCENT - transparency) * ALPHA_SCALE_FACTOR / PERCENTAGE_TO_DECIMAL);
 }
-
-//+------------------------------------------------------------------+
-//| Validate Transparency Range                                      |
-//| اعتبارسنجی محدوده transparency                                   |
-//+------------------------------------------------------------------+
-bool IsValidTransparency(int transparency)
-{
-    return (transparency >= MIN_TRANSPARENCY_PERCENT && 
-            transparency <= MAX_TRANSPARENCY_PERCENT);
+    bool IsValidTransparency(int transparency) {
+    return (transparency >= MIN_TRANSPARENCY_PERCENT && transparency <= MAX_TRANSPARENCY_PERCENT);
 }
-
-//+------------------------------------------------------------------+
-//| Validate Zone Height Percent                                     |
-//| اعتبارسنجی درصد ارتفاع zone                                      |
-//+------------------------------------------------------------------+
-bool IsValidZoneHeightPercent(double heightPercent)
-{
-    return (heightPercent >= MIN_ZONE_HEIGHT_PERCENT && 
-            heightPercent <= MAX_ZONE_HEIGHT_PERCENT);
+    bool IsValidZoneHeightPercent(double heightPercent) {
+    return (heightPercent >= MIN_ZONE_HEIGHT_PERCENT && heightPercent <= MAX_ZONE_HEIGHT_PERCENT);
 }
-
-//+------------------------------------------------------------------+
-//| Get Frequency for Step                                           |
-//| دریافت فرکانس برای گام                                           |
-//+------------------------------------------------------------------+
-double GetFrequencyForStep(int step)
-{
-    if(step <= 0) return 0.0;
+    double GetFrequencyForStep(int step) {
+        if(step <= 0) return 0.0;
     return (double)FREQUENCY_BASE / step;
 }
-
-//+------------------------------------------------------------------+
-//| Validate Price Value (Simple Check)                              |
-//| اعتبارسنجی مقدار قیمت                                            |
-//+------------------------------------------------------------------+
-bool IsValidPriceSimple(double price)
-{
+    bool IsValidPriceSimple(double price) {
     return (price >= MIN_PRICE_VALUE && price < MAX_PRICE_MULTIPLIER);
 }
-
-//+------------------------------------------------------------------+
-//| Print Constants Summary (Debug)                                  |
-//| چاپ خلاصه ثابت‌ها (دیباگ)                                        |
-//+------------------------------------------------------------------+
-void PrintConstantsSummary()
-{
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("═══════════════════════════════════════════════════════════");
-    Print("📋 PROJECT CONSTANTS SUMMARY");
-    Print("═══════════════════════════════════════════════════════════");
-    Print("Transparency Range: ", MIN_TRANSPARENCY_PERCENT, "-", MAX_TRANSPARENCY_PERCENT, "%");
-    Print("Zone Height Range: ", DoubleToString(MIN_ZONE_HEIGHT_PERCENT * 100, 2), "-", 
+    void PrintConstantsSummary() {
+        #ifdef ENABLE_DEBUG_LOGS
+    Print("=== PROJECT CONSTANTS ===");
+    Print("Transparency: ", MIN_TRANSPARENCY_PERCENT, "-", MAX_TRANSPARENCY_PERCENT, "%");
+    Print("Zone Height: ", DoubleToString(MIN_ZONE_HEIGHT_PERCENT * 100, 2), "-",
           DoubleToString(MAX_ZONE_HEIGHT_PERCENT * 100, 2), "%");
-    Print("Max Zones Per Chart: ", MAX_ZONES_PER_CHART);
-    Print("Max Learning Data: ", MAX_LEARNING_DATA_SIZE);
-    Print("Cache Log Interval: ", CACHE_LOG_INTERVAL);
-    Print("═══════════════════════════════════════════════════════════");
+    Print("Max Zones: ", MAX_ZONES_PER_CHART);
     #endif
-}
+    }
+    #endif
+    // PROJECT_CONSTANTS_MQH

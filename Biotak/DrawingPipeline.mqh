@@ -1,9 +1,4 @@
-//+------------------------------------------------------------------+
-//|                                              DrawingPipeline.mqh |
-//|                                  Copyright 2025, Biotak Project  |
-//|                                    Clean Architecture Pipeline   |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2025, Biotak Project"
+﻿#property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 
 // Include modules in dependency order
@@ -14,10 +9,10 @@
 
 //+------------------------------------------------------------------+
 //| MAIN ORCHESTRATOR: Draw Levels and Zones                         |
-//| هماهنگ‌کننده اصلی: رسم سطوح و زون‌ها                             |
+
 //|                                                                  |
 //| This function orchestrates the complete 5-phase pipeline         |
-//| این تابع کل خط لوله 5 مرحله‌ای را هماهنگ می‌کند                  |
+
 //+------------------------------------------------------------------+
 void DrawLevelsAndZones(
     const SLevelRawData &levels[],
@@ -27,63 +22,60 @@ void DrawLevelsAndZones(
 {
     // ═══════════════════════════════════════════════════════════════
     // PHASE 1: VALIDATION & PREPARATION
-    // مرحله 1: اعتبارسنجی و آماده‌سازی
+    
     // ═══════════════════════════════════════════════════════════════
     int count;
     double zoneHeight;
-    
     if(!ValidateCompleteConfig(levels, stepSize, config, count, zoneHeight)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ DrawLevelsAndZones: Validation failed");
-        #endif
-        return;
+    #endif
+    return;
     }
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 2: LEVEL CLASSIFICATION
-    // مرحله 2: طبقه‌بندی سطوح
+    
     // ═══════════════════════════════════════════════════════════════
     SLevelClassification classifications[];
     ClassifyLevels(levels, config, classifications);
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 3: ZONE GEOMETRY CALCULATION
-    // مرحله 3: محاسبه هندسه زون‌ها
+    
     // ═══════════════════════════════════════════════════════════════
     SZoneGeometry geometries[];
     CalculateZoneGeometries(levels, classifications, zoneHeight, geometries);
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 4: STYLE RESOLUTION
-    // مرحله 4: تعیین استایل
+    
     // ═══════════════════════════════════════════════════════════════
     SLineRenderInfo lines[];
     SZoneRenderInfo zones[];
-    
     ResolveLineStyles(levels, classifications, config, objectPrefix, lines);
     ResolveZoneStyles(levels, classifications, geometries, config, objectPrefix, zones);
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 5: BATCH RENDERING
-    // مرحله 5: رسم دسته‌ای
+    
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL: Rendering order is zones first, then lines (Requirement 9.5)
     // This ensures zones appear in background and lines in foreground
-    // ترتیب رسم: ابتدا زون‌ها، سپس خطوط (الزام 9.5)
+    
     RenderBatch(lines, zones);
     
     // MEMORY FIX: Free arrays after use
     ArrayFree(lines);
     ArrayFree(zones);
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ DrawLevelsAndZones: Pipeline completed successfully");
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
 //| LEGACY SUPPORT: Calculate Linear Levels                          |
-//| پشتیبانی قدیمی: محاسبه سطوح خطی                                  |
+
 //+------------------------------------------------------------------+
 void CalculateLinearLevels(double startPrice, double stepSize, 
                            int countAbove, int countBelow, 
@@ -94,7 +86,6 @@ void CalculateLinearLevels(double startPrice, double stepSize,
     // Estimate max size to avoid frequent resizing
     int estimatedSize = countAbove + countBelow + 1;
     ArrayResize(outLevels, estimatedSize);
-    
     int validCount = 0;
     
     // 1. Midpoint (Always included)
@@ -109,11 +100,10 @@ void CalculateLinearLevels(double startPrice, double stepSize,
         
         // Safety Check: Stop if out of bounds (unless custom mode)
         if(!ignoreLimits && maxPriceLimit > 0 && price > maxPriceLimit) break;
-        
-        outLevels[validCount].price = price;
-        outLevels[validCount].logicalStep = i;
-        outLevels[validCount].stepTypeIndex = 0;
-        validCount++;
+    outLevels[validCount].price = price;
+    outLevels[validCount].logicalStep = i;
+    outLevels[validCount].stepTypeIndex = 0;
+    validCount++;
     }
     
     // 3. Below (Descending)
@@ -125,11 +115,10 @@ void CalculateLinearLevels(double startPrice, double stepSize,
         
         // Safety Check: Stop if out of bounds
         if(!ignoreLimits && minPriceLimit > 0 && price < minPriceLimit) break;
-        
-        outLevels[validCount].price = price;
-        outLevels[validCount].logicalStep = -i;
-        outLevels[validCount].stepTypeIndex = 0;
-        validCount++;
+    outLevels[validCount].price = price;
+    outLevels[validCount].logicalStep = -i;
+    outLevels[validCount].stepTypeIndex = 0;
+    validCount++;
     }
     
     // Resize to actual count
@@ -143,11 +132,11 @@ void CalculateLinearLevels(double startPrice, double stepSize,
     Print("   Requested Above: ", countAbove, ", Generated: ", validCount - 1 - (validCount - 1 - countAbove));
     Print("   Requested Below: ", countBelow);
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
 //| Cleanup Helper                                                    |
-//| کمک پاک‌سازی                                                      |
+
 //+------------------------------------------------------------------+
 void Cleanup(string prefix) {
     CleanupZoneObjects(prefix);

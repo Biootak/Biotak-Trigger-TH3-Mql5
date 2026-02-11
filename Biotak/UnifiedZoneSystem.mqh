@@ -1,9 +1,4 @@
-//+------------------------------------------------------------------+
-//|                                          UnifiedZoneSystem.mqh   |
-//|                                  Copyright 2025, Biotak Project  |
-//|                    Unified Zone Creation for ALL Modes           |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2025, Biotak Project"
+﻿#property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 
 // CRITICAL: Include guard to prevent duplicate symbols
@@ -19,32 +14,27 @@
 
 //+------------------------------------------------------------------+
 //| UNIFIED ZONE CONFIGURATION                                        |
-//| تنظیمات یکپارچه Zone برای تمام مودها                             |
+
 //|                                                                  |
-//| این struct تمام تنظیمات zone را برای همه مودها مدیریت می‌کند    |
+
 //+------------------------------------------------------------------+
 struct SUnifiedZoneConfig {
-    bool enabled;                    // آیا zone ها فعال هستند؟
-    int transparency;                // شفافیت (0-100)
-    double heightPercent;            // درصد ارتفاع zone نسبت به step (0.0-1.0)
-    bool separateStructureTrigger;   // آیا structure و trigger جدا باشند؟
-    color defaultColor;              // رنگ پیش‌فرض
-    ENUM_ZONE_STYLE style;    // استایل zone (Lines/Filled/Empty/Hidden)
+        bool enabled;
+    int transparency;
+    double heightPercent;
+    bool separateStructureTrigger;
+    color defaultColor;
+    ENUM_ZONE_STYLE style;    
 };
 
 //+------------------------------------------------------------------+
 //| CREATE ZONE BETWEEN TWO LEVELS - UNIFIED METHOD                  |
-//| ساخت Zone بین دو سطح - متد یکپارچه برای تمام مودها              |
+
 //|                                                                  |
-//| این تابع واحد برای تمام مودها استفاده می‌شود:                   |
+
 //| - M Mode, SS/LS Mode, Factor Mode, TP Mode, etc.                |
 //|                                                                  |
-//| @param zoneName نام یکتای zone                                   |
-//| @param prevLevelPrice قیمت سطح قبلی                              |
-//| @param currentLevelPrice قیمت سطح فعلی                           |
-//| @param config تنظیمات zone                                       |
-//| @param levelColor رنگ سطح (برای zone استفاده می‌شود)            |
-//| @return true اگر موفق، false اگر ناموفق                          |
+
 //+------------------------------------------------------------------+
 bool CreateUnifiedZone(const string zoneName,
                        const double prevLevelPrice,
@@ -73,8 +63,8 @@ bool CreateUnifiedZone(const string zoneName,
         if(callCount <= 5) {
             Print("⚠️ ZONE: DISABLED globally");
         }
-        #endif
-        return true; // Not an error, just disabled
+    #endif
+    return true; // Not an error, just disabled
     }
     
     // Check style: HIDDEN
@@ -83,18 +73,18 @@ bool CreateUnifiedZone(const string zoneName,
         if(callCount <= 5) {
             Print("⚠️ ZONE: Style is HIDDEN");
         }
-        #endif
+    #endif
         // Delete zone if exists
         if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
-        return true; // Not an error, just hidden
+    return true; // Not an error, just hidden
     }
     
     // Validate zone name
     if(StringLen(zoneName) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateUnifiedZone: Empty zone name");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Validate prices
@@ -102,17 +92,17 @@ bool CreateUnifiedZone(const string zoneName,
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateUnifiedZone: Invalid prices - Prev=", DoubleToString(prevLevelPrice, Digits),
               ", Current=", DoubleToString(currentLevelPrice, Digits));
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Check if prices are equal (no zone needed)
-    // PERF FIX: Use epsilon comparison instead of exact float ==
+    // Use epsilon comparison instead of exact float ==
     if(AreEqual(prevLevelPrice, currentLevelPrice, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CreateUnifiedZone: Prices are equal - no zone needed");
-        #endif
-        return true; // Not an error
+    #endif
+    return true; // Not an error
     }
     
     // Validate height percent
@@ -120,8 +110,8 @@ bool CreateUnifiedZone(const string zoneName,
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateUnifiedZone: Invalid height percent: ", config.heightPercent,
               " (must be between ", MIN_ZONE_HEIGHT_PERCENT, " and ", MAX_ZONE_HEIGHT_PERCENT, ")");
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -135,8 +125,8 @@ bool CreateUnifiedZone(const string zoneName,
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateUnifiedZone: Invalid step size: ", stepSize);
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // Calculate zone height (percentage of step size)
@@ -154,8 +144,8 @@ bool CreateUnifiedZone(const string zoneName,
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateUnifiedZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, Digits),
               ", Lower=", DoubleToString(lowerPrice, Digits));
-        #endif
-        return false;
+    #endif
+    return false;
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -184,36 +174,33 @@ bool CreateUnifiedZone(const string zoneName,
     request.endTime = 0;    // Auto-calculate
     
     SZoneCreationResult result = CreateZone(request);
-    
     if(!result.success) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CreateUnifiedZone: Factory failed for '", zoneName, "' - ", result.errorMessage,
               " (Code: ", result.errorCode, ")");
-        #endif
-        return false;
+    #endif
+    return false;
     }
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ CreateUnifiedZone: Created/Updated '", zoneName, "' [",
           DoubleToString(lowerPrice, Digits), " - ", DoubleToString(upperPrice, Digits), "]");
     #endif
-    
     return true;
 }
 
 //+------------------------------------------------------------------+
 //| GET UNIFIED ZONE CONFIG FROM GLOBAL SETTINGS                     |
-//| دریافت تنظیمات یکپارچه zone از تنظیمات global                    |
+
 //|                                                                  |
-//| این تابع تنظیمات zone را از input parameters می‌خواند            |
-//| FIX BUG #16: Added validation for global variables               |
-//| GOLD VERSION: Added style support for all modes                  |
+
+//| Added validation for global variables               |
+//| Added style support for all modes                  |
 //+------------------------------------------------------------------+
 SUnifiedZoneConfig GetUnifiedZoneConfig()
 {
     SUnifiedZoneConfig config;
     
-    // FIX BUG #16: Validate global variables exist and have valid values
+    // Validate global variables exist and have valid values
     // Read from global input parameters with safe defaults
     config.enabled = inpShowMidZones;
     
@@ -222,53 +209,44 @@ SUnifiedZoneConfig GetUnifiedZoneConfig()
     if(config.transparency < 0) config.transparency = 0;
     if(config.transparency > 100) config.transparency = 100;
     
-    // GOLD VERSION: Use configurable zone height from input parameter
+    // Use configurable zone height from input parameter
     // Convert from percentage (1-100) to decimal (0.01-1.0)
     double heightPercentInput = inpMidZoneHeightPercent / 100.0;
     
     // Validate and clamp height percent
     if(heightPercentInput < MIN_ZONE_HEIGHT_PERCENT) {
         heightPercentInput = MIN_ZONE_HEIGHT_PERCENT;
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetUnifiedZoneConfig: Zone height too small, clamped to ", 
               MIN_ZONE_HEIGHT_PERCENT * 100, "%");
-        #endif
+    #endif
     }
     if(heightPercentInput > MAX_ZONE_HEIGHT_PERCENT) {
         heightPercentInput = MAX_ZONE_HEIGHT_PERCENT;
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetUnifiedZoneConfig: Zone height too large, clamped to ", 
               MAX_ZONE_HEIGHT_PERCENT * 100, "%");
-        #endif
+    #endif
     }
     
     config.heightPercent = heightPercentInput;
-    
     config.separateStructureTrigger = true;
     config.defaultColor = clrDarkGray;
     
-    // GOLD VERSION: Add style support
+    // Add style support
     config.style = inpMidZoneStyle;
-    
     return config;
 }
 
 //+------------------------------------------------------------------+
 //| CREATE ZONE WITH TRACKING - FOR STRUCTURE/TRIGGER SEPARATION    |
-//| ساخت Zone با ردیابی - برای جداسازی Structure/Trigger            |
+
 //|                                                                  |
-//| این تابع برای مودهایی که structure و trigger جدا دارند          |
-//| (مثل M Mode, SS/LS Mode)                                         |
+
 //|                                                                  |
-//| FIX BUG #15: Removed unused prevPrice parameter                  |
+//| Removed unused prevPrice parameter                  |
 //|                                                                  |
-//| @param zoneName نام zone                                         |
-//| @param currentPrice قیمت فعلی                                    |
-//| @param isStructure آیا این zone برای structure است؟             |
-//| @param levelColor رنگ سطح                                        |
-//| @param lastStructurePrice آخرین قیمت structure (برای tracking)  |
-//| @param lastTriggerPrice آخرین قیمت trigger (برای tracking)      |
-//| @return true اگر موفق                                            |
+
 //+------------------------------------------------------------------+
 bool CreateZoneWithTracking(const string zoneName,
                             const double currentPrice,
@@ -281,14 +259,13 @@ bool CreateZoneWithTracking(const string zoneName,
     
     // Determine which "last price" to use based on structure/trigger
     double effectivePrevPrice = 0;
-    
     if(isStructure) {
         effectivePrevPrice = lastStructurePrice;
-        lastStructurePrice = currentPrice; // Update tracker
+    lastStructurePrice = currentPrice; // Update tracker
     }
     else {
         effectivePrevPrice = lastTriggerPrice;
-        lastTriggerPrice = currentPrice; // Update tracker
+    lastTriggerPrice = currentPrice; // Update tracker
     }
     
     // Only create zone if we have a previous price
@@ -302,16 +279,11 @@ bool CreateZoneWithTracking(const string zoneName,
 
 //+------------------------------------------------------------------+
 //| CREATE SIMPLE ZONE - FOR MODES WITHOUT STRUCTURE/TRIGGER        |
-//| ساخت Zone ساده - برای مودهای بدون Structure/Trigger             |
+
 //|                                                                  |
-//| این تابع برای مودهایی که structure/trigger ندارند               |
-//| (مثل Factor Mode, M-Equal Mode)                                 |
+
 //|                                                                  |
-//| @param zoneName نام zone                                         |
-//| @param prevPrice قیمت قبلی                                       |
-//| @param currentPrice قیمت فعلی                                    |
-//| @param levelColor رنگ سطح                                        |
-//| @return true اگر موفق                                            |
+
 //+------------------------------------------------------------------+
 bool CreateSimpleZone(const string zoneName,
                       const double prevPrice,
@@ -324,30 +296,16 @@ bool CreateSimpleZone(const string zoneName,
 
 //+------------------------------------------------------------------+
 //| CREATE ZONE WITH SMART FALLBACK - UNIFIED FOR ALL MODES         |
-//| ساخت Zone با Fallback هوشمند - یکپارچه برای تمام مودها          |
+
 //|                                                                  |
-//| این تابع برای تمام مودها استفاده می‌شود و به صورت خودکار       |
-//| تشخیص می‌دهد که آیا باید از Structure/Trigger tracking استفاده |
-//| کند یا از fallback ساده.                                        |
+
 //|                                                                  |
 //| LOGIC:                                                           |
-//| 1. اگر Structure فعال است و سطح Structure است → Structure zone |
-//| 2. اگر Trigger فعال است و سطح Trigger است → Trigger zone      |
-//| 3. در غیر این صورت → Fallback zone با رنگ سطح                  |
+
 //|                                                                  |
-//| CRITICAL FIX: Added fixedStepSize parameter for consistent zones|
+//| Added fixedStepSize parameter for consistent zones|
 //|                                                                  |
-//| @param zoneName نام zone                                         |
-//| @param currentPrice قیمت سطح فعلی                                |
-//| @param isStructure آیا این سطح Structure است؟                   |
-//| @param levelColor رنگ سطح                                        |
-//| @param structureEnabled آیا Structure فعال است؟                 |
-//| @param triggerEnabled آیا Trigger فعال است؟                     |
-//| @param lastStructurePrice آخرین قیمت Structure (برای tracking)  |
-//| @param lastTriggerPrice آخرین قیمت Trigger (برای tracking)      |
-//| @param lastFallbackPrice آخرین قیمت Fallback (برای tracking)    |
-//| @param fixedStepSize اندازه ثابت step (0=auto از فاصله)        |
-//| @return true اگر موفق                                            |
+
 //+------------------------------------------------------------------+
 bool CreateZoneWithSmartFallback(const string zoneName,
                                  const double currentPrice,
@@ -365,19 +323,18 @@ bool CreateZoneWithSmartFallback(const string zoneName,
     // CRITICAL DIAGNOSTIC - Track per timeframe
     static int m15Count = 0, m30Count = 0;
     int currentTF = PeriodMinutes();
-    
     #ifdef ENABLE_DEBUG_LOGS
     if(currentTF == 15 && m15Count < 5) {
         m15Count++;
-        Print("🔍 M15-FALLBACK #", m15Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
+    Print("🔍 M15-FALLBACK #", m15Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
     }
     else if(currentTF == 30 && m30Count < 5) {
         m30Count++;
-        Print("🔍 M30-FALLBACK #", m30Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
+    Print("🔍 M30-FALLBACK #", m30Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
     }
     #endif
     
-    // CRITICAL FIX: Check if zones are enabled globally
+    // Check if zones are enabled globally
     if(!config.enabled) {
         // Zones disabled - still update tracking variables but don't draw
         #ifdef ENABLE_DEBUG_LOGS
@@ -387,9 +344,8 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         else if(currentTF == 30 && m30Count <= 5) {
             Print("🔍 M30-DISABLED: Returning early");
         }
-        #endif
-        
-        if(isStructure && structureEnabled) {
+    #endif
+    if(isStructure && structureEnabled) {
             lastStructurePrice = currentPrice;
         }
         else if(!isStructure && triggerEnabled) {
@@ -398,31 +354,30 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         else {
             lastFallbackPrice = currentPrice;
         }
-        return true; // Not an error, just disabled
+    return true; // Not an error, just disabled
     }
     
     // Determine which tracking path to use
     double effectivePrevPrice = 0;
     bool shouldDraw = false;
-    
     if(isStructure && structureEnabled) {
         // Structure zone path
         effectivePrevPrice = lastStructurePrice;
-        shouldDraw = (lastStructurePrice > 0);
-        lastStructurePrice = currentPrice;
+    shouldDraw = (lastStructurePrice > 0);
+    lastStructurePrice = currentPrice;
     }
     else if(!isStructure && triggerEnabled) {
         // Trigger zone path
         effectivePrevPrice = lastTriggerPrice;
-        shouldDraw = (lastTriggerPrice > 0);
-        lastTriggerPrice = currentPrice;
+    shouldDraw = (lastTriggerPrice > 0);
+    lastTriggerPrice = currentPrice;
     }
     else {
         // FALLBACK: Neither Structure nor Trigger enabled
         // Draw zone using level's own color
         effectivePrevPrice = lastFallbackPrice;
-        shouldDraw = (lastFallbackPrice > 0);
-        lastFallbackPrice = currentPrice;
+    shouldDraw = (lastFallbackPrice > 0);
+    lastFallbackPrice = currentPrice;
     }
     
     // CRITICAL DIAGNOSTIC
@@ -439,8 +394,8 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
             Print("🔍 TF", currentTF, "-SKIP: First level or no prev price");
         }
-        #endif
-        return true; // Not an error, just first level
+    #endif
+    return true; // Not an error, just first level
     }
     
     // CRITICAL DIAGNOSTIC
@@ -450,15 +405,15 @@ bool CreateZoneWithSmartFallback(const string zoneName,
     }
     #endif
     
-    // CRITICAL FIX: Use fixed step size if provided
+    // Use fixed step size if provided
     if(fixedStepSize > 0) {
-        // CRITICAL FIX: fixedStepSize is the STEP SIZE, not the distance
+        // fixedStepSize is the STEP SIZE, not the distance
         // We need to calculate zone height based on the ACTUAL distance between levels
         double actualDistance = MathAbs(currentPrice - effectivePrevPrice);
-        double zoneHeight = actualDistance * config.heightPercent * 0.5;
-        double midPoint = (effectivePrevPrice + currentPrice) / 2.0;
-        double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
-        double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
+    double zoneHeight = actualDistance * config.heightPercent * 0.5;
+    double midPoint = (effectivePrevPrice + currentPrice) / 2.0;
+    double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
+    double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
         
         // CRITICAL DIAGNOSTIC
         #ifdef ENABLE_DEBUG_LOGS
@@ -466,41 +421,39 @@ bool CreateZoneWithSmartFallback(const string zoneName,
             Print("🔍 TF", currentTF, "-ZONE: upper=", DoubleToString(upperPrice, 5), 
                   ", lower=", DoubleToString(lowerPrice, 5), ", dist=", DoubleToString(actualDistance, 5));
         }
-        #endif
+    #endif
         
         // Handle LINES style (special case)
         if(config.style == FACTOR_ZONE_LINES) {
-            return CreateFactorMidZone_LinesStyle(zoneName, upperPrice, lowerPrice,
+        return CreateFactorMidZone_LinesStyle(zoneName, upperPrice, lowerPrice,
                                                   (levelColor == clrNONE) ? config.defaultColor : levelColor,
                                                   config.transparency);
         }
         
         // Handle HIDDEN style
         if(config.style == FACTOR_ZONE_HIDDEN) {
-            if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
-            return true;
+        if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+    return true;
         }
         
         // Handle BOX styles (Filled/Empty)
         SZoneCreationRequest request;
-        request.name = zoneName;
-        request.topPrice = upperPrice;
-        request.bottomPrice = lowerPrice;
-        request.zoneColor = (levelColor == clrNONE) ? config.defaultColor : levelColor;
-        request.transparency = config.transparency;
-        request.filled = (config.style == FACTOR_ZONE_BOX_FILLED);
-        request.startTime = 0;
-        request.endTime = 0;
-        
-        SZoneCreationResult result = CreateZone(request);
+    request.name = zoneName;
+    request.topPrice = upperPrice;
+    request.bottomPrice = lowerPrice;
+    request.zoneColor = (levelColor == clrNONE) ? config.defaultColor : levelColor;
+    request.transparency = config.transparency;
+    request.filled = (config.style == FACTOR_ZONE_BOX_FILLED);
+    request.startTime = 0;
+    request.endTime = 0;
+    SZoneCreationResult result = CreateZone(request);
         
         // CRITICAL DIAGNOSTIC
         if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
             Print("🔍 TF", currentTF, "-RESULT: success=", (result.success ? "YES" : "NO"), 
                   ", error=", result.errorMessage);
         }
-        
-        return result.success;
+    return result.success;
     }
     
     // Original method: use distance between levels
@@ -509,30 +462,28 @@ bool CreateZoneWithSmartFallback(const string zoneName,
 
 //+------------------------------------------------------------------+
 //| BATCH CREATE ZONES - FOR PERFORMANCE                             |
-//| ساخت دسته‌ای Zone ها - برای بهینه‌سازی عملکرد                   |
+
 //|                                                                  |
-//| این تابع برای ساخت چندین zone به صورت batch استفاده می‌شود      |
+
 //+------------------------------------------------------------------+
 struct SZonePair {
-    string name;
+        string name;
     double prevPrice;
     double currentPrice;
     color levelColor;
 };
 
-int CreateZonesBatch(const SZonePair &zones[], const SUnifiedZoneConfig &config)
+    int CreateZonesBatch(const SZonePair &zones[], const SUnifiedZoneConfig &config)
 {
-    int count = ArraySize(zones);
+        int count = ArraySize(zones);
     int successCount = 0;
-    
     for(int i = 0; i < count; i++) {
         if(CreateUnifiedZone(zones[i].name, zones[i].prevPrice, zones[i].currentPrice,
                             config, zones[i].levelColor)) {
             successCount++;
         }
     }
-    
     return successCount;
 }
-
-#endif // UNIFIED_ZONE_SYSTEM_MQH
+    #endif
+    // UNIFIED_ZONE_SYSTEM_MQH

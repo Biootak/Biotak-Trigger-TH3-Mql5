@@ -1,3 +1,6 @@
+﻿#ifndef CONSTANTS_AND_ENUMS_MQH
+#define CONSTANTS_AND_ENUMS_MQH
+
 #define MAX_LINES 10
 #define CACHE_TIMEOUT 60
 
@@ -6,7 +9,7 @@
 #ifndef OBJ_ALL_PERIODS
 #define OBJ_ALL_PERIODS 0xFFFFFFFF  // Show on all timeframes
 #endif
-#ifndef OBJ_NO_PERIODS
+    #ifndef OBJ_NO_PERIODS
 #define OBJ_NO_PERIODS 0            // Hide on all timeframes
 #endif
 
@@ -27,12 +30,10 @@
 #define MIN_SAFE_DIVISIONS 0.001      // Minimum divisions to prevent precision loss
 #define MAX_SAFE_FACTOR 10000.0       // Maximum factor value to prevent overflow
 
-// تعریف ثابت‌های مورد نیاز برای تنظیم خصوصیات آبجکت‌ها
 #ifndef OBJPROP_BOLD
 #define OBJPROP_BOLD 5
 #endif
-
-const string FRACTAL_TIMEFRAMES[] = {
+    const string FRACTAL_TIMEFRAMES[] = {
     "M1", "M4", "M16", "H1+M4", "H4+M16", "H17+M4",
     "D2+H20+M16", "D11+H9+M4", "D45+H12+M16"
 };
@@ -49,32 +50,28 @@ const double MODIFIED_FRACTAL_PERCENTAGES[] = {
     2.6664,   // D11+H9+M4: 266.64%
     5.3328    // D45+H12+M16: 533.28%
 };
-const color FRACTAL_COLORS[] = {
+    const color FRACTAL_COLORS[] = {
     clrBlack, clrBlack, clrBlack, clrBlue, clrRed,
     clrRed, clrGreen, clrBlack, clrBlack
 };
-const string STANDARD_TIMEFRAMES[] = {"D1", "W1", "MN1"};
-const int STANDARD_MINUTES[] = {1440, 10080, 43200};
-const color STANDARD_COLORS[] = {clrBlue, clrBlue, clrBlue};
-
-enum ENUM_TH_START_POINT_TYPE {
+    const string STANDARD_TIMEFRAMES[] = {"D1", "W1", "MN1"};
+    const int STANDARD_MINUTES[] = {1440, 10080, 43200};
+    const color STANDARD_COLORS[] = {clrBlue, clrBlue, clrBlue};
+    enum ENUM_TH_START_POINT_TYPE {
     TH_START_POINT_MIDPOINT = 0,      // Midpoint
     TH_START_POINT_HISTORICAL_HIGH = 1, // Historical High
     TH_START_POINT_HISTORICAL_LOW = 2,  // Historical Low
     TH_START_POINT_CUSTOM_PRICE = 3    // Custom Price
 };
-
-enum ENUM_LINE_OBJECT_TYPE {
+    enum ENUM_LINE_OBJECT_TYPE {
     LINE_OBJECT_HORIZONTAL_LINE = 0,
     LINE_OBJECT_RAY_LINE = 1
 };
-
-enum ENUM_LABEL_CORNER_POSITION {
+    enum ENUM_LABEL_CORNER_POSITION {
     LABEL_CORNER_LEFT_TOP = 0,
     LABEL_CORNER_LEFT_BOTTOM = 1
 };
-
-enum ENUM_LABEL_ARRANGEMENT {
+    enum ENUM_LABEL_ARRANGEMENT {
     LABEL_ARRANGEMENT_VERTICAL = 0,
     LABEL_ARRANGEMENT_HORIZONTAL = 1
 };
@@ -98,7 +95,7 @@ enum ENUM_FACTOR_MODE {
 
 //+------------------------------------------------------------------+
 //| Factor Auto Basis - What to base the auto calculation on         |
-//| مبنای محاسبه خودکار Factor                                       |
+
 //|                                                                  |
 //| CONTROL: Average of SS and LS (TH×1.75) - Balanced [DEFAULT]    |
 //| SS: Short Step (TH×1.5) - Closer levels, more lines             |
@@ -122,7 +119,7 @@ enum ENUM_FACTOR_AUTO_BASIS {
 
 //+------------------------------------------------------------------+
 //| Structure Base Multiplier - Valid range 2-9                      |
-//| ضریب پایه ساختار - محدوده معتبر ۲ تا ۹                          |
+
 //|                                                                  |
 //| Defines the hierarchical structure levels:                      |
 //| L1 = base^1, L2 = base^2, L3 = base^3, L4 = base^4, L5 = base^5|
@@ -145,13 +142,13 @@ enum ENUM_STRUCTURE_BASE_MULTIPLIER {
 };
 
 // Harmonic Ratio validation constants
-#define MIN_HARMONIC_RATIO 1.01   // حداقل 1% تفاوت (meaningful alternation)
-#define MAX_HARMONIC_RATIO 2.0    // حداکثر 2x (maximum variation)
+#define MIN_HARMONIC_RATIO 1.01   
+#define MAX_HARMONIC_RATIO 2.0    
 #define DEFAULT_HARMONIC_RATIO 1.333  // Golden-like ratio (4/3)
 
 //+------------------------------------------------------------------+
 //| Mean Type Selection (for aggregates and quick test)              |
-//| انتخاب نوع میانگین (برای aggregates و تست سریع)                 |
+
 //+------------------------------------------------------------------+
 enum ENUM_MEAN_TYPE {
     MEAN_ARITHMETIC = 0,    // Arithmetic Mean: (A + B + ...) / n
@@ -164,7 +161,7 @@ enum ENUM_MEAN_TYPE {
 
 //+------------------------------------------------------------------+
 //| Quick Test Presets (Simplified Component Selection)              |
-//| Preset‌های تست سریع (انتخاب ساده components)                     |
+
 //|                                                                  |
 //| NOTE: CUSTOM removed - use Advanced mode for full control       |
 //+------------------------------------------------------------------+
@@ -185,14 +182,13 @@ enum ENUM_SSLS_BASIS_TYPE {
 
 //+------------------------------------------------------------------+
 //| Calculation Basis (matching Java CalculationBasis enum)          |
-//| مبنای محاسبات (مطابق با جاوا)                                    |
+
 //|                                                                  |
-//| TH_BASIS - محاسبات بر اساس TH (درصد قیمت × √دقیقه)               |
-//| ATR_BASIS - محاسبات بر اساس ATR واقعی (Weighted ATR)             |
+
 //+------------------------------------------------------------------+
 enum ENUM_CALCULATION_BASIS {
-    CALC_BASIS_TH = 0,          // TH-Based (Theoretical) - پیش‌فرض
-    CALC_BASIS_ATR = 1          // ATR-Based (Actual) - واقعی
+    CALC_BASIS_TH = 0,          
+    CALC_BASIS_ATR = 1          
 };
 
 // M step basis type
@@ -202,7 +198,7 @@ enum ENUM_MSTEP_BASIS_TYPE {
 };
 
 // Smart Combo Component Selection (Unified)
-// انتخاب هوشمند اجزای ترکیبی (یکپارچه)
+
 enum ENUM_COMBO_COMPONENT_ITEM {
     // Sub Components (Fastest - 1/4x)
     COMP_SUB_TH = 0,            // Sub TH
@@ -225,7 +221,7 @@ enum ENUM_COMBO_COMPONENT_ITEM {
     COMP_STRUCTURE_LS = 11,     // Structure LS
     
     // ═══════════════════════════════════════════════════════════════
-    // AGGREGATE COMPONENTS (میانگین‌های ترکیبی)
+    
     // These calculate the mean of TH, SS, LS for a timeframe
     // ═══════════════════════════════════════════════════════════════
     COMP_SUB_MEAN = 12,         // Sub Mean: (Sub_TH + Sub_SS + Sub_LS) / 3
@@ -239,7 +235,7 @@ enum ENUM_COMBO_COMPONENT_ITEM {
 
 //+------------------------------------------------------------------+
 //| Combo Operators for Calculator Mode (Manual)                     |
-//| عملگرهای ترکیبی برای حالت ماشین حساب (دستی)                      |
+
 //|                                                                  |
 //| BINARY OPERATORS (2 operands): OP_PLUS to OP_HARMONIC_MEAN      |
 //| N-ARY OPERATORS (all components): OP_GEOMETRIC_MEAN_ALL to end  |
@@ -256,7 +252,7 @@ enum ENUM_COMBO_COMPONENT_ITEM {
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_OPERATOR {
     // ═══════════════════════════════════════════════════════════════
-    // BINARY OPERATORS (عملگرهای دوتایی) - Work on 2 values
+    
     // ═══════════════════════════════════════════════════════════════
     OP_PLUS = 0,                // Plus: A + B
     OP_MINUS = 1,               // Minus: A - B
@@ -267,7 +263,7 @@ enum ENUM_COMBO_OPERATOR {
     OP_HARMONIC_MEAN = 6,       // Harmonic Mean: 2AB / (A + B)
     
     // ═══════════════════════════════════════════════════════════════
-    // N-ARY OPERATORS (عملگرهای چندتایی) - Work on ALL active components
+    
     // When used as Operator 1, collects ALL non-IGNORE components
     // ═══════════════════════════════════════════════════════════════
     OP_GEOMETRIC_MEAN_ALL = 7,  // Geometric Mean (All): ⁿ√(C1 × C2 × ... × Cn)
@@ -284,7 +280,7 @@ enum ENUM_COMBO_OPERATOR {
 
 //+------------------------------------------------------------------+
 //| Calculator Topology (Architecture of Calculation)                |
-//| معماری محاسبات ماشین حساب (ساختار فرمول)                         |
+
 //+------------------------------------------------------------------+
 enum ENUM_CALCULATOR_TOPOLOGY {
     TOPOLOGY_LINEAR = 0,        // Linear: ((A op B) op C) op D [Sequential]
@@ -293,7 +289,7 @@ enum ENUM_CALCULATOR_TOPOLOGY {
 
 //+------------------------------------------------------------------+
 //| Advanced Combo Operations for Factor Auto Basis                  |
-//| عملیات‌های پیشرفته Combo برای Factor Auto Basis                  |
+
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_OPERATION {
     COMBO_OP_AVERAGE = 0,       // Average: (A + B) / 2 [Default]
@@ -307,7 +303,7 @@ enum ENUM_COMBO_OPERATION {
 
 //+------------------------------------------------------------------+
 //| Combo Mode Selection (Quick Test / Preset / Advanced)            |
-//| انتخاب حالت Combo (تست سریع / Preset / پیشرفته)                 |
+
 //|                                                                  |
 //| THREE INDEPENDENT MODES - No overlap, no conflicts              |
 //|                                                                  |
@@ -341,7 +337,7 @@ enum ENUM_COMBO_MODE {
 
 //+------------------------------------------------------------------+
 //| Timeframe Types for Advanced Combo                               |
-//| انواع تایم‌فریم برای Combo پیشرفته                               |
+
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_TIMEFRAME_TYPE {
     COMBO_TF_SUB = 0,           // Sub: 1/4 current (faster)
@@ -352,7 +348,7 @@ enum ENUM_COMBO_TIMEFRAME_TYPE {
 
 //+------------------------------------------------------------------+
 //| Step Size Type (TH, SS, LS)                                      |
-//| نوع اندازه گام                                                    |
+
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_STEP_TYPE {
     COMBO_STEP_TH = 0,          // TH: Base step (1.0×)
@@ -362,22 +358,22 @@ enum ENUM_COMBO_STEP_TYPE {
 
 //+------------------------------------------------------------------+
 //| Preset Combinations (Common Use Cases) - OPTIMIZED FOR UX        |
-//| ترکیب‌های از پیش تعریف شده - بهینه شده برای کاربر               |
+
 //|                                                                  |
 //| DESIGN PRINCIPLE: 80/20 Rule - 15 presets cover 98% of needs    |
-//| اصل طراحی: قانون 80/20 - 15 preset پوشش 98% نیاز               |
+
 //|                                                                  |
 //| IMPORTANT: COMBO_PRESET_LEGACY_ADD is the default for backward  |
 //| compatibility with old Combo Step Mode (Component1 + Component2)|
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_PRESET {
     // ═══════════════════════════════════════════════════════════════
-    // CATEGORY 0: LEGACY (سازگاری با نسخه قدیم) - DEFAULT
+    
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_LEGACY_ADD = 0,            // Legacy: Trigger SS + Pattern SS (ADD)
     
     // ═══════════════════════════════════════════════════════════════
-    // CATEGORY 1: BALANCED (متعادل) - Most Common (58% usage)
+    
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_BALANCED_MEDIUM = 1,       // Balanced Medium: (Pattern + Trigger) / 2 [Most Popular]
     COMBO_PRESET_BALANCED_LONG = 2,         // Balanced Long: (Structure + Pattern) / 2
@@ -385,27 +381,27 @@ enum ENUM_COMBO_PRESET {
     COMBO_PRESET_BALANCED_MIN = 4,          // Balanced Min: min(Pattern, Trigger)
     
     // ═══════════════════════════════════════════════════════════════
-    // CATEGORY 2: CONSERVATIVE (محافظه‌کار) - Fewer Levels (15% usage)
+    
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_CONSERVATIVE = 5,          // Conservative: max(Structure, Pattern)
     COMBO_PRESET_ULTRA_CONSERVATIVE = 6,    // Ultra Conservative: Structure TH
     COMBO_PRESET_TRIPLE_CONSERVATIVE = 7,   // Triple Conservative: max(Trigger, Pattern, Structure)
     
     // ═══════════════════════════════════════════════════════════════
-    // CATEGORY 3: AGGRESSIVE (تهاجمی) - More Levels (11% usage)
+    
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_AGGRESSIVE = 8,            // Aggressive: min(Pattern, Trigger)
     COMBO_PRESET_ULTRA_AGGRESSIVE = 9,      // Ultra Aggressive: min(Trigger, Sub)
     COMBO_PRESET_TRIPLE_AGGRESSIVE = 10,    // Triple Aggressive: min(Trigger, Pattern, Structure)
     
     // ═══════════════════════════════════════════════════════════════
-    // CATEGORY 4: SPECIAL (ویژه) - Advanced Use Cases (4% usage)
+    
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_TREND_FILTER = 11,         // Trend Filter: Structure - Sub
     COMBO_PRESET_VOLATILITY_ADAPTIVE = 12,  // Volatility: (Structure + Sub) / 2
     
     // ═══════════════════════════════════════════════════════════════
-    // CATEGORY 5: ADVANCED USER (دستی) - For Advanced Users (2% usage)
+    
     // These presets redirect to Advanced Mode for full control
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) → Redirects to Advanced Mode
@@ -413,7 +409,7 @@ enum ENUM_COMBO_PRESET {
 };
 
 // Mode label duration options
-// مدت زمان نمایش لیبل تغییر مود
+
 enum ENUM_MODE_LABEL_DURATION {
     MODE_LABEL_1_SEC = 1,       // 1 Second
     MODE_LABEL_2_SEC = 2,       // 2 Seconds (Default)
@@ -424,7 +420,7 @@ enum ENUM_MODE_LABEL_DURATION {
 };
 
 // TH3 Label Position
-// موقعیت نمایش label های TH3
+
 enum ENUM_TH3_LABEL_POSITION {
     TH3_LABEL_START = 0,        // Start (Beginning of line)
     TH3_LABEL_MIDDLE = 1,       // Middle (Center of visible range)
@@ -433,7 +429,7 @@ enum ENUM_TH3_LABEL_POSITION {
 };
 
 // Unified Zone Display Style (Used by ALL modes)
-// نحوه نمایش Zone ها (برای تمام مودها)
+
 enum ENUM_ZONE_STYLE {
     ZONE_STYLE_LINES = 0,         // Lines Only (Two boundary lines)
     ZONE_STYLE_BOX_FILLED = 1,    // Filled Box (Rectangle with fill)
@@ -442,7 +438,7 @@ enum ENUM_ZONE_STYLE {
 };
 
 // Legacy aliases for backward compatibility
-// نام‌های قدیمی برای سازگاری با کد قبلی
+
 #define ENUM_TH3_ZONE_STYLE ENUM_ZONE_STYLE
 #define ENUM_FACTOR_ZONE_STYLE ENUM_ZONE_STYLE
 #define TH3_ZONE_LINES ZONE_STYLE_LINES
@@ -455,7 +451,7 @@ enum ENUM_ZONE_STYLE {
 #define FACTOR_ZONE_HIDDEN ZONE_STYLE_HIDDEN
 
 // TH3 Drawing Mode
-// حالت رسم TH3 (Steps یا AB=CD)
+
 enum ENUM_TH3_DRAWING_MODE {
     TH3_MODE_STEPS = 0,         // Steps Mode (2-point drag)
     TH3_MODE_ABCD = 1           // AB=CD Mode (3-point click: A, B, C → calculates D)
@@ -463,19 +459,15 @@ enum ENUM_TH3_DRAWING_MODE {
 
 //+------------------------------------------------------------------+
 //| TH3 Frequency Test System - Available Frequencies (0-100%)      |
-//| سیستم تست فرکانس TH3 - فرکانس‌های موجود (0 تا 100 درصد)         |
+
 //+------------------------------------------------------------------+
 // Base frequencies: multiples of 3.125% (1/32) - 32 frequencies
 // Plus: Geometric and Harmonic means between adjacent frequencies
 // Total: ~94 frequencies covering full 0-100% range
-// 
-// فرکانس‌های پایه: مضرب 3.125% (1/32) - 32 فرکانس
-// به علاوه: میانگین هندسی و هارمونیک بین فرکانس‌های مجاور
-// جمع: حدود 94 فرکانس که کل بازه 0-100% را پوشش می‌دهند
 // TH3 Frequency Test Array - EXTENDED (Base + Key means up to 120%)
-// آرایه فرکانس‌های تست TH3 - گسترش یافته (Base + میانگین‌های کلیدی تا 120%)
+
 // Includes all base frequencies + geometric means between them (3.125% to 120%)
-// شامل همه فرکانس‌های base + میانگین هندسی بین اونها (3.125% تا 120%)
+
 const double TH3_TEST_FREQUENCIES[] = {
     // Original range: 3.125% to 100% (63 frequencies)
     3.125,   // 1/32
@@ -558,49 +550,44 @@ const double TH3_TEST_FREQUENCIES[] = {
     119.372, // √(118.75 × 120)
     120.0    // 38.4/32 - Extended maximum
 };
-
-const int TH3_FREQUENCY_COUNT = 77; // 63 original + 14 extended (3.125% to 120%)
+    const int TH3_FREQUENCY_COUNT = 77; // 63 original + 14 extended (3.125% to 120%)
 
 //+------------------------------------------------------------------+
 //| PIPELINE ARCHITECTURE STRUCTS (Added for Modular Refactoring)    |
-//| ساختارهای معماری پایپ‌لاین (برای ریفکتورینگ ماژولار)            |
+
 //+------------------------------------------------------------------+
 
-// 1. Raw Calculation Data (خروجی لایه محاسبات)
 struct SLevelRawData {
-    double price;           // قیمت سطح
-    int logicalStep;        // شماره گام منطقی (مثلاً 0, 1, -1)
-    string label;           // برچسب اختیاری
-    int stepTypeIndex;      // نوع گام (برای مودهای SS/LS یا Factor)
+        double price;
+    int logicalStep;
+    string label;
+    int stepTypeIndex;      
 };
 
-// 2. Render Information for Lines (اطلاعات نهایی برای رسم خط)
-struct SLineRenderInfo {
-    bool isVisible;         // آیا باید رسم شود؟
-    string name;            // نام یکتای آبجکت
-    double price;           // قیمت
-    color clr;              // رنگ
-    ENUM_LINE_STYLE style;  // استایل
-    int width;              // ضخامت
-    string tooltip;         // تول‌تیپ
-    bool selectable;        // قابل انتخاب بودن
-    bool selected;          // وضعیت انتخاب
-    int zOrder;             // اولویت نمایش
+    struct SLineRenderInfo {
+        bool isVisible;
+    string name;
+    double price;
+    color clr;
+    ENUM_LINE_STYLE style;
+    int width;
+    string tooltip;
+    bool selectable;
+    bool selected;
+    int zOrder;             
 };
 
-// 3. Render Information for Zones (اطلاعات نهایی برای رسم زون)
-struct SZoneRenderInfo {
-    bool isVisible;         // آیا باید رسم شود؟
-    string name;            // نام یکتای آبجکت
-    double topPrice;        // قیمت بالا
-    double bottomPrice;     // قیمت پایین
-    color clr;              // رنگ پس‌زمینه
-    int transparency;       // شفافیت (برای Rectangle Label اگر نیاز شد، فعلا Rect ساده است)
-    bool filled;            // توپر بودن
+    struct SZoneRenderInfo {
+        bool isVisible;
+    string name;
+    double topPrice;
+    double bottomPrice;
+    color clr;
+    int transparency;
+    bool filled;            
 };
 
-// 4. Configuration for Styling (تنظیمات استایل‌دهی)
-struct SStyleConfig {
+    struct SStyleConfig {
     // Structure Settings
     bool showStructure;
     color structColorL1;
@@ -620,65 +607,67 @@ struct SStyleConfig {
     // Zone Settings
     bool showZones;
     int zoneTransparency;
-    double zoneHeightPercent; // درصد ارتفاع زون نسبت به گام (0.0-1.0)
+    double zoneHeightPercent; 
 };
 
 //+------------------------------------------------------------------+
 //| STRUCTURE: Level Classification Result                           |
-//| نتیجه طبقه‌بندی سطح (Active/Inactive, Structure/Trigger)         |
+
 //+------------------------------------------------------------------+
 struct SLevelClassification {
-    bool isActive;        // آیا این سطح فعال است؟ (باید در محاسبات لحاظ شود)
-    bool isStructure;     // آیا سطح Structure است؟
-    color levelColor;     // رنگ سطح
-    int style;            // استایل خط (STYLE_SOLID, STYLE_DOT, etc.)
-    int width;            // عرض خط (1-5)
+        bool isActive;
+    bool isStructure;
+    color levelColor;
+    int style;
+    int width;            
 };
 
 //+------------------------------------------------------------------+
 //| STRUCTURE: Zone Geometry Data                                    |
-//| داده‌های هندسی زون (مستقل از رسم)                                |
+
 //+------------------------------------------------------------------+
 struct SZoneGeometry {
-    bool isValid;         // آیا این زون معتبر است؟
-    double topPrice;      // قیمت بالای زون (normalized)
-    double bottomPrice;   // قیمت پایین زون (normalized)
-    double midPoint;      // نقطه میانی بین دو سطح
-    int linkedLevelIndex; // ایندکس سطحی که این زون به آن متصل است
+        bool isValid;
+    double topPrice;
+    double bottomPrice;
+    double midPoint;
+    int linkedLevelIndex; 
 };
 
 //+------------------------------------------------------------------+
 //| STRUCTURE: Zone Validation Result                                |
-//| نتیجه اعتبارسنجی زون                                             |
+
 //+------------------------------------------------------------------+
 struct SZoneValidationResult {
-    bool isValid;         // آیا زون معتبر است؟
-    string errorMessage;  // پیام خطا (در صورت عدم اعتبار)
-    int errorCode;        // کد خطا (0 = موفق)
+        bool isValid;
+    string errorMessage;
+    int errorCode;        
 };
 
 //+------------------------------------------------------------------+
 //| ENUM: Zone Validation Error Codes                                |
-//| کدهای خطای اعتبارسنجی زون                                        |
+
 //+------------------------------------------------------------------+
 enum ENUM_ZONE_ERROR {
-    ZONE_ERROR_NONE = 0,              // بدون خطا
-    ZONE_ERROR_INVALID_PRICES = 1,    // قیمت‌های نامعتبر
-    ZONE_ERROR_INVALID_HEIGHT = 2,    // ارتفاع نامعتبر
-    ZONE_ERROR_EQUAL_PRICES = 3,      // قیمت‌های برابر
-    ZONE_ERROR_INVERTED_BOUNDS = 4,   // مرزهای معکوس (top < bottom)
-    ZONE_ERROR_OUT_OF_RANGE = 5,      // خارج از محدوده معقول
-    ZONE_ERROR_INVALID_TIMEFRAME = 6  // تایم‌فریم نامعتبر
+    ZONE_ERROR_NONE = 0,              
+    ZONE_ERROR_INVALID_PRICES = 1,    
+    ZONE_ERROR_INVALID_HEIGHT = 2,    
+    ZONE_ERROR_EQUAL_PRICES = 3,      
+    ZONE_ERROR_INVERTED_BOUNDS = 4,   
+    ZONE_ERROR_OUT_OF_RANGE = 5,      
+    ZONE_ERROR_INVALID_TIMEFRAME = 6  
 };
 
 //+------------------------------------------------------------------+
 //| TH3 Object Name Suffixes (Magic Numbers Elimination)            |
-//| پسوندهای نام اشیاء TH3 (حذف Magic Numbers)                       |
+
 //+------------------------------------------------------------------+
 const string TH3_SUFFIX_LINE_AB = "_Line_AB";
-const string TH3_SUFFIX_LINE_BC = "_Line_BC";
-const string TH3_SUFFIX_TARGET = "_Target_";
-const string TH3_SUFFIX_POINT = "_Point_";
-const string TH3_SUFFIX_LABEL = "_Label_";
-const string TH3_SUFFIX_INFO = "_Info";
-const string TH3_SUFFIX_ZONE = "_Zone";
+    const string TH3_SUFFIX_LINE_BC = "_Line_BC";
+    const string TH3_SUFFIX_TARGET = "_Target_";
+    const string TH3_SUFFIX_POINT = "_Point_";
+    const string TH3_SUFFIX_LABEL = "_Label_";
+    const string TH3_SUFFIX_INFO = "_Info";
+    const string TH3_SUFFIX_ZONE = "_Zone";
+    #endif
+    // CONSTANTS_AND_ENUMS_MQH

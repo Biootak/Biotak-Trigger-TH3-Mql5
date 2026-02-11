@@ -1,16 +1,9 @@
-//+------------------------------------------------------------------+
-//|                                          PerformanceMetrics.mqh |
-//|                                      Biotak Trigger TH3 Indicator |
-//|                   Performance Metrics Collection and Monitoring   |
-//+------------------------------------------------------------------+
+﻿#ifndef PERFORMANCE_METRICS_MQH
+#define PERFORMANCE_METRICS_MQH
+
 #property copyright "Biotak"
 #property strict
 
-//+------------------------------------------------------------------+
-//| Performance Metrics Structure                                     |
-//| Tracks various performance indicators for optimization analysis  |
-//| Requirements: 20.1, 20.2, 20.3, 20.4, 20.5                      |
-//+------------------------------------------------------------------+
 struct SPerformanceMetrics {
     // OnCalculate metrics
     int onCalculateCalls;       // Total OnCalculate calls
@@ -47,28 +40,19 @@ struct SPerformanceMetrics {
     datetime collectionStart;   // Metrics collection start time
 };
 
-//+------------------------------------------------------------------+
-//| Global Metrics Instance                                          |
-//+------------------------------------------------------------------+
-static SPerformanceMetrics g_performanceMetrics;
-static bool g_metricsInitialized = false;
+    static SPerformanceMetrics g_performanceMetrics;
+    static bool g_metricsInitialized = false;
 
 // Metrics logging configuration
 static int g_metricsLogInterval = 100;  // Log every N OnCalculate calls
 static bool g_metricsEnabled = true;    // Enable/disable metrics collection
 
-//+------------------------------------------------------------------+
-//| Initialize Performance Metrics                                   |
-//| Call from OnInit to reset all counters                           |
-//| Requirements: 20.1, 20.2, 20.3, 20.4                            |
-//+------------------------------------------------------------------+
 void InitializePerformanceMetrics() {
     g_performanceMetrics.onCalculateCalls = 0;
     g_performanceMetrics.skippedCalls = 0;
     g_performanceMetrics.totalExecutionTimeMs = 0;
     g_performanceMetrics.minExecutionTimeMs = UINT_MAX;
     g_performanceMetrics.maxExecutionTimeMs = 0;
-    
     g_performanceMetrics.thCacheHits = 0;
     g_performanceMetrics.thCacheMisses = 0;
     g_performanceMetrics.factorCacheHits = 0;
@@ -77,94 +61,53 @@ void InitializePerformanceMetrics() {
     g_performanceMetrics.geometryCacheMisses = 0;
     g_performanceMetrics.extensionCacheHits = 0;
     g_performanceMetrics.extensionCacheMisses = 0;
-    
     g_performanceMetrics.objectFindCalls = 0;
     g_performanceMetrics.objectCreateCalls = 0;
     g_performanceMetrics.objectDeleteCalls = 0;
     g_performanceMetrics.objectSetCalls = 0;
     g_performanceMetrics.chartRedrawCalls = 0;
-    
     g_performanceMetrics.zoneCreationAttempts = 0;
     g_performanceMetrics.zoneCreationSuccesses = 0;
     g_performanceMetrics.zoneCreationFailures = 0;
     g_performanceMetrics.zoneUpdateOperations = 0;
-    
     g_performanceMetrics.lastReset = TimeCurrent();
     g_performanceMetrics.collectionStart = TimeCurrent();
-    
     g_metricsInitialized = true;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("📊 Performance Metrics Initialized");
     #endif
-}
-
-//+------------------------------------------------------------------+
-//| Reset Performance Metrics                                        |
-//| Clears all counters and restarts collection                      |
-//+------------------------------------------------------------------+
-void ResetPerformanceMetrics() {
+    }
+    void ResetPerformanceMetrics() {
     InitializePerformanceMetrics();
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("🔄 Performance Metrics Reset");
     #endif
-}
-
-//+------------------------------------------------------------------+
-//| Enable/Disable Metrics Collection                                |
-//+------------------------------------------------------------------+
-void SetMetricsEnabled(bool enabled) {
+    }
+    void SetMetricsEnabled(bool enabled) {
     g_metricsEnabled = enabled;
 }
-
-//+------------------------------------------------------------------+
-//| Set Metrics Logging Interval                                     |
-//| interval: Number of OnCalculate calls between log outputs        |
-//+------------------------------------------------------------------+
-void SetMetricsLogInterval(int interval) {
-    if(interval > 0) {
+    void SetMetricsLogInterval(int interval) {
+        if(interval > 0) {
         g_metricsLogInterval = interval;
     }
 }
-
-//+------------------------------------------------------------------+
-//| OnCalculate Execution Time Tracking                              |
-//| Requirements: 20.1                                               |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Start Execution Time Measurement                                 |
-//| Returns: Start timestamp in milliseconds                         |
-//+------------------------------------------------------------------+
-uint StartExecutionTimer() {
+    uint StartExecutionTimer() {
     if(!g_metricsEnabled) return 0;
     return GetTickCount();
 }
-
-//+------------------------------------------------------------------+
-//| End Execution Time Measurement                                   |
-//| startTime: Timestamp from StartExecutionTimer                    |
-//| skipped: true if call was skipped by throttling                  |
-//+------------------------------------------------------------------+
-void EndExecutionTimer(uint startTime, bool skipped = false) {
+    void EndExecutionTimer(uint startTime, bool skipped = false) {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
-    
     uint endTime = GetTickCount();
     uint executionTime = endTime - startTime;
-    
     g_performanceMetrics.onCalculateCalls++;
-    
     if(skipped) {
         g_performanceMetrics.skippedCalls++;
     } else {
         g_performanceMetrics.totalExecutionTimeMs += executionTime;
-        
-        if(executionTime < g_performanceMetrics.minExecutionTimeMs) {
+    if(executionTime < g_performanceMetrics.minExecutionTimeMs) {
             g_performanceMetrics.minExecutionTimeMs = executionTime;
         }
-        
-        if(executionTime > g_performanceMetrics.maxExecutionTimeMs) {
+    if(executionTime > g_performanceMetrics.maxExecutionTimeMs) {
             g_performanceMetrics.maxExecutionTimeMs = executionTime;
         }
     }
@@ -174,234 +117,106 @@ void EndExecutionTimer(uint startTime, bool skipped = false) {
         LogPerformanceMetrics();
     }
 }
-
-//+------------------------------------------------------------------+
-//| Cache Hit/Miss Tracking                                          |
-//| Requirements: 20.2                                               |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Record TH Cache Hit                                              |
-//+------------------------------------------------------------------+
-void RecordTHCacheHit() {
+    void RecordTHCacheHit() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.thCacheHits++;
 }
-
-//+------------------------------------------------------------------+
-//| Record TH Cache Miss                                             |
-//+------------------------------------------------------------------+
-void RecordTHCacheMiss() {
+    void RecordTHCacheMiss() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.thCacheMisses++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Factor Cache Hit                                          |
-//+------------------------------------------------------------------+
-void RecordFactorCacheHit() {
+    void RecordFactorCacheHit() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.factorCacheHits++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Factor Cache Miss                                         |
-//+------------------------------------------------------------------+
-void RecordFactorCacheMiss() {
+    void RecordFactorCacheMiss() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.factorCacheMisses++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Geometry Cache Hit                                        |
-//+------------------------------------------------------------------+
-void RecordGeometryCacheHit() {
+    void RecordGeometryCacheHit() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.geometryCacheHits++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Geometry Cache Miss                                       |
-//+------------------------------------------------------------------+
-void RecordGeometryCacheMiss() {
+    void RecordGeometryCacheMiss() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.geometryCacheMisses++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Extension Multiplier Cache Hit                            |
-//+------------------------------------------------------------------+
-void RecordExtensionCacheHit() {
+    void RecordExtensionCacheHit() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.extensionCacheHits++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Extension Multiplier Cache Miss                           |
-//+------------------------------------------------------------------+
-void RecordExtensionCacheMiss() {
+    void RecordExtensionCacheMiss() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.extensionCacheMisses++;
 }
-
-//+------------------------------------------------------------------+
-//| API Call Tracking                                                |
-//| Requirements: 20.3                                               |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Record ObjectFind Call                                           |
-//+------------------------------------------------------------------+
-void RecordObjectFindCall() {
+    void RecordObjectFindCall() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.objectFindCalls++;
 }
-
-//+------------------------------------------------------------------+
-//| Record ObjectCreate Call                                         |
-//+------------------------------------------------------------------+
-void RecordObjectCreateCall() {
+    void RecordObjectCreateCall() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.objectCreateCalls++;
 }
-
-//+------------------------------------------------------------------+
-//| Record ObjectDelete Call                                         |
-//+------------------------------------------------------------------+
-void RecordObjectDeleteCall() {
+    void RecordObjectDeleteCall() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.objectDeleteCalls++;
 }
-
-//+------------------------------------------------------------------+
-//| Record ObjectSet Call                                            |
-//+------------------------------------------------------------------+
-void RecordObjectSetCall() {
+    void RecordObjectSetCall() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.objectSetCalls++;
 }
-
-//+------------------------------------------------------------------+
-//| Record ChartRedraw Call                                          |
-//+------------------------------------------------------------------+
-void RecordChartRedrawCall() {
+    void RecordChartRedrawCall() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.chartRedrawCalls++;
 }
-
-//+------------------------------------------------------------------+
-//| Zone Operation Tracking                                          |
-//| Requirements: 20.4                                               |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Record Zone Creation Attempt                                     |
-//+------------------------------------------------------------------+
-void RecordZoneCreationAttempt() {
+    void RecordZoneCreationAttempt() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.zoneCreationAttempts++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Zone Creation Success                                     |
-//+------------------------------------------------------------------+
-void RecordZoneCreationSuccess() {
+    void RecordZoneCreationSuccess() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.zoneCreationSuccesses++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Zone Creation Failure                                     |
-//+------------------------------------------------------------------+
-void RecordZoneCreationFailure() {
+    void RecordZoneCreationFailure() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.zoneCreationFailures++;
 }
-
-//+------------------------------------------------------------------+
-//| Record Zone Update Operation                                     |
-//+------------------------------------------------------------------+
-void RecordZoneUpdateOperation() {
+    void RecordZoneUpdateOperation() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
     g_performanceMetrics.zoneUpdateOperations++;
 }
-
-//+------------------------------------------------------------------+
-//| Metrics Calculation and Reporting                                |
-//| Requirements: 20.5                                               |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Calculate Average Execution Time                                 |
-//| Returns: Average execution time in milliseconds                  |
-//+------------------------------------------------------------------+
-double GetAverageExecutionTime() {
+    double GetAverageExecutionTime() {
     if(!g_metricsInitialized) return 0.0;
-    
     int executedCalls = g_performanceMetrics.onCalculateCalls - g_performanceMetrics.skippedCalls;
     if(executedCalls <= 0) return 0.0;
-    
     return (double)g_performanceMetrics.totalExecutionTimeMs / (double)executedCalls;
 }
-
-//+------------------------------------------------------------------+
-//| Calculate Cache Hit Rate                                         |
-//| Returns: Cache hit rate as percentage (0-100)                    |
-//+------------------------------------------------------------------+
-double GetTHCacheHitRate() {
+    double GetTHCacheHitRate() {
     if(!g_metricsInitialized) return 0.0;
-    
     int totalAccesses = g_performanceMetrics.thCacheHits + g_performanceMetrics.thCacheMisses;
     if(totalAccesses <= 0) return 0.0;
-    
     return ((double)g_performanceMetrics.thCacheHits / (double)totalAccesses) * 100.0;
 }
-
-//+------------------------------------------------------------------+
-//| Calculate Factor Cache Hit Rate                                  |
-//+------------------------------------------------------------------+
-double GetFactorCacheHitRate() {
+    double GetFactorCacheHitRate() {
     if(!g_metricsInitialized) return 0.0;
-    
     int totalAccesses = g_performanceMetrics.factorCacheHits + g_performanceMetrics.factorCacheMisses;
     if(totalAccesses <= 0) return 0.0;
-    
     return ((double)g_performanceMetrics.factorCacheHits / (double)totalAccesses) * 100.0;
 }
-
-//+------------------------------------------------------------------+
-//| Calculate Zone Creation Success Rate                             |
-//| Returns: Success rate as percentage (0-100)                      |
-//+------------------------------------------------------------------+
-double GetZoneCreationSuccessRate() {
+    double GetZoneCreationSuccessRate() {
     if(!g_metricsInitialized) return 0.0;
-    
     if(g_performanceMetrics.zoneCreationAttempts <= 0) return 0.0;
-    
     return ((double)g_performanceMetrics.zoneCreationSuccesses / 
             (double)g_performanceMetrics.zoneCreationAttempts) * 100.0;
 }
-
-//+------------------------------------------------------------------+
-//| Calculate Throttling Effectiveness                               |
-//| Returns: Percentage of calls skipped by throttling (0-100)       |
-//+------------------------------------------------------------------+
-double GetThrottlingEffectiveness() {
+    double GetThrottlingEffectiveness() {
     if(!g_metricsInitialized) return 0.0;
-    
     if(g_performanceMetrics.onCalculateCalls <= 0) return 0.0;
-    
     return ((double)g_performanceMetrics.skippedCalls / 
             (double)g_performanceMetrics.onCalculateCalls) * 100.0;
 }
-
-//+------------------------------------------------------------------+
-//| Log Performance Metrics Summary                                  |
-//| Requirements: 20.5, 20.6                                         |
-//+------------------------------------------------------------------+
-void LogPerformanceMetrics() {
+    void LogPerformanceMetrics() {
     if(!g_metricsEnabled || !g_metricsInitialized) return;
-    
     #ifdef ENABLE_DEBUG_LOGS
     Print("╔═══════════════════════════════════════════════════════════════╗");
     Print("║  PERFORMANCE METRICS SUMMARY                                  ║");
@@ -449,25 +264,14 @@ void LogPerformanceMetrics() {
     datetime now = TimeCurrent();
     int collectionSeconds = (int)(now - g_performanceMetrics.collectionStart);
     Print("║  Collection Period: ", collectionSeconds, " seconds");
-    
     Print("╚═══════════════════════════════════════════════════════════════╝");
     #endif
-}
+    }
 
-//+------------------------------------------------------------------+
-//| Get Metrics Structure                                            |
-//| Returns: Copy of current metrics for external analysis           |
-//+------------------------------------------------------------------+
 SPerformanceMetrics GetPerformanceMetrics() {
-    return g_performanceMetrics;
+        return g_performanceMetrics;
 }
-
-//+------------------------------------------------------------------+
-//| Check if Optimization is Effective                               |
-//| Returns: true if metrics show good optimization                  |
-//| Requirements: 20.6                                               |
-//+------------------------------------------------------------------+
-bool IsOptimizationEffective() {
+    bool IsOptimizationEffective() {
     if(!g_metricsInitialized) return false;
     
     // Check if we have enough data
@@ -484,17 +288,10 @@ bool IsOptimizationEffective() {
     // Target: Zone creation success rate = 100% (or close)
     double successRate = GetZoneCreationSuccessRate();
     bool successTarget = (successRate > 95.0 || g_performanceMetrics.zoneCreationAttempts < 5);
-    
     return timeTarget && cacheTarget && successTarget;
 }
-
-//+------------------------------------------------------------------+
-//| Export Metrics to String                                         |
-//| Returns: Formatted string with all metrics                       |
-//+------------------------------------------------------------------+
-string ExportMetricsToString() {
+    string ExportMetricsToString() {
     if(!g_metricsInitialized) return "Metrics not initialized";
-    
     string output = "";
     output += "OnCalculate: " + IntegerToString(g_performanceMetrics.onCalculateCalls) + " calls\n";
     output += "Skipped: " + IntegerToString(g_performanceMetrics.skippedCalls) + " (" + 
@@ -504,8 +301,10 @@ string ExportMetricsToString() {
     output += "Factor Cache: " + DoubleToString(GetFactorCacheHitRate(), 1) + "% hit rate\n";
     output += "Zone Success: " + DoubleToString(GetZoneCreationSuccessRate(), 1) + "%\n";
     output += "ObjectFind Calls: " + IntegerToString(g_performanceMetrics.objectFindCalls) + "\n";
-    
     return output;
 }
 
 //+------------------------------------------------------------------+
+
+#endif
+    // PERFORMANCE_METRICS_MQH

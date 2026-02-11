@@ -1,8 +1,8 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                            ATRCalculations.mqh   |
 //|                                                                  |
 //| ATR-Based Calculations for Biotak Trigger TH3                   |
-//| محاسبات مبتنی بر ATR برای بایوتک تریگر                          |
+
 //|                                                                  |
 //| This module implements ATR_BASIS calculation mode matching       |
 //| the Java/MotiveWave implementation exactly.                      |
@@ -27,11 +27,11 @@
 
 //+------------------------------------------------------------------+
 //| ATR Calculation Constants (matching Java OptimizedCalculations)  |
-//| ثابت‌های محاسبه ATR (مطابق با جاوا)                              |
+
 //+------------------------------------------------------------------+
 
 // Default periods for Weighted ATR (matching Java)
-// دوره‌های پیش‌فرض برای ATR وزن‌دار
+
 #define ATR_PERIOD_1    5
 #define ATR_PERIOD_2    10
 #define ATR_PERIOD_3    21
@@ -40,7 +40,7 @@
 #define ATR_PERIOD_6    264
 
 // Weights for each period (matching Java)
-// وزن‌ها برای هر دوره
+
 #define ATR_WEIGHT_1    1
 #define ATR_WEIGHT_2    1
 #define ATR_WEIGHT_3    2
@@ -57,11 +57,11 @@
 
 //+------------------------------------------------------------------+
 //| ATR Cache Structure for Performance                              |
-//| ساختار کش ATR برای بهینه‌سازی                                    |
+
 //| AUDIT FIX: Enhanced with multi-timeframe support                 |
 //+------------------------------------------------------------------+
 struct ATRCacheEntry {
-    double weightedATR;          // Cached weighted ATR value
+        double weightedATR;          // Cached weighted ATR value
     datetime lastUpdate;         // Last update time
     int barCount;                // Bar count when cached
     int cachedTimeframe;         // Timeframe when cached (for lock detection)
@@ -70,7 +70,7 @@ struct ATRCacheEntry {
 
 // AUDIT FIX: Multi-timeframe cache for better performance
 struct ATRMultiTFCache {
-    int timeframeMinutes;        // Timeframe in minutes
+        int timeframeMinutes;        // Timeframe in minutes
     double atrValue;             // Cached ATR value
     datetime lastUpdate;         // Last update time
     bool valid;                  // Is cache valid?
@@ -78,19 +78,14 @@ struct ATRMultiTFCache {
 
 // Global ATR cache
 static ATRCacheEntry g_atrCache;
-static bool g_atrCacheInitialized = false;
+    static bool g_atrCacheInitialized = false;
 
 // AUDIT FIX: Multi-timeframe cache (up to 10 timeframes)
 #define MAX_TF_CACHE_SIZE 10
 static ATRMultiTFCache g_multiTFCache[MAX_TF_CACHE_SIZE];
-static int g_multiTFCacheCount = 0;
-static bool g_multiTFCacheInitialized = false;
-
-//+------------------------------------------------------------------+
-//| Initialize ATR Cache                                             |
-//| AUDIT FIX: Initialize both single and multi-TF caches            |
-//+------------------------------------------------------------------+
-void InitializeATRCache() {
+    static int g_multiTFCacheCount = 0;
+    static bool g_multiTFCacheInitialized = false;
+    void InitializeATRCache() {
     g_atrCache.weightedATR = 0.0;
     g_atrCache.lastUpdate = 0;
     g_atrCache.barCount = 0;
@@ -101,19 +96,14 @@ void InitializeATRCache() {
     // AUDIT FIX: Initialize multi-TF cache
     for(int i = 0; i < MAX_TF_CACHE_SIZE; i++) {
         g_multiTFCache[i].timeframeMinutes = 0;
-        g_multiTFCache[i].atrValue = 0.0;
-        g_multiTFCache[i].lastUpdate = 0;
-        g_multiTFCache[i].valid = false;
+    g_multiTFCache[i].atrValue = 0.0;
+    g_multiTFCache[i].lastUpdate = 0;
+    g_multiTFCache[i].valid = false;
     }
     g_multiTFCacheCount = 0;
     g_multiTFCacheInitialized = true;
 }
-
-//+------------------------------------------------------------------+
-//| Cleanup ATR Cache (call from OnDeinit)                           |
-//| AUDIT FIX: Cleanup both caches                                   |
-//+------------------------------------------------------------------+
-void CleanupATRCache() {
+    void CleanupATRCache() {
     g_atrCache.valid = false;
     g_atrCacheInitialized = false;
     
@@ -124,11 +114,11 @@ void CleanupATRCache() {
 
 //+------------------------------------------------------------------+
 //| Get effective timeframe (respects timeframe lock)                |
-//| دریافت تایم‌فریم مؤثر (با احترام به قفل تایم‌فریم)               |
+
 //+------------------------------------------------------------------+
 int GetEffectiveTimeframe() {
     // Use locked timeframe if lock is active, otherwise use chart timeframe
-    // اگه قفل فعاله از تایم‌فریم قفل شده استفاده کن، وگرنه از تایم‌فریم چارت
+    
     if(g_timeframeLocked && g_lockedPeriod > 0) {
         return g_lockedPeriod;
     }
@@ -137,10 +127,10 @@ int GetEffectiveTimeframe() {
 
 //+------------------------------------------------------------------+
 //| Get bar count for effective timeframe                            |
-//| دریافت تعداد کندل‌ها برای تایم‌فریم مؤثر                         |
+
 //+------------------------------------------------------------------+
 int GetEffectiveBars() {
-    int tf = GetEffectiveTimeframe();
+        int tf = GetEffectiveTimeframe();
     if(tf == Period()) {
         return Bars(_Symbol, _Period);
     }
@@ -149,44 +139,43 @@ int GetEffectiveBars() {
 
 //+------------------------------------------------------------------+
 //| Calculate True Range for a single bar                            |
-//| محاسبه True Range برای یک کندل                                   |
+
 //|                                                                  |
 //| Formula: TR = max(High-Low, |High-PrevClose|, |Low-PrevClose|)  |
 //| NOTE: Respects timeframe lock - uses locked TF data if active    |
 //| AUDIT FIX: Added FloatingPointHelper validation                  |
 //+------------------------------------------------------------------+
 double CalculateTrueRange(const int barIndex) {
-    int tf = GetEffectiveTimeframe();
+        int tf = GetEffectiveTimeframe();
     int totalBars = GetEffectiveBars();
     
     // AUDIT FIX: Validate bar index
     if(barIndex < 0 || barIndex >= totalBars) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateTrueRange: Invalid bar index (", barIndex, "/", totalBars, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
-    
     double high, low, prevClose;
     
     // Use iHigh/iLow/iClose/iOpen for timeframe-aware access
-    // استفاده از iHigh/iLow/iClose/iOpen برای دسترسی آگاه از تایم‌فریم
+    
     if(tf == Period()) {
         // Current chart timeframe - use iHigh/iLow/iOpen/iClose (MQL5 compatible)
-        // CRITICAL FIX: Validate array bounds before access
+        // Validate array bounds before access
         int currentBars = Bars(_Symbol, _Period);
-        if(barIndex >= currentBars) {
-            #ifdef ENABLE_DEBUG_LOGS
+    if(barIndex >= currentBars) {
+        #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CalculateTrueRange: barIndex exceeds Bars (", barIndex, "/", currentBars, ")");
-            #endif
-            return 0.0;
+    #endif
+    return 0.0;
         }
         
         high = iHigh(_Symbol, _Period, barIndex);
-        low = iLow(_Symbol, _Period, barIndex);
+    low = iLow(_Symbol, _Period, barIndex);
         
         // For first bar, use Open as previous close
-        // CRITICAL FIX: Check barIndex + 1 bounds before access
+        // Check barIndex + 1 bounds before access
         if(barIndex >= currentBars - 1) {
             prevClose = iOpen(_Symbol, _Period, barIndex);
         } else {
@@ -195,10 +184,10 @@ double CalculateTrueRange(const int barIndex) {
     } else {
         // Locked timeframe - use iHigh/iLow/iClose/iOpen
         high = iHigh(_Symbol, (ENUM_TIMEFRAMES)tf, barIndex);
-        low = iLow(_Symbol, (ENUM_TIMEFRAMES)tf, barIndex);
+    low = iLow(_Symbol, (ENUM_TIMEFRAMES)tf, barIndex);
         
         // For first bar, use Open as previous close
-        // CRITICAL FIX: Check barIndex + 1 bounds
+        // Check barIndex + 1 bounds
         if(barIndex >= totalBars - 1 || totalBars <= 1) {
             prevClose = iOpen(_Symbol, (ENUM_TIMEFRAMES)tf, barIndex);
         } else {
@@ -212,16 +201,16 @@ double CalculateTrueRange(const int barIndex) {
        !IsValidPrice(prevClose, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateTrueRange: Invalid price data (H:", high, " L:", low, " PC:", prevClose, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // AUDIT FIX: Validate high >= low
     if(IsLess(high, low, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateTrueRange: High < Low (H:", high, " L:", low, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // Calculate True Range components
@@ -233,13 +222,12 @@ double CalculateTrueRange(const int barIndex) {
     double tr = hl;
     if(hc > tr) tr = hc;
     if(lc > tr) tr = lc;
-    
     return tr;
 }
 
 //+------------------------------------------------------------------+
 //| Calculate Simple ATR for a given period                          |
-//| محاسبه ATR ساده برای یک دوره مشخص                                |
+
 //|                                                                  |
 //| Matches Java: OptimizedCalculations.calculateATROptimized()      |
 //| NOTE: Respects timeframe lock - uses GetEffectiveBars()          |
@@ -250,24 +238,23 @@ double CalculateSimpleATR(const int period) {
     if(period <= 0 || period > 10000) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateSimpleATR: Invalid period (", period, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // Use GetEffectiveBars() to respect timeframe lock
-    // استفاده از GetEffectiveBars() برای احترام به قفل تایم‌فریم
+    
     int barsAvailable = GetEffectiveBars();
     if(barsAvailable <= period) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateSimpleATR: Not enough bars (", barsAvailable, " < ", period, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
-    
     double sumTR = 0.0;
     int validBars = 0;
     
-    // CRITICAL FIX: Start from bar 1 (completed bar), not bar 0 (current bar)
+    // Start from bar 1 (completed bar), not bar 0 (current bar)
     // Bar 0 is still forming and its High/Low/Close can change
     // Calculate ATR from completed bars only (index 1 = last completed bar)
     for(int i = 1; i <= period && i < barsAvailable; i++) {
@@ -276,7 +263,7 @@ double CalculateSimpleATR(const int period) {
         // AUDIT FIX: Use IsZero for comparison
         if(!IsZero(tr, EPSILON_PRICE)) {
             sumTR += tr;
-            validBars++;
+    validBars++;
         }
     }
     
@@ -286,7 +273,7 @@ double CalculateSimpleATR(const int period) {
 
 //+------------------------------------------------------------------+
 //| Batch ATR Calculation for Multiple Periods                       |
-//| محاسبه دسته‌ای ATR برای چند دوره                                 |
+
 //|                                                                  |
 //| OPTIMIZATION: Calculates TR once and reuses for all periods      |
 //| Matches Java: OptimizedCalculations.calculateATRBatch()          |
@@ -299,54 +286,52 @@ void CalculateATRBatch(double &results[]) {
     ArrayInitialize(results, 0.0);
     
     // Use GetEffectiveBars() to respect timeframe lock
-    // استفاده از GetEffectiveBars() برای احترام به قفل تایم‌فریم
+    
     int barsAvailable = GetEffectiveBars();
     
     // AUDIT FIX: Validate bars available
     if(barsAvailable <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBatch: No bars available");
-        #endif
-        return;
+    #endif
+    return;
     }
     
-    // CRITICAL FIX: Calculate only periods we have enough data for
-    // محاسبه فقط دوره‌هایی که داده کافی داریم
+    // Calculate only periods we have enough data for
+    
     // Need period + 1 bars: period bars for TR + 1 for prevClose
     // But start from bar 1 (completed), so need period + 2 total bars
     if(barsAvailable < ATR_PERIOD_1 + 2) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBatch: Not enough bars (", barsAvailable, "), need at least ", ATR_PERIOD_1 + 2);
-        #endif
-        return;
+    #endif
+    return;
     }
     
     // If limited bars, calculate what we can and skip larger periods
     if(barsAvailable <= ATR_PERIOD_6 + 2) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBatch: Limited bars (", barsAvailable, "), calculating available periods only");
-        #endif
-        
-        int periods_limited[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
+    #endif
+    int periods_limited[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
                                  ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-        
-        for(int p = 0; p < 6; p++) {
+    for(int p = 0; p < 6; p++) {
             // Only calculate if we have enough bars (period + 2: period bars + 1 prevClose + skip bar 0)
             if(barsAvailable >= periods_limited[p] + 2) {
                 results[p] = CalculateSimpleATR(periods_limited[p]);
             } else {
                 results[p] = 0.0;
-                #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ CalculateATRBatch: Skipping ATR period ", periods_limited[p], 
                       " (need ", periods_limited[p] + 2, " bars, have ", barsAvailable, ")");
-                #endif
-            }
+    #endif
+    }
         }
         return;
     }
     
     // Pre-calculate True Range for all bars we need using batch CopyXxx
-    // PERF FIX: Use CopyHigh/CopyLow/CopyClose/CopyOpen batch calls instead of
+    // Use CopyHigh/CopyLow/CopyClose/CopyOpen batch calls instead of
     // per-bar iHigh/iLow/iClose/iOpen (reduces ~1000 API calls to ~4)
     int maxPeriod = ATR_PERIOD_6;
     int tf = GetEffectiveTimeframe();
@@ -354,7 +339,7 @@ void CalculateATRBatch(double &results[]) {
     
     // Batch copy OHLC data in 4 calls instead of ~1000 individual calls
     double highArr[], lowArr[], closeArr[], openArr[];
-    // CRITICAL FIX: Need maxPeriod + 3 bars for complete TR calculation
+    // Need maxPeriod + 3 bars for complete TR calculation
     // - maxPeriod bars for TR calculation (bar 1 to bar maxPeriod)
     // - 1 extra bar (bar 0, current - we'll skip it)
     // - 1 extra bar for prevClose of bar maxPeriod (bar maxPeriod+1)
@@ -362,38 +347,34 @@ void CalculateATRBatch(double &results[]) {
     // Actually: We copy bars 0 to maxPeriod+1, which is maxPeriod+2 bars
     // For bar maxPeriod, we need close of bar maxPeriod+1
     int copyCount = MathMin(maxPeriod + 2, barsAvailable);
-    
     int copiedHigh  = CopyHigh(_Symbol, etf, 0, copyCount, highArr);
     int copiedLow   = CopyLow(_Symbol, etf, 0, copyCount, lowArr);
     int copiedClose = CopyClose(_Symbol, etf, 0, copyCount, closeArr);
     int copiedOpen  = CopyOpen(_Symbol, etf, 0, copyCount, openArr);
-    
     if(copiedHigh < copyCount || copiedLow < copyCount || 
        copiedClose < copyCount || copiedOpen < copyCount) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBatch: CopyXxx failed (H:", copiedHigh, " L:", copiedLow,
               " C:", copiedClose, " O:", copiedOpen, " needed:", copyCount, "), falling back");
-        #endif
+    #endif
         // Fallback to per-bar method
-        // CRITICAL FIX: Use completed bars only (start from bar 1)
+        // Use completed bars only (start from bar 1)
         double trFallback[];
-        if(ArrayResize(trFallback, maxPeriod) != maxPeriod) return;
+    if(ArrayResize(trFallback, maxPeriod) != maxPeriod) return;
         
         // Calculate TR for completed bars (bar 1 to bar maxPeriod)
         for(int i = 1; i <= maxPeriod && i < barsAvailable; i++) {
             trFallback[i-1] = CalculateTrueRange(i);  // Store at i-1
         }
-        
-        int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
+    int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
                             ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-        for(int p = 0; p < 6; p++) {
-            double sum_fb = 0.0; int count_fb = 0;
-            int limit_fb = MathMin(periods_fb[p], maxPeriod);
-            
-            for(int i = 0; i < limit_fb; i++) {
+    for(int p = 0; p < 6; p++) {
+        double sum_fb = 0.0; int count_fb = 0;
+    int limit_fb = MathMin(periods_fb[p], maxPeriod);
+    for(int i = 0; i < limit_fb; i++) {
                 if(!IsZero(trFallback[i], EPSILON_PRICE)) { 
-                    sum_fb += trFallback[i]; 
-                    count_fb++; 
+                    sum_fb += trFallback[i];
+    count_fb++; 
                 }
             }
             
@@ -405,7 +386,7 @@ void CalculateATRBatch(double &results[]) {
             }
         }
         ArrayFree(trFallback);
-        return;
+    return;
     }
     
     // CopyXxx returns data in chronological order [oldest..newest]
@@ -414,19 +395,19 @@ void CalculateATRBatch(double &results[]) {
     if(ArrayResize(trValues, maxPeriod) != maxPeriod) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateATRBatch: Failed to resize TR array");
-        #endif
-        return;
+    #endif
+    return;
     }
     
     // Calculate TR from batch arrays (no more per-bar API calls)
-    // CRITICAL FIX: Start from bar 1 (completed bar), not bar 0 (current forming bar)
+    // Start from bar 1 (completed bar), not bar 0 (current forming bar)
     // Stop at copyCount - 1 to ensure we have prevClose available
     for(int i = 1; i <= maxPeriod && i < copyCount - 1; i++) {
         int arrIdx = copyCount - 1 - i;  // Convert bar index to array index
         
         double high = highArr[arrIdx];
-        double low  = lowArr[arrIdx];
-        double prevClose;
+    double low  = lowArr[arrIdx];
+    double prevClose;
         
         // For prevClose, use previous bar's close (arrIdx-1 in chronological order)
         // Since we stop at i < copyCount - 1, arrIdx will always be >= 1
@@ -447,12 +428,12 @@ void CalculateATRBatch(double &results[]) {
         
         // True Range = max(H-L, |H-prevC|, |L-prevC|)
         double hl = high - low;
-        double hc = MathAbs(high - prevClose);
-        double lc = MathAbs(low - prevClose);
-        double tr = hl;
-        if(hc > tr) tr = hc;
-        if(lc > tr) tr = lc;
-        trValues[i-1] = tr;  // Store at i-1 because we start from i=1
+    double hc = MathAbs(high - prevClose);
+    double lc = MathAbs(low - prevClose);
+    double tr = hl;
+    if(hc > tr) tr = hc;
+    if(lc > tr) tr = lc;
+    trValues[i-1] = tr;  // Store at i-1 because we start from i=1
     }
     
     // Free batch arrays
@@ -464,53 +445,50 @@ void CalculateATRBatch(double &results[]) {
     // Calculate ATR for each period using pre-computed TR values
     int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
                      ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-    
     for(int p = 0; p < 6; p++) {
         int period = periods[p];
         
-        // CRITICAL FIX: Check if we have enough data (need period bars, not period+1)
+        // Check if we have enough data (need period bars, not period+1)
         // maxPeriod already includes the extra bar for prevClose calculation
         if(period > maxPeriod) {
             results[p] = 0.0;
-            #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CalculateATRBatch: Skipping period ", period, " (maxPeriod=", maxPeriod, ")");
-            #endif
-            continue;
+    #endif
+    continue;
         }
-        
-        double sum = 0.0;
-        int count = 0;
+    double sum = 0.0;
+    int count = 0;
         
         // Calculate average TR for this period
         for(int i = 0; i < period && i < maxPeriod; i++) {
             // AUDIT FIX: Use IsZero for comparison
             if(!IsZero(trValues[i], EPSILON_PRICE)) {
                 sum += trValues[i];
-                count++;
+    count++;
             }
         }
         
-        // CRITICAL FIX: Only calculate if we have enough valid bars
+        // Only calculate if we have enough valid bars
         // Need at least 50% of period for reliable ATR
         if(count >= period / 2) {
             results[p] = SafeDivide(sum, (double)count, 0.0, EPSILON_GENERAL);
         } else {
             results[p] = 0.0;
-            #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ CalculateATRBatch: Insufficient valid bars for period ", period, 
                   " (", count, "/", period, ")");
-            #endif
-        }
+    #endif
+    }
     }
     
     // Free array
     ArrayFree(trValues);
 }
 
-
 //+------------------------------------------------------------------+
 //| Calculate Weighted ATR                                           |
-//| محاسبه ATR وزن‌دار                                                |
+
 //|                                                                  |
 //| Formula (matching Java OptimizedCalculations.calculateWeightedATR): |
 //| ATR = (ATR₅×1 + ATR₁₀×1 + ATR₂₁×2 + ATR₆₆×3 + ATR₁₃₂×5 + ATR₂₆₄×8) / 20 |
@@ -529,8 +507,8 @@ double CalculateWeightedATR() {
     if(effectiveBars <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateWeightedATR: No bars available");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // AUDIT FIX: Validate TimeCurrent()
@@ -538,12 +516,12 @@ double CalculateWeightedATR() {
     if(currentTime == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateWeightedATR: TimeCurrent() returned 0");
-        #endif
+    #endif
         // Use cached value if available
         if(g_atrCacheInitialized && g_atrCache.valid) {
-            return g_atrCache.weightedATR;
+        return g_atrCache.weightedATR;
         }
-        return 0.0;
+    return 0.0;
     }
     
     // Check cache first
@@ -556,7 +534,7 @@ double CalculateWeightedATR() {
         if(MathAbs(effectiveBars - g_atrCache.barCount) <= ATR_CACHE_BAR_TOLERANCE && 
            (currentTime - g_atrCache.lastUpdate) < ATR_CACHE_TTL_SECONDS &&
            g_atrCache.cachedTimeframe == effectiveTF) {
-            return g_atrCache.weightedATR;
+        return g_atrCache.weightedATR;
         }
     }
     
@@ -573,14 +551,13 @@ double CalculateWeightedATR() {
     if(ArraySize(atrValues) < 6) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateWeightedATR: ATR batch calculation failed, array size=", ArraySize(atrValues));
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // Calculate weighted sum
     double weightedSum = 0.0;
     int totalWeight = 0;
-    
     int weights[] = {ATR_WEIGHT_1, ATR_WEIGHT_2, ATR_WEIGHT_3, 
                      ATR_WEIGHT_4, ATR_WEIGHT_5, ATR_WEIGHT_6};
     
@@ -588,43 +565,43 @@ double CalculateWeightedATR() {
     if(ArraySize(weights) != 6) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateWeightedATR: Invalid weights array size");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
-    // CRITICAL FIX: Only use periods with valid ATR values
+    // Only use periods with valid ATR values
     // If some periods are missing (not enough bars), adjust weights accordingly
     for(int i = 0; i < 6; i++) {
         // AUDIT FIX: Use IsZero for comparison
         if(!IsZero(atrValues[i], EPSILON_PRICE)) {
             // AUDIT FIX: Check for potential overflow before multiplication
             double temp = atrValues[i] * weights[i];
-            if(temp > 1e10) {  // Sanity check
+    if(temp > 1e10) {  // Sanity check
                 #ifdef ENABLE_DEBUG_LOGS
                 Print("⚠️ CalculateWeightedATR: Overflow detected in weighted sum");
-                #endif
-                continue;
+    #endif
+    continue;
             }
             weightedSum += temp;
-            totalWeight += weights[i];
+    totalWeight += weights[i];
         } else {
-            #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
             static datetime s_lastSkipLog = 0;
-            datetime now = TimeCurrent();
-            if(now - s_lastSkipLog > 300) {  // Log every 5 minutes
+    datetime now = TimeCurrent();
+    if(now - s_lastSkipLog > 300) {  // Log every 5 minutes
                 Print("⚠️ CalculateWeightedATR: Skipping ATR period ", i, " (value is zero)");
-                s_lastSkipLog = now;
+    s_lastSkipLog = now;
             }
-            #endif
-        }
+    #endif
+    }
     }
     
-    // CRITICAL FIX: If no valid ATR values, return 0
+    // If no valid ATR values, return 0
     if(totalWeight == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ CalculateWeightedATR: No valid ATR values available");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // AUDIT FIX: Use SafeDivide
@@ -634,8 +611,8 @@ double CalculateWeightedATR() {
     if(!IsValidPrice(result, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateWeightedATR: Invalid result (", result, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // Update cache (including timeframe for lock detection)
@@ -645,33 +622,31 @@ double CalculateWeightedATR() {
     g_atrCache.barCount = effectiveBars;
     g_atrCache.cachedTimeframe = effectiveTF;
     g_atrCache.valid = true;
-    
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastATRLog = 0;
     if(currentTime - s_lastATRLog > 300) {  // Log every 5 minutes
         Print("========== WEIGHTED ATR CALCULATION ==========");
-        Print("ATR₅: ", DoubleToString(atrValues[0], Digits));
-        Print("ATR₁₀: ", DoubleToString(atrValues[1], Digits));
-        Print("ATR₂₁: ", DoubleToString(atrValues[2], Digits));
-        Print("ATR₆₆: ", DoubleToString(atrValues[3], Digits));
-        Print("ATR₁₃₂: ", DoubleToString(atrValues[4], Digits));
-        Print("ATR₂₆₄: ", DoubleToString(atrValues[5], Digits));
-        Print("Weighted ATR: ", DoubleToString(result, Digits));
-        Print("Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
-        Print("==============================================");
-        s_lastATRLog = TimeCurrent();
+    Print("ATR₅: ", DoubleToString(atrValues[0], Digits));
+    Print("ATR₁₀: ", DoubleToString(atrValues[1], Digits));
+    Print("ATR₂₁: ", DoubleToString(atrValues[2], Digits));
+    Print("ATR₆₆: ", DoubleToString(atrValues[3], Digits));
+    Print("ATR₁₃₂: ", DoubleToString(atrValues[4], Digits));
+    Print("ATR₂₆₄: ", DoubleToString(atrValues[5], Digits));
+    Print("Weighted ATR: ", DoubleToString(result, Digits));
+    Print("Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
+    Print("==============================================");
+    s_lastATRLog = TimeCurrent();
     }
     #endif
     
     // Free array AFTER debug logging
     ArrayFree(atrValues);
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Calculate Hybrid ATR for Target Timeframe                        |
-//| محاسبه ATR ترکیبی برای تایم‌فریم هدف                             |
+
 //|                                                                  |
 //| Uses Weighted ATR for current timeframe and scales using         |
 //| fractal relationship for other timeframes.                       |
@@ -685,8 +660,8 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     if(currentMinutes <= 0 || targetMinutes <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateHybridATR: Invalid timeframe minutes (current:", currentMinutes, " target:", targetMinutes, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // Calculate weighted ATR for current timeframe
@@ -696,8 +671,8 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     if(IsZero(currentATR, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateHybridATR: Current ATR is zero");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // If same timeframe, return current ATR
@@ -715,8 +690,8 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     if(ratio < 0.01 || ratio > 100.0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateHybridATR: Ratio out of range (", ratio, ")");
-        #endif
-        return currentATR; // Return current ATR as fallback
+    #endif
+    return currentATR; // Return current ATR as fallback
     }
     
     // Scale using fractal relationship: ATR scales with √(timeframe ratio)
@@ -727,55 +702,54 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     if(!IsValidPrice(result, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateHybridATR: Invalid result (", result, ")");
-        #endif
-        return currentATR; // Return current ATR as fallback
+    #endif
+    return currentATR; // Return current ATR as fallback
     }
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Get Current Timeframe in Minutes                                 |
-//| دریافت تایم‌فریم فعلی به دقیقه                                   |
+
 //| AUDIT FIX: Added validation for Period()                         |
 //+------------------------------------------------------------------+
 int GetCurrentTimeframeMinutes() {
-    int period = Period();
+        int period = Period();
     
     // AUDIT FIX: Validate period
     if(period <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetCurrentTimeframeMinutes: Invalid period (", period, ")");
-        #endif
-        return 0;
+    #endif
+    return 0;
     }
     
     switch(period) {
         case PERIOD_M1:  return 1;
-        case PERIOD_M5:  return 5;
-        case PERIOD_M15: return 15;
-        case PERIOD_M30: return 30;
-        case PERIOD_H1:  return 60;
-        case PERIOD_H4:  return 240;
-        case PERIOD_D1:  return 1440;
-        case PERIOD_W1:  return 10080;
-        case PERIOD_MN1: return 43200;
-        default:         
+    case PERIOD_M5:  return 5;
+    case PERIOD_M15: return 15;
+    case PERIOD_M30: return 30;
+    case PERIOD_H1:  return 60;
+    case PERIOD_H4:  return 240;
+    case PERIOD_D1:  return 1440;
+    case PERIOD_W1:  return 10080;
+    case PERIOD_MN1: return 43200;
+    default:         
             // For custom timeframes, return period directly
             // Validate it's reasonable (1 min to 1 month)
             if(period >= 1 && period <= 43200) {
-                return period;
+        return period;
             }
-            #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
             Print("⚠️ GetCurrentTimeframeMinutes: Unusual period (", period, ")");
-            #endif
-            return period;
+    #endif
+    return period;
     }
 }
 
 //+------------------------------------------------------------------+
 //| Calculate ATR-Based Step Value                                   |
-//| محاسبه مقدار Step بر اساس ATR                                    |
+
 //|                                                                  |
 //| This replaces TH calculation when ATR_BASIS is selected.         |
 //| Returns step value in PRICE units (same as TH).                  |
@@ -789,16 +763,16 @@ double CalculateATRBasedStep() {
     if(IsZero(weightedATR, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBasedStep: Invalid weighted ATR value");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // AUDIT FIX: Validate result
     if(!IsValidPrice(weightedATR, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBasedStep: ATR value out of valid range (", weightedATR, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // ATR is already in price units, return directly
@@ -808,7 +782,7 @@ double CalculateATRBasedStep() {
 
 //+------------------------------------------------------------------+
 //| Calculate ATR-Based Fractal Values                               |
-//| محاسبه مقادیر فراکتال بر اساس ATR                                |
+
 //|                                                                  |
 //| Structure = ATR (current timeframe)                              |
 //| Pattern = 0.5 × Structure                                        |
@@ -828,8 +802,8 @@ void CalculateATRFractalValues(double &structureValue, double &patternValue, dou
     if(IsZero(structureValue, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRFractalValues: Structure value is zero");
-        #endif
-        return;
+    #endif
+    return;
     }
     
     // Pattern = 0.5 * Structure (same ratio as TH)
@@ -843,16 +817,16 @@ void CalculateATRFractalValues(double &structureValue, double &patternValue, dou
        !IsValidPrice(triggerValue, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRFractalValues: Invalid calculated values");
-        #endif
-        structureValue = 0.0;
-        patternValue = 0.0;
-        triggerValue = 0.0;
+    #endif
+    structureValue = 0.0;
+    patternValue = 0.0;
+    triggerValue = 0.0;
     }
 }
 
 //+------------------------------------------------------------------+
 //| Get ATR for Specific Timeframe (with fractal scaling)            |
-//| دریافت ATR برای تایم‌فریم مشخص (با مقیاس‌بندی فراکتالی)          |
+
 //|                                                                  |
 //| Uses hybrid approach: actual ATR for current TF, scaled for others |
 //| AUDIT FIX: Added validation and multi-TF caching                 |
@@ -862,18 +836,17 @@ double GetATRForTimeframe(const int targetMinutes) {
     if(targetMinutes <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetATRForTimeframe: Invalid target minutes (", targetMinutes, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
-    
     int currentMinutes = GetCurrentTimeframeMinutes();
     
     // AUDIT FIX: Validate current minutes
     if(currentMinutes <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetATRForTimeframe: Invalid current minutes (", currentMinutes, ")");
-        #endif
-        return 0.0;
+    #endif
+    return 0.0;
     }
     
     // AUDIT FIX: Validate TimeCurrent()
@@ -881,23 +854,23 @@ double GetATRForTimeframe(const int targetMinutes) {
     if(currentTime == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetATRForTimeframe: TimeCurrent() returned 0");
-        #endif
+    #endif
         // Try to find cached value
         if(g_multiTFCacheInitialized) {
             for(int i = 0; i < g_multiTFCacheCount; i++) {
-                if(g_multiTFCache[i].timeframeMinutes == targetMinutes && 
+        if(g_multiTFCache[i].timeframeMinutes == targetMinutes && 
                    g_multiTFCache[i].valid) {
-                    return g_multiTFCache[i].atrValue;
+        return g_multiTFCache[i].atrValue;
                 }
             }
         }
-        return 0.0;
+    return 0.0;
     }
     
     // AUDIT FIX: Check multi-TF cache first
     if(g_multiTFCacheInitialized) {
         for(int i = 0; i < g_multiTFCacheCount; i++) {
-            if(g_multiTFCache[i].timeframeMinutes == targetMinutes && 
+        if(g_multiTFCache[i].timeframeMinutes == targetMinutes && 
                g_multiTFCache[i].valid &&
                (currentTime - g_multiTFCache[i].lastUpdate) < ATR_CACHE_TTL_SECONDS) {
                 // Cache hit
@@ -913,13 +886,12 @@ double GetATRForTimeframe(const int targetMinutes) {
     if(g_multiTFCacheInitialized && !IsZero(result, EPSILON_PRICE)) {
         UpdateMultiTFCache(targetMinutes, result);
     }
-    
     return result;
 }
 
 //+------------------------------------------------------------------+
 //| Update Multi-Timeframe Cache                                     |
-//| به‌روزرسانی کش چند تایم‌فریمی                                    |
+
 //| AUDIT FIX: New function for multi-TF cache management            |
 //+------------------------------------------------------------------+
 void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
@@ -927,15 +899,15 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
     if(timeframeMinutes <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ UpdateMultiTFCache: Invalid timeframe minutes (", timeframeMinutes, ")");
-        #endif
-        return;
+    #endif
+    return;
     }
     
     if(!IsValidPrice(atrValue, EPSILON_PRICE)) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ UpdateMultiTFCache: Invalid ATR value (", atrValue, ")");
-        #endif
-        return;
+    #endif
+    return;
     }
     
     if(!g_multiTFCacheInitialized) {
@@ -947,8 +919,8 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
     if(currentTime == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ UpdateMultiTFCache: TimeCurrent() returned 0, skipping cache update");
-        #endif
-        return;
+    #endif
+    return;
     }
     
     // Find existing entry or create new one
@@ -958,103 +930,98 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
     for(int i = 0; i < g_multiTFCacheCount; i++) {
         if(g_multiTFCache[i].timeframeMinutes == timeframeMinutes) {
             targetIndex = i;
-            break;
+    break;
         }
     }
     
     // If not found and space available, create new entry
     if(targetIndex < 0 && g_multiTFCacheCount < MAX_TF_CACHE_SIZE) {
         targetIndex = g_multiTFCacheCount;
-        g_multiTFCacheCount++;
+    g_multiTFCacheCount++;
     }
     
     // If still not found, replace oldest entry (LRU)
     if(targetIndex < 0) {
         datetime oldestTime = currentTime;
-        int oldestIndex = 0;
-        
-        for(int i = 0; i < MAX_TF_CACHE_SIZE; i++) {
-            if(g_multiTFCache[i].lastUpdate < oldestTime) {
+    int oldestIndex = 0;
+    for(int i = 0; i < MAX_TF_CACHE_SIZE; i++) {
+        if(g_multiTFCache[i].lastUpdate < oldestTime) {
                 oldestTime = g_multiTFCache[i].lastUpdate;
-                oldestIndex = i;
+    oldestIndex = i;
             }
         }
         
         targetIndex = oldestIndex;
-        
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ℹ️ UpdateMultiTFCache: Cache full, replacing oldest entry (TF=", 
+    #ifdef ENABLE_DEBUG_LOGS
+        Print("️ UpdateMultiTFCache: Cache full, replacing oldest entry (TF=", 
               g_multiTFCache[oldestIndex].timeframeMinutes, " min)");
-        #endif
+    #endif
     }
     
     // AUDIT FIX: Validate target index before update
     if(targetIndex >= 0 && targetIndex < MAX_TF_CACHE_SIZE) {
         g_multiTFCache[targetIndex].timeframeMinutes = timeframeMinutes;
-        g_multiTFCache[targetIndex].atrValue = atrValue;
-        g_multiTFCache[targetIndex].lastUpdate = currentTime;
-        g_multiTFCache[targetIndex].valid = true;
-        
-        #ifdef ENABLE_DEBUG_LOGS
+    g_multiTFCache[targetIndex].atrValue = atrValue;
+    g_multiTFCache[targetIndex].lastUpdate = currentTime;
+    g_multiTFCache[targetIndex].valid = true;
+    #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastCacheLog = 0;
-        if(currentTime - s_lastCacheLog > 300) { // Log every 5 minutes
+    if(currentTime - s_lastCacheLog > 300) { // Log every 5 minutes
             Print("✅ UpdateMultiTFCache: Updated cache entry [", targetIndex, "] TF=", 
                   timeframeMinutes, " min, ATR=", DoubleToString(atrValue, Digits));
-            s_lastCacheLog = currentTime;
+    s_lastCacheLog = currentTime;
         }
-        #endif
+    #endif
     } else {
         // AUDIT FIX: Log error if index is invalid
         #ifdef ENABLE_DEBUG_LOGS
         Print("❌ UpdateMultiTFCache: Invalid target index (", targetIndex, 
               "), cache update failed");
-        #endif
+    #endif
     }
 }
 
 //+------------------------------------------------------------------+
 //| Invalidate ATR Cache (call when data changes significantly)      |
-//| باطل کردن کش ATR                                                 |
+
 //| AUDIT FIX: Invalidate both caches with logging                   |
 //+------------------------------------------------------------------+
 void InvalidateATRCache() {
-    #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
     int invalidatedCount = 0;
     #endif
     
     // Invalidate main cache
     if(g_atrCache.valid) {
         g_atrCache.valid = false;
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
         invalidatedCount++;
-        #endif
+    #endif
     }
     
     // AUDIT FIX: Invalidate multi-TF cache
     for(int i = 0; i < g_multiTFCacheCount; i++) {
         if(g_multiTFCache[i].valid) {
             g_multiTFCache[i].valid = false;
-            #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
             invalidatedCount++;
-            #endif
-        }
+    #endif
     }
-    
+    }
     #ifdef ENABLE_DEBUG_LOGS
     if(invalidatedCount > 0) {
-        Print("ℹ️ InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
+        Print("️ InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
     }
     #endif
-}
+    }
 
 //+------------------------------------------------------------------+
 //| Get ATR Cache Statistics (for debugging)                         |
-//| دریافت آمار کش ATR (برای دیباگ)                                  |
+
 //| AUDIT FIX: Include multi-TF cache stats                          |
 //+------------------------------------------------------------------+
 string GetATRCacheStats() {
-    string stats = "";
-    
+        string stats = "";
     if(!g_atrCacheInitialized || !g_atrCache.valid) {
         stats += "ATR Cache: Not initialized or invalid\n";
     } else {
@@ -1068,9 +1035,8 @@ string GetATRCacheStats() {
     // AUDIT FIX: Multi-TF cache stats
     if(g_multiTFCacheInitialized && g_multiTFCacheCount > 0) {
         stats += StringFormat("Multi-TF Cache: %d entries\n", g_multiTFCacheCount);
-        
-        for(int i = 0; i < g_multiTFCacheCount; i++) {
-            if(g_multiTFCache[i].valid) {
+    for(int i = 0; i < g_multiTFCacheCount; i++) {
+        if(g_multiTFCache[i].valid) {
                 stats += StringFormat("  TF=%d min: ATR=%.6f, Age=%d sec\n",
                                    g_multiTFCache[i].timeframeMinutes,
                                    g_multiTFCache[i].atrValue,
@@ -1078,6 +1044,5 @@ string GetATRCacheStats() {
             }
         }
     }
-    
     return stats;
 }
