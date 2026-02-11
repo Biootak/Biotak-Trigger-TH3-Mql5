@@ -1621,7 +1621,7 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
     // ========================================
     // مرحله 4: جمع‌آوری فرکانس‌های candidate
     // ========================================
-    bool candidateFreqs[76]; // TH3_FREQUENCY_COUNT = 76 (extended to 120%)
+    bool candidateFreqs[77]; // TH3_FREQUENCY_COUNT = 77 (3.125% to 120%)
     ArrayInitialize(candidateFreqs, false);
     
     // روش 1: بر اساس فرمول ریاضی (100/N)

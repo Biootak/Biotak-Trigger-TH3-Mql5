@@ -218,16 +218,12 @@ void PrintConstantsSummary()
     Print("═══════════════════════════════════════════════════════════");
     Print("📋 PROJECT CONSTANTS SUMMARY");
     Print("═══════════════════════════════════════════════════════════");
-    #ifdef ENABLE_DEBUG_LOGS
     Print("Transparency Range: ", MIN_TRANSPARENCY_PERCENT, "-", MAX_TRANSPARENCY_PERCENT, "%");
     Print("Zone Height Range: ", DoubleToString(MIN_ZONE_HEIGHT_PERCENT * 100, 2), "-", 
-    #endif
           DoubleToString(MAX_ZONE_HEIGHT_PERCENT * 100, 2), "%");
-    #ifdef ENABLE_DEBUG_LOGS
     Print("Max Zones Per Chart: ", MAX_ZONES_PER_CHART);
     Print("Max Learning Data: ", MAX_LEARNING_DATA_SIZE);
     Print("Cache Log Interval: ", CACHE_LOG_INTERVAL);
     Print("═══════════════════════════════════════════════════════════");
-    #endif
     #endif
 }

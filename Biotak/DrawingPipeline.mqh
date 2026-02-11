@@ -146,33 +146,6 @@ void CalculateLinearLevels(double startPrice, double stepSize,
 }
 
 //+------------------------------------------------------------------+
-//| LEGACY SUPPORT: Old Style Resolver (Deprecated)                  |
-//| پشتیبانی قدیمی: حل‌کننده استایل قدیمی (منسوخ شده)                |
-//|                                                                  |
-//| NOTE: Use DrawLevelsAndZones() instead for new code              |
-//| توجه: برای کد جدید از DrawLevelsAndZones() استفاده کنید         |
-//+------------------------------------------------------------------+
-void ResolveStylesLinear(const SLevelRawData &levels[], 
-                        double stepSize,
-                        const SStyleConfig &config,
-                        const string objectPrefix,
-                        SLineRenderInfo &outLines[],
-                        SZoneRenderInfo &outZones[])
-{
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("⚠️ ResolveStylesLinear: DEPRECATED - Use DrawLevelsAndZones() instead");
-    #endif
-    
-    // Delegate to new pipeline
-    DrawLevelsAndZones(levels, stepSize, config, objectPrefix);
-    
-    // For backward compatibility, populate output arrays
-    int count = ArraySize(levels);
-    ArrayResize(outLines, count);
-    ArrayResize(outZones, 0); // Zones handled internally
-}
-
-//+------------------------------------------------------------------+
 //| Cleanup Helper                                                    |
 //| کمک پاک‌سازی                                                      |
 //+------------------------------------------------------------------+

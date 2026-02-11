@@ -182,14 +182,26 @@ bool ValidateStringNotEmpty(const string str, const string paramName = "string")
 //| اعتبارسنجی تایم‌فریم                                             |
 //+------------------------------------------------------------------+
 bool ValidateTimeframe(int timeframe) {
-    // Valid MT4 timeframes
+    // Valid MQL5 timeframes
     switch(timeframe) {
         case PERIOD_M1:
+        case PERIOD_M2:
+        case PERIOD_M3:
+        case PERIOD_M4:
         case PERIOD_M5:
+        case PERIOD_M6:
+        case PERIOD_M10:
+        case PERIOD_M12:
         case PERIOD_M15:
+        case PERIOD_M20:
         case PERIOD_M30:
         case PERIOD_H1:
+        case PERIOD_H2:
+        case PERIOD_H3:
         case PERIOD_H4:
+        case PERIOD_H6:
+        case PERIOD_H8:
+        case PERIOD_H12:
         case PERIOD_D1:
         case PERIOD_W1:
         case PERIOD_MN1:

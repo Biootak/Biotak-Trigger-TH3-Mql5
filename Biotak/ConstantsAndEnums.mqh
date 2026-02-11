@@ -559,7 +559,7 @@ const double TH3_TEST_FREQUENCIES[] = {
     120.0    // 38.4/32 - Extended maximum
 };
 
-const int TH3_FREQUENCY_COUNT = 76; // 38 base + 38 geometric means (extended to 120%)
+const int TH3_FREQUENCY_COUNT = 77; // 63 original + 14 extended (3.125% to 120%)
 
 //+------------------------------------------------------------------+
 //| PIPELINE ARCHITECTURE STRUCTS (Added for Modular Refactoring)    |

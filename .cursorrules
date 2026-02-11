@@ -1,0 +1,558 @@
+# Biotak Trigger TH3 - MQL5 Development Rules
+# ==============================================
+# Expert AI Assistant Rules for MetaTrader 5 Custom Indicator Development
+# فایل قوانین توسعه برای اندیکاتور سفارشی متاتریدر 5
+
+## 📋 Project Overview
+You are working on **Biotak Trigger TH3**, a professional MQL5 indicator implementing Professor Saeed Khakestar's Time Harmonic (TH) levels formula for MetaTrader 5 platform.
+
+**Version:** 3.10
+**Language:** MQL5
+**Type:** Custom Chart Indicator
+**Target Platform:** MetaTrader 5
+
+---
+
+## 🎯 Core Principles
+
+### 1. MQL5 Language Specifics
+- **ALWAYS** use MQL5 syntax, NOT MQL4
+- Use `OnInit()`, `OnDeinit()`, `OnCalculate()`, `OnChartEvent()`, `OnTimer()`
+- Arrays are indexed from 0, time series can be `AS_SERIES` or not
+- Use `datetime`, `color`, `ENUM_TIMEFRAMES` types correctly
+- String functions: `StringFormat()`, `StringConcatenate()`, `StringLen()`, etc.
+- Use `#property` directives for indicator metadata
+
+### 2. File Organization
+```
+Root/
+├── Biotak Trigger TH3.mq5          # Main indicator file
+├── Biotak/                         # Include files directory
+│   ├── BuildConfig.mqh             # Build mode configuration (MUST BE FIRST)
+│   ├── MQL5Compat.mqh              # MQL5 compatibility layer
+│   ├── PropertiesAndInputs.mqh     # Input parameters
+│   ├── ConstantsAndEnums.mqh       # Constants and enumerations
+│   ├── GlobalVariables.mqh         # Global state management
+│   ├── *Calculations.mqh           # Calculation logic files
+│   ├── *Functions.mqh              # Function libraries
+│   ├── *Manager.mqh                # Manager classes
+│   └── Tests/                      # Test files
+```
+
+### 3. Include Order (CRITICAL!)
+```mql5
+#include "Biotak\BuildConfig.mqh"           // ALWAYS FIRST!
+#include "Biotak\MQL5Compat.mqh"            // ALWAYS SECOND!
+#include "Biotak\PropertiesAndInputs.mqh"
+#include "Biotak\ConstantsAndEnums.mqh"
+// ... other includes in logical order
+```
+
+---
+
+## 🔧 Build System
+
+### Debug vs Production Mode
+- Edit `Biotak/BuildConfig.mqh` to toggle modes
+- **Production:** `#define DEBUG_BUILD` is commented out
+- **Debug:** `#define DEBUG_BUILD` is uncommented
+
+### Conditional Compilation
+```mql5
+#ifdef DEBUG_BUILD
+    // Debug-only code (logging, assertions, performance tracking)
+#else
+    // Production code (optimized)
+#endif
+```
+
+### Debug Macros Available
+- `DEBUG_LOG(msg)` - Conditional logging
+- `PERF_START(name)` - Performance tracking start
+- `PERF_END(name)` - Performance tracking end
+- `ASSERT(condition, msg)` - Runtime assertions
+
+---
+
+## 📝 Coding Standards
+
+### Naming Conventions
+- **Global Variables:** `g_variableName` (camelCase with g_ prefix)
+- **Input Parameters:** `inp_ParameterName` (camelCase with inp_ prefix)
+- **Constants:** `CONSTANT_NAME` (UPPER_SNAKE_CASE)
+- **Functions:** `FunctionName()` (PascalCase)
+- **Local Variables:** `localVariable` (camelCase)
+- **Enums:** `ENUM_TypeName` and `TYPE_VALUE`
+
+### Example
+```mql5
+// Input parameters
+input bool inp_ShowLevels = true;
+input color inp_LineColor = clrBlue;
+
+// Constants
+#define MAX_LEVELS 100
+const string INDICATOR_NAME = "Biotak TH3";
+
+// Global variables
+bool g_isInitialized = false;
+datetime g_lastUpdateTime = 0;
+
+// Function
+void UpdateIndicatorLevels() {
+    // Local variable
+    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+}
+```
+
+### Code Structure
+```mql5
+//+------------------------------------------------------------------+
+//| Function Description                                              |
+//+------------------------------------------------------------------+
+ReturnType FunctionName(parameters)
+{
+    // Input validation
+    if(!IsValidInput()) {
+        return ERROR_VALUE;
+    }
+    
+    // Main logic
+    // ...
+    
+    // Return result
+    return result;
+}
+```
+
+---
+
+## 🛡️ Security & Performance Rules
+
+### Memory Management
+- **NEVER** create memory leaks
+- Always clean up objects in `OnDeinit()`
+- Delete chart objects when no longer needed
+- Use `ObjectsDeleteAll()` carefully with prefix filtering
+
+### Buffer Overflow Prevention
+```mql5
+// ALWAYS validate array bounds
+if(index >= 0 && index < ArraySize(array)) {
+    array[index] = value;
+}
+
+// ALWAYS check string lengths
+if(StringLen(text) < MAX_LENGTH) {
+    // Process text
+}
+```
+
+### Race Condition Prevention
+- Use `ObjectFind()` before accessing objects
+- Check return values of all functions
+- Validate data before calculations
+- Use atomic operations where possible
+
+### Floating Point Safety
+```mql5
+// DON'T use direct comparison
+if(price == targetPrice) { } // WRONG!
+
+// DO use epsilon comparison
+if(MathAbs(price - targetPrice) < 0.00001) { } // CORRECT
+
+// Or use helper functions from FloatingPointHelper.mqh
+if(IsEqual(price, targetPrice)) { } // BEST
+```
+
+---
+
+## 🎨 Drawing Objects
+
+### Object Naming Convention
+```mql5
+// Format: PREFIX_DESCRIPTOR_UNIQUEID
+string objectName = "BIOTAK_TH_LEVEL_" + IntegerToString(levelIndex);
+```
+
+### Object Creation Pattern
+```mql5
+// 1. Check if exists
+if(ObjectFind(0, objectName) < 0) {
+    // 2. Create object
+    ObjectCreate(0, objectName, OBJ_HLINE, 0, 0, price);
+}
+
+// 3. Set properties
+ObjectSetInteger(0, objectName, OBJPROP_COLOR, lineColor);
+ObjectSetInteger(0, objectName, OBJPROP_WIDTH, lineWidth);
+ObjectSetInteger(0, objectName, OBJPROP_STYLE, lineStyle);
+
+// 4. Set description
+ObjectSetString(0, objectName, OBJPROP_TEXT, description);
+```
+
+### Flickering Prevention
+- Use `PropertyChangeDetector.mqh` to detect actual changes
+- Only update objects when properties actually change
+- Batch updates when possible
+- Use redraw flags to minimize chart refreshes
+
+---
+
+## 🧪 Testing Guidelines
+
+### Property-Based Testing
+```mql5
+#ifdef DEBUG_BUILD
+void TestFunction() {
+    // Arrange
+    double input = 1.23456;
+    
+    // Act
+    double result = CalculateTH(input);
+    
+    // Assert
+    ASSERT(result > 0, "TH calculation should be positive");
+    ASSERT(!MathIsValidNumber(result), "Result should be valid number");
+}
+#endif
+```
+
+### Performance Testing
+```mql5
+PERF_START("CalculationBlock");
+// Your calculation code
+PERF_END("CalculationBlock");
+```
+
+---
+
+## 📊 TH Calculation Rules
+
+### Formula Constants
+- TH levels are calculated using specific mathematical formulas
+- Always validate base price before calculations
+- Support multiple step modes: TH, SS/LS, M, TP, Combo
+- Respect fractal timeframes (M1, M4, M16, H1+M4, H4+M16)
+
+### Base Price Updates
+- Update every 30 minutes
+- Support custom price selection
+- Validate price range before accepting
+
+### Timeframe Handling
+```mql5
+// Standard timeframes
+PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
+PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1
+
+// Fractal timeframes (custom)
+// Defined in FractalTimeframes.mqh
+```
+
+---
+
+## 🔔 Alert System
+
+### Alert Types
+- Price touch alerts
+- Level cross alerts
+- Timeframe change alerts
+
+### Alert Implementation
+```mql5
+if(inp_EnableAlerts && PriceHitLevel()) {
+    Alert("Biotak TH3: Price hit level at ", DoubleToString(level, _Digits));
+    
+    if(inp_EnablePushNotifications) {
+        SendNotification("TH3 Alert: Level hit");
+    }
+}
+```
+
+---
+
+## 🌍 Internationalization
+
+### Multi-Language Support
+```mql5
+// Use descriptive English names in code
+// Support Persian (Farsi) in comments and UI strings
+
+string GetLocalizedString(string key) {
+    if(key == "SHOW_LEVELS") {
+        return (inp_Language == LANG_PERSIAN) ? "نمایش سطوح" : "Show Levels";
+    }
+    return key;
+}
+```
+
+---
+
+## 🎹 Hotkey System
+
+### Supported Keys
+- **F:** Hide/Show indicator
+- **G:** Lock/Unlock timeframe
+- **C:** Set custom price
+- **T:** Toggle trigger levels
+- **E:** Cycle step modes
+- **R:** Reset to defaults
+
+### Implementation Pattern
+```mql5
+void OnChartEvent(const int id, const long& lparam, 
+                  const double& dparam, const string& sparam)
+{
+    if(id == CHARTEVENT_KEYDOWN) {
+        switch((int)lparam) {
+            case 70: // 'F' key
+                ToggleVisibility();
+                break;
+            // ... other keys
+        }
+    }
+}
+```
+
+---
+
+## 📚 Documentation Standards
+
+### Function Documentation
+```mql5
+//+------------------------------------------------------------------+
+//| Calculate TH Level                                                |
+//| محاسبه سطح TH                                                     |
+//+------------------------------------------------------------------+
+//| Parameters:                                                       |
+//|   basePrice - قیمت پایه برای محاسبه                              |
+//|   factor    - ضریب محاسبه TH                                     |
+//| Returns:                                                          |
+//|   double - مقدار سطح TH محاسبه شده                               |
+//+------------------------------------------------------------------+
+double CalculateTHLevel(double basePrice, double factor)
+{
+    // Implementation
+}
+```
+
+### File Headers
+```mql5
+//+------------------------------------------------------------------+
+//| FileName.mqh                                                      |
+//| توضیحات فارسی فایل                                                |
+//+------------------------------------------------------------------+
+//| Purpose: Brief description                                        |
+//| Dependencies: List of included files                              |
+//| Version: X.XX                                                     |
+//+------------------------------------------------------------------+
+```
+
+---
+
+## ⚠️ Common Pitfalls to Avoid
+
+### 1. Array Indexing
+```mql5
+// WRONG: Assuming time series indexing
+double price = Close[0]; // May not work as expected!
+
+// CORRECT: Check series flag or use explicit indexing
+if(ArrayGetAsSeries(close)) {
+    price = close[0]; // Latest bar
+} else {
+    price = close[rates_total - 1]; // Latest bar
+}
+```
+
+### 2. String Operations
+```mql5
+// WRONG: String concatenation with +
+string result = "Value: " + DoubleToString(value); // May fail!
+
+// CORRECT: Use StringFormat or StringConcatenate
+string result = StringFormat("Value: %.2f", value);
+```
+
+### 3. Object Operations
+```mql5
+// WRONG: Not checking if object exists
+ObjectSetInteger(0, "MyLine", OBJPROP_COLOR, clrRed); // May fail!
+
+// CORRECT: Always check first
+if(ObjectFind(0, "MyLine") >= 0) {
+    ObjectSetInteger(0, "MyLine", OBJPROP_COLOR, clrRed);
+}
+```
+
+### 4. Initialization
+```mql5
+// ALWAYS return proper init codes
+int OnInit() {
+    if(!ValidateInputs()) {
+        return INIT_PARAMETERS_INCORRECT;
+    }
+    
+    if(!CreateObjects()) {
+        return INIT_FAILED;
+    }
+    
+    return INIT_SUCCEEDED;
+}
+```
+
+---
+
+## 🚀 Optimization Guidelines
+
+### Calculation Caching
+- Cache expensive calculations
+- Use `CalculationCache.mqh` for reusable results
+- Invalidate cache when base price changes
+
+### Object Management
+- Limit total number of objects (use `ObjectCountManager.mqh`)
+- Reuse objects instead of delete/create
+- Use object pooling for frequently created objects
+
+### Chart Redraw
+- Minimize `ChartRedraw()` calls
+- Batch visual updates
+- Use `RedrawFlagManager.mqh` to coordinate redraws
+
+---
+
+## 🔄 Version Control
+
+### Commit Message Format
+```
+type(scope): subject
+
+body
+
+footer
+```
+
+### Types
+- **feat:** New feature
+- **fix:** Bug fix
+- **perf:** Performance improvement
+- **refactor:** Code restructuring
+- **docs:** Documentation
+- **test:** Tests
+- **chore:** Maintenance
+
+### Example
+```
+feat(th-calc): Add support for custom TH factors
+
+- Implement factor validation
+- Add input parameter for custom factor
+- Update calculation logic to use custom factor
+
+Closes #123
+```
+
+---
+
+## 🎓 Learning Resources
+
+### MQL5 Documentation
+- [MQL5 Reference](https://www.mql5.com/en/docs)
+- [MQL5 Code Base](https://www.mql5.com/en/code)
+- [MQL5 Forum](https://www.mql5.com/en/forum)
+
+### Best Practices
+- Keep functions small and focused
+- Use descriptive names
+- Comment complex logic
+- Test edge cases
+- Profile performance bottlenecks
+
+---
+
+## 🆘 When Helping with Code
+
+### DO:
+✅ Follow MQL5 syntax strictly
+✅ Use existing helper functions from project includes
+✅ Maintain consistent naming conventions
+✅ Add proper error handling
+✅ Include both English and Persian comments
+✅ Consider performance implications
+✅ Write testable code
+✅ Use conditional compilation for debug code
+✅ Validate all inputs
+✅ Check array bounds
+
+### DON'T:
+❌ Use MQL4 syntax or functions
+❌ Ignore memory management
+❌ Create unnecessary global variables
+❌ Skip input validation
+❌ Use magic numbers (define constants)
+❌ Write functions longer than 100 lines
+❌ Ignore error return values
+❌ Use deprecated functions
+❌ Hardcode strings (use constants)
+❌ Forget to clean up in OnDeinit()
+
+---
+
+## 💡 AI Assistant Behavior
+
+When I ask for help:
+
+1. **Understand the Context:** Review related files before suggesting changes
+2. **Maintain Architecture:** Respect the modular structure (separate .mqh files)
+3. **Be Consistent:** Follow existing patterns in the codebase
+4. **Think Security:** Always consider memory leaks, buffer overflows, race conditions
+5. **Optimize:** Suggest performance improvements when appropriate
+6. **Document:** Add comments in both English and Persian
+7. **Test:** Consider edge cases and suggest test scenarios
+8. **Explain:** Describe why you're making specific choices
+
+### Response Format
+```
+## 🎯 Understanding
+[Explain what needs to be done]
+
+## 📝 Solution
+[Provide the code with explanations]
+
+## ⚡ Key Points
+[Highlight important considerations]
+
+## 🧪 Testing
+[Suggest how to test the changes]
+```
+
+---
+
+## 📞 Contact & Credits
+
+**Formula:** Professor Saeed Khakestar
+**Developer:** Biotak (@biotak)
+**Version:** 3.10 - GOLD Release
+**License:** Proprietary
+
+---
+
+## 🎯 Current Focus Areas
+
+- Performance optimization
+- Memory leak prevention
+- Race condition elimination
+- Buffer overflow protection
+- Flickering elimination
+- Code maintainability
+- Test coverage improvement
+
+---
+
+**Remember:** This is a professional trading tool. Code quality, reliability, and performance are paramount. Every line of code should be production-ready, well-tested, and maintainable.
+
+حالا شما می‌توانید از این فایل در ادیتورهای هوش مصنوعی مثل Cursor استفاده کنید! 🚀

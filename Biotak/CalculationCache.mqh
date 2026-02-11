@@ -484,25 +484,8 @@ void InvalidateExtensionMultiplierCache() {
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| Invalidate All Calculation Caches                                |
-//| Call on major state changes (timeframe change, settings change)  |
-//+------------------------------------------------------------------+
-void InvalidateAllCalculationCaches() {
-    InvalidateTHCache();
-    InvalidateFactorCache();
-    InvalidateTimeframeCache();
-    InvalidatePeriodSecondsCache();
-    InvalidateGeometryCache();
-    InvalidateExtensionMultiplierCache();
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 All Calculation Caches Invalidated");
-    #endif
-}
-
-//+------------------------------------------------------------------+
 //| Invalidate Timeframe-Dependent Caches                            |
-//| Call when timeframe changes                                      |
+//| Call when timeframe changes or major state changes               |
 //+------------------------------------------------------------------+
 void InvalidateTimeframeDependentCaches() {
     InvalidateTHCache();

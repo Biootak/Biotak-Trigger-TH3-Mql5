@@ -302,10 +302,6 @@ int ValidateInputs()
     // FACTOR STEP VALIDATIONS
     // ═══════════════════════════════════════════════════════════════
     
-    // ═══════════════════════════════════════════════════════════════
-    // FACTOR STEP VALIDATIONS
-    // ═══════════════════════════════════════════════════════════════
-    
     // SECURITY FIX: Validate factor value
     if(inpFactorValue < 0.01 || inpFactorValue > 10000) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -313,18 +309,6 @@ int ValidateInputs()
         Print("   Valid range: 0.01 - 10000");
         #endif
         return INIT_PARAMETERS_INCORRECT;
-    }
-    
-    // SECURITY FIX: Validate harmonic ratio
-    if(inpEnableHarmonicPattern) {
-        if(inpHarmonicRatio < 1.01 || inpHarmonicRatio > 2.0) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ ERROR: Harmonic Ratio (", DoubleToString(inpHarmonicRatio, 3), ") out of range");
-            Print("   Valid range: 1.01 - 2.0");
-            Print("   Recommended: 1.333 (Golden), 1.5 (Medium), 2.0 (Max)");
-            #endif
-            return INIT_PARAMETERS_INCORRECT;
-        }
     }
     
     if(inpFactorAdjustStep <= 0 || inpFactorAdjustStep > 100) {

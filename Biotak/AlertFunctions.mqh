@@ -59,14 +59,14 @@ void CheckAlerts(const string objectPrefix, double currentPrice) {
         }
         
         // بهینه‌سازی: فقط سطوح فعال را بررسی کنید
-        int maxLevelsToCheck = MathMin(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow);
+        int maxLevelsToCheck = MathMax(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow);
         maxLevelsToCheck = MathMin(maxLevelsToCheck, 256); // محدودیت ایمنی
         
         for(int stepCount = 1; stepCount <= maxLevelsToCheck; stepCount++) {
             // بررسی سطوح بالا
             if(stepCount <= inpMaxTHLevelsAbove) {
                 string lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCount);
-                if(ObjectExistsCached(lineNameAbove)) { // PERF: Use hash-cached object check
+                if(CacheObjectExists(lineNameAbove)) { // Use hash-cached object check
                     double levelAbove = ObjectGetDouble(0, lineNameAbove, OBJPROP_PRICE, 0);
                     if(levelAbove != EMPTY_VALUE && currentPrice >= levelAbove) {
                         string alertKey = "TriggerTH_Up_" + IntegerToString(stepCount);
@@ -83,7 +83,7 @@ void CheckAlerts(const string objectPrefix, double currentPrice) {
             // بررسی سطوح پایین
             if(stepCount <= inpMaxTHLevelsBelow) {
                 string lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCount);
-                if(ObjectExistsCached(lineNameBelow)) { // PERF: Use hash-cached object check
+                if(CacheObjectExists(lineNameBelow)) { // Use hash-cached object check
                     double levelBelow = ObjectGetDouble(0, lineNameBelow, OBJPROP_PRICE, 0);
                     if(levelBelow != EMPTY_VALUE && currentPrice <= levelBelow) {
                         string alertKey = "TriggerTH_Down_" + IntegerToString(stepCount);

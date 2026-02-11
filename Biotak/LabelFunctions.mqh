@@ -579,7 +579,9 @@ bool CreateATRLabel(const double atrValue) {
     double target5x = MathFloor(atrPips * 5.0);
     double target15x = MathFloor(atrPips * 15.0);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("CreateATRLabel: atrPips=", atrPips, " targets=", target3x, ",", target5x, ",", target15x);
+    #endif
     
     string mainObjName = "ATR_Label_Main";
     string targetsObjName = "ATR_Label_Targets";
@@ -591,17 +593,25 @@ bool CreateATRLabel(const double atrValue) {
     
     if (ObjectFind(0, mainObjName) < 0) {
         if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("CreateATRLabel: Failed to create mainObjName");
+            #endif
             return false;
         }
+        #ifdef ENABLE_DEBUG_LOGS
         Print("CreateATRLabel: Created mainObjName");
+        #endif
     }
     if (inpShowTHTargets && ObjectFind(0, targetsObjName) < 0) {
         if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) {
+            #ifdef ENABLE_DEBUG_LOGS
             Print("CreateATRLabel: Failed to create targetsObjName");
+            #endif
             return false;
         }
+        #ifdef ENABLE_DEBUG_LOGS
         Print("CreateATRLabel: Created targetsObjName");
+        #endif
     }
     
     // فرمت دو خطی:
@@ -610,7 +620,9 @@ bool CreateATRLabel(const double atrValue) {
     string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
     string mainText = StringFormat("ATR: %.1f", atrPips);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("CreateATRLabel: mainText='", mainText, "' targetsText='", targetsText, "'");
+    #endif
     
     if(inpShowTHTargets) {
         ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
@@ -640,7 +652,9 @@ bool CreateATRLabel(const double atrValue) {
     int singleLineHeight = inpFontSize + lineGap;
     int baseY = 25; // موقعیت در بالای چارت
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("CreateATRLabel: labelXDistance=", labelXDistance, " baseY=", baseY, " singleLineHeight=", singleLineHeight);
+    #endif
     
     // محاسبه عرض تقریبی برای مرکز کردن
     int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
@@ -654,24 +668,34 @@ bool CreateATRLabel(const double atrValue) {
     if(inpShowTHTargets) {
         ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
         ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY);
+        #ifdef ENABLE_DEBUG_LOGS
         Print("CreateATRLabel: targetsObjName position X=", labelXDistance + targetsOffset, " Y=", baseY);
+        #endif
     }
     ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance);
     ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
+    #ifdef ENABLE_DEBUG_LOGS
     Print("CreateATRLabel: mainObjName position X=", labelXDistance, " Y=", baseY + singleLineHeight);
+    #endif
     
     // احترام به حالت Hide (کلید F)
     if(IsIndicatorHidden()) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("CreateATRLabel: Indicator is hidden, setting OBJ_NO_PERIODS");
+        #endif
         if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("CreateATRLabel: Indicator is visible, setting OBJ_ALL_PERIODS");
+        #endif
         if(inpShowTHTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
         ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("CreateATRLabel: Completed successfully");
+    #endif
     return true;
 }
 

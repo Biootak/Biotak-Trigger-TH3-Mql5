@@ -253,16 +253,6 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
         return 0;
     }
     
-    // ═══════════════════════════════════════════════════════════════
-    // CRITICAL FIX #4: Check for potential overflow BEFORE multiplication
-    // ═══════════════════════════════════════════════════════════════
-    if(factor > 1000000000.0 / 2.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Factor would cause overflow in multiplication");
-        #endif
-        return 0;
-    }
-    
     // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
     double cachedResult = GetCachedFactorStepSize(highPrice, lowPrice, factor);
     if(cachedResult > 0) {

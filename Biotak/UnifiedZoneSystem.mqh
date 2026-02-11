@@ -59,25 +59,31 @@ bool CreateUnifiedZone(const string zoneName,
     // CRITICAL DIAGNOSTIC: Always print (not just in debug mode)
     static int callCount = 0;
     callCount++;
+    #ifdef ENABLE_DEBUG_LOGS
     if(callCount <= 5) {  // Only first 5 calls to avoid spam
         Print("🔍 ZONE: '", zoneName, "' TF=", PeriodMinutes(), 
               "min, Enabled=", (config.enabled ? "YES" : "NO"), 
               ", Style=", (int)config.style);
     }
+    #endif
     
     // Check if zones are enabled
     if(!config.enabled) {
+        #ifdef ENABLE_DEBUG_LOGS
         if(callCount <= 5) {
             Print("⚠️ ZONE: DISABLED globally");
         }
+        #endif
         return true; // Not an error, just disabled
     }
     
     // Check style: HIDDEN
     if(config.style == FACTOR_ZONE_HIDDEN) {
+        #ifdef ENABLE_DEBUG_LOGS
         if(callCount <= 5) {
             Print("⚠️ ZONE: Style is HIDDEN");
         }
+        #endif
         // Delete zone if exists
         if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
         return true; // Not an error, just hidden
@@ -360,6 +366,7 @@ bool CreateZoneWithSmartFallback(const string zoneName,
     static int m15Count = 0, m30Count = 0;
     int currentTF = PeriodMinutes();
     
+    #ifdef ENABLE_DEBUG_LOGS
     if(currentTF == 15 && m15Count < 5) {
         m15Count++;
         Print("🔍 M15-FALLBACK #", m15Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
@@ -368,16 +375,19 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         m30Count++;
         Print("🔍 M30-FALLBACK #", m30Count, ": Enabled=", (config.enabled ? "YES" : "NO"));
     }
+    #endif
     
     // CRITICAL FIX: Check if zones are enabled globally
     if(!config.enabled) {
         // Zones disabled - still update tracking variables but don't draw
+        #ifdef ENABLE_DEBUG_LOGS
         if(currentTF == 15 && m15Count <= 5) {
             Print("🔍 M15-DISABLED: Returning early");
         }
         else if(currentTF == 30 && m30Count <= 5) {
             Print("🔍 M30-DISABLED: Returning early");
         }
+        #endif
         
         if(isStructure && structureEnabled) {
             lastStructurePrice = currentPrice;
@@ -416,23 +426,29 @@ bool CreateZoneWithSmartFallback(const string zoneName,
     }
     
     // CRITICAL DIAGNOSTIC
+    #ifdef ENABLE_DEBUG_LOGS
     if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
         Print("🔍 TF", currentTF, "-TRACK: shouldDraw=", (shouldDraw ? "YES" : "NO"), 
               ", prevPrice=", DoubleToString(effectivePrevPrice, 5));
     }
+    #endif
     
     // Only create zone if we have a previous price
     if(!shouldDraw || effectivePrevPrice <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
             Print("🔍 TF", currentTF, "-SKIP: First level or no prev price");
         }
+        #endif
         return true; // Not an error, just first level
     }
     
     // CRITICAL DIAGNOSTIC
+    #ifdef ENABLE_DEBUG_LOGS
     if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
         Print("🔍 TF", currentTF, "-STEP: fixedStepSize=", DoubleToString(fixedStepSize, 5));
     }
+    #endif
     
     // CRITICAL FIX: Use fixed step size if provided
     if(fixedStepSize > 0) {
@@ -445,10 +461,12 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
         
         // CRITICAL DIAGNOSTIC
+        #ifdef ENABLE_DEBUG_LOGS
         if((currentTF == 15 && m15Count <= 5) || (currentTF == 30 && m30Count <= 5)) {
             Print("🔍 TF", currentTF, "-ZONE: upper=", DoubleToString(upperPrice, 5), 
                   ", lower=", DoubleToString(lowerPrice, 5), ", dist=", DoubleToString(actualDistance, 5));
         }
+        #endif
         
         // Handle LINES style (special case)
         if(config.style == FACTOR_ZONE_LINES) {

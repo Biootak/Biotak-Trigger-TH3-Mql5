@@ -35,6 +35,7 @@ struct SObjectCacheSlot {
     string name;
     SObjectCacheEntry entry;
     bool occupied;
+    bool deleted;         // Tombstone sentinel for linear probing
     datetime lastAccess;  // For LRU eviction
 };
 
@@ -43,8 +44,8 @@ static SObjectCacheSlot g_objectCacheHash[CACHE_HASH_BUCKETS];
 static bool g_objectCacheHashInitialized = false;
 static int g_objectCacheSize = 0;
 
-// Maximum cache size (prevents unbounded growth)
-#define MAX_CACHE_SIZE 1000
+// Maximum cache size (80% load factor of 512 buckets)
+#define MAX_CACHE_SIZE 400
 
 //+------------------------------------------------------------------+
 //| Simple String Hash Function (DJB2 variant)                       |
@@ -70,6 +71,7 @@ void InitializeObjectCacheHash() {
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
         g_objectCacheHash[i].name = "";
         g_objectCacheHash[i].occupied = false;
+        g_objectCacheHash[i].deleted = false;
         g_objectCacheHash[i].lastAccess = 0;
     }
     
@@ -91,13 +93,17 @@ int CacheFindIndex(const string name) {
     
     int slot = HashObjectName(name);
     
-    // Linear probing with max attempts
+    // Linear probing with max attempts (skip tombstones, stop at truly empty)
     for(int probe = 0; probe < CACHE_MAX_PROBE; probe++) {
         int idx = (slot + probe) % CACHE_HASH_BUCKETS;
         
-        if(!g_objectCacheHash[idx].occupied) {
-            return -1;  // Empty slot - object not in cache
+        if(!g_objectCacheHash[idx].occupied && !g_objectCacheHash[idx].deleted) {
+            return -1;  // Empty slot (never used) - object not in cache
         }
+        
+        // Skip tombstone slots (deleted=true, occupied=false)
+        if(g_objectCacheHash[idx].deleted && !g_objectCacheHash[idx].occupied)
+            continue;
         
         if(g_objectCacheHash[idx].name == name) {
             // Update last access time for LRU
@@ -145,8 +151,8 @@ void CacheAddObject(const string name, const double price,
     for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
         int insertIdx = (slot + probe) % CACHE_HASH_BUCKETS;
         
-        if(!g_objectCacheHash[insertIdx].occupied) {
-            // Found empty slot - insert here
+        if(!g_objectCacheHash[insertIdx].occupied || g_objectCacheHash[insertIdx].deleted) {
+            // Found empty or tombstone slot - insert here
             g_objectCacheHash[insertIdx].name = name;
             g_objectCacheHash[insertIdx].entry.name = name;
             g_objectCacheHash[insertIdx].entry.lastPrice = price;
@@ -156,6 +162,7 @@ void CacheAddObject(const string name, const double price,
             g_objectCacheHash[insertIdx].entry.exists = true;
             g_objectCacheHash[insertIdx].entry.lastUpdate = TimeCurrent();
             g_objectCacheHash[insertIdx].occupied = true;
+            g_objectCacheHash[insertIdx].deleted = false;
             g_objectCacheHash[insertIdx].lastAccess = TimeCurrent();
             
             g_objectCacheSize++;
@@ -199,6 +206,7 @@ void EvictLRUEntry() {
         
         g_objectCacheHash[lruIdx].name = "";
         g_objectCacheHash[lruIdx].occupied = false;
+        g_objectCacheHash[lruIdx].deleted = true;  // Tombstone
         g_objectCacheHash[lruIdx].lastAccess = 0;
         g_objectCacheSize--;
     }
@@ -216,9 +224,10 @@ void CacheRemoveObject(const string name) {
         return; // Object not in cache
     }
     
-    // Mark slot as unoccupied
+    // Mark slot as tombstone (preserves linear probing chain)
     g_objectCacheHash[idx].name = "";
     g_objectCacheHash[idx].occupied = false;
+    g_objectCacheHash[idx].deleted = true;  // Tombstone sentinel
     g_objectCacheHash[idx].lastAccess = 0;
     g_objectCacheSize--;
     
@@ -237,6 +246,7 @@ void CacheClear() {
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
         g_objectCacheHash[i].name = "";
         g_objectCacheHash[i].occupied = false;
+        g_objectCacheHash[i].deleted = false;
         g_objectCacheHash[i].lastAccess = 0;
     }
     

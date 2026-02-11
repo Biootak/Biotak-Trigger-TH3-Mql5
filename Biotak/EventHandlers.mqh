@@ -420,25 +420,30 @@ int OnInitHandler() {
 }
 
 // Helper function to create custom price horizontal line (DRY)
-void CreateCustomPriceLine(double price, int digits)
+bool CreateCustomPriceLine(double price, int digits, bool selected = false, 
+                           string tooltipSuffix = "Drag to adjust")
 {
-    ObjectDelete(0, g_customPriceHorizontalLineName);
-    if(ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, price)) {
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_COLOR, inpCustomPriceLevelColor);
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_STYLE, STYLE_SOLID);
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_WIDTH, inpCustomPriceLevelWidth);
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, false);
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-        ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                      "📍 Custom Price: " + DoubleToString(price, digits) + " | Drag to adjust");
-        g_customPriceLineCreated = true;
+    if(ObjectFind(0, g_customPriceHorizontalLineName) < 0) {
+        if(!ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, price)) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ Failed to create custom price line. Error: ", GetLastError());
+            #endif
+            g_customPriceLineCreated = false;
+            return false;
+        }
     } else {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Failed to create custom price line. Error: ", GetLastError());
-        #endif
-        g_customPriceLineCreated = false;
+        ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, price);
     }
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_COLOR, inpCustomPriceLevelColor);
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_STYLE, STYLE_SOLID);
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_WIDTH, inpCustomPriceLevelWidth);
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, selected);
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
+    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
+                  "📍 Custom Price: " + DoubleToString(price, digits) + " | " + tooltipSuffix);
+    g_customPriceLineCreated = true;
+    return true;
 }
 
 //+------------------------------------------------------------------+
@@ -2587,20 +2592,20 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_thStartPointType = inpTHStartPointType;
             g_customTHStartPrice = inpCustomTHStartPrice;
             
-            // Clear keyboard override GlobalVariables but keep input parameter values
+            // Clear keyboard override GlobalVariables (GlobalVariableDel is safe if var doesn't exist)
             // PERFORMANCE: Use cached ChartID string
             string chartIdStr = GetCachedChartIdStr();
             string symbolName = GetCachedSymbol();
-            if(GlobalVariableCheck("Biotak_StepMode_" + chartIdStr)) GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_Factor_" + chartIdStr)) GlobalVariableDel("Biotak_Factor_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_CalcBasis_" + chartIdStr)) GlobalVariableDel("Biotak_CalcBasis_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_LockTF_" + chartIdStr)) GlobalVariableDel("Biotak_LockTF_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_LockTFPeriod_" + chartIdStr)) GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_TriggerLevels_" + chartIdStr)) GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_LinesVisible_" + chartIdStr)) GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_CustomPriceOverride_" + symbolName)) GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
-            if(GlobalVariableCheck("Biotak_TH3Freq_" + chartIdStr)) GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
-            if(GlobalVariableCheck("Biotak_TH3FreqIdx_" + chartIdStr)) GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
+            GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
+            GlobalVariableDel("Biotak_Factor_" + chartIdStr);
+            GlobalVariableDel("Biotak_CalcBasis_" + chartIdStr);
+            GlobalVariableDel("Biotak_LockTF_" + chartIdStr);
+            GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
+            GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
+            GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
+            GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
+            GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
+            GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
             
             // If input parameter has custom price, restore it; otherwise clear
             if(inpCustomTHStartPrice > 0.0) {

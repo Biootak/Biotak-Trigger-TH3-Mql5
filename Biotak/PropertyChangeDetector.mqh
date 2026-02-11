@@ -19,14 +19,6 @@ struct SPropertyChangeResult {
 };
 
 //+------------------------------------------------------------------+
-//| Epsilon for floating-point price comparison                       |
-//| Used to avoid false positives from floating-point precision       |
-//| Value: 1e-8 (0.00000001) - appropriate for most currency pairs   |
-//| Note: This epsilon-based comparison satisfies Requirement 10.1    |
-//+------------------------------------------------------------------+
-#define PRICE_EPSILON 0.00000001
-
-//+------------------------------------------------------------------+
 //| Check if price changed significantly                              |
 //| Uses epsilon comparison to handle floating-point precision        |
 //| Parameters:                                                       |
@@ -42,7 +34,7 @@ bool HasPriceChanged(const double oldPrice, const double newPrice) {
     
     // Use epsilon comparison for floating-point values
     double diff = MathAbs(oldPrice - newPrice);
-    return diff > PRICE_EPSILON;
+    return diff > EPSILON_PRICE;
 }
 
 //+------------------------------------------------------------------+
