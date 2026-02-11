@@ -143,7 +143,15 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
 
     // Create or update object
     bool objectExists = CacheObjectExists(request.name);
-    if(!objectExists) objectExists = (ObjectFind(0, request.name) >= 0);
+    if(objectExists) {
+        // FIX: Verify cache accuracy - cache can be stale after ObjectsDeleteAll in ClearAllLevels
+        if(ObjectFind(0, request.name) < 0) {
+            CacheRemoveObject(request.name);
+            objectExists = false;
+        }
+    } else {
+        objectExists = (ObjectFind(0, request.name) >= 0);
+    }
 
     if(!objectExists) {
         long chartId = ChartID();

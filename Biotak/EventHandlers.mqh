@@ -551,6 +551,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             }
         }
     }
+    // FIX: Clear ObjectCache after deleting objects to prevent stale cache entries.
+    // Without this, rapid mode cycling (E key) causes CacheObjectExists to return true
+    // for deleted zones, making CreateZone skip creation and zones stop rendering.
+    CacheClear();
 }
     void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
