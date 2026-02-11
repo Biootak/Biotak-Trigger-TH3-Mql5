@@ -92,12 +92,6 @@ bool CreateFactorMidZone(const string zoneName,
         return CreateFactorMidZone_LinesStyle(zoneName, upperPrice, lowerPrice, 
                                               zoneColor, transparency);
     }
-    SUnifiedZoneConfig config;
-    config.enabled = true;
-    config.transparency = transparency;
-    config.heightPercent = 1.0;
-    config.separateStructureTrigger = false;
-    config.defaultColor = zoneColor;
     double midPoint = (upperPrice + lowerPrice) / 2.0;
     double halfHeight = (upperPrice - lowerPrice) / 2.0;
     SZoneCreationRequest request;
