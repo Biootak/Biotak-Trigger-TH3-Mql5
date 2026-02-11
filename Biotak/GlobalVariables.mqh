@@ -13,6 +13,8 @@ static bool g_calculatedOnce = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
 bool g_redrawTHLevelsNeeded = true;
 bool g_forceClearOnNextDraw = false;
+int g_currentLabelYOffset = 0;  // Cumulative Y offset for stacking top label sections (ATR)
+int g_currentLabelYOffsetBottom = 0;  // Cumulative Y offset for stacking bottom label sections (TH)
 static bool g_redrawNeeded = true;
 
 // Performance Tracking

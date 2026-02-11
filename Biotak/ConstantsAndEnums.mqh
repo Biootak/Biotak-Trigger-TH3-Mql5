@@ -14,7 +14,7 @@
 #endif
 
 // Performance & Safety Constants
-#define MAX_SAFE_LEVELS 100           // Maximum safe number of levels per side (reduced from 200 to prevent hanging)
+#define MAX_SAFE_LEVELS 200           // Maximum safe number of levels per side
 #define MAX_SAFE_OBJECTS 3000         // Warning threshold for total objects
 #define CRITICAL_OBJECT_LIMIT 50000   // Critical threshold (MT5 limit ~64K)
 #define CPU_WARNING_MS 100            // Warning if OnCalculate takes >100ms

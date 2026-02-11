@@ -2327,8 +2327,8 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     stepDistances[0] = lsFirst ? lsValue : ssValue;
     stepDistances[1] = lsFirst ? ssValue : lsValue;
     double avgStepSize = (ssValue + lsValue) / 2.0;
-    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
-    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
+    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxLevels;
     if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
     if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
     double chartPriceMax = ChartGetDouble(0, CHART_PRICE_MAX);
@@ -2633,8 +2633,8 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     #endif
     return;
     }
-    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
-    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
+    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxLevels;
     if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
     if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
     double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
@@ -2867,8 +2867,8 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     #endif
     return;
     }
-    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
-    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
+    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxLevels;
     if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
     if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
     double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
@@ -3088,8 +3088,8 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     #endif
     return;
     }
-    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
-    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
+    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxLevels;
     if(effectiveMaxAbove > MAX_SAFE_LEVELS) effectiveMaxAbove = MAX_SAFE_LEVELS;
     if(effectiveMaxBelow > MAX_SAFE_LEVELS) effectiveMaxBelow = MAX_SAFE_LEVELS;
     double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
@@ -3699,11 +3699,11 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     double currentPrice = iClose(_Symbol, _Period, 0);
     double viewportTop = currentPrice + (historicalRange * 10.0);
     double viewportBottom = currentPrice - (historicalRange * 10.0);
-    int safeMaxAbove = maxLevelsAbove;
-    int safeMaxBelow = maxLevelsBelow;
+    int safeMaxAbove = (int)MathMin(maxLevelsAbove, MAX_SAFE_LEVELS);
+    int safeMaxBelow = (int)MathMin(maxLevelsBelow, MAX_SAFE_LEVELS);
     if(centerPrice > viewportTop || centerPrice < viewportBottom) {
-        safeMaxAbove = (int)MathMin(maxLevelsAbove, 100);
-    safeMaxBelow = (int)MathMin(maxLevelsBelow, 100);
+        safeMaxAbove = (int)MathMin(safeMaxAbove, 100);
+    safeMaxBelow = (int)MathMin(safeMaxBelow, 100);
     #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ Harmonic: Center outside viewport - limiting to ", safeMaxAbove, "/", safeMaxBelow);
     #endif

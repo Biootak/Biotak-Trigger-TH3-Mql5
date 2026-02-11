@@ -199,6 +199,17 @@ void ClearAllModeLabels() {
     }
     Comment("");
 }
+    void ApplyModeLabelStyle(const string name, const color textColor, const int yOffsetExtra = 0) {
+        ObjectSetInteger(0, name, OBJPROP_CORNER, inpModeLabelCorner);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, inpModeLabelXDistance);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra);
+    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpModeLabelFontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
     void UpdateStepModeLabel() {    if(!inpShowModeChangeLabel) return;
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     string modeName = GetStepModeName(currentMode);
@@ -218,15 +229,7 @@ void ClearAllModeLabels() {
         ObjectCreate(0, g_stepModeLabelName, OBJ_LABEL, 0, 0, 0);
     }
     ObjectSetString(0, g_stepModeLabelName, OBJPROP_TEXT, "[ " + basisName + " | " + modeName + " ]");
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_XDISTANCE, 15);
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_YDISTANCE, 25);
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, g_stepModeLabelName, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_FONTSIZE, 11);
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_HIDDEN, true);
+    ApplyModeLabelStyle(g_stepModeLabelName, inpModeLabelColor);
     if(inpModeLabelDuration > 0) {
         EventSetTimer(inpModeLabelDuration);
     }
@@ -240,15 +243,7 @@ void ClearAllModeLabels() {
         ObjectCreate(0, g_basisModeLabelName, OBJ_LABEL, 0, 0, 0);
     }
     ObjectSetString(0, g_basisModeLabelName, OBJPROP_TEXT, "[ " + basisName + " | " + modeName + " ]");
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_XDISTANCE, 15);
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_YDISTANCE, 25);
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, g_basisModeLabelName, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_FONTSIZE, 11);
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_HIDDEN, true);
+    ApplyModeLabelStyle(g_basisModeLabelName, inpModeLabelColor);
     if(inpModeLabelDuration > 0) {
         EventSetTimer(inpModeLabelDuration);
     }
@@ -277,15 +272,7 @@ void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) retu
     }
     ObjectSetString(0, g_factorLabelName, OBJPROP_TEXT, 
         "[ F: " + DoubleToString(factorValue, 2) + stepText + " ]");
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_XDISTANCE, LABEL_X_OFFSET);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_YDISTANCE, LABEL_Y_OFFSET);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, g_factorLabelName, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_FONTSIZE, 11);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_COLOR, inpFactorLevelColor);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_factorLabelName, OBJPROP_HIDDEN, true);
+    ApplyModeLabelStyle(g_factorLabelName, inpFactorLevelColor);
     if(inpModeLabelDuration > 0) {
         EventSetTimer(inpModeLabelDuration);
     }
@@ -332,15 +319,7 @@ void UpdateTH3FrequencyLabel(double frequency) {    if(!inpShowModeChangeLabel) 
     }
     ObjectSetString(0, g_frequencyLabelName, OBJPROP_TEXT, 
         "[ TH3 Freq: " + DoubleToString(frequency, 3) + "%" + stepInfo + " ]");
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_CORNER, inpModeLabelCorner);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_XDISTANCE, inpModeLabelXDistance);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_YDISTANCE, inpModeLabelYDistance + FREQUENCY_LABEL_Y_EXTRA);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, g_frequencyLabelName, OBJPROP_FONT, inpFontName);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_FONTSIZE, inpModeLabelFontSize);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_COLOR, inpModeLabelColor);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_HIDDEN, true);
+    ApplyModeLabelStyle(g_frequencyLabelName, inpModeLabelColor, FREQUENCY_LABEL_Y_EXTRA);
     EventSetTimer(FREQUENCY_LABEL_TIMER_SEC);
 }
 

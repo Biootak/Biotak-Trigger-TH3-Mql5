@@ -385,6 +385,28 @@ void HideAllTHObjects()
     }
     else if(reason == REASON_PARAMETERS)
     {
+        // پاک کردن تمام لیبل‌های ATR و TH برای اعمال تنظیمات جدید
+        string currentTFStr = IntegerToString(Period());
+        string uniquePrefix = inpObjectPrefix + "TF" + currentTFStr + "_";
+        string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+        
+        // حذف لیبل‌های ATR
+        ObjectDelete(0, uniquePrefix + "ATR_Title");
+        for(int i = 0; i < ArraySize(allTimeframes); i++) {
+            ObjectDelete(0, uniquePrefix + "ATR_" + allTimeframes[i]);
+            ObjectDelete(0, uniquePrefix + "ATR_Steps_" + allTimeframes[i]);
+            ObjectDelete(0, uniquePrefix + "ATR_Targets_" + allTimeframes[i]);
+        }
+        
+        // حذف لیبل‌های TH
+        ObjectDelete(0, inpObjectPrefix + "TH_Title");
+        string fractalTFs[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+        for(int i = 0; i < ArraySize(fractalTFs); i++) {
+            ObjectDelete(0, inpObjectPrefix + "TH_" + fractalTFs[i]);
+            ObjectDelete(0, inpObjectPrefix + "TH_Steps_" + fractalTFs[i]);
+            ObjectDelete(0, inpObjectPrefix + "TH_Targets_" + fractalTFs[i]);
+        }
+        
         string symbolName = GetCachedSymbol();
     string chartIdStrLocal = GetCachedChartIdStr();
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
@@ -564,8 +586,8 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
     if(maxAbove < 1) maxAbove = 1;
     if(maxBelow < 1) maxBelow = 1;
-    } else {        maxAbove = inpMaxTHLevelsAbove;
-    maxBelow = inpMaxTHLevelsBelow;
+    } else {        maxAbove = inpMaxLevels;
+    maxBelow = inpMaxLevels;
     if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
     if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
     if(maxAbove < 1) maxAbove = 1;
@@ -612,15 +634,22 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     static double s_lastCustomPrice = 0;
     static int s_lastMaxAbove = 0;
     static int s_lastMaxBelow = 0;
+    static double s_lastATRValue = 0;
     string currentTF = GetFractalTimeframeForCurrent();
     ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
+    bool isATR = (currentBasis == CALC_BASIS_ATR);
+    double currentATRValue = 0;
+    if(isATR) {
+        currentATRValue = CalculateWeightedATR();
+    }
     if(dailyClosePrice == s_lastDailyClose && 
        currentBasis == s_lastBasis && 
        currentTF == s_lastTF &&
        g_thStartPointType == s_lastStartPointType &&
        (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || g_customTHStartPrice == s_lastCustomPrice) &&
-       inpMaxTHLevelsAbove == s_lastMaxAbove &&
-       inpMaxTHLevelsBelow == s_lastMaxBelow &&
+       inpMaxLevels == s_lastMaxAbove &&
+       inpMaxLevels == s_lastMaxBelow &&
+       (!isATR || MathAbs(currentATRValue - s_lastATRValue) < GetCachedPoint() * 0.1) &&
        s_lastDailyClose != 0) {
         data = s_cachedData;
     return true;
@@ -692,8 +721,9 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     s_lastTF = currentTF;
     s_lastStartPointType = g_thStartPointType;
     s_lastCustomPrice = g_customTHStartPrice;
-    s_lastMaxAbove = inpMaxTHLevelsAbove;
-    s_lastMaxBelow = inpMaxTHLevelsBelow;
+    s_lastMaxAbove = inpMaxLevels;
+    s_lastMaxBelow = inpMaxLevels;
+    s_lastATRValue = currentATRValue;
     return true;
 }
     void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
@@ -887,15 +917,8 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
         case TH_STEP:
         default:
         {            ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-    if(currentBasis == CALC_BASIS_ATR) {                StepCalculationData data;
-    if(!CalculateCommonStepData(dailyClosePrice, data)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("❌ TH_STEP (ATR): Failed to calculate common step data");
-    #endif
-    return;
-                }
-    DrawTHLevelsWithStep(objectPrefix, data.midpointPrice, data.structureValue, "S",
-                                    data.maxLevelsAbove, data.maxLevelsBelow);
+    if(currentBasis == CALC_BASIS_ATR) {
+                DrawTHLevels(objectPrefix, dailyClosePrice, true);
     #ifdef ENABLE_DEBUG_LOGS
                 Print("✅ TH_STEP (ATR): Completed successfully");
     #endif
@@ -955,6 +978,7 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     static string s_lastPrefix = "";
     if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {        ClearAllLevels(s_lastPrefix);
     InvalidateTimeframeDependentCaches();
+    InvalidateATRCache();
     }
     s_lastPrefix = objectPrefix;
     #ifdef ENABLE_DEBUG_LOGS
@@ -983,6 +1007,9 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     {        if (g_dailyClosePriceForTH == EMPTY_VALUE)
         {
             g_dailyClosePriceForTH = thBasePrice;        }
+    g_currentLabelYOffset = 0;  // Reset top label stacking offset
+    g_currentLabelYOffsetBottom = 0;  // Reset bottom label stacking offset
+    DisplayATRLabels(objectPrefix);
     if(inpShowTHLabels && inpShowFractalTHs) DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLevels) g_redrawTHLevelsNeeded = true;
@@ -1145,6 +1172,7 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     }
     bool tickThrottled = (nowMs - s_lastTickMs < 100 && s_lastTickMs != 0);
     if(timeframeChanged) {        InvalidateTimeframeDependentCaches();
+    InvalidateATRCache();
     #ifdef ENABLE_DEBUG_LOGS
         Print("🔄 Timeframe changed: ", s_lastPeriod, " -> ", currentPeriod);
     #endif
@@ -1175,7 +1203,7 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
                 if(s_cpuWarningCount % 10 == 0) {                    Print("⚠️ Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
-    Print("🧹 Consider reducing inpMaxTHLevelsAbove/Below for better performance");
+    Print("🧹 Consider reducing inpMaxLevels for better performance");
                 }
     #endif
     s_cpuWarningCount++;
@@ -1439,8 +1467,14 @@ void ApplyLinesVisibility()
     string stepModeGvarName = "Biotak_StepMode_" + GetCachedChartIdStr();
     GlobalVariableSet(stepModeGvarName, g_stepModeOverride);
     UpdateStepModeLabel();
+    // FIX: Invalidate ATR cache when switching modes in ATR mode
+    // so CalculateCommonStepData recalculates with fresh ATR data
+    if(GetCurrentCalculationBasis() == CALC_BASIS_ATR) {
+            InvalidateATRCache();
+        }
     g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
+    g_calculatedOnce = false;  // FIX: Force label refresh on mode change
     RedrawAllObjects(true);
     ThrottledChartRedraw();
         }
@@ -1533,6 +1567,7 @@ void ApplyLinesVisibility()
     }
     g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
+    g_calculatedOnce = false;
     RedrawAllObjects(true);
     ThrottledChartRedraw();
         }
@@ -1544,15 +1579,7 @@ void ApplyLinesVisibility()
                 ClearAllModeLabels();
     ObjectCreate(0, g_frequencyLabelName, OBJ_LABEL, 0, 0, 0);
     ObjectSetString(0, g_frequencyLabelName, OBJPROP_TEXT, "[ TH3 Tool is Disabled ]");
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_XDISTANCE, 15);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_YDISTANCE, 45);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, g_frequencyLabelName, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_FONTSIZE, 11);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_HIDDEN, true);
+    ApplyModeLabelStyle(g_frequencyLabelName, inpModeLabelColor, FREQUENCY_LABEL_Y_EXTRA);
     if(inpModeLabelDuration > 0) EventSetTimer(inpModeLabelDuration);
     return;
             }
@@ -1571,15 +1598,7 @@ void ApplyLinesVisibility()
                 ClearAllModeLabels();
     ObjectCreate(0, g_frequencyLabelName, OBJ_LABEL, 0, 0, 0);
     ObjectSetString(0, g_frequencyLabelName, OBJPROP_TEXT, "[ TH3 Tool is Disabled ]");
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_XDISTANCE, 15);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_YDISTANCE, 45);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, g_frequencyLabelName, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_FONTSIZE, 11);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_HIDDEN, true);
+    ApplyModeLabelStyle(g_frequencyLabelName, inpModeLabelColor, FREQUENCY_LABEL_Y_EXTRA);
     if(inpModeLabelDuration > 0) EventSetTimer(inpModeLabelDuration);
     return;
             }

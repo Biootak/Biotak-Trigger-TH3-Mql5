@@ -37,9 +37,9 @@ bool ShouldTriggerAlert(const string levelName) {
         if(ShouldTriggerAlert("MidpointLevel"))
                 TriggerAlert("Price reached Midpoint: " + DoubleToString(midpointLevel, Digits));
         }
-    int maxLevels = MathMin(MathMax(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow), 256);
+    int maxLevels = MathMin(inpMaxLevels, 256);
     for(int step = 1; step <= maxLevels; step++) {
-        if(step <= inpMaxTHLevelsAbove) {
+        if(step <= inpMaxLevels) {
         string nameAbove = prefix + "TriggerTH_Up_" + IntegerToString(step);
     if(CacheObjectExists(nameAbove)) {
         double lvl = ObjectGetDouble(0, nameAbove, OBJPROP_PRICE, 0);
@@ -50,7 +50,7 @@ bool ShouldTriggerAlert(const string levelName) {
                     }
                 }
             }
-    if(step <= inpMaxTHLevelsBelow) {
+    if(step <= inpMaxLevels) {
         string nameBelow = prefix + "TriggerTH_Down_" + IntegerToString(step);
     if(CacheObjectExists(nameBelow)) {
         double lvl = ObjectGetDouble(0, nameBelow, OBJPROP_PRICE, 0);

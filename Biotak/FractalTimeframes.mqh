@@ -206,3 +206,28 @@ string GetOverlapTimeframesInfo(int step, const int &intervals[]) {
     return tf;
 }
 
+// Fractal timeframe durations in minutes (powers of 4)
+// M1=1, M4=4, M16=16, H1+M4=64, H4+M16=256, H17+M4=1024,
+// D2+H20+M16=4096, D11+H9+M4=16384, D45+H12+M16=65536
+const int FRACTAL_TIMEFRAME_MINUTES[] = {
+    1, 4, 16, 64, 256, 1024, 4096, 16384, 65536
+};
+
+// Get minutes for a fractal timeframe name
+int GetFractalTimeframeMinutes(const string timeframe) {
+    int arraySize = ArraySize(FRACTAL_TIMEFRAMES);
+    int minutesArraySize = ArraySize(FRACTAL_TIMEFRAME_MINUTES);
+    for(int i = 0; i < arraySize && i < minutesArraySize; i++) {
+        if(FRACTAL_TIMEFRAMES[i] == timeframe) {
+            return FRACTAL_TIMEFRAME_MINUTES[i];
+        }
+    }
+    // Fallback: use chart period minutes
+    return GetCurrentTimeframeMinutes();
+}
+
+// Get structure timeframe minutes for current chart
+int GetStructureTimeframeMinutes() {
+    string structTF = GetStructureTimeframeForCurrent();
+    return GetFractalTimeframeMinutes(structTF);
+}

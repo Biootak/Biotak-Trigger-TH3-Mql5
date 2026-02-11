@@ -89,6 +89,15 @@ bool ValidateWidth(int width, const string name) {
     if(!ValidateNonNegative(inpInitialX, "InitialX")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpInitialY, "InitialY")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpLabelSpacing, "LabelSpacing")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpTitleSpacing, "TitleSpacing")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpRowSpacing, "RowSpacing")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpSectionSpacing, "SectionSpacing")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpHorizontalPadding, "HorizontalPadding")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpATRRowSpacing, "ATRRowSpacing")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpTHRowSpacing, "THRowSpacing")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpATRHorizontalPadding, "ATRHorizontalPadding")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpTHHorizontalPadding, "THHorizontalPadding")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpTHBottomPadding, "THBottomPadding")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidatePositive(inpMaxLabelWidth, "MaxLabelWidth")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpABCDInfoXDistance, "ABCDInfoX")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpABCDInfoYDistance, "ABCDInfoY")) return INIT_PARAMETERS_INCORRECT;
@@ -96,12 +105,11 @@ bool ValidateWidth(int width, const string name) {
     if(!ValidateNonNegative(inpModeLabelYDistance, "ModeLabelY")) return INIT_PARAMETERS_INCORRECT;
 
     // Levels
-    if(!ValidatePositive(inpMaxTHLevelsAbove, "MaxTHLevelsAbove")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidatePositive(inpMaxTHLevelsBelow, "MaxTHLevelsBelow")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidatePositive(inpMaxLevels, "MaxLevels")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidatePositive(inpCustomPriceMaxLevels, "CustomPriceMaxLevels")) return INIT_PARAMETERS_INCORRECT;
 
     // Performance warnings
-    if(inpMaxTHLevelsAbove > MAX_SAFE_LEVELS || inpMaxTHLevelsBelow > MAX_SAFE_LEVELS) {
+    if(inpMaxLevels > MAX_SAFE_LEVELS) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("WARNING: TH Levels exceed MAX_SAFE_LEVELS (", MAX_SAFE_LEVELS, ")");
     #endif
