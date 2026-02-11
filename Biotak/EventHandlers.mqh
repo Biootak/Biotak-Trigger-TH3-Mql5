@@ -183,6 +183,21 @@ int OnInitHandler() {    InitializeGlobalCache();
     g_factorValueOverride = 50.0;
         }
     }
+    // Restore TH3 Frequency override
+    string th3FreqGvarName = "Biotak_TH3Freq_" + chartIdStr;
+    {
+        double val = GlobalVariableGet(th3FreqGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            if(val > 0 && val <= 120.0) {
+                g_th3FreqOverride = val;
+            } else {
+                GlobalVariableDel(th3FreqGvarName);
+                g_th3FreqOverride = 0.0;
+            }
+        } else {
+            g_th3FreqOverride = 0.0;
+        }
+    }
     InitializeATRCache();
     UpdateLockStatusLabel();
     PrintBuildInfo();
@@ -1435,12 +1450,45 @@ void ApplyLinesVisibility()
     ThrottledChartRedraw();
             }
         }
+        // KEY '3' — Decrease TH3 Frequency
+        if(lparam == '3' || lparam == 51) {
+            if(inpEnableTH3Tool) {
+                double currentFreq = g_th3FreqOverride;
+                if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
+                double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
+                double newFreq = NormalizeDouble(currentFreq - step, 2);
+                if(newFreq < 0.1) newFreq = 0.1;
+                g_th3FreqOverride = newFreq;
+                GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
+                UpdateTH3FreqLabel(newFreq);
+                UpdateAllTH3Objects();
+                ThrottledChartRedraw();
+            }
+        }
+
+        // KEY '4' — Increase TH3 Frequency
+        if(lparam == '4' || lparam == 52) {
+            if(inpEnableTH3Tool) {
+                double currentFreq = g_th3FreqOverride;
+                if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
+                double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
+                double newFreq = NormalizeDouble(currentFreq + step, 2);
+                if(newFreq > 120.0) newFreq = 120.0;
+                g_th3FreqOverride = newFreq;
+                GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
+                UpdateTH3FreqLabel(newFreq);
+                UpdateAllTH3Objects();
+                ThrottledChartRedraw();
+            }
+        }
+
     string mutableResetKey = inpResetKey;
     StringToUpper(mutableResetKey);
     int resetKeyCode = StringGetCharacter(mutableResetKey, 0);
     if(lparam == resetKeyCode)
         {            g_stepModeOverride = -1;
     g_factorValueOverride = 0;
+    g_th3FreqOverride = 0;
     g_timeframeLocked = false;
     g_lockedPeriod = 0;
     g_triggerLevelsEnabled = inpShowTrigger;

@@ -38,6 +38,7 @@ static bool g_linesVisible = true;
 static int g_stepModeOverride = -1;        // -1 = use input, 0-5 = override
 static double g_factorValueOverride = 0;   // 0 = use input, >0 = override
 static int g_factorColorOverride = -1;     // -1 = use input
+static double g_th3FreqOverride = 0;       // 0 = use input, >0 = override
 
 // Alert Tracking
 static datetime g_lastAlertTime = 0;
@@ -49,6 +50,7 @@ static int g_lockedPeriod = 0;
 static string g_lockStatusLabelName = "Biotak_LockStatus_Label";
 static string g_stepModeLabelName = "Biotak_StepMode_Label";
 static string g_factorLabelName = "Biotak_Factor_Label";
+static string g_th3FreqLabelName = "Biotak_TH3Freq_Label";
 
 // ChartRedraw Throttling
 static datetime g_lastChartRedrawTime = 0;

@@ -191,6 +191,9 @@ void ClearAllModeLabels() {
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
     }
+    if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
+        ObjectDelete(0, g_th3FreqLabelName);
+    }
 
     Comment("");
 }
@@ -256,6 +259,25 @@ void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) retu
     if(inpModeLabelDuration > 0) {
         EventSetTimer(inpModeLabelDuration);
     }
+}
+
+//+------------------------------------------------------------------+
+//| Update TH3 Frequency label on chart                             |
+//+------------------------------------------------------------------+
+void UpdateTH3FreqLabel(double freqValue) {
+    if(!inpShowModeChangeLabel) return;
+    ClearAllModeLabels();
+    if(IsIndicatorHidden()) return;
+
+    if(ObjectFind(0, g_th3FreqLabelName) < 0)
+        ObjectCreate(0, g_th3FreqLabelName, OBJ_LABEL, 0, 0, 0);
+
+    ObjectSetString(0, g_th3FreqLabelName, OBJPROP_TEXT,
+        "[ TH3 Freq: " + DoubleToString(freqValue, 2) + "% ]");
+    ApplyModeLabelStyle(g_th3FreqLabelName, inpTH3Color);
+
+    if(inpModeLabelDuration > 0)
+        EventSetTimer(inpModeLabelDuration);
 }
 
 //+------------------------------------------------------------------+
