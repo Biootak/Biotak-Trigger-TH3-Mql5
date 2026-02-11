@@ -221,18 +221,17 @@ input string inpObjectPrefix = "THLevels";
 input ENUM_LINE_OBJECT_TYPE inpTHLineObjectType = LINE_OBJECT_HORIZONTAL_LINE;
 input ENUM_LABEL_CORNER_POSITION inpLabelCornerPosition = LABEL_CORNER_LEFT_TOP;
 input ENUM_LABEL_ARRANGEMENT inpLabelArrangement = LABEL_ARRANGEMENT_HORIZONTAL;
-input int inpInitialX = 20;
-input int inpInitialY = 25;
-input int inpLabelSpacing = 18;
-input int inpTitleSpacing = 14;            // Title-to-labels vertical spacing
-input int inpRowSpacing = 16;              // Spacing between label rows/lines
-input int inpSectionSpacing = 23;          // Spacing between ATR and TH sections
-input int inpHorizontalPadding = 20;       // Horizontal gap between labels
-input int inpATRRowSpacing = 16;           // ATR row spacing override
-input int inpTHRowSpacing = 16;            // TH row spacing override
-input int inpATRHorizontalPadding = 45;    // ATR horizontal padding override
-input int inpTHHorizontalPadding = 45;     // TH horizontal padding override
-input int inpTHBottomPadding = 5;          // TH distance from chart bottom
+
+// === Label Position ===
+input int inpLabelsMarginTop = 25;        // Distance from top of chart
+input int inpLabelsMarginLeft = 20;       // Distance from left edge
+input int inpLabelsMarginBottom = 5;      // Distance from bottom of chart
+
+// === Label Spacing ===
+input int inpLabelRowGap = 16;            // Vertical gap between rows
+input int inpLabelColumnGap = 45;         // Horizontal gap between columns
+input int inpSectionGap = 23;             // Gap between ATR and TH sections
+
 input int inpMaxLabelWidth = 250;
 input ENUM_TIMEFRAMES inpHistoricalTimeframe = PERIOD_CURRENT;
 input int inpHistoricalPeriods = 0;

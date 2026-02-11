@@ -85,19 +85,13 @@ bool ValidateWidth(int width, const string name) {
     if(!ValidateWidth(inpStructureL4Width, "StructureL4Width")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateWidth(inpStructureL5Width, "StructureL5Width")) return INIT_PARAMETERS_INCORRECT;
 
-    // Positions & Spacing
-    if(!ValidateNonNegative(inpInitialX, "InitialX")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpInitialY, "InitialY")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpLabelSpacing, "LabelSpacing")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpTitleSpacing, "TitleSpacing")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpRowSpacing, "RowSpacing")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpSectionSpacing, "SectionSpacing")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpHorizontalPadding, "HorizontalPadding")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpATRRowSpacing, "ATRRowSpacing")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpTHRowSpacing, "THRowSpacing")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpATRHorizontalPadding, "ATRHorizontalPadding")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpTHHorizontalPadding, "THHorizontalPadding")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidateNonNegative(inpTHBottomPadding, "THBottomPadding")) return INIT_PARAMETERS_INCORRECT;
+    // Label Position & Spacing
+    if(!ValidateNonNegative(inpLabelsMarginTop, "LabelsMarginTop")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelsMarginLeft, "LabelsMarginLeft")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelsMarginBottom, "LabelsMarginBottom")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelRowGap, "LabelRowGap")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelColumnGap, "LabelColumnGap")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpSectionGap, "SectionGap")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidatePositive(inpMaxLabelWidth, "MaxLabelWidth")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpABCDInfoXDistance, "ABCDInfoX")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpABCDInfoYDistance, "ABCDInfoY")) return INIT_PARAMETERS_INCORRECT;

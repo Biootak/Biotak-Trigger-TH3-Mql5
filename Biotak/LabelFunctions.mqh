@@ -624,10 +624,10 @@ bool DrawMainLevels(const string prefix) {
     ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
     ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
-    int labelXDistance = inpInitialX;
-    int lineGap = inpATRRowSpacing;
+    int labelXDistance = inpLabelsMarginLeft;
+    int lineGap = inpLabelRowGap;
     int singleLineHeight = inpFontSize + lineGap;
-    int baseY = inpInitialY + inpTitleSpacing;
+    int baseY = inpLabelsMarginTop;
     int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
     int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
     int targetsOffset = (mainTextWidth - targetsTextWidth) / 2;
@@ -705,7 +705,7 @@ bool DrawMainLevels(const string prefix) {
     }
     int labelXDistance = MathAbs(xPos);
     int bottomPadding = 20;
-    int lineGap = inpATRRowSpacing;
+    int lineGap = inpLabelRowGap;
     int singleLineHeight = inpFontSize + lineGap;
     int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
     int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
@@ -779,16 +779,16 @@ bool DrawMainLevels(const string prefix) {
     
     // Layout setup — ATR renders FIRST (at the top)
     bool isVerticalLayout = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL);
-    int rowSpacing = inpATRRowSpacing;
-    int horizontalPadding = inpATRHorizontalPadding;
-    int startXPos = inpInitialX;
+    int rowSpacing = inpLabelRowGap;
+    int horizontalPadding = inpLabelColumnGap;
+    int startXPos = inpLabelsMarginLeft;
     int lineGap = rowSpacing;
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    int titleYPos = inpInitialY + g_currentLabelYOffset;
+    int titleYPos = inpLabelsMarginTop + g_currentLabelYOffset;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
-    int sectionGap = inpSectionSpacing;  // Gap between ATR and TH sections
+    int sectionGap = inpSectionGap;
     
     // Create "ATR:" title label
     string titleObjName = uniquePrefix + "ATR_Title";
@@ -801,7 +801,7 @@ bool DrawMainLevels(const string prefix) {
     ENUM_BASE_CORNER corner = CORNER_LEFT_UPPER;
     ObjectSetInteger(0, titleObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, titleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetInteger(0, titleObjName, OBJPROP_XDISTANCE, inpInitialX);
+    ObjectSetInteger(0, titleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     int titleY = titleYPos;
     ObjectSetInteger(0, titleObjName, OBJPROP_YDISTANCE, titleY);
     ObjectSetInteger(0, titleObjName, OBJPROP_SELECTABLE, false);
@@ -932,7 +932,7 @@ bool DrawMainLevels(const string prefix) {
     ObjectSetInteger(0, stepsObjName, OBJPROP_HIDDEN, false);
     int labelXDistance = MathAbs(xPos);
     int bottomPadding = 0;
-    int lineGap = inpRowSpacing;
+    int lineGap = inpLabelRowGap;
     int singleLineHeight = inpFontSize + lineGap;
     int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
     int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
@@ -990,17 +990,17 @@ bool DrawMainLevels(const string prefix) {
     // Use IsZero for float comparison instead of == 0
     if(IsZero(point, EPSILON_PRICE) || digits == 0) return;
     bool isVerticalLayout = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL);
-    int rowSpacing = inpTHRowSpacing;
-    int horizontalPadding = inpTHHorizontalPadding;
-    int startXPos = inpInitialX;
+    int rowSpacing = inpLabelRowGap;
+    int horizontalPadding = inpLabelColumnGap;
+    int startXPos = inpLabelsMarginLeft;
     int lineGap = rowSpacing;
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    int titleYPos = inpInitialY + inpTHBottomPadding + g_currentLabelYOffsetBottom;
+    int titleYPos = inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom;
     int titleAdjustment = inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
-    int sectionGap = inpSectionSpacing;
+    int sectionGap = inpSectionGap;
     string thTitleObjName = objectPrefix + "TH_Title";
     ObjectDelete(0, thTitleObjName);
     ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
@@ -1011,7 +1011,7 @@ bool DrawMainLevels(const string prefix) {
     ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
     ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpInitialX);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     int thTitleY = titleYPos + titleAdjustment;
     
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, thTitleY);
@@ -1081,14 +1081,14 @@ bool DrawMainLevels(const string prefix) {
     // Use IsZero for float comparison instead of == 0
     if(IsZero(point, EPSILON_PRICE) || digits == 0) return;
     bool isVerticalLayout = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL);
-    int rowSpacing = inpTHRowSpacing;
-    int horizontalPadding = inpTHHorizontalPadding;
-    int startXPos = inpInitialX;
+    int rowSpacing = inpLabelRowGap;
+    int horizontalPadding = inpLabelColumnGap;
+    int startXPos = inpLabelsMarginLeft;
     int lineGap = rowSpacing;
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    int titleYPos = inpInitialY + inpTHBottomPadding + g_currentLabelYOffsetBottom;
+    int titleYPos = inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom;
     int titleAdjustment = inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int titleWidth = (int)CalculateTextWidth("TH:");
@@ -1108,7 +1108,7 @@ bool DrawMainLevels(const string prefix) {
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpInitialX);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + titleAdjustment);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
@@ -1155,7 +1155,7 @@ bool DrawMainLevels(const string prefix) {
         }
     }
     int standardConsumedY = (currentYPos - startYPos) + lineHeight;
-    g_currentLabelYOffsetBottom += standardConsumedY + inpSectionSpacing;
+    g_currentLabelYOffsetBottom += standardConsumedY + inpSectionGap;
 }
     void StoreLabelPosition(const string name, const int xPos, const int yPos) {
     for(int i=0; i<ArraySize(g_labelPositions); i++) {
@@ -1178,7 +1178,7 @@ bool DrawMainLevels(const string prefix) {
 }
     int GetStoredXPosition(const string name) {
     for(int i=0; i<ArraySize(g_labelPositions); i++) if(g_labelPositions[i].name==name) return g_labelPositions[i].xPos;
-    return inpInitialX;
+    return inpLabelsMarginLeft;
 }
     double CalculateTextWidth(string text) {
         double averageCharWidth=inpFontSize*0.7;
