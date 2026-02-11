@@ -272,6 +272,171 @@ double CalculateSimpleATR(const int period) {
 }
 
 //+------------------------------------------------------------------+
+//| Core Wilder's ATR Batch Calculation for Any Timeframe            |
+//|                                                                  |
+//| Standard Wilder's ATR (RMA) formula:                             |
+//| Step 1: Initial ATR = SMA(TR, period) for first N bars           |
+//| Step 2: ATR[n] = (ATR[n-1] × (period-1) + TR[n]) / period       |
+//|                                                                  |
+//| CopyXxx array ordering: arr[0]=OLDEST, arr[count-1]=NEWEST       |
+//| Copies 3× maxPeriod bars for proper Wilder's convergence (~95%)  |
+//| Fibonacci-weighted: {1,1,2,3,5,8}/20 over periods {5..264}      |
+//+------------------------------------------------------------------+
+void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
+    ArrayResize(results, 6);
+    ArrayInitialize(results, 0.0);
+    
+    int barsAvailable = iBars(_Symbol, tf);
+    
+    if(barsAvailable <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatchWilders: No bars available for TF=", tf);
+        #endif
+        return;
+    }
+    
+    if(barsAvailable < ATR_PERIOD_1 + 2) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatchWilders: Not enough bars (", barsAvailable, ") for TF=", tf);
+        #endif
+        return;
+    }
+    
+    int maxPeriod = ATR_PERIOD_6; // 264
+    
+    // Copy 3× maxPeriod + 2 bars for Wilder's smoothing convergence (~95%)
+    // +1 for prevClose of oldest bar, +1 for current bar (skipped)
+    // CopyXxx docs: "oldest element will be located at the start of physical memory"
+    // So: arr[0]=OLDEST bar, arr[copyCount-1]=NEWEST (bar 0, current)
+    int copyCount = MathMin(maxPeriod * 3 + 2, barsAvailable);
+    
+    double highArr[], lowArr[], closeArr[];
+    int copiedHigh  = CopyHigh(_Symbol, tf, 0, copyCount, highArr);
+    int copiedLow   = CopyLow(_Symbol, tf, 0, copyCount, lowArr);
+    int copiedClose = CopyClose(_Symbol, tf, 0, copyCount, closeArr);
+    
+    if(copiedHigh < copyCount || copiedLow < copyCount || copiedClose < copyCount) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatchWilders: CopyXxx failed for TF=", tf,
+              " (H:", copiedHigh, " L:", copiedLow, " C:", copiedClose, " need:", copyCount, ")");
+        #endif
+        // Fallback: per-bar CalculateTrueRange with Wilder's (only for current TF)
+        if(tf == _Period || tf == PERIOD_CURRENT) {
+            int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3,
+                                ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
+            for(int p = 0; p < 6; p++) {
+                int period = periods_fb[p];
+                int convergeBars = MathMin(period * 3, barsAvailable - 1);
+                if(convergeBars < period) { results[p] = 0.0; continue; }
+                
+                // Wilder's ATR using per-bar CalculateTrueRange
+                // CalculateTrueRange uses bar index: 0=current, 1=last completed, etc.
+                // Process from oldest (bar convergeBars) to newest (bar 1)
+                double sumTR = 0.0;
+                for(int b = convergeBars; b > convergeBars - period; b--) {
+                    sumTR += CalculateTrueRange(b);
+                }
+                double atr = sumTR / (double)period; // Initial SMA
+                
+                for(int b = convergeBars - period; b >= 1; b--) {
+                    atr = (atr * (double)(period - 1) + CalculateTrueRange(b)) / (double)period;
+                }
+                results[p] = (IsValidPrice(atr, EPSILON_PRICE) && atr > 0) ? atr : 0.0;
+            }
+        }
+        return;
+    }
+    
+    // CopyXxx returns chronological data:
+    //   arr[0] = OLDEST bar copied
+    //   arr[copyCount-1] = NEWEST bar (bar 0, current/forming)
+    //
+    // Skip arr[copyCount-1] = current forming bar (High/Low/Close still changing)
+    // Skip arr[0] = no prevClose available for True Range
+    // Valid TR range: array indices 1 to copyCount-2
+    // TR[k] = max(high[k]-low[k], |high[k]-close[k-1]|, |low[k]-close[k-1]|)
+    
+    int trCount = copyCount - 2;
+    if(trCount < ATR_PERIOD_1) {
+        ArrayFree(highArr); ArrayFree(lowArr); ArrayFree(closeArr);
+        return;
+    }
+    
+    double trValues[];
+    ArrayResize(trValues, trCount);
+    
+    // Calculate TR chronologically: arr[1] (2nd oldest) to arr[copyCount-2] (newest completed)
+    // trValues[0] = oldest valid TR, trValues[trCount-1] = newest completed TR
+    for(int k = 1; k <= trCount; k++) {
+        double high = highArr[k];
+        double low  = lowArr[k];
+        double prevClose = closeArr[k - 1]; // Chronologically older bar's close
+        
+        if(!IsValidPrice(high, EPSILON_PRICE) || !IsValidPrice(low, EPSILON_PRICE) ||
+           !IsValidPrice(prevClose, EPSILON_PRICE) || IsLess(high, low, EPSILON_PRICE)) {
+            trValues[k - 1] = 0.0;
+            continue;
+        }
+        
+        double hl = high - low;
+        double hc = MathAbs(high - prevClose);
+        double lc = MathAbs(low - prevClose);
+        double tr = hl;
+        if(hc > tr) tr = hc;
+        if(lc > tr) tr = lc;
+        trValues[k - 1] = tr;
+    }
+    
+    ArrayFree(highArr);
+    ArrayFree(lowArr);
+    ArrayFree(closeArr);
+    
+    // Apply Wilder's ATR (RMA) for each period using shared TR data
+    // trValues is chronological: [0]=oldest, [trCount-1]=newest completed
+    int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3,
+                     ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
+    
+    for(int p = 0; p < 6; p++) {
+        int period = periods[p];
+        
+        if(trCount < period) {
+            results[p] = 0.0;
+            continue;
+        }
+        
+        // Step 1: Initial ATR = Simple Moving Average of first 'period' TRs (oldest end)
+        double sumTR = 0.0;
+        for(int i = 0; i < period; i++) {
+            sumTR += trValues[i];
+        }
+        double atr = sumTR / (double)period;
+        
+        // Step 2: Wilder's smoothing (RMA) for remaining bars toward newest
+        // ATR[n] = (ATR[n-1] × (period-1) + TR[n]) / period
+        for(int i = period; i < trCount; i++) {
+            atr = (atr * (double)(period - 1) + trValues[i]) / (double)period;
+        }
+        
+        results[p] = (IsValidPrice(atr, EPSILON_PRICE) && atr > 0) ? atr : 0.0;
+    }
+    
+    ArrayFree(trValues);
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    static datetime s_lastWildersLog = 0;
+    datetime now = TimeCurrent();
+    if(now - s_lastWildersLog > 300) {
+        Print("✅ CalculateATRBatchWilders: TF=", tf, " bars=", barsAvailable,
+              " copied=", copyCount, " trCount=", trCount);
+        for(int p = 0; p < 6; p++) {
+            Print("   ATR[", periods[p], "]=", DoubleToString(results[p], _Digits));
+        }
+        s_lastWildersLog = now;
+    }
+    #endif
+}
+
+//+------------------------------------------------------------------+
 //| Batch ATR Calculation for Multiple Periods                       |
 
 //|                                                                  |
@@ -389,8 +554,8 @@ void CalculateATRBatch(double &results[]) {
     return;
     }
     
-    // CopyXxx returns data in chronological order [oldest..newest]
-    // We need index 0 = newest bar. Convert: bar_i -> arr[copyCount - 1 - i]
+    // BUGFIX: CopyXxx returns data as [bar0, bar1, bar2, ...] where bar0 is newest
+    // So arrIdx = i directly (no conversion needed)
     double trValues[];
     if(ArrayResize(trValues, maxPeriod) != maxPeriod) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -402,22 +567,18 @@ void CalculateATRBatch(double &results[]) {
     // Calculate TR from batch arrays (no more per-bar API calls)
     // Start from bar 1 (completed bar), not bar 0 (current forming bar)
     // Stop at copyCount - 1 to ensure we have prevClose available
+    // BUGFIX: CopyHigh/Low/Close returns [bar0, bar1, bar2, ...] so arrIdx = i directly
     for(int i = 1; i <= maxPeriod && i < copyCount - 1; i++) {
-        int arrIdx = copyCount - 1 - i;  // Convert bar index to array index
+        // Direct conversion: bar i → array index i (CopyXxx returns chronological order)
+        int arrIdx = i;
         
         double high = highArr[arrIdx];
     double low  = lowArr[arrIdx];
     double prevClose;
         
-        // For prevClose, use previous bar's close (arrIdx-1 in chronological order)
-        // Since we stop at i < copyCount - 1, arrIdx will always be >= 1
-        // So arrIdx - 1 >= 0, which is safe
-        if(arrIdx > 0) {
-            prevClose = closeArr[arrIdx - 1];
-        } else {
-            // This should never happen due to loop condition, but keep as safety
-            prevClose = openArr[arrIdx];
-        }
+        // For prevClose, use close of previous bar (bar i+1)
+        // Since i >= 1 and i < copyCount - 1, we have i+1 <= copyCount - 1 (valid)
+        prevClose = closeArr[arrIdx + 1];  // close of bar i+1 (previous bar)
         
         // Validate prices
         if(!IsValidPrice(high, EPSILON_PRICE) || !IsValidPrice(low, EPSILON_PRICE) || 
@@ -543,9 +704,9 @@ double CalculateWeightedATR() {
         InitializeATRCache();
     }
     
-    // Calculate ATR for all periods in batch
+    // Calculate ATR for all periods using Wilder's ATR (RMA)
     double atrValues[];
-    CalculateATRBatch(atrValues);
+    CalculateATRBatchWilders(atrValues, (ENUM_TIMEFRAMES)effectiveTF);
     
     // AUDIT FIX: Validate array size before access
     if(ArraySize(atrValues) < 6) {
@@ -709,6 +870,201 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
 }
 
 //+------------------------------------------------------------------+
+//| Convert Minutes to ENUM_TIMEFRAMES                               |
+//| BUGFIX: Helper function for direct timeframe ATR calculation     |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES MinutesToTimeframe(const int minutes) {
+    switch(minutes) {
+        case 1:     return PERIOD_M1;
+        case 5:     return PERIOD_M5;
+        case 15:    return PERIOD_M15;
+        case 30:    return PERIOD_M30;
+        case 60:    return PERIOD_H1;
+        case 240:   return PERIOD_H4;
+        case 1440:  return PERIOD_D1;
+        case 10080: return PERIOD_W1;
+        case 43200: return PERIOD_MN1;
+        default:
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("⚠️ MinutesToTimeframe: Unknown minutes (", minutes, "), defaulting to current TF");
+            #endif
+            return _Period;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Weighted ATR for Specific Timeframe                    |
+//| BUGFIX: Direct calculation from target TF data (no scaling)      |
+//+------------------------------------------------------------------+
+double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
+    // Validate target timeframe
+    if(targetTF == PERIOD_CURRENT || targetTF == _Period) {
+        return CalculateWeightedATR(); // Use existing function for current TF
+    }
+    
+    // Get bars available for target timeframe
+    int targetBars = iBars(_Symbol, targetTF);
+    if(targetBars <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateWeightedATRForTimeframe: No bars available for TF=", targetTF);
+        #endif
+        return 0.0;
+    }
+    
+    // Calculate ATR for all periods using Wilder's ATR (RMA) on target TF
+    double atrValues[];
+    CalculateATRBatchWilders(atrValues, targetTF);
+    
+    // Validate array size
+    if(ArraySize(atrValues) < 6) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ CalculateWeightedATRForTimeframe: Batch calculation failed for TF=", targetTF);
+        #endif
+        return 0.0;
+    }
+    
+    // Calculate weighted sum
+    double weightedSum = 0.0;
+    int totalWeight = 0;
+    int weights[] = {ATR_WEIGHT_1, ATR_WEIGHT_2, ATR_WEIGHT_3, 
+                     ATR_WEIGHT_4, ATR_WEIGHT_5, ATR_WEIGHT_6};
+    
+    for(int i = 0; i < 6; i++) {
+        if(!IsZero(atrValues[i], EPSILON_PRICE)) {
+            double temp = atrValues[i] * weights[i];
+            if(temp < 1e10) {  // Overflow check
+                weightedSum += temp;
+                totalWeight += weights[i];
+            }
+        }
+    }
+    
+    if(totalWeight == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("❌ CalculateWeightedATRForTimeframe: No valid ATR values for TF=", targetTF);
+        #endif
+        return 0.0;
+    }
+    
+    double result = SafeDivide(weightedSum, (double)totalWeight, 0.0, EPSILON_GENERAL);
+    
+    if(!IsValidPrice(result, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateWeightedATRForTimeframe: Invalid result for TF=", targetTF);
+        #endif
+        return 0.0;
+    }
+    
+    ArrayFree(atrValues);
+    return result;
+}
+
+//+------------------------------------------------------------------+
+//| Batch ATR Calculation for Specific Timeframe                     |
+//| BUGFIX: Calculate from target TF data directly                   |
+//+------------------------------------------------------------------+
+void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targetTF) {
+    ArrayResize(results, 6);
+    ArrayInitialize(results, 0.0);
+    
+    int barsAvailable = iBars(_Symbol, targetTF);
+    
+    if(barsAvailable <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatchForTimeframe: No bars available for TF=", targetTF);
+        #endif
+        return;
+    }
+    
+    if(barsAvailable < ATR_PERIOD_1 + 2) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatchForTimeframe: Not enough bars for TF=", targetTF);
+        #endif
+        return;
+    }
+    
+    // Use batch CopyXxx for target timeframe
+    int maxPeriod = ATR_PERIOD_6;
+    double highArr[], lowArr[], closeArr[], openArr[];
+    int copyCount = MathMin(maxPeriod + 2, barsAvailable);
+    
+    int copiedHigh  = CopyHigh(_Symbol, targetTF, 0, copyCount, highArr);
+    int copiedLow   = CopyLow(_Symbol, targetTF, 0, copyCount, lowArr);
+    int copiedClose = CopyClose(_Symbol, targetTF, 0, copyCount, closeArr);
+    int copiedOpen  = CopyOpen(_Symbol, targetTF, 0, copyCount, openArr);
+    
+    if(copiedHigh < copyCount || copiedLow < copyCount || 
+       copiedClose < copyCount || copiedOpen < copyCount) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("⚠️ CalculateATRBatchForTimeframe: CopyXxx failed for TF=", targetTF);
+        #endif
+        return;
+    }
+    
+    // Calculate True Range for each bar
+    double trValues[];
+    if(ArrayResize(trValues, maxPeriod) != maxPeriod) return;
+    
+    for(int i = 1; i <= maxPeriod && i < copyCount - 1; i++) {
+        int arrIdx = i;
+        
+        double high = highArr[arrIdx];
+        double low  = lowArr[arrIdx];
+        double prevClose = closeArr[arrIdx + 1];
+        
+        if(!IsValidPrice(high, EPSILON_PRICE) || !IsValidPrice(low, EPSILON_PRICE) || 
+           !IsValidPrice(prevClose, EPSILON_PRICE) || IsLess(high, low, EPSILON_PRICE)) {
+            trValues[i-1] = 0.0;
+            continue;
+        }
+        
+        double hl = high - low;
+        double hc = MathAbs(high - prevClose);
+        double lc = MathAbs(low - prevClose);
+        double tr = hl;
+        if(hc > tr) tr = hc;
+        if(lc > tr) tr = lc;
+        trValues[i-1] = tr;
+    }
+    
+    ArrayFree(highArr);
+    ArrayFree(lowArr);
+    ArrayFree(closeArr);
+    ArrayFree(openArr);
+    
+    // Calculate ATR for each period
+    int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
+                     ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
+    
+    for(int p = 0; p < 6; p++) {
+        int period = periods[p];
+        
+        if(period > maxPeriod) {
+            results[p] = 0.0;
+            continue;
+        }
+        
+        double sum = 0.0;
+        int count = 0;
+        
+        for(int i = 0; i < period && i < maxPeriod; i++) {
+            if(!IsZero(trValues[i], EPSILON_PRICE)) {
+                sum += trValues[i];
+                count++;
+            }
+        }
+        
+        if(count >= period / 2) {
+            results[p] = SafeDivide(sum, (double)count, 0.0, EPSILON_GENERAL);
+        } else {
+            results[p] = 0.0;
+        }
+    }
+    
+    ArrayFree(trValues);
+}
+
+//+------------------------------------------------------------------+
 //| Get Current Timeframe in Minutes                                 |
 
 //| AUDIT FIX: Added validation for Period()                         |
@@ -825,10 +1181,10 @@ void CalculateATRFractalValues(double &structureValue, double &patternValue, dou
 }
 
 //+------------------------------------------------------------------+
-//| Get ATR for Specific Timeframe (with fractal scaling)            |
-
+//| Get ATR for Specific Timeframe (DIRECT CALCULATION - NO SCALING) |
 //|                                                                  |
-//| Uses hybrid approach: actual ATR for current TF, scaled for others |
+//| BUGFIX: Calculate ATR directly from target timeframe data        |
+//| Each timeframe gets its own real ATR, not scaled from current TF |
 //| AUDIT FIX: Added validation and multi-TF caching                 |
 //+------------------------------------------------------------------+
 double GetATRForTimeframe(const int targetMinutes) {
@@ -836,15 +1192,6 @@ double GetATRForTimeframe(const int targetMinutes) {
     if(targetMinutes <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetATRForTimeframe: Invalid target minutes (", targetMinutes, ")");
-    #endif
-    return 0.0;
-    }
-    int currentMinutes = GetCurrentTimeframeMinutes();
-    
-    // AUDIT FIX: Validate current minutes
-    if(currentMinutes <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ GetATRForTimeframe: Invalid current minutes (", currentMinutes, ")");
     #endif
     return 0.0;
     }
@@ -879,8 +1226,9 @@ double GetATRForTimeframe(const int targetMinutes) {
         }
     }
     
-    // Calculate ATR
-    double result = CalculateHybridATR(currentMinutes, targetMinutes);
+    // BUGFIX: Calculate ATR directly from target timeframe (not scaled!)
+    ENUM_TIMEFRAMES targetTF = MinutesToTimeframe(targetMinutes);
+    double result = CalculateWeightedATRForTimeframe(targetTF);
     
     // AUDIT FIX: Update multi-TF cache
     if(g_multiTFCacheInitialized && !IsZero(result, EPSILON_PRICE)) {

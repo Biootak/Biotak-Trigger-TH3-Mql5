@@ -102,13 +102,13 @@ bool DrawMainLevels(const string prefix) {
         }
         thStepSizePoints = currentATR / s_cachedPointValue;
         
-        // Compute structure ATR values using hybrid ATR (√(time_ratio) scaling)
+        // Compute structure ATR using direct calculation on structure timeframe
         string currentFractalTF = GetFractalTimeframeForCurrent();
         int currentMinutes = GetFractalTimeframeMinutes(currentFractalTF);
         int structureMinutes = GetFractalTimeframeMinutes(structureTimeframe);
         
         if(currentMinutes > 0 && structureMinutes > 0) {
-            double structureATR = CalculateHybridATR(currentMinutes, structureMinutes);
+            double structureATR = GetATRForTimeframe(structureMinutes);
             structureTFTHStepSizePoints = structureATR / s_cachedPointValue;
         } else {
             // Fallback: use fixed ratio (structure is 2 fractal levels up = √16 = 4× ATR)
@@ -748,9 +748,6 @@ bool DrawMainLevels(const string prefix) {
     int digits = GetCachedDigits();
     if(IsZero(point, EPSILON_PRICE) || digits == 0) return;
     
-    int currentMinutes = GetCurrentTimeframeMinutes();
-    if(currentMinutes <= 0) return;
-    
     // Clean up old ATR label objects
     string currentTFStr = IntegerToString(Period());
     string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
@@ -827,8 +824,9 @@ bool DrawMainLevels(const string prefix) {
         string timeframeName = timeframes[i];
     int targetMinutes = tfMinutes[i];
     
-    // Use weighted ATR with √(time_ratio) scaling
-    double atrValue = CalculateHybridATR(currentMinutes, targetMinutes);
+    // BUGFIX: Use GetATRForTimeframe for direct calculation (not scaled!)
+    // This ensures ATR values are consistent across all chart timeframes
+    double atrValue = GetATRForTimeframe(targetMinutes);
     if(atrValue <= 0 || atrValue == EMPTY_VALUE) {
             ATR_PRINTF2("=== DisplayATRLabels: Invalid ATR for ", timeframeName, " ===");
     continue;
