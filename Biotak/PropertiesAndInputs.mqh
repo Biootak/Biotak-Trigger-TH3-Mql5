@@ -24,7 +24,7 @@ input int inpFontSize = 8;
 input bool inpShowATRLabels = true;            // Show ATR info labels on chart
 input bool inpShowATRTargets = true;           // Show ATR 3x/5x/15x targets
     input string S2 = "---------- CALCULATION ----------";
-input ENUM_CALCULATION_BASIS inpCalculationBasis = CALC_BASIS_TH;
+
 input ENUM_STEP_CALCULATION_MODE inpStepCalculationMode = M_STEP;
 input ENUM_TH_START_POINT_TYPE inpTHStartPointType = TH_START_POINT_CUSTOM_PRICE;
 input ENUM_APPLIED_PRICE inpTHPriceType = PRICE_CLOSE;

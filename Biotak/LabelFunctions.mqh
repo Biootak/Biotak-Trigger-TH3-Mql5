@@ -52,8 +52,8 @@ bool DrawMainLevels(const string prefix) {
     }
     return true;
 }
-    void DrawTHLevels(const string objectPrefix, const double dailyClosePrice, const bool useATRBasis = false) {
-        if(!useATRBasis && dailyClosePrice <= 0) {
+    void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
+        if(dailyClosePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("DrawTHLevels: Invalid daily close price");
     #endif
@@ -91,42 +91,8 @@ bool DrawMainLevels(const string prefix) {
     double cachedLongStepVal;
     double cachedShortStepVal;
     
-    if(useATRBasis) {
-        // ATR-based step calculations using fractal timeframe scaling
-        double currentATR = CalculateWeightedATR();
-        if(currentATR <= 0 || currentATR < s_cachedPointValue) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ DrawTHLevels(ATR): Invalid ATR value=", currentATR);
-            #endif
-            return;
-        }
-        thStepSizePoints = currentATR / s_cachedPointValue;
-        
-        // Compute structure ATR using direct calculation on structure timeframe
-        string currentFractalTF = GetFractalTimeframeForCurrent();
-        int currentMinutes = GetFractalTimeframeMinutes(currentFractalTF);
-        int structureMinutes = GetFractalTimeframeMinutes(structureTimeframe);
-        
-        if(currentMinutes > 0 && structureMinutes > 0) {
-            double structureATR = GetATRForTimeframe(structureMinutes);
-            structureTFTHStepSizePoints = structureATR / s_cachedPointValue;
-        } else {
-            // Fallback: use fixed ratio (structure is 2 fractal levels up = √16 = 4× ATR)
-            structureTFTHStepSizePoints = thStepSizePoints * 4.0;
-        }
-        doubleStructureTFTHStepSizePoints = structureTFTHStepSizePoints * 2.0;
-        tripleStructureTFTHStepSizePoints = structureTFTHStepSizePoints * 4.0;
-        quadrupleStructureTFTHStepSizePoints = structureTFTHStepSizePoints * 8.0;
-        quintupleStructureTFTHStepSizePoints = structureTFTHStepSizePoints * 16.0;
-        basisLabel = "ATR";
-        // For trigger tooltip: show LS and SS in pips directly
-        cachedLongStepVal = 2.0;
-        cachedShortStepVal = 1.5;
-        ArrayResize(structurePercentages, 5);
-        ArrayInitialize(structurePercentages, 0.0);
-    } else {
-        // Original TH-based step calculations
-        double structureTFPercentage=CalculateTimeframeTH(structureTimeframe);
+    // TH-based step calculations
+    double structureTFPercentage=CalculateTimeframeTH(structureTimeframe);
         if(structureTFPercentage <= 0) {
             #ifdef ENABLE_DEBUG_LOGS
             Print("DrawTHLevels: Invalid structure timeframe percentage");
@@ -163,10 +129,9 @@ bool DrawMainLevels(const string prefix) {
         quadrupleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[3]);
         quintupleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[4]);
         basisLabel = "TH";
-        // Original TH trigger tooltip multipliers
+        // TH trigger tooltip multipliers
         cachedLongStepVal = timeframePercentage * 2.0;
         cachedShortStepVal = timeframePercentage * 1.5;
-    }
     
     // Validate step sizes to prevent infinite loops
     if(thStepSizePoints <= 0 || thStepSizePoints < s_cachedPointValue) {

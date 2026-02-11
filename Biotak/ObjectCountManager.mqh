@@ -194,7 +194,6 @@ int EmergencyCleanupObjects()
             // OPTIMIZATION: Check most common first
             bool isModeLabel = (StringFind(objName, "StepMode_Label") >= 0);
     if(!isModeLabel) isModeLabel = (StringFind(objName, "Factor_Label") >= 0);
-    if(!isModeLabel) isModeLabel = (StringFind(objName, "BasisMode_Label") >= 0);
     if(!isModeLabel) isModeLabel = (StringFind(objName, "LockStatus_Label") >= 0);
     if(isModeLabel) {
                 continue;

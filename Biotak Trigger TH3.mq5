@@ -96,7 +96,6 @@ void OnChartEvent(const int id,
 
 void OnTimer() {
     if(ObjectFind(0, g_stepModeLabelName) >= 0)  ObjectDelete(0, g_stepModeLabelName);
-    if(ObjectFind(0, g_basisModeLabelName) >= 0) ObjectDelete(0, g_basisModeLabelName);
     if(ObjectFind(0, g_factorLabelName) >= 0)    ObjectDelete(0, g_factorLabelName);
     Comment("");
     EventKillTimer();

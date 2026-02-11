@@ -186,10 +186,6 @@ enum ENUM_SSLS_BASIS_TYPE {
 //|                                                                  |
 
 //+------------------------------------------------------------------+
-enum ENUM_CALCULATION_BASIS {
-    CALC_BASIS_TH = 0,          
-    CALC_BASIS_ATR = 1          
-};
 
 // M step basis type
 enum ENUM_MSTEP_BASIS_TYPE {

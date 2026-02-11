@@ -4,14 +4,14 @@
 //| ATR-Based Calculations for Biotak Trigger TH3                   |
 
 //|                                                                  |
-//| This module implements ATR_BASIS calculation mode matching       |
-//| the Java/MotiveWave implementation exactly.                      |
+//| This module implements ATR calculations for informational        |
+//| labels and display purposes.                                     |
 //|                                                                  |
 //| Key Features:                                                    |
 //| - Weighted ATR calculation (multiple periods with weights)       |
 //| - Hybrid ATR (current TF + fractal scaling for others)          |
 //| - Batch ATR calculation for performance                          |
-//| - Full compatibility with existing TH_BASIS mode                 |
+//| - ATR values displayed as info labels only (not for drawing)     |
 //|                                                                  |
 //| AUDIT UPDATE v3.11 (2026-02-02):                                 |
 //| ✅ Added FloatingPointHelper integration for safe comparisons    |
@@ -1100,83 +1100,6 @@ int GetCurrentTimeframeMinutes() {
             Print("⚠️ GetCurrentTimeframeMinutes: Unusual period (", period, ")");
     #endif
     return period;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Calculate ATR-Based Step Value                                   |
-
-//|                                                                  |
-//| This replaces TH calculation when ATR_BASIS is selected.         |
-//| Returns step value in PRICE units (same as TH).                  |
-//| AUDIT FIX: Added validation using FloatingPointHelper            |
-//+------------------------------------------------------------------+
-double CalculateATRBasedStep() {
-    // Get weighted ATR for current timeframe
-    double weightedATR = CalculateWeightedATR();
-    
-    // AUDIT FIX: Use IsZero for comparison
-    if(IsZero(weightedATR, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CalculateATRBasedStep: Invalid weighted ATR value");
-    #endif
-    return 0.0;
-    }
-    
-    // AUDIT FIX: Validate result
-    if(!IsValidPrice(weightedATR, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CalculateATRBasedStep: ATR value out of valid range (", weightedATR, ")");
-    #endif
-    return 0.0;
-    }
-    
-    // ATR is already in price units, return directly
-    // This matches how TH returns price units
-    return weightedATR;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate ATR-Based Fractal Values                               |
-
-//|                                                                  |
-//| Structure = ATR (current timeframe)                              |
-//| Pattern = 0.5 × Structure                                        |
-//| Trigger = 0.25 × Structure                                       |
-//| AUDIT FIX: Added validation and error handling                   |
-//+------------------------------------------------------------------+
-void CalculateATRFractalValues(double &structureValue, double &patternValue, double &triggerValue) {
-    // Initialize outputs to zero
-    structureValue = 0.0;
-    patternValue = 0.0;
-    triggerValue = 0.0;
-    
-    // Get ATR-based step as structure
-    structureValue = CalculateATRBasedStep();
-    
-    // AUDIT FIX: Validate structure value
-    if(IsZero(structureValue, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CalculateATRFractalValues: Structure value is zero");
-    #endif
-    return;
-    }
-    
-    // Pattern = 0.5 * Structure (same ratio as TH)
-    patternValue = structureValue * 0.5;
-    
-    // Trigger = 0.25 * Structure (same ratio as TH)
-    triggerValue = structureValue * 0.25;
-    
-    // AUDIT FIX: Validate calculated values
-    if(!IsValidPrice(patternValue, EPSILON_PRICE) || 
-       !IsValidPrice(triggerValue, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CalculateATRFractalValues: Invalid calculated values");
-    #endif
-    structureValue = 0.0;
-    patternValue = 0.0;
-    triggerValue = 0.0;
     }
 }
 

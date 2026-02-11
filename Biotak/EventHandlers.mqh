@@ -183,13 +183,6 @@ int OnInitHandler() {    InitializeGlobalCache();
     g_factorValueOverride = 50.0;
         }
     }
-    string basisGvarName = "Biotak_CalcBasis_" + chartIdStr;
-    {
-        double val = GlobalVariableGet(basisGvarName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-            g_calculationBasisOverride = (int)val;
-        }
-    }
     string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
     {
         double restoredFreq = GlobalVariableGet(freqGvarName);
@@ -300,10 +293,6 @@ void HideAllTHObjects()
         ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     hiddenCount++;
     }
-    if(ObjectFind(0, g_basisModeLabelName) >= 0) {
-        ObjectSetInteger(0, g_basisModeLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    hiddenCount++;
-    }
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     hiddenCount++;
@@ -353,9 +342,6 @@ void HideAllTHObjects()
     EventKillTimer();
     if(ObjectFind(0, g_stepModeLabelName) >= 0) {
         ObjectDelete(0, g_stepModeLabelName);
-    }
-    if(ObjectFind(0, g_basisModeLabelName) >= 0) {
-        ObjectDelete(0, g_basisModeLabelName);
     }
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
@@ -596,15 +582,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 }
 
 //+------------------------------------------------------------------+
-//| Get Current Calculation Basis (respects keyboard override)       |
-
 //+------------------------------------------------------------------+
-ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
-        if(g_calculationBasisOverride >= 0) {
-        return (ENUM_CALCULATION_BASIS)g_calculationBasisOverride;
-    }
-    return inpCalculationBasis;
-}
     struct StepCalculationData {
         double thValue;
     double structureValue;
@@ -616,7 +594,7 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     double midpointPrice;
     int maxLevelsAbove;
     int maxLevelsBelow;
-    bool isATRBasis;};
+};
 
     bool CalculateCommonStepData(const double dailyClosePrice, StepCalculationData &data)
 {
@@ -628,66 +606,35 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     }
     static StepCalculationData s_cachedData;
     static double s_lastDailyClose = 0;
-    static ENUM_CALCULATION_BASIS s_lastBasis = -1;
     static string s_lastTF = "";
     static int s_lastStartPointType = -1;
     static double s_lastCustomPrice = 0;
     static int s_lastMaxAbove = 0;
     static int s_lastMaxBelow = 0;
-    static double s_lastATRValue = 0;
     string currentTF = GetFractalTimeframeForCurrent();
-    ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-    bool isATR = (currentBasis == CALC_BASIS_ATR);
-    double currentATRValue = 0;
-    if(isATR) {
-        currentATRValue = CalculateWeightedATR();
-    }
+    
     if(dailyClosePrice == s_lastDailyClose && 
-       currentBasis == s_lastBasis && 
        currentTF == s_lastTF &&
        g_thStartPointType == s_lastStartPointType &&
        (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || g_customTHStartPrice == s_lastCustomPrice) &&
        inpMaxLevels == s_lastMaxAbove &&
        inpMaxLevels == s_lastMaxBelow &&
-       (!isATR || MathAbs(currentATRValue - s_lastATRValue) < GetCachedPoint() * 0.1) &&
        s_lastDailyClose != 0) {
         data = s_cachedData;
     return true;
     }
-    data.isATRBasis = (currentBasis == CALC_BASIS_ATR);
+    
     int digits = Digits;
-    if(data.isATRBasis) {
-        //=============================================================        
-        //=============================================================        CalculateATRFractalValues(data.structureValue, data.patternValue, data.triggerValue);
-    data.thValue = data.structureValue;
-    #ifdef ENABLE_DEBUG_LOGS
-        static datetime s_lastATRDebugLogTime = 0;
-    datetime currentDebugTime = TimeCurrent();
-    if(currentDebugTime - s_lastATRDebugLogTime > 300) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("========== MT4 ATR_BASIS CALCULATION ==========");
-    Print("Calculation Basis: ATR (Actual)");
-    Print("Weighted ATR (Structure): ", DoubleToString(data.structureValue, 10));
-    Print("Pattern Value (0.5×ATR): ", DoubleToString(data.patternValue, 10));
-    Print("Trigger Value (0.25×ATR): ", DoubleToString(data.triggerValue, 10));
-    Print("SS (1.5 × Structure): ", DoubleToString(data.structureValue * 1.5, 10));
-    Print("LS (2.0 × Structure): ", DoubleToString(data.structureValue * 2.0, 10));
-    Print("================================================");
-    #endif
-    s_lastATRDebugLogTime = currentDebugTime;
-        }
-    #endif
-    } else {
-        //=============================================================        
-        //=============================================================
-        double timeframePercentage = GetTimeframeTH();
+    
+    // TH-based step calculations
+    double timeframePercentage = GetTimeframeTH();
     data.thValue = CalculateTH(dailyClosePrice, digits, timeframePercentage);
     CalculateFractalValues(data.thValue, data.structureValue, data.patternValue, data.triggerValue);
+    
     #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastTHDebugLogTime = 0;
     datetime currentDebugTime = TimeCurrent();
     if(currentDebugTime - s_lastTHDebugLogTime > 300) {
-        #ifdef ENABLE_DEBUG_LOGS
             Print("========== MT4 TH_BASIS CALCULATION ==========");
     Print("Calculation Basis: TH (Theoretical)");
     Print("Base Price (dailyClosePrice): ", DoubleToString(dailyClosePrice, 10));
@@ -699,11 +646,10 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     Print("SS (1.5 × Structure): ", DoubleToString(data.structureValue * 1.5, 10));
     Print("LS (2.0 × Structure): ", DoubleToString(data.structureValue * 2.0, 10));
     Print("==============================================");
-    #endif
     s_lastTHDebugLogTime = currentDebugTime;
         }
     #endif
-    }
+    
     data.shortStep = data.structureValue * 1.5;
     data.longStep = data.structureValue * 2.0;
     data.pointSize = 1.0;
@@ -717,27 +663,22 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
     GetAdaptiveLevelCounts(data.maxLevelsAbove, data.maxLevelsBelow);
     s_cachedData = data;
     s_lastDailyClose = dailyClosePrice;
-    s_lastBasis = currentBasis;
     s_lastTF = currentTF;
     s_lastStartPointType = g_thStartPointType;
     s_lastCustomPrice = g_customTHStartPrice;
     s_lastMaxAbove = inpMaxLevels;
     s_lastMaxBelow = inpMaxLevels;
-    s_lastATRValue = currentATRValue;
     return true;
 }
     void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
 {
         static ENUM_STEP_CALCULATION_MODE s_lastDrawnMode = (ENUM_STEP_CALCULATION_MODE)-1;
-    static ENUM_CALCULATION_BASIS s_lastDrawnBasis = (ENUM_CALCULATION_BASIS)-1;
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
-    ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-    bool modeChanged = (currentMode != s_lastDrawnMode || currentBasis != s_lastDrawnBasis);
+    bool modeChanged = (currentMode != s_lastDrawnMode);
     if(modeChanged || g_forceClearOnNextDraw) {
         bool clearZones = !g_customPriceLineDragging;
     ClearAllLevels(objectPrefix, clearZones);
     s_lastDrawnMode = currentMode;
-    s_lastDrawnBasis = currentBasis;
     g_forceClearOnNextDraw = false;
     }
     switch(currentMode) {
@@ -916,17 +857,11 @@ ENUM_CALCULATION_BASIS GetCurrentCalculationBasis() {
         
         case TH_STEP:
         default:
-        {            ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-    if(currentBasis == CALC_BASIS_ATR) {
-                DrawTHLevels(objectPrefix, dailyClosePrice, true);
+        {
+            DrawTHLevels(objectPrefix, dailyClosePrice);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ TH_STEP (ATR): Completed successfully");
+            Print("✅ TH_STEP: Completed successfully");
     #endif
-    } else {                DrawTHLevels(objectPrefix, dailyClosePrice);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ TH_STEP (TH): Completed successfully");
-    #endif
-    }
             break;
         }
     }
@@ -1467,11 +1402,6 @@ void ApplyLinesVisibility()
     string stepModeGvarName = "Biotak_StepMode_" + GetCachedChartIdStr();
     GlobalVariableSet(stepModeGvarName, g_stepModeOverride);
     UpdateStepModeLabel();
-    // FIX: Invalidate ATR cache when switching modes in ATR mode
-    // so CalculateCommonStepData recalculates with fresh ATR data
-    if(GetCurrentCalculationBasis() == CALC_BASIS_ATR) {
-            InvalidateATRCache();
-        }
     g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
     g_calculatedOnce = false;  // FIX: Force label refresh on mode change
@@ -1546,31 +1476,6 @@ void ApplyLinesVisibility()
     ThrottledChartRedraw();
             }
         }
-    if(lparam == 'W' || lparam == 'w')
-        {            ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-    ENUM_CALCULATION_BASIS newBasis = (currentBasis == CALC_BASIS_TH) ? CALC_BASIS_ATR : CALC_BASIS_TH;
-    g_calculationBasisOverride = (int)newBasis;
-    string basisGvarName = "Biotak_CalcBasis_" + GetCachedChartIdStr();
-    GlobalVariableSet(basisGvarName, g_calculationBasisOverride);
-    if(newBasis == CALC_BASIS_ATR) {
-                InvalidateATRCache();
-            }
-    UpdateBasisModeLabel(newBasis);
-    if(newBasis == CALC_BASIS_TH) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("📐 Calculation Basis: TH (Theoretical)");
-    #endif
-    } else {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("📊 Calculation Basis: ATR (Actual)");
-    #endif
-    }
-    g_forceClearOnNextDraw = true;
-    g_redrawTHLevelsNeeded = true;
-    g_calculatedOnce = false;
-    RedrawAllObjects(true);
-    ThrottledChartRedraw();
-        }
     if(lparam == '3')
         {            if(!inpEnableTH3Tool) {
         if(ObjectFind(0, g_frequencyLabelName) >= 0) {
@@ -1631,7 +1536,6 @@ void ApplyLinesVisibility()
     if(lparam == resetKeyCode)
         {            g_stepModeOverride = -1;
     g_factorValueOverride = 0;
-    g_calculationBasisOverride = -1;
     g_timeframeLocked = false;
     g_lockedPeriod = 0;
     g_triggerLevelsEnabled = inpShowTrigger;
@@ -1648,7 +1552,6 @@ void ApplyLinesVisibility()
     string symbolName = GetCachedSymbol();
     GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
     GlobalVariableDel("Biotak_Factor_" + chartIdStr);
-    GlobalVariableDel("Biotak_CalcBasis_" + chartIdStr);
     GlobalVariableDel("Biotak_LockTF_" + chartIdStr);
     GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
     GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);

@@ -188,9 +188,6 @@ void ClearAllModeLabels() {
         if(ObjectFind(0, g_stepModeLabelName) >= 0) {
         ObjectDelete(0, g_stepModeLabelName);
     }
-    if(ObjectFind(0, g_basisModeLabelName) >= 0) {
-        ObjectDelete(0, g_basisModeLabelName);
-    }
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
     }
@@ -213,8 +210,7 @@ void ClearAllModeLabels() {
     void UpdateStepModeLabel() {    if(!inpShowModeChangeLabel) return;
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     string modeName = GetStepModeName(currentMode);
-    ENUM_CALCULATION_BASIS currentBasis = GetCurrentCalculationBasis();
-    string basisName = (currentBasis == CALC_BASIS_TH) ? "TH" : "ATR";
+    string basisName = "TH";
     if(currentMode == COMBO_STEP) {
         ENUM_COMBO_MODE currentComboMode = inpComboMode;
     if(currentComboMode == COMBO_MODE_PRESET) {            ENUM_COMBO_PRESET currentPreset = inpComboPreset;
@@ -230,20 +226,6 @@ void ClearAllModeLabels() {
     }
     ObjectSetString(0, g_stepModeLabelName, OBJPROP_TEXT, "[ " + basisName + " | " + modeName + " ]");
     ApplyModeLabelStyle(g_stepModeLabelName, inpModeLabelColor);
-    if(inpModeLabelDuration > 0) {
-        EventSetTimer(inpModeLabelDuration);
-    }
-}
-    void UpdateBasisModeLabel(ENUM_CALCULATION_BASIS basis) {    if(!inpShowModeChangeLabel) return;
-    string basisName = (basis == CALC_BASIS_TH) ? "TH" : "ATR";
-    string modeName = GetStepModeName(GetCurrentStepMode());
-    ClearAllModeLabels();
-    if(IsIndicatorHidden()) return;
-    if(ObjectFind(0, g_basisModeLabelName) < 0) {
-        ObjectCreate(0, g_basisModeLabelName, OBJ_LABEL, 0, 0, 0);
-    }
-    ObjectSetString(0, g_basisModeLabelName, OBJPROP_TEXT, "[ " + basisName + " | " + modeName + " ]");
-    ApplyModeLabelStyle(g_basisModeLabelName, inpModeLabelColor);
     if(inpModeLabelDuration > 0) {
         EventSetTimer(inpModeLabelDuration);
     }

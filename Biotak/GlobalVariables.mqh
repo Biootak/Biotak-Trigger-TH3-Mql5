@@ -39,7 +39,6 @@ static bool g_linesVisible = true;
 static int g_stepModeOverride = -1;        // -1 = use input, 0-5 = override
 static double g_factorValueOverride = 0;   // 0 = use input, >0 = override
 static int g_factorColorOverride = -1;     // -1 = use input
-static int g_calculationBasisOverride = -1; // -1 = use input, 0=TH, 1=ATR
 
 // Alert Tracking
 static datetime g_lastAlertTime = 0;
@@ -50,7 +49,6 @@ static bool g_timeframeLocked = false;
 static int g_lockedPeriod = 0;
 static string g_lockStatusLabelName = "Biotak_LockStatus_Label";
 static string g_stepModeLabelName = "Biotak_StepMode_Label";
-static string g_basisModeLabelName = "Biotak_BasisMode_Label";
 static string g_factorLabelName = "Biotak_Factor_Label";
 
 // ChartRedraw Throttling
@@ -133,7 +131,7 @@ uint g_isHiddenCacheTime = 0;
         string chartIdStr = GetCachedChartIdStr();
     string symbolName = SanitizeSymbolName(GetCachedSymbol());
     string gvars[];
-    ArrayResize(gvars, 12);
+    ArrayResize(gvars, 11);
     gvars[0]  = "Biotak_isHidden_" + chartIdStr;
     gvars[1]  = "Biotak_CustomPrice_" + symbolName;
     gvars[2]  = "Biotak_LockTF_" + chartIdStr;
@@ -141,11 +139,10 @@ uint g_isHiddenCacheTime = 0;
     gvars[4]  = "Biotak_TriggerLevels_" + chartIdStr;
     gvars[5]  = "Biotak_CustomPriceOverride_" + symbolName;
     gvars[6]  = "Biotak_StepMode_" + chartIdStr;
-    gvars[7]  = "Biotak_CalcBasis_" + chartIdStr;
-    gvars[8]  = "Biotak_Factor_" + chartIdStr;
-    gvars[9]  = "Biotak_TH3Freq_" + chartIdStr;
-    gvars[10] = "Biotak_TH3FreqIdx_" + chartIdStr;
-    gvars[11] = "Biotak_LinesVisible_" + chartIdStr;
+    gvars[7]  = "Biotak_Factor_" + chartIdStr;
+    gvars[8]  = "Biotak_TH3Freq_" + chartIdStr;
+    gvars[9]  = "Biotak_TH3FreqIdx_" + chartIdStr;
+    gvars[10] = "Biotak_LinesVisible_" + chartIdStr;
     for(int i = 0; i < ArraySize(gvars); i++) {
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }
