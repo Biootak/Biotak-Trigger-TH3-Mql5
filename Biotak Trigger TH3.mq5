@@ -51,7 +51,6 @@
 #include "Biotak\ATRCalculations.mqh"
 #include "Biotak\BasePriceManager.mqh"
 #include "Biotak\TH3Tool.mqh"
-#include "Biotak\FrequencyLearning.mqh"
 
 // Drawing & Rendering
 #include "Biotak\ObjectFunctions.mqh"

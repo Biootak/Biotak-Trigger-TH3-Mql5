@@ -20,7 +20,6 @@ static bool g_redrawNeeded = true;
 // Performance Tracking
 static int g_objectCountLast = 0;
 static datetime g_lastObjectCleanup = 0;
-static bool g_performanceMetricsInitialized = false;
 
 // Custom Price Selection
 static bool g_waitingForCustomPriceClick = false;
@@ -56,11 +55,6 @@ static datetime g_lastChartRedrawTime = 0;
 #define CHART_REDRAW_THROTTLE_MS 100
 static uint g_lastDragRedrawTime = 0;
 #define DRAG_REDRAW_THROTTLE_MS 50
-static string g_frequencyLabelName = "Biotak_Frequency_Label";
-
-// TH3 Frequency Cycling
-static double g_th3FrequencyOverride = 0.0;
-static int g_th3FrequencyIndex = 16;
 
 // AB=CD Pattern State
 static bool g_abcdDrawing = false;

@@ -183,29 +183,6 @@ int OnInitHandler() {    InitializeGlobalCache();
     g_factorValueOverride = 50.0;
         }
     }
-    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-    {
-        double restoredFreq = GlobalVariableGet(freqGvarName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-        if(restoredFreq > 0 && restoredFreq <= 100.0) {
-                g_th3FrequencyOverride = restoredFreq;
-            } else {                g_th3FrequencyOverride = 0;
-    GlobalVariableDel(freqGvarName);
-            }
-        }
-    }
-    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
-    {
-        double val = GlobalVariableGet(indexGvarName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-        int restoredIndex = (int)val;
-    if(restoredIndex >= 0 && restoredIndex < TH3_FREQUENCY_COUNT) {
-                g_th3FrequencyIndex = restoredIndex;
-            } else {                g_th3FrequencyIndex = 16;
-    GlobalVariableDel(indexGvarName);
-            }
-        }
-    }    
     InitializeATRCache();
     UpdateLockStatusLabel();
     PrintBuildInfo();
@@ -229,7 +206,6 @@ int OnInitHandler() {    InitializeGlobalCache();
     Print("💾 PERSISTENT: Settings saved to GlobalVariables (survive terminal restart)");
     Print("To enable 'Chart Shift': Right-click chart > Chart Shift (or F11)");
     #endif
-    InitializeLearningSystem();
     if(shouldBeHidden) {        g_redrawTHLevelsNeeded = false;
     #ifdef ENABLE_DEBUG_LOGS
         Print("🔒 OnInit: Indicator in HIDDEN state - objects will be hidden when created");
@@ -297,10 +273,6 @@ void HideAllTHObjects()
         ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     hiddenCount++;
     }
-    if(ObjectFind(0, g_frequencyLabelName) >= 0) {
-        ObjectSetInteger(0, g_frequencyLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    hiddenCount++;
-    }
     if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
         ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     hiddenCount++;
@@ -345,9 +317,6 @@ void HideAllTHObjects()
     }
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
-    }
-    if(ObjectFind(0, g_frequencyLabelName) >= 0) {
-        ObjectDelete(0, g_frequencyLabelName);
     }
     if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
         ObjectDelete(0, g_lockStatusLabelName);
@@ -440,7 +409,6 @@ void HideAllTHObjects()
     CleanupBasePriceManager();
     CleanupATRCache();
     CleanupObjectCountManager();
-    CleanupLearningSystem();
     g_initialized = false;
     g_calculatedOnce = false;
     g_redrawTHLevelsNeeded = true;
@@ -1383,15 +1351,6 @@ void ApplyLinesVisibility()
         {
             ToggleTH3Tool();
     ThrottledChartRedraw();        }
-    if(lparam == 'F' || lparam == 70)        {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("🔍 Starting Frequency Analysis...");
-    #endif
-    double optimalFreq = CalculateOptimalDefaultFrequency();
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ Analysis complete. Recommended default: ", DoubleToString(optimalFreq, 3), "%");
-    #endif
-    }
     string mutableStepModeKey = inpStepModeKey;
     StringToUpper(mutableStepModeKey);
     int stepModeKeyCode = StringGetCharacter(mutableStepModeKey, 0);
@@ -1476,60 +1435,6 @@ void ApplyLinesVisibility()
     ThrottledChartRedraw();
             }
         }
-    if(lparam == '3')
-        {            if(!inpEnableTH3Tool) {
-        if(ObjectFind(0, g_frequencyLabelName) >= 0) {
-                    ObjectDelete(0, g_frequencyLabelName);
-                }
-                ClearAllModeLabels();
-    ObjectCreate(0, g_frequencyLabelName, OBJ_LABEL, 0, 0, 0);
-    ObjectSetString(0, g_frequencyLabelName, OBJPROP_TEXT, "[ TH3 Tool is Disabled ]");
-    ApplyModeLabelStyle(g_frequencyLabelName, inpModeLabelColor, FREQUENCY_LABEL_Y_EXTRA);
-    if(inpModeLabelDuration > 0) EventSetTimer(inpModeLabelDuration);
-    return;
-            }
-            
-            DecrementTH3Frequency();
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("⬇️ TH3 Frequency: ", DoubleToString(GetCurrentTH3Frequency(), 3), "%");
-    #endif
-    ThrottledChartRedraw();
-        }
-    if(lparam == '4')
-        {            if(!inpEnableTH3Tool) {
-        if(ObjectFind(0, g_frequencyLabelName) >= 0) {
-                    ObjectDelete(0, g_frequencyLabelName);
-                }
-                ClearAllModeLabels();
-    ObjectCreate(0, g_frequencyLabelName, OBJ_LABEL, 0, 0, 0);
-    ObjectSetString(0, g_frequencyLabelName, OBJPROP_TEXT, "[ TH3 Tool is Disabled ]");
-    ApplyModeLabelStyle(g_frequencyLabelName, inpModeLabelColor, FREQUENCY_LABEL_Y_EXTRA);
-    if(inpModeLabelDuration > 0) EventSetTimer(inpModeLabelDuration);
-    return;
-            }
-            
-            CycleTH3Frequency();
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("⬆️ TH3 Frequency: ", DoubleToString(GetCurrentTH3Frequency(), 3), "%");
-    #endif
-    ThrottledChartRedraw();
-        }
-    if(lparam == '5')
-        {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("🔑 KEY 5 DETECTED IN EVENT HANDLER");
-    #endif
-    QuickApprovePattern();
-        }
-    if(lparam == 13)        {
-        if(g_adjustmentMode)
-            {
-                ConfirmAdjustedFrequency();
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ Adjusted frequency confirmed");
-    #endif
-    }
-        }
     string mutableResetKey = inpResetKey;
     StringToUpper(mutableResetKey);
     int resetKeyCode = StringGetCharacter(mutableResetKey, 0);
@@ -1540,8 +1445,6 @@ void ApplyLinesVisibility()
     g_lockedPeriod = 0;
     g_triggerLevelsEnabled = inpShowTrigger;
     g_linesVisible = inpShowLines;
-    g_th3FrequencyOverride = 0;
-    g_th3FrequencyIndex = 24;
     if(inpEnableTH3Tool) {
                 UpdateAllTH3Objects();
             }
@@ -1780,14 +1683,6 @@ void ApplyLinesVisibility()
         g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
-    }
-    if(id == CHARTEVENT_OBJECT_CLICK)
-    {
-        if(StringFind(sparam, "LEARN_") == 0)
-        {
-            OnFeedbackButtonClick(sparam);
-    return;
-        }
     }
     if(id == CHARTEVENT_OBJECT_CLICK)
     {

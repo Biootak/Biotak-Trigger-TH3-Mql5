@@ -74,83 +74,6 @@ void SetActiveABCDPattern(string patternName)
     }
 
 //+------------------------------------------------------------------+
-//| Calculate Optimal Default Frequency                             |
-
-//| Analyzes all frequencies to find best default for Steps 3,5,7   |
-//+------------------------------------------------------------------+
-double CalculateOptimalDefaultFrequency()
-{
-        double idealFrequencies[3];
-    idealFrequencies[0] = 100.0 / 3.0;
-    idealFrequencies[1] = 100.0 / 5.0;
-    idealFrequencies[2] = 100.0 / 7.0;
-    int bestIndices[3] = {-1, -1, -1};
-
-    double minErrors[3] = {1000000.0, 1000000.0, 1000000.0};
-    for(int i = 0; i < 3; i++)
-    {
-        double minError = 1000000.0;
-    int bestIdx = -1;
-    for(int j = 0; j < TH3_FREQUENCY_COUNT; j++)
-        {
-        double error = MathAbs(TH3_TEST_FREQUENCIES[j] - idealFrequencies[i]);
-    if(error < minError)
-            {
-                minError = error;
-    bestIdx = j;
-            }
-        }
-        
-        bestIndices[i] = bestIdx;
-    minErrors[i] = minError;
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    Print("📊 OPTIMAL DEFAULT FREQUENCY ANALYSIS");
-    Print("========================================");
-    Print("Step 3 (Ideal: 33.333%):");
-    Print("  → Closest: ", DoubleToString(TH3_TEST_FREQUENCIES[bestIndices[0]], 3), 
-          "% (Index: ", bestIndices[0], ", Error: ", DoubleToString(minErrors[0], 3), "%)");
-    Print("Step 5 (Ideal: 20.0%):");
-    Print("  → Closest: ", DoubleToString(TH3_TEST_FREQUENCIES[bestIndices[1]], 3), 
-          "% (Index: ", bestIndices[1], ", Error: ", DoubleToString(minErrors[1], 3), "%)");
-    Print("Step 7 (Ideal: 14.286%):");
-    Print("  → Closest: ", DoubleToString(TH3_TEST_FREQUENCIES[bestIndices[2]], 3), 
-          "% (Index: ", bestIndices[2], ", Error: ", DoubleToString(minErrors[2], 3), "%)");
-    Print("========================================");
-    #endif
-    double weightedFreq = (TH3_TEST_FREQUENCIES[bestIndices[0]] * 0.25) +
-                          (TH3_TEST_FREQUENCIES[bestIndices[1]] * 0.50) +
-                          (TH3_TEST_FREQUENCIES[bestIndices[2]] * 0.25);
-    double minError = 1000000.0;
-    int bestDefaultIdx = -1;
-    for(int i = 0; i < TH3_FREQUENCY_COUNT; i++)
-    {
-        double error = MathAbs(TH3_TEST_FREQUENCIES[i] - weightedFreq);
-    if(error < minError)
-        {
-            minError = error;
-    bestDefaultIdx = i;
-        }
-    }
-    double bestDefault = TH3_TEST_FREQUENCIES[bestDefaultIdx];
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🎯 RECOMMENDED DEFAULT FREQUENCY:");
-    Print("  Weighted Average: ", DoubleToString(weightedFreq, 3), "%");
-    Print("  Best Match: ", DoubleToString(bestDefault, 3), "% (Index: ", bestDefaultIdx, ")");
-    Print("========================================");
-    #endif
-    return bestDefault;
-}
-    double GetCurrentTH3Frequency() {
-        if(g_th3FrequencyOverride > 0.0) return g_th3FrequencyOverride;
-    if(inpTH3BaseStepPercent > 0.0 && inpTH3BaseStepPercent <= 120.0) {
-        return inpTH3BaseStepPercent;
-    }
-    return 28.125;
-}
-
-//+------------------------------------------------------------------+
 //| Analyze Three-Wave Pattern (XA, AB, BC)                         |
 
 //| Returns comprehensive wave analysis for frequency selection     |
@@ -955,668 +878,30 @@ double CalculateFibonacciDeviation(double ratio)
 }
 
 //+------------------------------------------------------------------+
-//| Find Optimal Frequency for XABCD Pattern - COMPLETE ANALYSIS    |
-
-//| Multi-factor scoring: error, wave analysis, Fibonacci, symmetry |
+//| Find Optimal Frequency for XABCD Pattern - STUBBED              |
+//| Frequency learning system removed                               |
 //+------------------------------------------------------------------+
 int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA, 
                                 datetime tB, double pB, datetime tC, double pC,
                                 FrequencySearchResult &results[],
                                 double maxErrorPercent = 5.0)
 {
-    
+    // Frequency learning system removed - return empty results
     ArrayResize(results, 0);
-    double AB_Distance = MathAbs(pB - pA);
-    if(AB_Distance <= 0) return 0;
-    double pipSize = GetCachedPipSize();
-    WaveAnalysis waves = AnalyzeThreeWaves(tX, pX, tA, pA, tB, pB, tC, pC);
-    AnalyzeHarmonicProperties(waves);
-    double suggestedFreq = CalculateFrequencyFromWaves(waves);
-    double speedRatio = CalculateMovementSpeed(tA, pA, tB, pB);
-    double timeSymmetry = waves.timeSymmetry;
-    double fibDeviation = CalculateFibonacciDeviation(waves.AB_XA_Ratio);
-    double consolidationFactor = CalculateConsolidationFactor(tA, tB, tC, waves);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    Print("🔍 COMPLETE WAVE ANALYSIS (X-A-B-C):");
-    Print("   Wave Distances: XA=", DoubleToString(waves.XA_Distance/pipSize, 1), 
-          " | AB=", DoubleToString(waves.AB_Distance/pipSize, 1),
-          " | BC=", DoubleToString(waves.BC_Distance/pipSize, 1), " pips");
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("   Wave Speeds: XA=", DoubleToString(waves.XA_Speed, 2), 
-          " | AB=", DoubleToString(waves.AB_Speed, 2),
-          " | BC=", DoubleToString(waves.BC_Speed, 2), " pips/min");
-    Print("   AB/XA Ratio: ", DoubleToString(waves.AB_XA_Ratio, 3), 
-          " (Fib Dev: ", DoubleToString(fibDeviation, 3), ")");
-    Print("   Speed Consistency: ", DoubleToString(waves.speedConsistency * 100, 1), "%");
-    Print("   Time Symmetry: ", DoubleToString(timeSymmetry * 100, 1), "%");
-    Print("   Consolidation Factor: ", DoubleToString(consolidationFactor * 100, 1), "% (Energy buildup)");
-    Print("   Pattern Type: ", waves.isImpulsive ? "Impulsive" : (waves.isCorrectional ? "Correctional" : "Balanced"));
-    Print("   Suggested Frequency: ", DoubleToString(suggestedFreq, 3), "%");
-    Print("   Speed Ratio: ", DoubleToString(speedRatio, 2), "x");
-    #endif
-    if(waves.speedConsistency < 0.5) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ⚠️ WARNING: Low speed consistency - results may be unreliable");
-    #endif
-    } else if(waves.speedConsistency < 0.7) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ⚠️ CAUTION: Moderate speed consistency");
-    #endif
-    } else {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ✅ Good speed consistency");
-    #endif
-    }
-    if(consolidationFactor > 0.7) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   🔥 HIGH CONSOLIDATION: Expect strong breakout - using larger steps");
-    #endif
-    } else if(consolidationFactor > 0.4) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ⚡ MODERATE CONSOLIDATION: Some energy buildup detected");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    #endif
-    #endif    
-    double gannAngle = waves.AB_Angle;
-    double bcToAbRatio = 0.0;
-    if(waves.AB_Distance > 0) {
-        bcToAbRatio = waves.BC_Distance / waves.AB_Distance;
-    }
-    string harmonicPattern = "NONE";
-    double harmonicConfidence = 0.0;
-    double prz_Frequency = 0.0;
-    if(waves.AB_XA_Ratio >= 0.580 && waves.AB_XA_Ratio <= 0.660) {
-        if(bcToAbRatio >= 0.382 && bcToAbRatio <= 0.886) {
-            harmonicPattern = "GARTLEY";
-    harmonicConfidence = 0.786;
-    prz_Frequency = 28.0 + (bcToAbRatio * 30.0);        }
-    }
-    else if(waves.AB_XA_Ratio >= 0.382 && waves.AB_XA_Ratio <= 0.500) {
-        if(bcToAbRatio >= 0.382 && bcToAbRatio <= 0.886) {
-            harmonicPattern = "BAT";
-    harmonicConfidence = 0.886;
-    prz_Frequency = 35.0 + (bcToAbRatio * 25.0);        }
-    }
-    else if(waves.AB_XA_Ratio >= 0.750 && waves.AB_XA_Ratio <= 0.820) {
-        if(bcToAbRatio >= 0.382 && bcToAbRatio <= 0.886) {
-            harmonicPattern = "BUTTERFLY";
-    harmonicConfidence = 1.272;
-    prz_Frequency = 45.0 + (bcToAbRatio * 35.0);        }
-    }
-    else if(waves.AB_XA_Ratio >= 0.382 && waves.AB_XA_Ratio <= 0.618) {
-        if(bcToAbRatio >= 0.382 && bcToAbRatio <= 0.886) {
-            harmonicPattern = "CRAB";
-    harmonicConfidence = 1.618;
-    prz_Frequency = 50.0 + (bcToAbRatio * 40.0);        }
-    }
-    double medianPrice = (pX + pA + pB) / 3.0;
-    double currentDistanceFromMedian = MathAbs(pC - medianPrice);
-    double maxDistanceFromMedian = MathMax(MathAbs(pA - medianPrice), MathAbs(pB - medianPrice));
-    double medianLineDeviation = 0.0;
-    if(maxDistanceFromMedian > 0) {
-        medianLineDeviation = currentDistanceFromMedian / maxDistanceFromMedian;
-    }
-    bool strongMedianLinePull = (medianLineDeviation > 0.8);
-    bool moderateMedianLinePull = (medianLineDeviation > 0.5 && medianLineDeviation <= 0.8);
-    double medianLineFrequency = 0.0;
-    if(strongMedianLinePull) {
-        
-        medianLineFrequency = 55.0 + (medianLineDeviation * 30.0);    } else if(moderateMedianLinePull) {
-        
-        medianLineFrequency = 35.0 + (medianLineDeviation * 30.0);    }
-    bool isValidABCD = false;
-    double abcdScore = 0.0;
-    double bcRetracementError = MathAbs(bcToAbRatio - 0.618);
-    if(bcRetracementError < 0.15) {  
-        isValidABCD = true;
-    abcdScore = 1.0 - (bcRetracementError / 0.15);    }
-    bool isStrongImpulsive = (gannAngle > 75.0 && consolidationFactor < 0.1);
-    bool isMediumImpulsive = (gannAngle >= 50.0 && gannAngle <= 75.0 && consolidationFactor < 0.1);
-    bool hasDeepRetracement = (bcToAbRatio > 0.7);
-    bool hasGoodTimeSymmetry = (timeSymmetry > 0.8);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    Print("🎯 ADVANCED HARMONIC & PITCHFORK ANALYSIS:");
-    Print("========================================");
-    if(harmonicPattern != "NONE") {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("📊 HARMONIC PATTERN: ", harmonicPattern);
-    Print("   AB/XA Ratio: ", DoubleToString(waves.AB_XA_Ratio, 3));
-    Print("   BC/AB Ratio: ", DoubleToString(bcToAbRatio, 3));
-    Print("   Confidence Level: ", DoubleToString(harmonicConfidence, 3));
-    Print("   PRZ Frequency: ", DoubleToString(prz_Frequency, 1), "%");
-    Print("   → Using harmonic-based frequency selection");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("📐 ANDREWS PITCHFORK (Median Line):");
-    Print("   Median Price: ", DoubleToString(medianPrice, Digits));
-    Print("   Distance from Median: ", DoubleToString(medianLineDeviation * 100, 1), "%");
-    #endif
-    if(strongMedianLinePull) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   🎯 STRONG PULL: Price far from median (>80%)");
-    Print("   → Expect strong reversal to median");
-    Print("   → Median Frequency: ", DoubleToString(medianLineFrequency, 1), "%");
-    #endif
-    } else if(moderateMedianLinePull) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ⚡ MODERATE PULL: Price moderately far (50-80%)");
-    Print("   → Median Frequency: ", DoubleToString(medianLineFrequency, 1), "%");
-    #endif
-    } else {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ✓ Near Median: Price close to equilibrium");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 AB=CD PATTERN VALIDATION:");
-    Print("   BC Retracement: ", DoubleToString(bcToAbRatio, 3), " (Target: 0.618)");
-    Print("   Error: ", DoubleToString(bcRetracementError, 3));
-    #endif
-    if(isValidABCD) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ✅ VALID AB=CD: Score ", DoubleToString(abcdScore * 100, 1), "%");
-    Print("   → Using AB=CD frequency rules");
-    #endif
-    } else {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ⚠️ Not a classic AB=CD pattern");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    #endif
-    if(isStrongImpulsive) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("🚀 STRONG IMPULSIVE PATTERN DETECTED:");
-    Print("   Gann Angle: ", DoubleToString(gannAngle, 2), "° (>75°)");
-    Print("   Consolidation: ", DoubleToString(consolidationFactor * 100, 1), "% (<10%)");
-    Print("   BC/AB Ratio: ", DoubleToString(bcToAbRatio, 3));
-    #endif
-    if(hasDeepRetracement) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("   Deep Retracement: YES - Expect strong continuation");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("   → Adjusting scoring: Prefer higher frequencies (50-70% range)");
-    Print("   → Reducing penalties for low consistency and time symmetry");
-    #endif
-    }
-    else if(isMediumImpulsive) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚡ MEDIUM IMPULSIVE PATTERN DETECTED:");
-    Print("   Gann Angle: ", DoubleToString(gannAngle, 2), "° (50-75°)");
-    Print("   Consolidation: ", DoubleToString(consolidationFactor * 100, 1), "% (<10%)");
-    Print("   BC/AB Ratio: ", DoubleToString(bcToAbRatio, 3));
-    Print("   Time Symmetry: ", DoubleToString(timeSymmetry * 100, 1), "%");
-    #endif
-    if(hasGoodTimeSymmetry) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("   Good Time Symmetry: Pattern is reliable");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("   → Adjusting scoring: Prefer frequencies (35-50% range)");
-    Print("   → Reducing penalties for low consistency");
-    #endif
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    #endif
-    #endif
-    int targetSteps[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-
-    int primarySteps[3] = {3, 5, 7};
-    if(isStrongImpulsive) {
-        primarySteps[0] = 2;
-    primarySteps[1] = 3;
-    primarySteps[2] = 4;
-    }
-    
-    else if(isMediumImpulsive) {
-        primarySteps[0] = 2;
-    primarySteps[1] = 3;
-    primarySteps[2] = 5;
-    }
-    bool candidateFreqs[77];
-    ArrayInitialize(candidateFreqs, false);
-    for(int stepIdx = 0; stepIdx < 3; stepIdx++)
-    {
-        int targetStep = primarySteps[stepIdx];
-    double idealFreq = 100.0 / targetStep;
-    int closestIdx = 0;
-    double minDiff = 1000.0;
-    for(int i = 0; i < TH3_FREQUENCY_COUNT; i++)
-        {
-        double diff = MathAbs(TH3_TEST_FREQUENCIES[i] - idealFreq);
-    if(diff < minDiff)
-            {
-                minDiff = diff;
-    closestIdx = i;
-            }
-        }
-    int startIdx = MathMax(0, closestIdx - 5);
-    int endIdx = MathMin(TH3_FREQUENCY_COUNT - 1, closestIdx + 5);
-    for(int i = startIdx; i <= endIdx; i++)
-        {
-            candidateFreqs[i] = true;
-        }
-    }
-    if(suggestedFreq > 0 && suggestedFreq <= 100.0)
-    {
-        int closestIdx = 0;
-    double minDiff = 1000.0;
-    for(int i = 0; i < TH3_FREQUENCY_COUNT; i++)
-        {
-        double diff = MathAbs(TH3_TEST_FREQUENCIES[i] - suggestedFreq);
-    if(diff < minDiff)
-            {
-                minDiff = diff;
-    closestIdx = i;
-            }
-        }
-    int startIdx = MathMax(0, closestIdx - 3);
-    int endIdx = MathMin(TH3_FREQUENCY_COUNT - 1, closestIdx + 3);
-    for(int i = startIdx; i <= endIdx; i++)
-        {
-            candidateFreqs[i] = true;
-        }
-    }
-    if(isStrongImpulsive) {
-        for(int i = 0; i < TH3_FREQUENCY_COUNT; i++)
-        {
-        if(TH3_TEST_FREQUENCIES[i] >= 50.0 && TH3_TEST_FREQUENCIES[i] <= 70.0)
-            {
-                candidateFreqs[i] = true;
-            }
-        }
-    }
-    
-    else if(isMediumImpulsive) {
-        for(int i = 0; i < TH3_FREQUENCY_COUNT; i++)
-        {
-        if(TH3_TEST_FREQUENCIES[i] >= 35.0 && TH3_TEST_FREQUENCIES[i] <= 50.0)
-            {
-                candidateFreqs[i] = true;
-            }
-        }
-    }
-    for(int freqIdx = 0; freqIdx < TH3_FREQUENCY_COUNT; freqIdx++)
-    {
-        if(!candidateFreqs[freqIdx]) continue;
-    double testFreq = TH3_TEST_FREQUENCIES[freqIdx];
-    for(int stepIdx = 0; stepIdx < 10; stepIdx++)
-        {
-        int testStep = targetSteps[stepIdx];
-    double calcD, targetPrice;
-    double errorPercent = CalculateFrequencyError(pA, pB, pC, testFreq, 
-                                                          testStep, calcD, targetPrice);
-    LearnedWeights learnedWeights = GetLearnedWeights();
-    double stepPriority = 1.0;
-    if(testStep == 5) {
-                stepPriority = learnedWeights.step5Priority;  
-            } else if(testStep == 3 || testStep == 7) {
-                stepPriority = learnedWeights.step3_7Priority;  
-            } else if(testStep == 1) {
-                stepPriority = learnedWeights.step1Priority;  
-            }
-    double errorScore = errorPercent * learnedWeights.errorWeight;
-    double speedConsistencyWeight = learnedWeights.speedConsistencyWeight;
-    if(isStrongImpulsive) {
-                speedConsistencyWeight *= 0.3;  
-            }
-            else if(isMediumImpulsive) {
-                speedConsistencyWeight *= 0.5;  
-            }
-    double speedScore = (1.0 - waves.speedConsistency) * 20.0 * speedConsistencyWeight;
-    double timeSymmetryWeight = learnedWeights.timeSymmetryWeight;
-    if(isStrongImpulsive && hasDeepRetracement) {
-                timeSymmetryWeight *= 0.2;  
-            }
-            else if(isMediumImpulsive && hasGoodTimeSymmetry) {
-                timeSymmetryWeight *= 0.5;  
-            }
-    double timeScore = (1.0 - timeSymmetry) * 100.0 * timeSymmetryWeight;
-    double fibScore = fibDeviation * 100.0 * learnedWeights.fibonacciWeight;
-    double freqDeviation = 0.0;
-    if(suggestedFreq > 0) {
-                freqDeviation = MathAbs(testFreq - suggestedFreq) / suggestedFreq;
-            }
-    double freqScore = freqDeviation * 100.0 * learnedWeights.freqDeviationWeight;
-    double consolidationPenalty = 0.0;
-    if(consolidationFactor > 0.3) {
-        if(testFreq < suggestedFreq) {
-        double freqRatio = testFreq / suggestedFreq;
-    consolidationPenalty = (1.0 - freqRatio) * consolidationFactor * 100.0 * learnedWeights.consolidationWeight;
-                }
-            }
-    double stepPriorityScore = stepPriority * learnedWeights.stepPriorityWeight;
-    double impulsiveBonus = 0.0;
-    if(isStrongImpulsive) {
-        if(testFreq >= 50.0 && testFreq <= 70.0) {
-                    impulsiveBonus = -50.0;  
-                }
-                
-                else if(testFreq < 30.0) {
-                    impulsiveBonus = 100.0;  
-                }
-            }
-            else if(isMediumImpulsive) {
-        if(testFreq >= 35.0 && testFreq <= 50.0) {
-                    impulsiveBonus = -30.0;  
-                }
-                
-                else if(testFreq < 25.0) {
-                    impulsiveBonus = 80.0;  
-                }
-    if(hasGoodTimeSymmetry && testFreq >= 40.0 && testFreq <= 45.0) {
-                    impulsiveBonus -= 20.0;  
-                }
-            }
-    double harmonicBonus = 0.0;
-    if(harmonicPattern != "NONE" && prz_Frequency > 0) {
-        double przDeviation = MathAbs(testFreq - prz_Frequency) / prz_Frequency;
-    if(przDeviation < 0.15) {                    harmonicBonus = -40.0 * (1.0 - przDeviation / 0.15);
-    if(harmonicPattern == "CRAB") harmonicBonus *= 1.3;
-    else if(harmonicPattern == "BUTTERFLY") harmonicBonus *= 1.2;
-    else if(harmonicPattern == "BAT") harmonicBonus *= 1.1;
-                }
-            }
-    double medianLineBonus = 0.0;
-    if(medianLineFrequency > 0) {
-        double medianDeviation = MathAbs(testFreq - medianLineFrequency) / medianLineFrequency;
-    if(medianDeviation < 0.20) {
-        if(strongMedianLinePull) {
-                        
-                        medianLineBonus = -35.0 * (1.0 - medianDeviation / 0.20);                    } else if(moderateMedianLinePull) {
-                        
-                        medianLineBonus = -20.0 * (1.0 - medianDeviation / 0.20);                    }
-                }
-            }
-    double abcdBonus = 0.0;
-    if(isValidABCD) {
-        if(testFreq >= 25.0 && testFreq <= 45.0) {
-                    abcdBonus = -30.0 * abcdScore;
-    if(testFreq >= 36.0 && testFreq <= 40.0) {
-                        abcdBonus -= 15.0;                    }
-                }
-            }
-    double accelerationScore = 0.0;
-    if(waves.AB_to_BC_Acceleration > 0.001) {
-        double accelRatio = MathMin(waves.AB_to_BC_Acceleration / 0.01, 1.0);
-    accelerationScore = -20.0 * accelRatio;            }
-            
-            else if(waves.AB_to_BC_Acceleration < -0.001) {
-        double accelRatio = MathMin(MathAbs(waves.AB_to_BC_Acceleration) / 0.01, 1.0);
-    accelerationScore = 20.0 * accelRatio;            }
-    double strengthScore = 0.0;
-    if(waves.BC_RelativeStrength > 2.0) {
-                
-                strengthScore = -25.0;
-            } else if(waves.BC_RelativeStrength < 1.0) {
-                
-                strengthScore = 25.0;
-            }
-    double strengthRatio = waves.BC_RelativeStrength / MathMax(waves.AB_RelativeStrength, 0.1);
-    if(strengthRatio > 1.2) {
-                
-                strengthScore -= 15.0;
-            } else if(strengthRatio < 0.8) {
-                
-                strengthScore += 15.0;
-            }
-    double confidence = 100.0;
-    if(waves.speedConsistency < 0.5) confidence -= 30.0;
-    if(timeSymmetry < 0.6) confidence -= 20.0;
-    if(fibDeviation > 0.15) confidence -= 15.0;
-    if(errorPercent > 3.0) confidence -= 25.0;
-    if(harmonicPattern != "NONE") confidence += 15.0;
-    if(isValidABCD) confidence += 10.0;
-    if(waves.BC_RelativeStrength > 2.0) confidence += 10.0;
-    if(MathAbs(waves.AB_to_BC_Acceleration) < 0.001) confidence += 5.0;
-    if(confidence < 0) confidence = 0;
-    if(confidence > 100) confidence = 100;
-    double confidencePenalty = 0.0;
-    if(confidence < 50.0) {
-                confidencePenalty = 50.0 * (1.0 - confidence / 50.0);            }
-    double harmonicMeanScore = 0.0;
-    if(waves.XA_Speed > 0 && waves.AB_Speed > 0 && waves.BC_Speed > 0) {
-        double recipSum = (1.0/waves.XA_Speed) + (1.0/waves.AB_Speed) + (1.0/waves.BC_Speed);
-    double harmonicMean = 3.0 / recipSum;
-    double arithmeticMean = (waves.XA_Speed + waves.AB_Speed + waves.BC_Speed) / 3.0;
-    double meanRatio = harmonicMean / arithmeticMean;
-    if(meanRatio > 0.9) {
-                    harmonicMeanScore = -15.0 * ((meanRatio - 0.9) / 0.1);                }
-                
-                else if(meanRatio < 0.7) {
-                    harmonicMeanScore = 15.0 * ((0.7 - meanRatio) / 0.3);                }
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("   Harmonic Mean: ", DoubleToString(harmonicMean, 2), " pips/min");
-    Print("   Arithmetic Mean: ", DoubleToString(arithmeticMean, 2), " pips/min");
-    Print("   Ratio: ", DoubleToString(meanRatio, 3), 
-                      " (", meanRatio > 0.9 ? "✅ Consistent" : (meanRatio < 0.7 ? "⚠️ Inconsistent" : "➡️ Moderate"), ")");
-    #endif
-    }
-    double phiRatioScore = 0.0;
-    double phi = 1.618033988749;
-    double phiInverse = 0.618033988749;
-    double phiDeviation_AB_XA = MathAbs(waves.AB_XA_Ratio - phiInverse);
-    if(phiDeviation_AB_XA < 0.05) {                
-                phiRatioScore -= 20.0 * (1.0 - phiDeviation_AB_XA / 0.05);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("   ✨ Golden Ratio detected in AB/XA: ", DoubleToString(waves.AB_XA_Ratio, 3));
-    #endif
-    }
-    double phiDeviation_BC_AB = MathAbs(waves.BC_AB_Ratio - phiInverse);
-    if(phiDeviation_BC_AB < 0.05) {                phiRatioScore -= 15.0 * (1.0 - phiDeviation_BC_AB / 0.05);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("   ✨ Golden Ratio detected in BC/AB: ", DoubleToString(waves.BC_AB_Ratio, 3));
-    #endif
-    }
-    double phiDeviation_AB_XA_ext = MathAbs(waves.AB_XA_Ratio - phi);
-    if(phiDeviation_AB_XA_ext < 0.08) {  
-                phiRatioScore -= 12.0 * (1.0 - phiDeviation_AB_XA_ext / 0.08);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("   ✨ Phi Extension detected in AB/XA: ", DoubleToString(waves.AB_XA_Ratio, 3));
-    #endif
-    }
-    double totalScore = (errorScore + speedScore + timeScore + fibScore + freqScore + consolidationPenalty) 
-                              * stepPriority * (1.0 + stepPriorityScore) 
-                              + impulsiveBonus + harmonicBonus + medianLineBonus + abcdBonus
-                              + accelerationScore + strengthScore + confidencePenalty
-                              + harmonicMeanScore + phiRatioScore;
-    int size = ArraySize(results);
-    ArrayResize(results, size + 1, 128);
-    results[size].frequency = testFreq;
-    results[size].frequencyIndex = freqIdx;
-    results[size].targetStep = testStep;
-    results[size].errorPercent = errorPercent;
-    results[size].calculatedD = calcD;
-    results[size].targetPrice = targetPrice;
-    results[size].errorPips = MathAbs(calcD - targetPrice) / pipSize;
-    results[size].gannAngle = speedRatio;
-    results[size].angleWeight = waves.speedConsistency;
-    results[size].timeSymmetry = timeSymmetry;
-    results[size].totalScore = totalScore;
-        }
-    }
-    int resultCount = ArraySize(results);
-    for(int i = 0; i < resultCount - 1; i++)
-    {
-        int minIdx = i;
-    for(int j = i + 1; j < resultCount; j++)
-        {
-        if(results[j].totalScore < results[minIdx].totalScore)
-            {
-                minIdx = j;
-            }
-        }
-    if(minIdx != i)
-        {
-            FrequencySearchResult temp = results[i];
-    results[i] = results[minIdx];
-    results[minIdx] = temp;
-        }
-    }
-    int goodResults = 0;
-    for(int i = 0; i < resultCount; i++)
-    {
-        if(results[i].errorPercent <= maxErrorPercent)
-        {
-            goodResults++;
-        }
-        else
-        {
-            break;
-        }
-    }
-    if(goodResults > 0)
-    {
-        ArrayResize(results, goodResults);
-    return goodResults;
-    }
-    else
-    {
-        int keepCount = MathMin(10, resultCount);
-    ArrayResize(results, keepCount);
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ No results with error < ", maxErrorPercent, "%, keeping best ", keepCount, " results");
-    #endif
-    return keepCount;
-    }
+    return 0;
 }
 
-//+------------------------------------------------------------------+
-//| Auto-Select Best Frequency for Current AB=CD Pattern            |
 
+//+------------------------------------------------------------------+
+//| Auto-Select Best Frequency for Current AB=CD Pattern - STUBBED  |
 //+------------------------------------------------------------------+
 bool AutoSelectBestFrequency(string patternName)
 {
-        string lineAB = patternName + "_Line_AB";
-    string lineBC = patternName + "_Line_BC";
-    if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Pattern not found: ", patternName);
-    #endif
+    // Frequency learning system removed - auto-selection disabled
     return false;
-    }
-    datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
-    double pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
-    datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
-    double pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
-    datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
-    double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
-    if(tA <= 0 || tB <= 0 || tC <= 0 || pA <= 0 || pB <= 0 || pC <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Invalid pattern data");
-    #endif
-    return false;
-    }
-    int barA = iBarShift(_Symbol, _Period, tA);
-    int barB = iBarShift(_Symbol, _Period, tB);
-    int AB_Bars = barA - barB;
-    if(AB_Bars < 1) AB_Bars = 1;
-    int barX = barA + AB_Bars;
-    datetime tX = iTime(_Symbol, 0, barX);
-    if(tX <= 0 || tX >= tA) {
-        
-        tX = tA - (tB - tA);
-    if(tX <= 0) tX = tA - 3600; 
-    }
-    bool isABBullish = (pB > pA);
-    double AB_Distance = MathAbs(pB - pA);
-    double pX;
-    if(isABBullish) {
-        
-        
-        
-        pX = pA + (AB_Distance * 0.618); 
-    } else {
-        
-        
-        
-        pX = pA - (AB_Distance * 0.618); 
-    }
-    if(pX <= 0) {
-        if(isABBullish) {
-            pX = pA + (AB_Distance * 0.5); 
-        } else {
-            pX = pA - (AB_Distance * 0.5);
-        }
-    }
-    if(pX <= 0) pX = pA;
-    FrequencySearchResult results[];
-    ArrayResize(results, 0);
-    bool hasValidX = (MathAbs(pX - pA) > MathAbs(pB - pA) * 0.1);
-    int resultCount;
-    if(hasValidX) {
-        
-        resultCount = FindOptimalFrequencyForABCD(tX, pX, tA, pA, tB, pB, tC, pC, results, 5.0);
-    } else {
-        
-        
-        resultCount = FindOptimalFrequencyForABCD(tA, pA, tA, pA, tB, pB, tC, pC, results, 5.0);
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ X point estimation not reliable, using simplified analysis");
-    #endif
-    }
-    if(resultCount == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ No suitable frequency found (error > 5%)");
-    #endif
-    return false;
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    Print("🔍 FREQUENCY SEARCH RESULTS");
-    Print("Pattern: ", patternName);
-    Print("AB Distance: ", DoubleToString(MathAbs(pB - pA), Digits), " (", 
-          DoubleToString(MathAbs(pB - pA) / ((Digits == 3 || Digits == 5) ? Point * 10 : Point), 1), " pips)");
-    Print("========================================");
-    Print("🎯 BEST MATCH:");
-    Print("   Frequency: ", DoubleToString(results[0].frequency, 3), "% (Index: ", results[0].frequencyIndex, ")");
-    Print("   Target: Step ", results[0].targetStep, " | Error: ", DoubleToString(results[0].errorPercent, 3), "% (", DoubleToString(results[0].errorPips, 1), " pips)");
-    Print("   Speed: ", DoubleToString(results[0].gannAngle, 2), "x | Consistency: ", DoubleToString(results[0].angleWeight * 100, 1), "%");
-    Print("   Time Symmetry: ", DoubleToString(results[0].timeSymmetry * 100, 1), "% | Total Score: ", DoubleToString(results[0].totalScore, 2));
-    Print("========================================");
-    Print("📊 TOP 10 ALTERNATIVES:");
-    #endif
-    int displayCount = MathMin(10, resultCount);
-    for(int i = 0; i < displayCount; i++)
-    {
-        Print(StringFormat("%d. %.3f%% → Step %d | Err: %.2f%% (%.1f pips) | Speed: %.2fx | Score: %.2f",
-              i + 1,
-              results[i].frequency,
-              results[i].targetStep,
-              results[i].errorPercent,
-              results[i].errorPips,
-              results[i].gannAngle,
-              results[i].totalScore));
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("========================================");
-    #endif
-    double bestFreq = results[0].frequency;
-    int bestIndex = results[0].frequencyIndex;
-    g_th3FrequencyOverride = bestFreq;
-    g_th3FrequencyIndex = bestIndex;
-    string chartIdStr = GetCachedChartIdStr();
-    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
-    GlobalVariableSet(freqGvarName, bestFreq);
-    GlobalVariableSet(indexGvarName, bestIndex);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Frequency applied successfully");
-    #endif
-    UpdateTH3FrequencyLabel(bestFreq);
-    return true;
 }
+
+
 
 //+------------------------------------------------------------------+
 //| Calculate AB=CD Point D (with 9-level validation)               |
@@ -1712,7 +997,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     #endif
     double AB_Distance = MathAbs(pB - pA);
     bool isBullish = (pB > pA);
-    double frequency = GetCurrentTH3Frequency();
+    double frequency = inpTH3BaseStepPercent;
     double baseUnit = AB_Distance * (frequency / 100.0);
     double pipSize = GetCachedPipSize();
     double labelOffset;
@@ -2026,7 +1311,7 @@ void UpdateAllTH3Objects() {
     double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
     if(tA > 0 && tB > 0 && tC > 0 && pA > 0 && pB > 0 && pC > 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("🔄 Updating pattern: ", baseName, " with frequency: ", DoubleToString(GetCurrentTH3Frequency(), 3), "%");
+            Print("🔄 Updating pattern: ", baseName, " with frequency: ", DoubleToString(inpTH3BaseStepPercent, 3), "%");
     #endif
     DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
     updatedCount++;
@@ -2038,7 +1323,7 @@ void UpdateAllTH3Objects() {
     }
     #ifdef ENABLE_DEBUG_LOGS
     Print("✅ Updated ", updatedCount, " AB=CD patterns with frequency: ", 
-          DoubleToString(GetCurrentTH3Frequency(), 3), "%");
+          DoubleToString(inpTH3BaseStepPercent, 3), "%");
     #endif
     ChartRedraw(0);
 }
@@ -2170,56 +1455,11 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                     waves,
                     consolidationFactor,
                     5.0);
-    if(resultCount > 0) {
-                    
-                    g_th3FrequencyOverride = searchResults[0].frequency;
-    g_th3FrequencyIndex = searchResults[0].frequencyIndex;
-    string chartIdStr = GetCachedChartIdStr();
-    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
-    GlobalVariableSet(freqGvarName, g_th3FrequencyOverride);
-    GlobalVariableSet(indexGvarName, g_th3FrequencyIndex);
-    #ifdef ENABLE_DEBUG_LOGS
-                    Print("========================================");
-    Print("🎯 AUTO-SELECTED FREQUENCY");
-    Print("========================================");
-    Print("Best: ", DoubleToString(searchResults[0].frequency, 3), "% → Step ", searchResults[0].targetStep);
-    Print("Error: ", DoubleToString(searchResults[0].errorPercent, 3), "% (", DoubleToString(searchResults[0].errorPips, 1), " pips)");
-    Print("Speed: ", DoubleToString(searchResults[0].gannAngle, 2), "x | Consistency: ", DoubleToString(searchResults[0].angleWeight * 100, 1), "%");
-    Print("Time Sym: ", DoubleToString(searchResults[0].timeSymmetry * 100, 1), "% | Score: ", DoubleToString(searchResults[0].totalScore, 2));
-    Print("========================================");
-    Print("📊 TOP 5 ALTERNATIVES:");
-    #endif
-    for(int i = 0; i < MathMin(5, resultCount); i++) {
-        Print(StringFormat("%d. %.3f%% → Step %d | Err: %.2f%% | Speed: %.2fx | Score: %.2f",
-                              i + 1,
-                              searchResults[i].frequency,
-                              searchResults[i].targetStep,
-                              searchResults[i].errorPercent,
-                              searchResults[i].gannAngle,
-                              searchResults[i].totalScore));
-                    }
-    #ifdef ENABLE_DEBUG_LOGS
-                    Print("========================================");
-    #endif
-    }
+    
+    // Frequency learning removed - pattern will use fixed inpTH3BaseStepPercent
     string patternName = "ABCD_Pattern_" + IntegerToString((long)GetTickCount());
     DrawABCDPattern(patternName, g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB, g_abcdTimeC, g_abcdPriceC);
     SetActiveABCDPattern(patternName);
-    SavePatternForLearning(
-                    patternName,
-                    g_abcdTimeX, g_abcdPriceX,
-                    g_abcdTimeA, g_abcdPriceA,
-                    g_abcdTimeB, g_abcdPriceB,
-                    g_abcdTimeC, g_abcdPriceC,
-                    searchResults[0].frequency,
-                    searchResults[0].frequencyIndex,
-                    searchResults[0].targetStep,
-                    searchResults[0].errorPercent,
-                    searchResults[0].totalScore,
-                    waves,
-                    consolidationFactor
-                );
     ObjectDelete(0, "ABCD_Temp_X");
     ObjectDelete(0, "ABCD_Temp_A");
     ObjectDelete(0, "ABCD_Temp_B");
@@ -2230,7 +1470,6 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
     g_abcdDrawing = false;
     g_abcdPointCount = 0;
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
-    UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
     ChartRedraw();
     #ifdef ENABLE_DEBUG_LOGS
                 Print("✅ AB=CD pattern created: ", patternName);
@@ -2444,7 +1683,6 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
     if(g_activeABCDPattern == baseName) {
                 SetActiveABCDPattern("");
             }
-    OnPatternDeleted(baseName);
     #ifdef ENABLE_DEBUG_LOGS
             Print("✅ Pattern cleanup complete: ", baseName);
     #endif
@@ -2486,39 +1724,6 @@ void ToggleTH3Tool() {
 }
 
 //+------------------------------------------------------------------+
-//| Cycle TH3 Frequency (Keys 3 and 4)                              |
-
-//+------------------------------------------------------------------+
-void CycleTH3Frequency() {
-        if(g_th3FrequencyIndex < 0 || g_th3FrequencyIndex >= TH3_FREQUENCY_COUNT) {
-        g_th3FrequencyIndex = 16;    }
-    
-    g_th3FrequencyIndex = (g_th3FrequencyIndex + 1) % TH3_FREQUENCY_COUNT;
-    g_th3FrequencyOverride = TH3_TEST_FREQUENCIES[g_th3FrequencyIndex];
-    CheckSmartFeedback();
-    UpdateAllTH3Objects();
-    UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
-    ChartRedraw(0);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 TH3 Frequency: ", DoubleToString(g_th3FrequencyOverride, 3), "%");
-    #endif
-    }
-    void DecrementTH3Frequency() {
-        if(g_th3FrequencyIndex < 0 || g_th3FrequencyIndex >= TH3_FREQUENCY_COUNT) {
-        g_th3FrequencyIndex = 16;    }
-    
-    g_th3FrequencyIndex = (g_th3FrequencyIndex - 1 + TH3_FREQUENCY_COUNT) % TH3_FREQUENCY_COUNT;
-    g_th3FrequencyOverride = TH3_TEST_FREQUENCIES[g_th3FrequencyIndex];
-    CheckSmartFeedback();
-    UpdateAllTH3Objects();
-    UpdateTH3FrequencyLabel(g_th3FrequencyOverride);
-    ChartRedraw(0);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 TH3 Frequency: ", DoubleToString(g_th3FrequencyOverride, 3), "%");
-    #endif
-    }
-
-//+------------------------------------------------------------------+
 //| Find Optimal Frequency with Learning Data                        |
 
 //| Returns: result count + fills waves and consolidation params    |
@@ -2531,13 +1736,11 @@ int FindOptimalFrequencyForABCD_WithLearningData(
     double &consolidationFactor_out,
     double maxErrorPercent = 5.0)
 {
-    
+    // Frequency learning system removed - return empty results
     ArrayResize(results, 0);
-    double AB_Distance = MathAbs(pB - pA);
-    if(AB_Distance <= 0) return 0;
-    waves_out = AnalyzeThreeWaves(tX, pX, tA, pA, tB, pB, tC, pC);
-    consolidationFactor_out = CalculateConsolidationFactor(tA, tB, tC, waves_out);
-    int resultCount = FindOptimalFrequencyForABCD(tX, pX, tA, pA, tB, pB, tC, pC, results, maxErrorPercent);
-    return resultCount;
+    WaveAnalysis emptyWaves;
+    waves_out = emptyWaves;
+    consolidationFactor_out = 0.0;
+    return 0;
 }
 

@@ -191,9 +191,7 @@ void ClearAllModeLabels() {
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
     }
-    if(ObjectFind(0, g_frequencyLabelName) >= 0) {
-        ObjectDelete(0, g_frequencyLabelName);
-    }
+
     Comment("");
 }
     void ApplyModeLabelStyle(const string name, const color textColor, const int yOffsetExtra = 0) {
@@ -258,51 +256,6 @@ void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) retu
     if(inpModeLabelDuration > 0) {
         EventSetTimer(inpModeLabelDuration);
     }
-}
-
-//+------------------------------------------------------------------+
-//| Update TH3 Frequency Label (auto-hide after 5 seconds)          |
-
-//+------------------------------------------------------------------+
-void UpdateTH3FrequencyLabel(double frequency) {    if(!inpShowModeChangeLabel) return;
-    ClearAllModeLabels();
-    if(IsIndicatorHidden()) return;
-    string stepInfo = "";
-    int total = ObjectsTotal(0, -1, OBJ_FIBO);
-    for(int i = 0; i < total; i++) {
-        string name = ObjectName(0, i, -1, OBJ_FIBO);
-    if(StringFind(name, "TH3_Structure_") == 0 && 
-           StringFind(name, "_Text") < 0 && 
-           StringFind(name, "_Target") < 0) {
-        datetime t1 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 0);
-    double p1 = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
-    datetime t2 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 1);
-    double p2 = ObjectGetDouble(0, name, OBJPROP_PRICE, 1);
-    if(t1 <= 0 || t2 <= 0 || p1 <= 0 || p2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ GetStructureRangeFromTH3: Invalid object data for ", name);
-    #endif
-    continue;
-            }
-    if(t1 > 0 && t2 > 0 && p1 > 0 && p2 > 0) {
-        double range = MathAbs(p2 - p1);
-    double rangePips = CalculatePipsDistance(p1, p2);
-    double stepPips = rangePips * (frequency / 100.0);
-    double stepCount = rangePips / stepPips;
-    int fullSteps = (int)MathFloor(stepCount);
-    double remainder = stepCount - fullSteps;
-    stepInfo = StringFormat(" | Step: %.1f pips | Steps: %d + %.2f", 
-                    stepPips, fullSteps, remainder);
-    break;            }
-        }
-    }
-    if(ObjectFind(0, g_frequencyLabelName) < 0) {
-        ObjectCreate(0, g_frequencyLabelName, OBJ_LABEL, 0, 0, 0);
-    }
-    ObjectSetString(0, g_frequencyLabelName, OBJPROP_TEXT, 
-        "[ TH3 Freq: " + DoubleToString(frequency, 3) + "%" + stepInfo + " ]");
-    ApplyModeLabelStyle(g_frequencyLabelName, inpModeLabelColor, FREQUENCY_LABEL_Y_EXTRA);
-    EventSetTimer(FREQUENCY_LABEL_TIMER_SEC);
 }
 
 //+------------------------------------------------------------------+
