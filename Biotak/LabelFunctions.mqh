@@ -729,10 +729,12 @@ bool DrawMainLevels(const string prefix) {
     // PERF: Pre-fetch all ATR values and skip full redraw if nothing changed
     static double s_lastATRPips[8] = {0,0,0,0,0,0,0,0};
     static int s_lastATRPeriod = -1;
+    double currentATRValues[8];
     double currentATRPips[8];
     bool anyChanged = (s_lastATRPeriod != Period());
     for(int i = 0; i < 8; i++) {
         double atrVal = GetATRForTimeframe(tfMinutes[i]);
+        currentATRValues[i] = atrVal;
         double pips = (atrVal > 0 && !IsZero(pipSize, EPSILON_PRICE))
                       ? NormalizeDouble(atrVal / pipSize, 1) : 0.0;
         currentATRPips[i] = pips;
@@ -809,10 +811,9 @@ bool DrawMainLevels(const string prefix) {
     for(int i = 0; i < ArraySize(timeframes); i++) {
         string timeframeName = timeframes[i];
     int targetMinutes = tfMinutes[i];
-    
-    // BUGFIX: Use GetATRForTimeframe for direct calculation (not scaled!)
-    // This ensures ATR values are consistent across all chart timeframes
-    double atrValue = GetATRForTimeframe(targetMinutes);
+
+    // PERF: Reuse pre-fetched ATR values from this same call (avoid duplicate heavy computation)
+    double atrValue = currentATRValues[i];
     if(atrValue <= 0 || atrValue == EMPTY_VALUE) {
             ATR_PRINTF2("=== DisplayATRLabels: Invalid ATR for ", timeframeName, " ===");
     continue;

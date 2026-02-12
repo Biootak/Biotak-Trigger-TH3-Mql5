@@ -10,11 +10,11 @@
 
 struct STH3ProfTag {
     string name;
-    long totalMs;
+    long totalUs;
     int count;
-    int maxMs;
+    long maxUs;
     datetime lastPrint;
-    uint startMs;
+    ulong startUs;
     bool running;
     bool used;
 };
@@ -26,11 +26,11 @@ void TH3ProfInitOnce() {
     if(g_th3ProfInit) return;
     for(int i = 0; i < TH3_PROF_MAX_TAGS; i++) {
         g_th3ProfTags[i].name = "";
-        g_th3ProfTags[i].totalMs = 0;
+        g_th3ProfTags[i].totalUs = 0;
         g_th3ProfTags[i].count = 0;
-        g_th3ProfTags[i].maxMs = 0;
+        g_th3ProfTags[i].maxUs = 0;
         g_th3ProfTags[i].lastPrint = 0;
-        g_th3ProfTags[i].startMs = 0;
+        g_th3ProfTags[i].startUs = 0;
         g_th3ProfTags[i].running = false;
         g_th3ProfTags[i].used = false;
     }
@@ -50,9 +50,9 @@ int TH3ProfFindOrAddTag(const string name) {
         if(!g_th3ProfTags[i].used) {
             g_th3ProfTags[i].used = true;
             g_th3ProfTags[i].name = name;
-            g_th3ProfTags[i].totalMs = 0;
+            g_th3ProfTags[i].totalUs = 0;
             g_th3ProfTags[i].count = 0;
-            g_th3ProfTags[i].maxMs = 0;
+            g_th3ProfTags[i].maxUs = 0;
             g_th3ProfTags[i].lastPrint = 0;
             return i;
         }
@@ -62,14 +62,14 @@ int TH3ProfFindOrAddTag(const string name) {
     return 0;
 }
 
-uint TH3ProfNowMs() {
-    return GetTickCount();
+ulong TH3ProfNowUs() {
+    return GetMicrosecondCount();
 }
 
 // Start/Stop by tag name (no local variables, avoids macro token-pasting).
 void TH3ProfStartTag(const string tag) {
     int idx = TH3ProfFindOrAddTag(tag);
-    g_th3ProfTags[idx].startMs = TH3ProfNowMs();
+    g_th3ProfTags[idx].startUs = TH3ProfNowUs();
     g_th3ProfTags[idx].running = true;
 }
 
@@ -77,22 +77,25 @@ void TH3ProfEndTag(const string tag) {
     int idx = TH3ProfFindOrAddTag(tag);
     if(!g_th3ProfTags[idx].running) return;
 
-    uint endMs = TH3ProfNowMs();
-    int elapsed = (int)(endMs - g_th3ProfTags[idx].startMs);
+    ulong endUs = TH3ProfNowUs();
+    long elapsedUs = (endUs >= g_th3ProfTags[idx].startUs) ? (long)(endUs - g_th3ProfTags[idx].startUs) : 0;
     g_th3ProfTags[idx].running = false;
 
-    g_th3ProfTags[idx].totalMs += elapsed;
+    g_th3ProfTags[idx].totalUs += elapsedUs;
     g_th3ProfTags[idx].count += 1;
-    if(elapsed > g_th3ProfTags[idx].maxMs) g_th3ProfTags[idx].maxMs = elapsed;
+    if(elapsedUs > g_th3ProfTags[idx].maxUs) g_th3ProfTags[idx].maxUs = elapsedUs;
 
     // Print at most once per 5 seconds per tag to avoid log spam
     datetime now = TimeCurrent();
     if(g_th3ProfTags[idx].lastPrint == 0 || (now - g_th3ProfTags[idx].lastPrint) >= 5) {
-        double avg = (g_th3ProfTags[idx].count > 0) ? ((double)g_th3ProfTags[idx].totalMs / (double)g_th3ProfTags[idx].count) : 0.0;
+        double avgMs = (g_th3ProfTags[idx].count > 0)
+                       ? (((double)g_th3ProfTags[idx].totalUs / (double)g_th3ProfTags[idx].count) / 1000.0)
+                       : 0.0;
+        double maxMs = (double)g_th3ProfTags[idx].maxUs / 1000.0;
         Print("[PROF] ", tag,
               " | count=", g_th3ProfTags[idx].count,
-              " avg=", DoubleToString(avg, 2), "ms",
-              " max=", g_th3ProfTags[idx].maxMs, "ms");
+              " avg=", DoubleToString(avgMs, 3), "ms",
+              " max=", DoubleToString(maxMs, 3), "ms");
         g_th3ProfTags[idx].lastPrint = now;
     }
 }

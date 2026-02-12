@@ -1254,45 +1254,67 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
 
 //+------------------------------------------------------------------+
 //| Invalidate ATR Cache (call when data changes significantly)      |
-
 //| AUDIT FIX: Invalidate both caches with logging                   |
 //+------------------------------------------------------------------+
 void InvalidateATRCache() {
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
     int invalidatedCount = 0;
     #endif
-    
+
     // Invalidate main cache
     if(g_atrCache.valid) {
         g_atrCache.valid = false;
-    #ifdef ENABLE_DEBUG_LOGS
+        #ifdef ENABLE_DEBUG_LOGS
         invalidatedCount++;
-    #endif
+        #endif
     }
-    
-    // AUDIT FIX: Invalidate multi-TF cache
+
+    // Invalidate multi-TF cache
     for(int i = 0; i < g_multiTFCacheCount; i++) {
         if(g_multiTFCache[i].valid) {
             g_multiTFCache[i].valid = false;
-    #ifdef ENABLE_DEBUG_LOGS
+            #ifdef ENABLE_DEBUG_LOGS
             invalidatedCount++;
-    #endif
+            #endif
+        }
     }
-    }
+
     #ifdef ENABLE_DEBUG_LOGS
     if(invalidatedCount > 0) {
         Print("️ InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
     }
     #endif
+}
+
+//+------------------------------------------------------------------+
+//| Warmup ATR cache for common label timeframes                     |
+//| Purpose: precompute first heavy ATR calls during OnInit          |
+//+------------------------------------------------------------------+
+void WarmupATRMultiTFCache() {
+    if(!inpShowATRLabels) return;
+
+    int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
+    for(int i = 0; i < ArraySize(tfMinutes); i++) {
+        // Best-effort warmup; keep behavior unchanged.
+        double atrWarmup = GetATRForTimeframe(tfMinutes[i]);
     }
+
+    #ifdef ENABLE_DEBUG_LOGS
+    static datetime s_lastWarmupLog = 0;
+    datetime now = TimeCurrent();
+    if(now > 0 && (s_lastWarmupLog == 0 || now - s_lastWarmupLog >= 60)) {
+        Print("⚡ ATR warmup completed for label timeframes");
+        s_lastWarmupLog = now;
+    }
+    #endif
+}
 
 //+------------------------------------------------------------------+
 //| Get ATR Cache Statistics (for debugging)                         |
-
 //| AUDIT FIX: Include multi-TF cache stats                          |
 //+------------------------------------------------------------------+
 string GetATRCacheStats() {
-        string stats = "";
+    string stats = "";
     if(!g_atrCacheInitialized || !g_atrCache.valid) {
         stats += "ATR Cache: Not initialized or invalid\n";
     } else {
@@ -1302,12 +1324,11 @@ string GetATRCacheStats() {
                            g_atrCache.barCount,
                            g_atrCache.cachedTimeframe);
     }
-    
-    // AUDIT FIX: Multi-TF cache stats
+
     if(g_multiTFCacheInitialized && g_multiTFCacheCount > 0) {
         stats += StringFormat("Multi-TF Cache: %d entries\n", g_multiTFCacheCount);
-    for(int i = 0; i < g_multiTFCacheCount; i++) {
-        if(g_multiTFCache[i].valid) {
+        for(int i = 0; i < g_multiTFCacheCount; i++) {
+            if(g_multiTFCache[i].valid) {
                 stats += StringFormat("  TF=%d min: ATR=%.6f, Age=%d sec\n",
                                    g_multiTFCache[i].timeframeMinutes,
                                    g_multiTFCache[i].atrValue,

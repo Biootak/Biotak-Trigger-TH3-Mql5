@@ -52,7 +52,6 @@ input bool inpBasePriceThresholdEnabled = true;
 input double inpBasePriceThresholdPercent = 0.066;
     input bool inpUseDynamicTradingDay = true;
 input double inpCustomTHStartPrice = 0.0;
-input int inpCustomPriceMaxLevels = 20;
 input color inpCustomPriceLevelColor = clrDodgerBlue;
 input int inpCustomPriceLevelWidth = 1;
 input bool inpEnableMagnet = true;

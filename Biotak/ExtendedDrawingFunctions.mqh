@@ -130,31 +130,34 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
     if(upperPrice <= lowerPrice) return false;
     string lineTop = zoneName + "_Top";
     string lineBottom = zoneName + "_Bottom";
-    if(ObjectFind(0, lineTop) >= 0) ObjectDelete(0, lineTop);
-    if(ObjectFind(0, lineBottom) >= 0) ObjectDelete(0, lineBottom);
     bool isHidden = IsIndicatorHidden();
-    if(ObjectCreate(0, lineTop, OBJ_HLINE, 0, 0, upperPrice)) {
-        ObjectSetInteger(0, lineTop, OBJPROP_COLOR, zoneColor);
-    ObjectSetInteger(0, lineTop, OBJPROP_STYLE, STYLE_DOT);
-    ObjectSetInteger(0, lineTop, OBJPROP_WIDTH, 1);
-    ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
-    ObjectSetInteger(0, lineTop, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
-    if(isHidden) {
-            ObjectSetInteger(0, lineTop, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+
+    bool topExists = (ObjectFind(0, lineTop) >= 0);
+    if(!topExists) {
+        if(!ObjectCreate(0, lineTop, OBJ_HLINE, 0, 0, upperPrice)) return false;
+        ObjectSetInteger(0, lineTop, OBJPROP_STYLE, STYLE_DOT);
+        ObjectSetInteger(0, lineTop, OBJPROP_WIDTH, 1);
+        ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
+        ObjectSetInteger(0, lineTop, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
     }
-    if(ObjectCreate(0, lineBottom, OBJ_HLINE, 0, 0, lowerPrice)) {
-        ObjectSetInteger(0, lineBottom, OBJPROP_COLOR, zoneColor);
-    ObjectSetInteger(0, lineBottom, OBJPROP_STYLE, STYLE_DOT);
-    ObjectSetInteger(0, lineBottom, OBJPROP_WIDTH, 1);
-    ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
-    ObjectSetInteger(0, lineBottom, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
-    if(isHidden) {
-            ObjectSetInteger(0, lineBottom, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+    ObjectSetDouble(0, lineTop, OBJPROP_PRICE, upperPrice);
+    ObjectSetInteger(0, lineTop, OBJPROP_COLOR, zoneColor);
+    ObjectSetInteger(0, lineTop, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+
+    bool bottomExists = (ObjectFind(0, lineBottom) >= 0);
+    if(!bottomExists) {
+        if(!ObjectCreate(0, lineBottom, OBJ_HLINE, 0, 0, lowerPrice)) return false;
+        ObjectSetInteger(0, lineBottom, OBJPROP_STYLE, STYLE_DOT);
+        ObjectSetInteger(0, lineBottom, OBJPROP_WIDTH, 1);
+        ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
+        ObjectSetInteger(0, lineBottom, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
     }
+    ObjectSetDouble(0, lineBottom, OBJPROP_PRICE, lowerPrice);
+    ObjectSetInteger(0, lineBottom, OBJPROP_COLOR, zoneColor);
+    ObjectSetInteger(0, lineBottom, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+
     return true;
 }
 

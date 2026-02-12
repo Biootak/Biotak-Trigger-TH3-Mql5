@@ -266,6 +266,7 @@ int OnInitHandler() {    InitializeGlobalCache();
         }
     }
     InitializeATRCache();
+    WarmupATRMultiTFCache();
     UpdateLockStatusLabel();
     PrintBuildInfo();
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
@@ -522,17 +523,19 @@ void HideAllTHObjects()
 //+------------------------------------------------------------------+
 void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 {
-        int totalDeleted = 0;
+    int totalDeleted = 0;
     int totalFailed = 0;
+    if(StringLen(objectPrefix) == 0) return;
+
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastClearLog = 0;
     if(TimeCurrent() - s_lastClearLog > 5) {
         Print("[MT4] 🧹 CLEARING ALL LEVELS with prefix: ", objectPrefix);
-    s_lastClearLog = TimeCurrent();
+        s_lastClearLog = TimeCurrent();
     }
     #endif
-    // PERF: Use static suffix arrays — avoids re-allocating 24+5 strings on every call
-    // Only the prefix concatenation needs to happen per call
+
+    // PERF: Single-pass deletion to avoid 24+ ObjectsDeleteAll full scans per redraw.
     static const string LEVEL_SUFFIXES[] = {
         "SSLS_", "M_", "MLabel_", "MEq_", "MEqLabel_", "TP_", "Combo_",
         "SharedPattern_", "TH_Level_", "S_",
@@ -544,72 +547,53 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         "StructureLevel5_Up_", "StructureLevel5_Down_",
         "Mid", "Factor_"
     };
-    static const int LEVEL_SUFFIX_COUNT = 24;
-    
-    // PERF: Cache the concatenated prefix+suffix strings to avoid 29 string allocations per call
-    static string s_cachedPrefixedSuffixes[24];
-    static string s_cachedZoneSuffixes[5];
-    static string s_lastCachedPrefix = "";
-    static const string ZONE_SUFFIX_NAMES[] = {
+    static const string ZONE_SUFFIXES[] = {
         "SSLS_Zone_", "M_Zone_", "TP_Zone_", "Combo_Zone_", "Factor_Zone_"
     };
-    static const int ZONE_SUFFIX_COUNT = 5;
-    
-    if(s_lastCachedPrefix != objectPrefix) {
-        for(int i = 0; i < LEVEL_SUFFIX_COUNT; i++) {
-            s_cachedPrefixedSuffixes[i] = objectPrefix + LEVEL_SUFFIXES[i];
-        }
-        for(int i = 0; i < ZONE_SUFFIX_COUNT; i++) {
-            s_cachedZoneSuffixes[i] = objectPrefix + ZONE_SUFFIX_NAMES[i];
-        }
-        s_lastCachedPrefix = objectPrefix;
-    }
-    
-    for(int i = 0; i < LEVEL_SUFFIX_COUNT; i++) {
-        int result = ObjectsDeleteAll(0, s_cachedPrefixedSuffixes[i], -1, -1);
-    if(result >= 0) {
-            totalDeleted += result;
-        } else {
-            totalFailed++;
-    int error = GetLastError();
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ ClearAllLevels: Failed to delete suffix '", LEVEL_SUFFIXES[i], "' - Error: ", error);
-    #endif
-    ResetLastError();
-    result = ObjectsDeleteAll(0, objectPrefix + LEVEL_SUFFIXES[i], -1, -1);
-    if(result >= 0) {
-                totalDeleted += result;
-    totalFailed--;            }
-        }
-    }
-    if(clearZones) {
-    for(int i = 0; i < ZONE_SUFFIX_COUNT; i++) {
-        int result = ObjectsDeleteAll(0, s_cachedZoneSuffixes[i], -1, -1);
-    if(result >= 0) {
-                totalDeleted += result;
-            } else {
-                totalFailed++;
+
+    int total = ObjectsTotal(0, -1, -1);
+    int prefixLen = StringLen(objectPrefix);
+    for(int i = total - 1; i >= 0; i--) {
+        string name = ObjectName(0, i, -1, -1);
+        if(name == "") continue;
+        if(StringLen(name) < prefixLen) continue;
+        if(StringSubstr(name, 0, prefixLen) != objectPrefix) continue;
+
+        string tail = StringSubstr(name, prefixLen);
+        bool shouldDelete = false;
+
+        for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
+            string suf = LEVEL_SUFFIXES[s];
+            int sl = StringLen(suf);
+            if(StringLen(tail) >= sl && StringSubstr(tail, 0, sl) == suf) {
+                shouldDelete = true;
+                break;
             }
         }
+
+        if(!shouldDelete && clearZones) {
+            for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++) {
+                string zs = ZONE_SUFFIXES[z];
+                int zl = StringLen(zs);
+                if(StringLen(tail) >= zl && StringSubstr(tail, 0, zl) == zs) {
+                    shouldDelete = true;
+                    break;
+                }
+            }
+        }
+
+        if(!shouldDelete) continue;
+
+        if(ObjectDelete(0, name)) totalDeleted++;
+        else totalFailed++;
     }
+
     #ifdef ENABLE_DEBUG_LOGS
     if(totalDeleted > 0 || totalFailed > 0) {
         Print("✅ ClearAllLevels: Deleted=", totalDeleted, ", Failed=", totalFailed);
     }
     #endif
-    if(totalFailed > 5) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ WARNING: Multiple deletion failures (", totalFailed, ") - forcing manual cleanup");
-    #endif
-    int total = ObjectsTotal(0, -1, -1);
-    int prefixLen = StringLen(objectPrefix);
-    for(int i = total - 1; i >= 0; i--) {
-        string name = ObjectName(0, i, -1, -1);
-    if(StringLen(name) >= prefixLen && StringSubstr(name, 0, prefixLen) == objectPrefix) {
-                ObjectDelete(0, name);
-            }
-        }
-    }
+
     // FIX: Clear ObjectCache after deleting objects to prevent stale cache entries.
     // Without this, rapid mode cycling (E key) causes CacheObjectExists to return true
     // for deleted zones, making CreateZone skip creation and zones stop rendering.
@@ -617,19 +601,12 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 }
     void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
-        if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {        maxAbove = inpCustomPriceMaxLevels;
-    maxBelow = inpCustomPriceMaxLevels;
-    if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
-    if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
-    if(maxAbove < 1) maxAbove = 1;
-    if(maxBelow < 1) maxBelow = 1;
-    } else {        maxAbove = inpMaxLevels;
-    maxBelow = inpMaxLevels;
-    if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
-    if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
-    if(maxAbove < 1) maxAbove = 1;
-    if(maxBelow < 1) maxBelow = 1;
-    }
+            maxAbove = inpMaxLevels;
+        maxBelow = inpMaxLevels;
+        if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
+        if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
+        if(maxAbove < 1) maxAbove = 1;
+        if(maxBelow < 1) maxBelow = 1;
 }
 
 //+------------------------------------------------------------------+
@@ -1821,7 +1798,7 @@ void RedrawLabelsOnly() {
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ Custom Price Mode activated! Using ", inpCustomPriceMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+                Print("✅ Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
     #endif
     }
         }
@@ -1851,7 +1828,7 @@ void RedrawLabelsOnly() {
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ Custom Price Mode activated! Using ", inpCustomPriceMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+            Print("✅ Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
     #endif
     }
     }

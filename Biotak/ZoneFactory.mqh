@@ -105,6 +105,36 @@ bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
     return (endTime > startTime);
 }
 
+// PERF: Compute zone time range at most once per redraw frame.
+// Uses CacheGetFrameTime() (refreshed in RedrawAllObjects) as frame key.
+bool GetZoneTimesForCurrentFrame(datetime &startTime, datetime &endTime)
+{
+    static datetime s_frameKey = 0;
+    static int s_cachedPeriod = -1;
+    static datetime s_start = 0;
+    static datetime s_end = 0;
+
+    datetime frameKey = CacheGetFrameTime();
+    int period = GetCachedPeriod();
+    if(frameKey > 0 && frameKey == s_frameKey && period == s_cachedPeriod && s_start > 0 && s_end > s_start) {
+        startTime = s_start;
+        endTime = s_end;
+        return true;
+    }
+
+    datetime calcStart = 0, calcEnd = 0;
+    if(!CalculateZoneTimes(calcStart, calcEnd)) return false;
+
+    s_frameKey = frameKey;
+    s_cachedPeriod = period;
+    s_start = calcStart;
+    s_end = calcEnd;
+
+    startTime = calcStart;
+    endTime = calcEnd;
+    return true;
+}
+
 // Core zone creation
 SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
 {
@@ -133,22 +163,10 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     datetime endTime = request.endTime;
 
     if(startTime == 0 || endTime == 0) {
-        int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
-        int extMult = CalculateAdaptiveExtensionMultiplier(MathMax(1, periodSeconds));
-
-        datetime cachedStart = 0, cachedEnd = 0;
-        if(GetCachedZoneGeometry(request.topPrice, request.bottomPrice, extMult, 0, cachedStart, cachedEnd)
-           && cachedStart > 0 && cachedEnd > 0) {
-            startTime = cachedStart;
-            endTime = cachedEnd;
-        }
-        else {
-            if(!CalculateZoneTimes(startTime, endTime)) {
-                result.errorMessage = "Time calculation failed";
-                result.errorCode = ERR_ZONE_NO_DATA;
-                return result;
-            }
-            StoreZoneGeometry(request.topPrice, request.bottomPrice, extMult, 0, startTime, endTime);
+        if(!GetZoneTimesForCurrentFrame(startTime, endTime)) {
+            result.errorMessage = "Time calculation failed";
+            result.errorCode = ERR_ZONE_NO_DATA;
+            return result;
         }
     }
 

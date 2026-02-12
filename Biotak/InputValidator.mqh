@@ -182,7 +182,6 @@ bool ValidateHotkeysUniqueAndSafe() {
 
     // Levels
     if(!ValidatePositive(inpMaxLevels, "MaxLevels")) return INIT_PARAMETERS_INCORRECT;
-    if(!ValidatePositive(inpCustomPriceMaxLevels, "CustomPriceMaxLevels")) return INIT_PARAMETERS_INCORRECT;
 
     // Performance warnings
     if(inpMaxLevels > MAX_SAFE_LEVELS) {
