@@ -208,6 +208,7 @@ bool DrawMainLevels(const string prefix) {
     }
     
     if (triggerEnabled || inpShowStructure) {
+        TH3_PROF_START(THLevelsLoops);
         // Get adaptive level counts based on start point type
         int maxLevelsAbove = 0;
     int maxLevelsBelow = 0;
@@ -545,6 +546,8 @@ bool DrawMainLevels(const string prefix) {
                   zoneCountBelow, " zones below");
         }
     #endif
+
+        TH3_PROF_END(THLevelsLoops);
     }
 }
     void SetLabelFont(const string name) {
@@ -577,18 +580,77 @@ bool DrawMainLevels(const string prefix) {
         ObjectDelete(0, targetsObjName);
     }
     
-    if (ObjectFind(0, mainObjName) < 0) {
-        if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
-    }
-    if (ObjectFind(0, stepsObjName) < 0) {
-        if (!ObjectCreate(0, stepsObjName, OBJ_LABEL, 0, 0, 0)) return false;
-    }
-    if (inpShowATRTargets && ObjectFind(0, targetsObjName) < 0) {
-        if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
-    }
     string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
     string mainText = StringFormat("%s: %.1f", timeframeName, atrPips);
     string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
+
+    // PERF: Check if objects already exist with correct text — skip redundant ObjectSet calls
+    bool mainExists = (ObjectFind(0, mainObjName) >= 0);
+    bool stepsExists = (ObjectFind(0, stepsObjName) >= 0);
+    bool targetsExists = (inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0);
+
+    if(mainExists && stepsExists) {
+        // Objects already configured — only update text/color if changed
+        string curMainText = ObjectGetString(0, mainObjName, OBJPROP_TEXT);
+        string curStepsText = ObjectGetString(0, stepsObjName, OBJPROP_TEXT);
+        bool textChanged = (curMainText != mainText || curStepsText != stepsText);
+        if(textChanged) {
+            ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
+            ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
+        }
+        color curColor = (color)ObjectGetInteger(0, mainObjName, OBJPROP_COLOR);
+        if(curColor != textColor) {
+            ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
+            ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
+        }
+        if(inpShowATRTargets) {
+            if(targetsExists) {
+                string curTargets = ObjectGetString(0, targetsObjName, OBJPROP_TEXT);
+                if(curTargets != targetsText) ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
+                color curTColor = (color)ObjectGetInteger(0, targetsObjName, OBJPROP_COLOR);
+                if(curTColor != textColor) ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
+            } else {
+                if(ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) {
+                    ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
+                    ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
+                    SetLabelFont(targetsObjName);
+                }
+            }
+        }
+        // Position update (Y may have changed due to layout shift)
+        int baseY = MathAbs(yPos);
+        int singleLineHeight_u = inpFontSize + inpLabelRowGap;
+        ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY);
+        ObjectSetInteger(0, stepsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight_u);
+        if(inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
+            ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight_u * 2);
+        }
+        int labelXDistance = MathAbs(xPos);
+        int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
+        int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
+        int mainOffset = (stepsTextWidth - mainTextWidth) / 2;
+        if(mainOffset < 0) mainOffset = 0;
+        ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance + mainOffset);
+        ObjectSetInteger(0, stepsObjName, OBJPROP_XDISTANCE, labelXDistance);
+        if(inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
+            int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+            int targetsOffset = (mainTextWidth - targetsTextWidth) / 2 + mainOffset;
+            if(targetsOffset < 0) targetsOffset = 0;
+            ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
+        }
+        return true;
+    }
+
+    // First-time creation: set all properties
+    if (!mainExists) {
+        if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    }
+    if (!stepsExists) {
+        if (!ObjectCreate(0, stepsObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    }
+    if (inpShowATRTargets && !targetsExists) {
+        if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    }
     if(inpShowATRTargets) {
         ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
     ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
@@ -663,21 +725,38 @@ bool DrawMainLevels(const string prefix) {
     double pipSize = GetCachedPipSize();
     int digits = GetCachedDigits();
     if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE) || digits == 0) return;
+
+    TH3_PROF_START(ATRLabels);
     
-    // Clean up old ATR label objects
+    // Naming is timeframe-specific; update in-place to avoid expensive object churn
     string currentTFStr = IntegerToString(Period());
     string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
-    string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
-    ObjectDelete(0, uniquePrefix + "ATR_Title");
-    for(int i = 0; i < ArraySize(allTimeframes); i++) {
-        ObjectDelete(0, uniquePrefix + "ATR_" + allTimeframes[i]);
-    ObjectDelete(0, uniquePrefix + "ATR_Steps_" + allTimeframes[i]);
-    ObjectDelete(0, uniquePrefix + "ATR_Targets_" + allTimeframes[i]);
-    }
     
     // Standard MT5 timeframes with minutes for CalculateHybridATR
     string timeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
     int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
+
+    // PERF: Pre-fetch all ATR values and skip full redraw if nothing changed
+    static double s_lastATRPips[8] = {0,0,0,0,0,0,0,0};
+    static int s_lastATRPeriod = -1;
+    double currentATRPips[8];
+    bool anyChanged = (s_lastATRPeriod != Period());
+    for(int i = 0; i < 8; i++) {
+        double atrVal = GetATRForTimeframe(tfMinutes[i]);
+        double pips = (atrVal > 0 && !IsZero(pipSize, EPSILON_PRICE))
+                      ? NormalizeDouble(atrVal / pipSize, 1) : 0.0;
+        currentATRPips[i] = pips;
+        if(!anyChanged && MathAbs(pips - s_lastATRPips[i]) > 0.05) anyChanged = true;
+    }
+    if(!anyChanged) {
+        // ATR values unchanged — skip expensive object operations
+        TH3_PROF_END(ATRLabels);
+        return;
+    }
+    // Update stored values
+    for(int i = 0; i < 8; i++) s_lastATRPips[i] = currentATRPips[i];
+    s_lastATRPeriod = Period();
+
     // Original color scheme per timeframe
     color colors[] = {
         clrBlack,        // M1
@@ -705,8 +784,9 @@ bool DrawMainLevels(const string prefix) {
     
     // Create "ATR:" title label
     string titleObjName = uniquePrefix + "ATR_Title";
-    ObjectDelete(0, titleObjName);
-    ObjectCreate(0, titleObjName, OBJ_LABEL, 0, 0, 0);
+    if(ObjectFind(0, titleObjName) < 0) {
+        ObjectCreate(0, titleObjName, OBJ_LABEL, 0, 0, 0);
+    }
     ObjectSetString(0, titleObjName, OBJPROP_TEXT, "ATR:");
     ObjectSetInteger(0, titleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, titleObjName, OBJPROP_FONT, inpFontName);
@@ -787,6 +867,8 @@ bool DrawMainLevels(const string prefix) {
     }
     
     ATR_PRINT("=== DisplayATRLabels: Completed ===");
+
+    TH3_PROF_END(ATRLabels);
 }
 
 // Fast ATR labels hide/show without deletion (O(1) object operations)
@@ -1000,8 +1082,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int sectionGap = inpSectionGap;
     string thTitleObjName = objectPrefix + "TH_Title";
-    ObjectDelete(0, thTitleObjName);
-    ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+    if(ObjectFind(0, thTitleObjName) < 0) {
+        ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+    }
     ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
@@ -1031,10 +1114,6 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int lineHeight = GetLabelLineHeight(inpShowTHTargets, rowSpacing);
     ArrayResize(g_storedTHs, 0); // Clear existing stored THs before displaying fractal THs
     ArrayResize(g_labelPositions, 0); // Clear label positions
-    string thLabelPrefix = objectPrefix + "TH_";
-    for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
-        ObjectDelete(0, thLabelPrefix + FRACTAL_TIMEFRAMES[i]);
-    }
     for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
     double percentage = MODIFIED_FRACTAL_PERCENTAGES[i];
@@ -1099,8 +1178,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
     int lineHeight = GetLabelLineHeight(inpShowTHTargets, rowSpacing);
     string thTitleObjName = objectPrefix + "TH_Title";
-    ObjectDelete(0, thTitleObjName);
-    ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+    if(ObjectFind(0, thTitleObjName) < 0) {
+        ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+    }
     ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
@@ -1116,10 +1196,6 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     } else {
         ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
-    string thLabelPrefix = objectPrefix + "TH_";
-    for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
-        ObjectDelete(0, thLabelPrefix + STANDARD_TIMEFRAMES[i]);
     }
     for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];

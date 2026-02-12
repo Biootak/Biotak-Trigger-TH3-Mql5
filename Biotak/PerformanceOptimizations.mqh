@@ -151,14 +151,12 @@ struct FunctionCacheSlot {
 
 // Simple string hash function (DJB2 variant)
 int HashString(const string str) {
-        int hash = 5381;
+        uint hash = 5381;
     int len = StringLen(str);
     for(int i = 0; i < len; i++) {
-        hash = ((hash << 5) + hash) + StringGetCharacter(str, i);
+        hash = ((hash << 5) + hash) + (uint)StringGetCharacter(str, i);
     }
-    // Ensure positive and within bounds
-    if(hash < 0) hash = -hash;
-    return hash % FUNC_CACHE_BUCKETS;
+    return (int)(hash % (uint)FUNC_CACHE_BUCKETS);
 }
     void InitializeFunctionCache() {
         if(g_functionCacheInitialized) return;

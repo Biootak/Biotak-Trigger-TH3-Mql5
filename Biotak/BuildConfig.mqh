@@ -6,6 +6,20 @@
 // Uncomment for DEBUG mode:
 // #define DEBUG_BUILD
 
+// Optional compile-time profiler (no inputs; when disabled it compiles out)
+// Enable by defining ENABLE_TH3_PROFILER (presence macro).
+// Default: enabled only in DEBUG_BUILD.
+#define ENABLE_TH3_PROFILER
+
+#ifndef ENABLE_TH3_PROFILER
+    #ifdef DEBUG_BUILD
+        #define ENABLE_TH3_PROFILER
+    #endif
+#endif
+
+// Must be after ENABLE_TH3_PROFILER
+#include "Profiler.mqh"
+
 #ifdef DEBUG_BUILD
     #define ENABLE_ATR_LOGS
     #define ENABLE_VERBOSE_ERRORS

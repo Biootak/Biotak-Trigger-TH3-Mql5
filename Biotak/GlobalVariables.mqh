@@ -101,6 +101,7 @@ bool g_isHiddenCached = false;
 uint g_isHiddenCacheTime = 0;
     void RefreshIsHiddenCache() {
         string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+    ResetLastError();
     double val = GlobalVariableGet(gvar_name);
     if(GetLastError() == ERR_GLOBALVARIABLE_NOT_FOUND)
         g_isHiddenCached = false;

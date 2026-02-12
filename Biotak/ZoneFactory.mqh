@@ -46,11 +46,28 @@ int CalculateAdaptiveExtensionMultiplier(int periodSeconds)
     return multiplier;
 }
 
-// Calculate zone start/end times
+// PERF: Per-frame static cache for zone times — avoids repeated Bars/iTime/PeriodSeconds calls
+// All zones in the same redraw cycle share identical start/end times
 bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
 {
+    static datetime s_cachedStart = 0;
+    static datetime s_cachedEnd = 0;
+    static int s_cachedPeriod = -1;
+    static datetime s_cachedBarTime = 0;
+
+    int currentPeriod = GetCachedPeriod();
+    datetime bar0Time = iTime(_Symbol, _Period, 0);
+
+    // Return cached result if same period and same bar
+    if(s_cachedPeriod == currentPeriod && bar0Time > 0 && bar0Time == s_cachedBarTime &&
+       s_cachedStart > 0 && s_cachedEnd > s_cachedStart) {
+        startTime = s_cachedStart;
+        endTime = s_cachedEnd;
+        return true;
+    }
+
     int safeBars = Bars(_Symbol, _Period);
-    datetime currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
+    datetime currentTime = (safeBars > 0) ? bar0Time : 0;
 
     if(safeBars > 0) {
         int recheck = Bars(_Symbol, _Period);
@@ -77,6 +94,14 @@ bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
 
     int multiplier = CalculateAdaptiveExtensionMultiplier(periodSeconds);
     endTime = currentTime + (periodSeconds * multiplier);
+
+    // Store in static cache for next call in same frame
+    if(endTime > startTime) {
+        s_cachedStart = startTime;
+        s_cachedEnd = endTime;
+        s_cachedPeriod = currentPeriod;
+        s_cachedBarTime = bar0Time;
+    }
     return (endTime > startTime);
 }
 

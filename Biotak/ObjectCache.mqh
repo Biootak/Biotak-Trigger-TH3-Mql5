@@ -36,14 +36,12 @@ static SObjectCacheSlot g_objectCacheHash[CACHE_HASH_BUCKETS];
 #define MAX_CACHE_SIZE 400
 
 int HashObjectName(const string name) {
-        int hash = 5381;
+        uint hash = 5381;
     int len = StringLen(name);
     for(int i = 0; i < len; i++) {
-        hash = ((hash << 5) + hash) + StringGetCharacter(name, i);
+        hash = ((hash << 5) + hash) + (uint)StringGetCharacter(name, i);
     }
-    // Ensure positive and within bounds
-    if(hash < 0) hash = -hash;
-    return hash % CACHE_HASH_BUCKETS;
+    return (int)(hash % (uint)CACHE_HASH_BUCKETS);
 }
     void InitializeObjectCacheHash() {
         if(g_objectCacheHashInitialized) return;
@@ -253,7 +251,9 @@ int HashObjectName(const string name) {
         }
     }
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("Object cache rebuilt: ", g_objectCacheSize, " objects cached from ", totalObjects, " total chart objects");
+    #endif
 }
     int CacheValidate() {
     if(!g_objectCacheHashInitialized) return 0;
@@ -269,7 +269,9 @@ int HashObjectName(const string name) {
         }
     }
     if(invalidCount > 0) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("Cache validation found ", invalidCount, " invalid entries out of ", g_objectCacheSize);
+        #endif
     }
     return invalidCount;
 }

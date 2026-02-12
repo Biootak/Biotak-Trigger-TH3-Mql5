@@ -2151,7 +2151,10 @@ static int g_cachedBaseMultiplier = -1;
               ", L5=", g_cachedIntervals[4]);
     #endif
     }
-    ArrayResize(intervals, 5);
+    // PERF: Skip ArrayResize when caller's array is already correct size
+    if(ArraySize(intervals) != 5) {
+        ArrayResize(intervals, 5);
+    }
     for(int i = 0; i < 5; i++) {
         intervals[i] = g_cachedIntervals[i];
     }

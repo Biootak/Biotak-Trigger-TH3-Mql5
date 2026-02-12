@@ -1,4 +1,6 @@
-﻿
+﻿#ifndef EVENT_HANDLERS_MQH
+#define EVENT_HANDLERS_MQH
+
 int OnInitHandler() {    InitializeGlobalCache();
     string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
     bool shouldBeHidden = false;
@@ -386,6 +388,8 @@ void HideAllTHObjects()
     g_thStartPointType = inpTHStartPointType;
     g_customPriceKeyboardOverride = false;    }
 }
+
+#endif // EVENT_HANDLERS_MQH
     void OnDeinitHandler(const int reason) {
         #ifdef ENABLE_DEBUG_LOGS
     Print("🧹 Starting cleanup - Reason: ", reason);
@@ -729,10 +733,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         static ENUM_STEP_CALCULATION_MODE s_lastDrawnMode = (ENUM_STEP_CALCULATION_MODE)-1;
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     bool modeChanged = (currentMode != s_lastDrawnMode);
+    // PERF: ClearAllLevels is already called by RedrawAllObjects before this function.
+    // Only update mode tracking here; skip the redundant second clear.
     if(modeChanged || g_forceClearOnNextDraw) {
-        bool clearZones = !g_customPriceLineDragging;
-    ClearAllLevels(objectPrefix, clearZones);
-    s_lastDrawnMode = currentMode;
+        s_lastDrawnMode = currentMode;
     g_forceClearOnNextDraw = false;
     }
     switch(currentMode) {
@@ -935,8 +939,11 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     double s_cachedPoint = GetCachedPoint();
     g_currentPrice = Bid;
     if(g_currentPrice <= 0) return;
+
+    TH3_PROF_START(BasePrice);
     UpdateBasePrice();
     double thBasePrice = GetBasePriceForTH();
+    TH3_PROF_END(BasePrice);
     if(thBasePrice <= 0 || thBasePrice == EMPTY_VALUE) {        thBasePrice = g_dailyClosePriceForTH;
     }
     static double s_lastDrawnBasePrice = 0.0;
@@ -950,15 +957,17 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_lastCalculation = currentTime;
     string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
     if(currentTime - g_lastObjectCleanup > CLEANUP_INTERVAL_SECONDS) {
+        TH3_PROF_START(ObjectCleanup);
         int currentObjectCount = ObjectsTotal(0, -1, -1);
     if(currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
         datetime cutoffTime = currentTime - 3600;
+    int currentPrefixLen = StringLen(objectPrefix);
     int maxCleanupItems = MathMin(currentObjectCount, 2000);
     for(int i = maxCleanupItems - 1; i >= 0; i--) {
         string objName = ObjectName(0, i, -1, -1);
     if(objName == "") continue;
     if(StringFind(objName, "TH3_Structure_") >= 0) continue;
-    if(StringFind(objName, objectPrefix) >= 0) continue;
+    if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
     datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
     if(objTime > 0 && objTime < cutoffTime) {
                     ObjectDelete(0, objName);
@@ -967,6 +976,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         }
         g_objectCountLast = currentObjectCount;
     g_lastObjectCleanup = currentTime;
+    TH3_PROF_END(ObjectCleanup);
     }
     static string s_lastPrefix = "";
     if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {        ClearAllLevels(s_lastPrefix);
@@ -1009,11 +1019,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             g_dailyClosePriceForTH = thBasePrice;        }
     g_currentLabelYOffset = 0;  // Reset top label stacking offset
     g_currentLabelYOffsetBottom = 0;  // Reset bottom label stacking offset
+
+    TH3_PROF_START(Labels);
     if(g_atrLabelsVisible && inpShowATRLabels) DisplayATRLabels(objectPrefix);
     bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
     bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
     if(inpShowTHLabels && g_thLabelsMode != 0 && showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLabels && g_thLabelsMode != 0 && showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+    TH3_PROF_END(Labels);
     if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
     g_calculatedOnce = true;
     g_labelsRelayoutNeeded = false;
@@ -1032,17 +1045,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             }
     if(!lineExists) {
-        if(ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, g_customTHStartPrice)) {
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_COLOR, inpCustomPriceLevelColor);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_WIDTH, inpCustomPriceLevelWidth);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                  "📍 Custom Price: " + DoubleToString(g_customTHStartPrice, s_cachedDigits) + " | Drag to adjust (live update)");
-    g_customPriceLineCreated = true;
-                }
+        CreateCustomPriceLine(g_customTHStartPrice, s_cachedDigits, false, "Drag to adjust (live update)");
             }
         } else if(inpCustomTHStartPrice > 0.0) {
         if(MathAbs(g_customTHStartPrice - inpCustomTHStartPrice) > s_cachedPoint * 0.1) {
@@ -1050,16 +1053,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
     GlobalVariableSet(gvarName, g_customTHStartPrice);
     if(!lineExists) {
-        if(ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, g_customTHStartPrice)) {
-                        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_COLOR, inpCustomPriceLevelColor);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_WIDTH, inpCustomPriceLevelWidth);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                      "📍 Custom Price: " + DoubleToString(g_customTHStartPrice, s_cachedDigits) + " | Drag to adjust (live update)");
-    g_customPriceLineCreated = true;
-                    }
+        CreateCustomPriceLine(g_customTHStartPrice, s_cachedDigits, false, "Drag to adjust (live update)");
                 } else {
                     ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, g_customTHStartPrice);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
@@ -1074,20 +1068,11 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             }
     if(!lineExists) {
-        if(ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, g_customTHStartPrice)) {
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_COLOR, inpCustomPriceLevelColor);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_WIDTH, inpCustomPriceLevelWidth);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                  "📍 Custom Price: " + DoubleToString(g_customTHStartPrice, s_cachedDigits) + " | Drag to adjust (live update)");
-    g_customPriceLineCreated = true;
-    #ifdef ENABLE_DEBUG_LOGS
+        if(CreateCustomPriceLine(g_customTHStartPrice, s_cachedDigits, false, "Drag to adjust (live update)")) {
+            #ifdef ENABLE_DEBUG_LOGS
                     Print("🔄 Custom price line restored at: ", DoubleToString(g_customTHStartPrice, s_cachedDigits));
-    #endif
-    }
+            #endif
+        }
             }
         } else {            g_thStartPointType = inpTHStartPointType;
     g_customTHStartPrice = 0.0;
@@ -1105,8 +1090,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         }
     #endif
     bool skipZones = g_customPriceLineDragging;
+    TH3_PROF_START(Levels);
     ClearAllLevels(objectPrefix, !skipZones);
     DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
+    TH3_PROF_END(Levels);
     g_redrawTHLevelsNeeded = false;
     }
     else if (!inpShowTHLevels && g_redrawTHLevelsNeeded)
@@ -1125,12 +1112,12 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     static uint s_lastTickMs = 0;
     static double s_lastPrice = 0;
-    static int s_lastBars = 0;
+    static datetime s_lastBarTime = 0;
     static int s_lastPeriod = -1;
     static double s_lastCustomPrice = 0;
     uint nowMs = GetTickCount();
     double currentPrice = (rates_total > 0) ? close[rates_total-1] : 0;
-    int currentBars = Bars(_Symbol, _Period);
+    datetime currentBarTime = (rates_total > 0) ? time[rates_total-1] : (datetime)0;
     int currentPeriod = _Period;
     double currentCustomPrice = g_customTHStartPrice;
     double priceChangePercent = 0;
@@ -1138,7 +1125,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         priceChangePercent = MathAbs((currentPrice - s_lastPrice) / s_lastPrice) * 100.0;
     }
     bool significantPriceChange = (priceChangePercent > 0.1);
-    bool barsChanged = (currentBars != s_lastBars && s_lastBars != 0);
+    bool barsChanged = (currentBarTime != s_lastBarTime && s_lastBarTime != 0);
     bool isNewBar = barsChanged;
     bool timeframeChanged = (currentPeriod != s_lastPeriod && s_lastPeriod != -1);
     bool customPriceChanged = false;
@@ -1169,11 +1156,13 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         }
     s_lastTickMs = nowMs;
     s_lastPrice = currentPrice;
-    s_lastBars = currentBars;
+    s_lastBarTime = currentBarTime;
     s_lastPeriod = currentPeriod;
     s_lastCustomPrice = currentCustomPrice;
+    TH3_PROF_START(RedrawCall);
     RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
-    if(barsChanged || s_lastBars == 0) {
+    TH3_PROF_END(RedrawCall);
+    if(barsChanged || s_lastBarTime == 0) {
         int totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS

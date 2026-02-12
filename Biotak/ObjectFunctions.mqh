@@ -174,10 +174,17 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         
         ObjectSetString(0, name, OBJPROP_TEXT, labelText);
     ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
-    string safeFontName = inpFontName;
+    // PERF: Cache font validation result to avoid 9-string comparison per call
+    static string s_validatedFont = "";
+    static string s_lastInputFont = "";
+    string safeFontName;
+    if(inpFontName == s_lastInputFont) {
+            safeFontName = s_validatedFont;
+        } else {
+            s_lastInputFont = inpFontName;
+    safeFontName = inpFontName;
     string validFonts[9] = {"Arial", "Arial Black", "Courier New", "Tahoma", "Verdana",
                                 "Times New Roman", "Calibri", "Segoe UI", "Consolas"};
-
     bool fontValid = false;
     for(int i = 0; i < 9; i++) {
         if(safeFontName == validFonts[i]) {
@@ -187,6 +194,8 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         }
         if(!fontValid) {
             safeFontName = "Arial";
+        }
+        s_validatedFont = safeFontName;
         }
         
         ObjectSetString(0, name, OBJPROP_FONT, safeFontName);
