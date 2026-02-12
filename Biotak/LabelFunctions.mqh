@@ -550,68 +550,6 @@ bool DrawMainLevels(const string prefix) {
     }
     return fullName;
 }
-    bool CreateATRLabel(const double atrValue) {
-    if (atrValue <= 0) return false;
-    double atrPips = NormalizeDouble(atrValue / (Point * 10), 1);
-    double target3x = MathFloor(atrPips * 3.0);
-    double target5x = MathFloor(atrPips * 5.0);
-    double target15x = MathFloor(atrPips * 15.0);
-    string mainObjName = "ATR_Label_Main";
-    string targetsObjName = "ATR_Label_Targets";
-    if(!inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
-        ObjectDelete(0, targetsObjName);
-    }
-    if (ObjectFind(0, mainObjName) < 0) {
-        if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
-    }
-    if (inpShowATRTargets && ObjectFind(0, targetsObjName) < 0) {
-        if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
-    }
-    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
-    string mainText = StringFormat("ATR: %.1f", atrPips);
-    if(inpShowATRTargets) {
-        ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, clrDodgerBlue);
-    SetLabelFont(targetsObjName);
-    }
-    ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
-    ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, clrDodgerBlue);
-    SetLabelFont(mainObjName);
-    ENUM_BASE_CORNER corner = CORNER_LEFT_UPPER;
-    ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
-    if(inpShowATRTargets) {
-        ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_ANCHOR, anchor);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_HIDDEN, false);
-    }
-    ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
-    ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
-    int labelXDistance = inpLabelsMarginLeft;
-    int lineGap = inpLabelRowGap;
-    int singleLineHeight = inpFontSize + lineGap;
-    int baseY = inpLabelsMarginTop;
-    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
-    int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
-    int targetsOffset = (mainTextWidth - targetsTextWidth) / 2;
-    if(targetsOffset < 0) targetsOffset = 0;
-    if(inpShowATRTargets) {
-        ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY);
-    }
-    ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance);
-    ObjectSetInteger(0, mainObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight);
-    if(IsIndicatorHidden()) {
-        if(inpShowATRTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        if(inpShowATRTargets) ObjectSetInteger(0, targetsObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    ObjectSetInteger(0, mainObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
-    return true;
-}
     bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
     
     // Calculate ATR, SS, LS values (same ratios as TH)
@@ -707,6 +645,7 @@ bool DrawMainLevels(const string prefix) {
     return true;
 }
     void DisplayATRLabels(const string objectPrefix) {
+    if(!g_atrLabelsVisible) return;
     
     ATR_PRINT("=== DisplayATRLabels: Starting ===");
     double point = GetSymbolPoint();

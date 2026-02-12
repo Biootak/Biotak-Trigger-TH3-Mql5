@@ -214,6 +214,7 @@ input string inpCustomPriceKey = "C";
 input string inpTriggerLevelsKey = "T";
 input string inpStepModeKey = "E";
 input string inpTH3ToolKey = "V";
+input string inpATRLabelsKey = "A";        // Toggle ATR labels on/off
 input string inpResetKey = "Q";
 
 //==============================================================================

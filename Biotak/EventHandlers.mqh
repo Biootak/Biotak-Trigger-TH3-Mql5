@@ -54,6 +54,22 @@ int OnInitHandler() {    InitializeGlobalCache();
         }
     } else {        g_linesVisible = inpShowLines;
     }
+    string atrGvarName = "Biotak_ATRLabels_" + chartIdStr;
+    if(GlobalVariableCheck(atrGvarName)) {
+        double gvarValue = GlobalVariableGet(atrGvarName);
+    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
+    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
+    if(isZero || isOne) {
+            g_atrLabelsVisible = isOne;
+        } else {
+        #ifdef ENABLE_DEBUG_LOGS
+            Print("❌ OnInit: Corrupted ATR labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
+    #endif
+    GlobalVariableSet(atrGvarName, inpShowATRLabels ? 1.0 : 0.0);
+    g_atrLabelsVisible = inpShowATRLabels;
+        }
+    } else {        g_atrLabelsVisible = inpShowATRLabels;
+    }
     int validationResult = ValidateInputs();
     if(validationResult != INIT_SUCCEEDED) {
         return validationResult;
@@ -933,7 +949,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             g_dailyClosePriceForTH = thBasePrice;        }
     g_currentLabelYOffset = 0;  // Reset top label stacking offset
     g_currentLabelYOffsetBottom = 0;  // Reset bottom label stacking offset
-    DisplayATRLabels(objectPrefix);
+    if(g_atrLabelsVisible) DisplayATRLabels(objectPrefix);
     if(inpShowTHLabels && inpShowFractalTHs) DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLevels) g_redrawTHLevelsNeeded = true;
@@ -1351,6 +1367,34 @@ void ApplyLinesVisibility()
     RedrawAllObjects(true);
     ThrottledChartRedraw();
         }
+    string mutableATRKey = inpATRLabelsKey;
+    StringToUpper(mutableATRKey);
+    int atrKeyCode = StringGetCharacter(mutableATRKey, 0);
+    if(lparam == atrKeyCode)
+        {
+        g_atrLabelsVisible = !g_atrLabelsVisible;
+    string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
+    GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
+    if(!g_atrLabelsVisible) {
+        // Fast hide: delete all ATR label objects
+        int total = ObjectsTotal(0, -1, -1);
+        string cachedPrefix = inpObjectPrefix;
+        int prefixLen = StringLen(cachedPrefix);
+        for(int i = total - 1; i >= 0; i--) {
+            string objName = ObjectName(0, i, -1, -1);
+            if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix && StringFind(objName, "ATR_") >= 0) {
+                ObjectDelete(0, objName);
+            }
+        }
+    } else {
+        // Fast show: force label recreation on next OnCalculate
+        g_calculatedOnce = false;
+    }
+    #ifdef ENABLE_DEBUG_LOGS
+        Print("📊 ATR Labels ", (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
+    #endif
+    ChartRedraw();
+        }
     string mutableTH3Key = inpTH3ToolKey;
     StringToUpper(mutableTH3Key);
     int th3KeyCode = StringGetCharacter(mutableTH3Key, 0);
@@ -1483,6 +1527,7 @@ void ApplyLinesVisibility()
     g_lockedPeriod = 0;
     g_triggerLevelsEnabled = inpShowTrigger;
     g_linesVisible = inpShowLines;
+    g_atrLabelsVisible = inpShowATRLabels;
     if(inpEnableTH3Tool) {
                 UpdateAllTH3Objects();
             }
@@ -1497,6 +1542,7 @@ void ApplyLinesVisibility()
     GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
     GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
     GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
+    GlobalVariableDel("Biotak_ATRLabels_" + chartIdStr);
     GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
     GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
     GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
