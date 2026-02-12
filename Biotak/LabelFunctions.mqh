@@ -910,7 +910,8 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
     SetLabelFont(mainObjName);
     SetLabelFont(stepsObjName);
-    ENUM_BASE_CORNER corner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM) ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
+    // TH labels are always bottom-left for consistent UX
+    ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
     ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
     if(inpShowTHTargets) {
         ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
@@ -993,10 +994,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    bool useBottomCorner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM);
-    int titleYPos = useBottomCorner ? (inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom)
-                                    : (inpLabelsMarginTop + g_currentLabelYOffset);
-    int titleAdjustment = useBottomCorner ? (inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight) : 0;
+    int safeBottomPad = inpFontSize + 6;
+    int titleYPos = inpTHLabelsMarginBottom + safeBottomPad + g_currentLabelYOffsetBottom;
+    int titleAdjustment = inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int sectionGap = inpSectionGap;
     string thTitleObjName = objectPrefix + "TH_Title";
@@ -1006,7 +1006,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ENUM_BASE_CORNER corner = useBottomCorner ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
+    ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
     ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
@@ -1070,8 +1070,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     }
     // Update global Y offset for next section (StandardTHs)
     int fractalConsumedY = (currentYPos - startYPos) + lineHeight;
-    if(useBottomCorner) g_currentLabelYOffsetBottom += fractalConsumedY + sectionGap;
-    else                g_currentLabelYOffset       += fractalConsumedY + sectionGap;
+    g_currentLabelYOffsetBottom += fractalConsumedY + sectionGap;
 }
     void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
         double point = GetSymbolPoint();
@@ -1087,10 +1086,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    bool useBottomCorner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM);
-    int titleYPos = useBottomCorner ? (inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom)
-                                    : (inpLabelsMarginTop + g_currentLabelYOffset);
-    int titleAdjustment = useBottomCorner ? (inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight) : 0;
+    int safeBottomPad = inpFontSize + 6;
+    int titleYPos = inpTHLabelsMarginBottom + safeBottomPad + g_currentLabelYOffsetBottom;
+    int titleAdjustment = inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int titleWidth = (int)CalculateTextWidth("TH:");
     int labelStartX = GetLabelStartX(startXPos, titleWidth, horizontalPadding, isVerticalLayout);
@@ -1107,7 +1105,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, useBottomCorner ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + titleAdjustment);
@@ -1156,8 +1154,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         }
     }
     int standardConsumedY = (currentYPos - startYPos) + lineHeight;
-    if(useBottomCorner) g_currentLabelYOffsetBottom += standardConsumedY + inpSectionGap;
-    else                g_currentLabelYOffset       += standardConsumedY + inpSectionGap;
+    g_currentLabelYOffsetBottom += standardConsumedY + inpSectionGap;
 }
     void StoreLabelPosition(const string name, const int xPos, const int yPos) {
     for(int i=0; i<ArraySize(g_labelPositions); i++) {

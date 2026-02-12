@@ -119,6 +119,10 @@ int OnInitHandler() {    InitializeGlobalCache();
     if(validationResult != INIT_SUCCEEDED) {
         return validationResult;
     }
+
+    // Backward-friendly: if user didn't customize TH bottom margin, keep it aligned with generic bottom margin
+    // (MQL inputs are compile-time defaults; this only affects internal layout usage)
+    // Note: inpTHLabelsMarginBottom is an input; we won't overwrite user customization.
     ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
     ChartSetInteger(0, CHART_SHOW_GRID, false);
@@ -1256,7 +1260,8 @@ void RedrawLabelsOnly() {
 
     bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
     bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
-    if(inpShowTHLabels && g_thLabelsMode != 0) {
+    // TH labels need a valid base price; if not ready yet, skip TH to avoid broken output.
+    if(inpShowTHLabels && g_thLabelsMode != 0 && g_dailyClosePriceForTH != EMPTY_VALUE && g_dailyClosePriceForTH > 0.0) {
         if(showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
         if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     }
@@ -1760,6 +1765,30 @@ void RedrawLabelsOnly() {
         OnABCDMouseEvent(id, lparam, dparam, sparam);
     if(g_abcdDrawing && id == CHARTEVENT_CLICK) {
             return;        }
+    }
+
+    // Chart layout/size changes (Navigator/Terminal toggles, window resize, etc.)
+    // Re-layout labels immediately so they don't "lag" until next tick.
+    if(id == CHARTEVENT_CHART_CHANGE) {
+        if(IsIndicatorHidden()) return;
+        static uint s_lastLayoutMs = 0;
+        static int s_lastW = -1;
+        static int s_lastH = -1;
+        uint nowMs = GetTickCount();
+        if(nowMs - s_lastLayoutMs < 250) return; // throttle bursts
+
+        int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+        int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+        if(w == s_lastW && h == s_lastH) return;
+        s_lastW = w;
+        s_lastH = h;
+
+        s_lastLayoutMs = nowMs;
+
+        g_labelsRelayoutNeeded = true;
+        RedrawLabelsOnly();
+        ChartRedraw();
+        return;
     }
     if(id == CHARTEVENT_CLICK && g_waitingForCustomPriceClick)
     {

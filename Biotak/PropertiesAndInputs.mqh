@@ -229,6 +229,7 @@ input ENUM_LABEL_ARRANGEMENT inpLabelArrangement = LABEL_ARRANGEMENT_HORIZONTAL;
 input int inpLabelsMarginTop = 25;        // Distance from top of chart
 input int inpLabelsMarginLeft = 20;       // Distance from left edge
 input int inpLabelsMarginBottom = 5;      // Distance from bottom of chart
+input int inpTHLabelsMarginBottom = 15;   // TH labels distance from bottom (bottom-left)
 
 // === Label Spacing ===
 input int inpLabelRowGap = 16;            // Vertical gap between rows

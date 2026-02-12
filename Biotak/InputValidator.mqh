@@ -170,6 +170,7 @@ bool ValidateHotkeysUniqueAndSafe() {
     if(!ValidateNonNegative(inpLabelsMarginTop, "LabelsMarginTop")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpLabelsMarginLeft, "LabelsMarginLeft")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpLabelsMarginBottom, "LabelsMarginBottom")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpTHLabelsMarginBottom, "THLabelsMarginBottom")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpLabelRowGap, "LabelRowGap")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpLabelColumnGap, "LabelColumnGap")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateNonNegative(inpSectionGap, "SectionGap")) return INIT_PARAMETERS_INCORRECT;
