@@ -1,6 +1,8 @@
 ﻿#ifndef OBJECT_FUNCTIONS_MQH
 #define OBJECT_FUNCTIONS_MQH
 
+#include "ObjectCache.mqh"
+
 bool CreateTHLineObject(const string name, const double price, const color lineColor, const ENUM_LINE_STYLE style, const int width, const string tooltip, ENUM_LINE_OBJECT_TYPE lineObjectType, bool isSelectable = false) {
 
     if(!CanCreateObject()) {
@@ -23,8 +25,11 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     return false;
     }
     double normalizedPrice = NormalizePrice(price);
-    datetime currentTime = TimeCurrent();
-    datetime futureTime = currentTime + PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod()) * ZONE_EXTENSION_MULTIPLIER;
+    // PERF: Use cached frame time and period seconds instead of per-object syscalls
+    datetime currentTime = CacheGetFrameTime();
+    static int s_cachedPeriodSec = 0;
+    if(s_cachedPeriodSec == 0) s_cachedPeriodSec = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
+    datetime futureTime = currentTime + s_cachedPeriodSec * ZONE_EXTENSION_MULTIPLIER;
     ENUM_OBJECT objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
     SObjectCacheEntry cachedEntry;
     bool objectInCache = CacheGetObject(name, cachedEntry);
@@ -124,7 +129,8 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
             CacheUpdateObject(name, normalizedPrice, lineColor, style, width);
         }
 
-        ApplyVisibilityState(name, true);
+        // PERF: Skip visibility update if state unchanged since last frame
+        ApplyVisibilityStateIfUnchangedSkip(name, true);
     }
     return true;
 }
@@ -217,11 +223,21 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
             labelText = StringFormat("%.1f pips", pips);
         }
         
+        // PERF: Always update text (pip distance changes per tick)
         ObjectSetString(0, name, OBJPROP_TEXT, labelText);
-    ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
-    ObjectSetDouble(0, name, OBJPROP_PRICE, price);
-    CacheUpdateObject(name, price, textColor, 0, 0);
-    ApplyVisibilityState(name, false);
+    // PERF: Only update color/price if actually changed (skip ~800 API calls per redraw)
+    SObjectCacheEntry labelCache;
+    bool inCache = CacheGetObject(name, labelCache);
+    if(!inCache || labelCache.lastColor != textColor) {
+        ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+    }
+    double normPrice = NormalizePrice(price);
+    if(!inCache || MathAbs(labelCache.lastPrice - normPrice) > GetCachedPoint() * 0.1) {
+        ObjectSetDouble(0, name, OBJPROP_PRICE, normPrice);
+    }
+    CacheUpdateObject(name, normPrice, textColor, 0, 0);
+    // PERF: Skip visibility update if state unchanged since last frame
+    ApplyVisibilityStateIfUnchangedSkip(name, false);
     }
     return true;
 }

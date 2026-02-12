@@ -2217,6 +2217,8 @@ int GetHighestStructureLevel(const int step, const int &intervals[]) {
     if(absStep % intervals[0] == 0) return 1;
     return 0;}
     bool GetPathForLevelOptimized(const int stepCount, color &outColor, ENUM_LINE_STYLE &outStyle, int &outWidth, const bool triggerEnabled) {
+        // PERF: Compute intervals once and reuse for both structure and trigger checks
+        bool isStructureLevel = false;
         if(inpShowStructure) {
         int baseMultiplier = GetValidatedBaseMultiplier();
     int intervals[];
@@ -2251,27 +2253,16 @@ int GetHighestStructureLevel(const int step, const int &intervals[]) {
     outWidth = inpStructureL1Width;
     return true;
         }
+        // If we reach here, structure is enabled but this step doesn't match any structure level
+        // isStructureLevel remains false — no need to recheck
     }
+    // PERF: If structure block above didn't return, this step is NOT a structure level.
+    // No need to recompute intervals — just check triggerEnabled directly.
     if(triggerEnabled) {
-        bool isStructureLevel = false;
-    if(inpShowStructure) {
-        int baseMultiplier = GetValidatedBaseMultiplier();
-    int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
-    if((intervals[4] > 0 && stepCount % intervals[4] == 0 && inpShowStructureL5) ||
-               (intervals[3] > 0 && stepCount % intervals[3] == 0 && inpShowStructureL4) ||
-               (intervals[2] > 0 && stepCount % intervals[2] == 0 && inpShowStructureL3) ||
-               (intervals[1] > 0 && stepCount % intervals[1] == 0 && inpShowStructureL2) ||
-               (intervals[0] > 0 && stepCount % intervals[0] == 0 && inpShowStructureL1)) {
-                isStructureLevel = true;
-            }
-        }
-    if(!isStructureLevel) {
             outColor = inpTriggerColor;
     outStyle = inpTriggerStyle;
     outWidth = inpTriggerWidth;
     return true;
-        }
     }
     return false;
 }

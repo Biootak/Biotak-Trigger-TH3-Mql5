@@ -32,6 +32,19 @@ static SObjectCacheSlot g_objectCacheHash[CACHE_HASH_BUCKETS];
     static bool g_objectCacheHashInitialized = false;
     static int g_objectCacheSize = 0;
 
+// PERF: Cached TimeCurrent() - refreshed once per redraw frame via CacheRefreshFrameTime()
+// Eliminates ~2000+ TimeCurrent() syscalls per redraw cycle
+static datetime g_cacheFrameTime = 0;
+
+void CacheRefreshFrameTime() {
+    g_cacheFrameTime = TimeCurrent();
+}
+
+datetime CacheGetFrameTime() {
+    if(g_cacheFrameTime == 0) g_cacheFrameTime = TimeCurrent();
+    return g_cacheFrameTime;
+}
+
 // Maximum cache size (80% load factor of 512 buckets)
 #define MAX_CACHE_SIZE 400
 
@@ -74,7 +87,7 @@ int HashObjectName(const string name) {
             continue;
     if(g_objectCacheHash[idx].name == name) {
             // Update last access time for LRU
-            g_objectCacheHash[idx].lastAccess = TimeCurrent();
+            g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
     return idx;  // Found
         }
     }
@@ -94,8 +107,8 @@ int HashObjectName(const string name) {
     g_objectCacheHash[idx].entry.lastStyle = style;
     g_objectCacheHash[idx].entry.lastWidth = width;
     g_objectCacheHash[idx].entry.exists = true;
-    g_objectCacheHash[idx].entry.lastUpdate = TimeCurrent();
-    g_objectCacheHash[idx].lastAccess = TimeCurrent();
+    g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
+    g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
     return;
     }
     
@@ -117,10 +130,10 @@ int HashObjectName(const string name) {
     g_objectCacheHash[insertIdx].entry.lastStyle = style;
     g_objectCacheHash[insertIdx].entry.lastWidth = width;
     g_objectCacheHash[insertIdx].entry.exists = true;
-    g_objectCacheHash[insertIdx].entry.lastUpdate = TimeCurrent();
+    g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[insertIdx].occupied = true;
     g_objectCacheHash[insertIdx].deleted = false;
-    g_objectCacheHash[insertIdx].lastAccess = TimeCurrent();
+    g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
     g_objectCacheSize++;
     return;
         }
@@ -140,7 +153,7 @@ int HashObjectName(const string name) {
     
     // Find LRU entry
     int lruIdx = -1;
-    datetime oldestAccess = TimeCurrent() + 86400;  // Start with future time
+    datetime oldestAccess = CacheGetFrameTime() + 86400;  // Start with future time
     
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
         if(g_objectCacheHash[i].occupied && g_objectCacheHash[i].lastAccess < oldestAccess) {
@@ -221,8 +234,8 @@ int HashObjectName(const string name) {
     g_objectCacheHash[idx].entry.lastStyle = style;
     g_objectCacheHash[idx].entry.lastWidth = width;
     g_objectCacheHash[idx].entry.exists = true;
-    g_objectCacheHash[idx].entry.lastUpdate = TimeCurrent();
-    g_objectCacheHash[idx].lastAccess = TimeCurrent();
+    g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
+    g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
 }
     int CacheGetSize() {
         return g_objectCacheSize;

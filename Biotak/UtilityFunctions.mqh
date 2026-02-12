@@ -80,6 +80,10 @@ void ThrottledChartRedraw(bool forceRedraw = false) {
         double pips = CalculatePipsDistance(priceLevel, g_currentPrice);
     return StringFormat("%s, Distance: +/- %.1f pips", baseTooltip, pips);
 }
+    // PERF: Overload accepting pre-computed pips to avoid redundant CalculatePipsDistance
+    string FormatTooltipWithDistanceFast(const string baseTooltip, const double precomputedPips) {
+    return StringFormat("%s, Distance: +/- %.1f pips", baseTooltip, precomputedPips);
+}
     double GetMidpointPrice(ENUM_TH_START_POINT_TYPE startPointType) {
     switch(startPointType) {
         case TH_START_POINT_HISTORICAL_HIGH:

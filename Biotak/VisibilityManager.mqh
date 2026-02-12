@@ -91,20 +91,42 @@ void SetAllLineObjectsVisibility(const bool visible)
     }
 }
 
-void ApplyVisibilityState(const string name, const bool isLine)
+// PERF: Track per-frame visibility state to skip redundant ObjectSetInteger calls
+// Visibility only changes when user toggles lines/indicator — extremely rare.
+static bool g_frameVisibilityLines = true;
+static bool g_frameVisibilityNonLines = true;
+static bool g_prevFrameVisibilityLines = true;
+static bool g_prevFrameVisibilityNonLines = true;
+static bool g_visibilityChangedThisFrame = true; // true on first frame to force initial set
+
+// Call once at start of RedrawAllObjects to compute frame visibility
+void CacheRefreshVisibilityState()
 {
-    if(ObjectFind(0, name) < 0) return;
-    bool shouldBeVisible = true;
-    if(IsIndicatorHidden()) shouldBeVisible = false;
-    else if(isLine && !GetCachedLinesVisible()) shouldBeVisible = false;
-    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, shouldBeVisible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+    bool hidden = IsIndicatorHidden();
+    g_frameVisibilityNonLines = !hidden;
+    g_frameVisibilityLines = !hidden && GetCachedLinesVisible();
+    
+    g_visibilityChangedThisFrame = (g_frameVisibilityLines != g_prevFrameVisibilityLines) ||
+                                    (g_frameVisibilityNonLines != g_prevFrameVisibilityNonLines);
+    g_prevFrameVisibilityLines = g_frameVisibilityLines;
+    g_prevFrameVisibilityNonLines = g_frameVisibilityNonLines;
 }
 
-bool ShouldObjectBeVisible(const bool isLine)
+// PERF: Caller always just created or verified the object exists.
+// Skip the expensive ObjectFind check — it was wasting ~864 calls per redraw.
+void ApplyVisibilityState(const string name, const bool isLine)
 {
-    if(IsIndicatorHidden()) return false;
-    if(isLine && !GetCachedLinesVisible()) return false;
-    return true;
+    long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
+}
+
+// PERF: For existing objects, only update visibility if state changed this frame
+// Saves ~800 ObjectSetInteger calls per redraw when visibility is stable
+void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
+{
+    if(!g_visibilityChangedThisFrame) return;
+    long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
 }
 
 #endif // VISIBILITY_MANAGER_MQH

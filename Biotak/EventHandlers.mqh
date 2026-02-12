@@ -531,67 +531,60 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     s_lastClearLog = TimeCurrent();
     }
     #endif
-    string prefixes[];
-    ArrayResize(prefixes, 24);
-    prefixes[0] = objectPrefix + "SSLS_";
-    prefixes[1] = objectPrefix + "M_";
-    prefixes[2] = objectPrefix + "MLabel_";
-    prefixes[3] = objectPrefix + "MEq_";
-    prefixes[4] = objectPrefix + "MEqLabel_";
-    prefixes[5] = objectPrefix + "TP_";
-    prefixes[6] = objectPrefix + "Combo_";
-    prefixes[7] = objectPrefix + "SharedPattern_";
-    prefixes[8] = objectPrefix + "TH_Level_";
-    prefixes[9] = objectPrefix + "S_";
-    prefixes[10] = objectPrefix + "TriggerTH_Up_";
-    prefixes[11] = objectPrefix + "TriggerTH_Down_";
-    prefixes[12] = objectPrefix + "StructureLevel1_Up_";
-    prefixes[13] = objectPrefix + "StructureLevel1_Down_";
-    prefixes[14] = objectPrefix + "StructureLevel2_Up_";
-    prefixes[15] = objectPrefix + "StructureLevel2_Down_";
-    prefixes[16] = objectPrefix + "StructureLevel3_Up_";
-    prefixes[17] = objectPrefix + "StructureLevel3_Down_";
-    prefixes[18] = objectPrefix + "StructureLevel4_Up_";
-    prefixes[19] = objectPrefix + "StructureLevel4_Down_";
-    prefixes[20] = objectPrefix + "StructureLevel5_Up_";
-    prefixes[21] = objectPrefix + "StructureLevel5_Down_";
-    prefixes[22] = objectPrefix + "Mid";
-    prefixes[23] = objectPrefix + "Factor_";
-    int prefixCount = ArraySize(prefixes);
-    if(prefixCount > MAX_PREFIX_COUNT) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CRITICAL: Prefix count (", prefixCount, ") exceeds MAX_PREFIX_COUNT (", MAX_PREFIX_COUNT, ")");
-    #endif
-    prefixCount = MAX_PREFIX_COUNT;
+    // PERF: Use static suffix arrays — avoids re-allocating 24+5 strings on every call
+    // Only the prefix concatenation needs to happen per call
+    static const string LEVEL_SUFFIXES[] = {
+        "SSLS_", "M_", "MLabel_", "MEq_", "MEqLabel_", "TP_", "Combo_",
+        "SharedPattern_", "TH_Level_", "S_",
+        "TriggerTH_Up_", "TriggerTH_Down_",
+        "StructureLevel1_Up_", "StructureLevel1_Down_",
+        "StructureLevel2_Up_", "StructureLevel2_Down_",
+        "StructureLevel3_Up_", "StructureLevel3_Down_",
+        "StructureLevel4_Up_", "StructureLevel4_Down_",
+        "StructureLevel5_Up_", "StructureLevel5_Down_",
+        "Mid", "Factor_"
+    };
+    static const int LEVEL_SUFFIX_COUNT = 24;
+    
+    // PERF: Cache the concatenated prefix+suffix strings to avoid 29 string allocations per call
+    static string s_cachedPrefixedSuffixes[24];
+    static string s_cachedZoneSuffixes[5];
+    static string s_lastCachedPrefix = "";
+    static const string ZONE_SUFFIX_NAMES[] = {
+        "SSLS_Zone_", "M_Zone_", "TP_Zone_", "Combo_Zone_", "Factor_Zone_"
+    };
+    static const int ZONE_SUFFIX_COUNT = 5;
+    
+    if(s_lastCachedPrefix != objectPrefix) {
+        for(int i = 0; i < LEVEL_SUFFIX_COUNT; i++) {
+            s_cachedPrefixedSuffixes[i] = objectPrefix + LEVEL_SUFFIXES[i];
+        }
+        for(int i = 0; i < ZONE_SUFFIX_COUNT; i++) {
+            s_cachedZoneSuffixes[i] = objectPrefix + ZONE_SUFFIX_NAMES[i];
+        }
+        s_lastCachedPrefix = objectPrefix;
     }
-    for(int i = 0; i < prefixCount; i++) {
-        int result = ObjectsDeleteAll(0, prefixes[i], -1, -1);
+    
+    for(int i = 0; i < LEVEL_SUFFIX_COUNT; i++) {
+        int result = ObjectsDeleteAll(0, s_cachedPrefixedSuffixes[i], -1, -1);
     if(result >= 0) {
             totalDeleted += result;
         } else {
             totalFailed++;
     int error = GetLastError();
     #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ ClearAllLevels: Failed to delete prefix '", prefixes[i], "' - Error: ", error);
+            Print("⚠️ ClearAllLevels: Failed to delete suffix '", LEVEL_SUFFIXES[i], "' - Error: ", error);
     #endif
     ResetLastError();
-    result = ObjectsDeleteAll(0, prefixes[i], -1, -1);
+    result = ObjectsDeleteAll(0, objectPrefix + LEVEL_SUFFIXES[i], -1, -1);
     if(result >= 0) {
                 totalDeleted += result;
     totalFailed--;            }
         }
     }
     if(clearZones) {
-        string zonePrefixes[];
-    ArrayResize(zonePrefixes, 5);
-    zonePrefixes[0] = objectPrefix + "SSLS_Zone_";
-    zonePrefixes[1] = objectPrefix + "M_Zone_";
-    zonePrefixes[2] = objectPrefix + "TP_Zone_";
-    zonePrefixes[3] = objectPrefix + "Combo_Zone_";
-    zonePrefixes[4] = objectPrefix + "Factor_Zone_";
-    int zonePrefixCount = ArraySize(zonePrefixes);
-    for(int i = 0; i < zonePrefixCount; i++) {
-        int result = ObjectsDeleteAll(0, zonePrefixes[i], -1, -1);
+    for(int i = 0; i < ZONE_SUFFIX_COUNT; i++) {
+        int result = ObjectsDeleteAll(0, s_cachedZoneSuffixes[i], -1, -1);
     if(result >= 0) {
                 totalDeleted += result;
             } else {
@@ -843,6 +836,21 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     Print("   MaxLevels: Above=", data.maxLevelsAbove, ", Below=", data.maxLevelsBelow);
     #endif
     UpdateFactorLabel(factorValue);
+    // PERF: Compute factor step size ONCE — was being computed 2-3 times with identical params
+    double factorStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
+    if(factorStepSize <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+                Print("❌ FACTOR_STEP: Invalid step size calculated");
+    #endif
+    return;
+            }
+    if(factorStepSize < Point * 2) {
+        #ifdef ENABLE_DEBUG_LOGS
+                Print("❌ FACTOR_STEP: Base step too small (", factorStepSize, 
+                      ") - Factor too large or range too small");
+    #endif
+    return;
+            }
     if(inpEnableHarmonicPattern) {
         double harmonicRatio = inpHarmonicRatio;
     if(harmonicRatio < MIN_HARMONIC_RATIO) {
@@ -859,44 +867,23 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     harmonicRatio = MAX_HARMONIC_RATIO;
                 }
     harmonicRatio = NormalizeDouble(harmonicRatio, 3);
-    double baseStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
-    if(baseStepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("❌ FACTOR_STEP: Invalid base step size calculated");
-    #endif
-    return;
-                }
-    if(baseStepSize < Point * 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("❌ FACTOR_STEP: Base step too small (", baseStepSize, 
-                          ") - Factor too large or range too small");
-    #endif
-    return;
-                }
     #ifdef ENABLE_DEBUG_LOGS
                 double pipSizeDbg = GetCachedPipSize();
     if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
                 Print("🎵 FACTOR_STEP: Harmonic Mode");
-    Print("   BaseStep=", DoubleToString(baseStepSize, Digits), 
-                      " (", DoubleToString(baseStepSize / pipSizeDbg, 1), " pips)");
+    Print("   BaseStep=", DoubleToString(factorStepSize, Digits), 
+                      " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     Print("   Ratio=", harmonicRatio, 
                       " (", DoubleToString((harmonicRatio - 1.0) * 100, 1), "% larger)");
-    Print("   LargeStep=", DoubleToString(baseStepSize * harmonicRatio, Digits),
-                      " (", DoubleToString(baseStepSize * harmonicRatio / pipSizeDbg, 1), " pips)");
+    Print("   LargeStep=", DoubleToString(factorStepSize * harmonicRatio, Digits),
+                      " (", DoubleToString(factorStepSize * harmonicRatio / pipSizeDbg, 1), " pips)");
     #endif
     DrawFactorLevelsHarmonicFromCenter(objectPrefix, data.midpointPrice, 
                                                    g_highestHigh, g_lowestLow,
-                                                   factorValue, baseStepSize, harmonicRatio,
+                                                   factorValue, factorStepSize, harmonicRatio,
                                                    data.maxLevelsAbove, data.maxLevelsBelow);
                 
             } else {
-        double factorStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
-    if(factorStepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("❌ FACTOR_STEP: Invalid step size calculated");
-    #endif
-    return;
-                }
     #ifdef ENABLE_DEBUG_LOGS
                 Print("📏 FACTOR_STEP: Standard Mode");
     double pipSizeDbg = GetCachedPipSize();
@@ -909,8 +896,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
                                           factorValue, factorStepSize,
                                           data.maxLevelsAbove, data.maxLevelsBelow);
             }
-    double referenceStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
-    DrawFactorBoundaryLines(objectPrefix, g_highestHigh, g_lowestLow, factorValue, referenceStepSize);
+    DrawFactorBoundaryLines(objectPrefix, g_highestHigh, g_lowestLow, factorValue, factorStepSize);
     #ifdef ENABLE_DEBUG_LOGS
             Print("✅ FACTOR_STEP: Completed successfully");
     #endif
@@ -933,6 +919,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     void RedrawAllObjects(bool force_redraw=false)
 {
+        // PERF: Refresh cached frame time once — eliminates ~2000+ TimeCurrent() syscalls in cache ops
+        CacheRefreshFrameTime();
+        // PERF: Cache visibility state once per frame — skips ~800 ObjectSetInteger calls when unchanged
+        CacheRefreshVisibilityState();
         datetime currentTime = TimeGMT();
     string s_cachedSymbol = GetCachedSymbol();
     int s_cachedDigits = GetCachedDigits();

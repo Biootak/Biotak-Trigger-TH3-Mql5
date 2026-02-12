@@ -197,6 +197,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         ObjectSetInteger(0, request.name, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, request.name, OBJPROP_RAY_RIGHT, true);
         ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
+        ApplyVisibilityState(request.name, false);
     }
     else {
         SObjectCacheEntry cachedEntry;
@@ -229,9 +230,10 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColor);
         }
         CacheUpdateObject(request.name, request.topPrice, request.zoneColor, 0, 0);
+        // PERF: Skip visibility for existing zones if state unchanged since last frame
+        ApplyVisibilityStateIfUnchangedSkip(request.name, false);
     }
 
-    ApplyVisibilityState(request.name, false);
     result.success = true;
     return result;
 }

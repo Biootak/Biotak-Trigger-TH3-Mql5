@@ -116,6 +116,11 @@ uint g_isHiddenCacheTime = 0;
     return g_isHiddenCached;
 }
     string SanitizeSymbolName(const string symbol) {
+        // PERF: Cache result since symbol never changes during indicator lifetime
+        static string s_cachedInput = "";
+        static string s_cachedResult = "";
+        if(symbol == s_cachedInput && s_cachedResult != "") return s_cachedResult;
+        s_cachedInput = symbol;
         string safe = symbol;
     StringReplace(safe, "_", "");  StringReplace(safe, "|", "");
     StringReplace(safe, ":", "");  StringReplace(safe, "/", "");
@@ -126,6 +131,7 @@ uint g_isHiddenCacheTime = 0;
     StringReplace(safe, "\"", ""); StringReplace(safe, "'", "");
     if(StringLen(safe) == 0) safe = "UNKNOWN";
     if(StringLen(safe) > 50) safe = StringSubstr(safe, 0, 50);
+    s_cachedResult = safe;
     return safe;
 }
     void CleanupAllGlobalVariables() {
