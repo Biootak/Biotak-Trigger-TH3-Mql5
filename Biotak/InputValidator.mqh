@@ -125,7 +125,7 @@ bool ValidateWidth(int width, const string name) {
     if(!ValidateRange(inpFactorAdjustStep, 0.01, 100.0, "FactorAdjustStep")) return INIT_PARAMETERS_INCORRECT;
 
     // TH3
-    if(!ValidateRange(inpTH3BaseStepPercent, 0.1, 120.0, "TH3BaseStepPercent")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateRange(inpTH3BaseStepPercent, 0.1, 1000.0, "TH3BaseStepPercent")) return INIT_PARAMETERS_INCORRECT;
 
     // Font Sizes
     if(!ValidatePositive(inpABCDInfoFontSize, "ABCDInfoFontSize")) return INIT_PARAMETERS_INCORRECT;

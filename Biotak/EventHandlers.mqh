@@ -188,7 +188,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         double val = GlobalVariableGet(th3FreqGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-            if(val > 0 && val <= 120.0) {
+            if(val > 0 && val <= 1000.0) {
                 g_th3FreqOverride = val;
             } else {
                 GlobalVariableDel(th3FreqGvarName);
@@ -920,6 +920,12 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_redrawTHLevelsNeeded = true;
     }
 
+    // Early exit when hidden - skip all drawing
+    if(IsIndicatorHidden()) {
+        HideAllTHObjects();
+        return;
+    }
+
     DrawMainLevels(objectPrefix);
     if(!g_calculatedOnce)
     {        if (g_dailyClosePriceForTH == EMPTY_VALUE)
@@ -932,19 +938,6 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLevels) g_redrawTHLevelsNeeded = true;
     g_calculatedOnce = true;
-    }
-    {
-        static bool s_isHiddenCached = false;
-    static datetime s_lastHiddenCheckTime = 0;
-    if(currentTime - s_lastHiddenCheckTime >= 2) {
-        string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    double val = GlobalVariableGet(gvar_name);
-    s_isHiddenCached = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND && (bool)val);
-    s_lastHiddenCheckTime = currentTime;
-        }
-    if(s_isHiddenCached) {
-            HideAllTHObjects();
-        }
     }
     g_dailyClosePriceForTH = thBasePrice;
     string gvarName = "Biotak_CustomPrice_" + s_cachedSymbol;
@@ -1041,21 +1034,6 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     {        ClearAllLevels(objectPrefix);
     g_redrawTHLevelsNeeded = false;
     }    
-    if(!g_linesVisible) {
-        int total = ObjectsTotal(0, -1, -1);
-    string cachedPrefix = objectPrefix;
-    int prefixLen = StringLen(cachedPrefix);
-    for(int i = 0; i < total; i++) {
-        string objName = ObjectName(0, i, -1, -1);
-    if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix) {
-        int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
-    if(objType == OBJ_HLINE || objType == OBJ_TREND) {
-                    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                }
-            }
-        }
-    }
-
     CheckAlerts(objectPrefix, g_currentPrice);
 }
     int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
@@ -1207,16 +1185,8 @@ void ApplyLinesVisibility()
         #ifdef ENABLE_DEBUG_LOGS
                 Print("👁️ F key: Showing all objects");
     #endif
-    string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
-    ClearAllLevels(objectPrefix);
-    g_calculatedOnce = false;
-    g_redrawTHLevelsNeeded = true;
-    g_initialized = true;
-    RedrawAllObjects(true);
+    // Fast show: toggle visibility instead of delete+recreate
     int total = ObjectsTotal(0, -1, -1);
-    int shownCount = 0;
-    int hiddenCount = 0;
-    int failedCount = 0;
     string cachedPrefixF = inpObjectPrefix;
     int prefixLenF = StringLen(cachedPrefixF);
     for(int i = total - 1; i >= 0; i--)
@@ -1224,26 +1194,48 @@ void ApplyLinesVisibility()
         string objName = ObjectName(0, i, -1, -1);
     if(StringLen(objName) >= prefixLenF && StringSubstr(objName, 0, prefixLenF) == cachedPrefixF)
                     {
+        // Keep trigger objects hidden if triggers are disabled
         bool isTriggerObject = (StringFind(objName, "TriggerTH_Up_") >= 0 || 
                                                StringFind(objName, "TriggerTH_Down_") >= 0);
     if(isTriggerObject && !g_triggerLevelsEnabled)
                         {
-        if(ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS)) {
-                                hiddenCount++;
-                            } else {
-                                failedCount++;
+            ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                        }
+        // Keep line objects hidden if lines are disabled
+        else if(!g_linesVisible)
+                        {
+            int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
+    if(objType == OBJ_HLINE || objType == OBJ_TREND)
+                            {
+                ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
                             }
-                        } else {
-                            shownCount++;
+                            else
+                            {
+                ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                            }
+                        }
+                        else
+                        {
+            ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
                         }
                     }
                 }
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ F key: Shown ", shownCount, " objects, hidden ", hiddenCount, 
-                      " Trigger objects (", failedCount, " failed)");
-    #endif
+    // Restore labels visibility
+    if(ObjectFind(0, g_stepModeLabelName) >= 0)
+        ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    if(ObjectFind(0, g_factorLabelName) >= 0)
+        ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    if(ObjectFind(0, g_lockStatusLabelName) >= 0)
+        ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    // Restore custom price line if active
+    if(g_customPriceKeyboardOverride && ObjectFind(0, g_customPriceHorizontalLineName) >= 0)
+        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+
+    // Defer recalculation to next OnCalculate tick
+    g_redrawTHLevelsNeeded = true;
     }
-            ThrottledChartRedraw();        }
+    // Direct ChartRedraw for F key (ThrottledChartRedraw skips when hidden)
+            ChartRedraw();        }
     string mutableLinesKey = inpLinesToggleKey;
     StringToUpper(mutableLinesKey);
     int linesKeyCode = StringGetCharacter(mutableLinesKey, 0);
@@ -1382,105 +1374,103 @@ void ApplyLinesVisibility()
     RedrawAllObjects(true);
     ThrottledChartRedraw();
         }
-    if(lparam == '1' || lparam == 49)        {
-            ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
-    if(currentMode == FACTOR_STEP)
-            {
+    // KEY '1' — Decrease Factor
+    if(lparam == '1') {
         double currentFactor = g_factorValueOverride;
-    if(currentFactor <= 0) {
-        if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
-                        currentFactor = inpFactorValue;
-                    } else {                        currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
-    if(currentFactor <= 0 || currentFactor > 10000) {
-        #ifdef ENABLE_DEBUG_LOGS
-                            Print("Factor decrease: Invalid factor from GetDefaultFactorValue, using 50.0");
-    #endif
-    currentFactor = 50.0;
-                        }
-                    }
+        if(currentFactor <= 0) {
+            if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
+                currentFactor = inpFactorValue;
+            } else {
+                currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
+                if(currentFactor <= 0 || currentFactor > 10000) {
+                    #ifdef ENABLE_DEBUG_LOGS
+                    Print("Factor decrease: Invalid factor from GetDefaultFactorValue, using 50.0");
+                    #endif
+                    currentFactor = 50.0;
                 }
-    double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : 0.1;
-    double newFactor = NormalizeDouble(currentFactor - step, 2);
-    if(newFactor < 0.01) newFactor = 0.01;
-    g_factorValueOverride = newFactor;
-    string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
-    if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("WARNING: Failed to persist Factor value to GlobalVariable");
-    #endif
+            }
+        }
+        double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : 0.1;
+        double newFactor = NormalizeDouble(currentFactor - step, 2);
+        if(newFactor < 0.01) newFactor = 0.01;
+        g_factorValueOverride = newFactor;
+        string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
+        if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("WARNING: Failed to persist Factor value to GlobalVariable");
+            #endif
+        }
+        UpdateFactorLabel(newFactor);
+        g_forceClearOnNextDraw = true;
+        g_redrawTHLevelsNeeded = true;
+        RedrawAllObjects(true);
+        ThrottledChartRedraw();
     }
-    UpdateFactorLabel(newFactor);
-    g_forceClearOnNextDraw = true;
-    g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
-    ThrottledChartRedraw();
-            }
-        }
-    if(lparam == '2' || lparam == 50)        {
-            ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
-    if(currentMode == FACTOR_STEP)
-            {
-        double currentFactor = g_factorValueOverride;
-    if(currentFactor <= 0) {
-        if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
-                        currentFactor = inpFactorValue;
-                    } else {                        currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
-    if(currentFactor <= 0 || currentFactor > 10000) {
-        #ifdef ENABLE_DEBUG_LOGS
-                            Print("Factor increase: Invalid factor from GetDefaultFactorValue, using 50.0");
-    #endif
-    currentFactor = 50.0;
-                        }
-                    }
-                }
-    double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : 0.1;
-    double newFactor = NormalizeDouble(currentFactor + step, 2);
-    if(newFactor > 10000) newFactor = 10000;
-    g_factorValueOverride = newFactor;
-    string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
-    if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("WARNING: Failed to persist Factor value to GlobalVariable");
-    #endif
-    }
-    UpdateFactorLabel(newFactor);
-    g_forceClearOnNextDraw = true;
-    g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
-    ThrottledChartRedraw();
-            }
-        }
-        // KEY '3' — Decrease TH3 Frequency
-        if(lparam == '3' || lparam == 51) {
-            if(inpEnableTH3Tool) {
-                double currentFreq = g_th3FreqOverride;
-                if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
-                double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
-                double newFreq = NormalizeDouble(currentFreq - step, 2);
-                if(newFreq < 0.1) newFreq = 0.1;
-                g_th3FreqOverride = newFreq;
-                GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
-                UpdateTH3FreqLabel(newFreq);
-                UpdateAllTH3Objects();
-                ThrottledChartRedraw();
-            }
-        }
 
-        // KEY '4' — Increase TH3 Frequency
-        if(lparam == '4' || lparam == 52) {
-            if(inpEnableTH3Tool) {
-                double currentFreq = g_th3FreqOverride;
-                if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
-                double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
-                double newFreq = NormalizeDouble(currentFreq + step, 2);
-                if(newFreq > 120.0) newFreq = 120.0;
-                g_th3FreqOverride = newFreq;
-                GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
-                UpdateTH3FreqLabel(newFreq);
-                UpdateAllTH3Objects();
-                ThrottledChartRedraw();
+    // KEY '2' — Increase Factor
+    else if(lparam == '2') {
+        double currentFactor = g_factorValueOverride;
+        if(currentFactor <= 0) {
+            if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
+                currentFactor = inpFactorValue;
+            } else {
+                currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
+                if(currentFactor <= 0 || currentFactor > 10000) {
+                    #ifdef ENABLE_DEBUG_LOGS
+                    Print("Factor increase: Invalid factor from GetDefaultFactorValue, using 50.0");
+                    #endif
+                    currentFactor = 50.0;
+                }
             }
         }
+        double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : 0.1;
+        double newFactor = NormalizeDouble(currentFactor + step, 2);
+        if(newFactor > 10000) newFactor = 10000;
+        g_factorValueOverride = newFactor;
+        string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
+        if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("WARNING: Failed to persist Factor value to GlobalVariable");
+            #endif
+        }
+        UpdateFactorLabel(newFactor);
+        g_forceClearOnNextDraw = true;
+        g_redrawTHLevelsNeeded = true;
+        RedrawAllObjects(true);
+        ThrottledChartRedraw();
+    }
+
+    // KEY '3' — Decrease TH3 Frequency
+    else if(lparam == '3') {
+        if(inpEnableTH3Tool) {
+            double currentFreq = g_th3FreqOverride;
+            if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
+            double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
+            double newFreq = NormalizeDouble(currentFreq - step, 2);
+            if(newFreq < 0.1) newFreq = 0.1;
+            g_th3FreqOverride = newFreq;
+            GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
+            UpdateTH3FreqLabel(newFreq);
+            UpdateAllTH3Objects();
+            ThrottledChartRedraw();
+        }
+    }
+
+    // KEY '4' — Increase TH3 Frequency
+    else if(lparam == '4') {
+        if(inpEnableTH3Tool) {
+            double currentFreq = g_th3FreqOverride;
+            if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
+            double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
+            double newFreq = NormalizeDouble(currentFreq + step, 2);
+            if(newFreq > 1000.0) newFreq = 1000.0;
+            g_th3FreqOverride = newFreq;
+            GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
+            UpdateTH3FreqLabel(newFreq);
+            UpdateAllTH3Objects();
+            ThrottledChartRedraw();
+        }
+    }
 
     string mutableResetKey = inpResetKey;
     StringToUpper(mutableResetKey);

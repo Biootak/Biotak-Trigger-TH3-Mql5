@@ -200,7 +200,7 @@ void ClearAllModeLabels() {
     void ApplyModeLabelStyle(const string name, const color textColor, const int yOffsetExtra = 0) {
         ObjectSetInteger(0, name, OBJPROP_CORNER, inpModeLabelCorner);
     ObjectSetInteger(0, name, OBJPROP_XDISTANCE, inpModeLabelXDistance);
-    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra + g_currentLabelYOffset);
     ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpModeLabelFontSize);
