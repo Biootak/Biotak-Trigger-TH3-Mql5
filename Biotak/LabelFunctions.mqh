@@ -821,6 +821,52 @@ void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
         }
     }
 }
+
+// Fast TH labels hide/show without deletion (O(1) object operations)
+// mode: 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH
+void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
+    // F key (global hide) always wins
+    bool shouldShow = ((mode != 0) && !IsIndicatorHidden());
+    long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+
+    string titleObj = objectPrefix + "TH_Title";
+    if(ObjectFind(0, titleObj) >= 0) {
+        ObjectSetInteger(0, titleObj, OBJPROP_TIMEFRAMES, tf);
+    }
+
+    bool showFractal = (mode == 1 || mode == 3);
+    bool showStandard = (mode == 2 || mode == 3);
+
+    // Fractal + Standard timeframes
+    for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
+        string timeframeName = FRACTAL_TIMEFRAMES[i];
+        string mainObj = objectPrefix + "TH_" + timeframeName;
+        string stepsObj = objectPrefix + "TH_Steps_" + timeframeName;
+        string targetsObj = objectPrefix + "TH_Targets_" + timeframeName;
+
+        long tfThis = (shouldShow && showFractal) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+        if(ObjectFind(0, mainObj) >= 0)  ObjectSetInteger(0, mainObj, OBJPROP_TIMEFRAMES, tfThis);
+        if(ObjectFind(0, stepsObj) >= 0) ObjectSetInteger(0, stepsObj, OBJPROP_TIMEFRAMES, tfThis);
+        if(ObjectFind(0, targetsObj) >= 0) {
+            if(shouldShow && showFractal && inpShowTHTargets) ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            else                                              ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
+    }
+    for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
+        string timeframeName = STANDARD_TIMEFRAMES[i];
+        string mainObj = objectPrefix + "TH_" + timeframeName;
+        string stepsObj = objectPrefix + "TH_Steps_" + timeframeName;
+        string targetsObj = objectPrefix + "TH_Targets_" + timeframeName;
+
+        long tfThis = (shouldShow && showStandard) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+        if(ObjectFind(0, mainObj) >= 0)  ObjectSetInteger(0, mainObj, OBJPROP_TIMEFRAMES, tfThis);
+        if(ObjectFind(0, stepsObj) >= 0) ObjectSetInteger(0, stepsObj, OBJPROP_TIMEFRAMES, tfThis);
+        if(ObjectFind(0, targetsObj) >= 0) {
+            if(shouldShow && showStandard && inpShowTHTargets) ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            else                                               ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
+    }
+}
     bool CreateTHLabel(const string objectPrefix, const string timeframeName, const double thValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
     if (!inpShowTHLabels) return true;
     

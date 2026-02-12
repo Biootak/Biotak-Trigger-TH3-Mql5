@@ -74,6 +74,47 @@ int OnInitHandler() {    InitializeGlobalCache();
     if(!inpShowATRLabels) {
         g_atrLabelsVisible = false;
     }
+    string thLabelsGvarName = "Biotak_THLabels_" + chartIdStr;
+    if(GlobalVariableCheck(thLabelsGvarName)) {
+        double gvarValue = GlobalVariableGet(thLabelsGvarName);
+    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
+    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
+    bool isTwo = MathAbs(gvarValue - 2.0) < EPSILON_GENERAL;
+    bool isThree = MathAbs(gvarValue - 3.0) < EPSILON_GENERAL;
+    if(isZero || isOne || isTwo || isThree) {
+            g_thLabelsMode = (int)gvarValue;
+            g_thLabelsVisible = (g_thLabelsMode != 0);
+        } else {
+        #ifdef ENABLE_DEBUG_LOGS
+            Print("❌ OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
+    #endif
+    int defaultMode = 0;
+    if(inpShowTHLabels) {
+        if(inpShowFractalTHs && inpShowStandardTHs) defaultMode = 3;
+        else if(inpShowFractalTHs) defaultMode = 1;
+        else if(inpShowStandardTHs) defaultMode = 2;
+        else defaultMode = 0;
+    }
+    GlobalVariableSet(thLabelsGvarName, (double)defaultMode);
+    g_thLabelsMode = defaultMode;
+    g_thLabelsVisible = (g_thLabelsMode != 0);
+        }
+    } else {
+        int defaultMode = 0;
+        if(inpShowTHLabels) {
+            if(inpShowFractalTHs && inpShowStandardTHs) defaultMode = 3;
+            else if(inpShowFractalTHs) defaultMode = 1;
+            else if(inpShowStandardTHs) defaultMode = 2;
+            else defaultMode = 0;
+        }
+        g_thLabelsMode = defaultMode;
+        g_thLabelsVisible = (g_thLabelsMode != 0);
+    }
+    // Input setting is the master switch: if disabled in Inputs, force runtime state off
+    if(!inpShowTHLabels) {
+        g_thLabelsMode = 0;
+        g_thLabelsVisible = false;
+    }
     int validationResult = ValidateInputs();
     if(validationResult != INIT_SUCCEEDED) {
         return validationResult;
@@ -409,6 +450,9 @@ void HideAllTHObjects()
     // ATR labels hotkey override should not survive parameter changes
     string atrLabelsGvarName = "Biotak_ATRLabels_" + chartIdStrLocal;
     GlobalVariableDel(atrLabelsGvarName);
+    // TH labels hotkey override should not survive parameter changes
+    string thLabelsGvarNameLocal = "Biotak_THLabels_" + chartIdStrLocal;
+    GlobalVariableDel(thLabelsGvarNameLocal);
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
     GlobalVariableSet(th3UpdateFlag, 1.0);
     GlobalVariableTemp(th3UpdateFlag);
@@ -962,8 +1006,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_currentLabelYOffset = 0;  // Reset top label stacking offset
     g_currentLabelYOffsetBottom = 0;  // Reset bottom label stacking offset
     if(g_atrLabelsVisible && inpShowATRLabels) DisplayATRLabels(objectPrefix);
-    if(inpShowTHLabels && inpShowFractalTHs) DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-    if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+    bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
+    bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
+    if(inpShowTHLabels && g_thLabelsMode != 0 && showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+    if(inpShowTHLabels && g_thLabelsMode != 0 && showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
     g_calculatedOnce = true;
     g_labelsRelayoutNeeded = false;
@@ -1177,6 +1223,44 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 void ApplyLinesVisibility()
 {    return;
 }
+
+// Robust hotkey matcher: compares both key code (lparam) and key text (sparam)
+bool IsHotkeyPressed(const long lparam, const string sparam, const string hotkey) {
+    if(StringLen(hotkey) <= 0) return false;
+    string k = hotkey;
+    StringToUpper(k);
+    int code = (int)StringGetCharacter(k, 0);
+    if((int)lparam == code) return true;
+
+    // Some keyboard layouts deliver different lparam; sparam can contain the key text
+    if(StringLen(sparam) > 0) {
+        string sp = sparam;
+        StringToUpper(sp);
+        if((int)StringGetCharacter(sp, 0) == code) return true;
+    }
+    return false;
+}
+
+// Lightweight label-only redraw (no level recalculation). Safe to call from hotkeys.
+void RedrawLabelsOnly() {
+    if(IsIndicatorHidden()) return;
+    datetime currentTime = TimeGMT();
+    string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+
+    g_currentLabelYOffset = 0;
+    g_currentLabelYOffsetBottom = 0;
+
+    if(g_atrLabelsVisible && inpShowATRLabels) {
+        DisplayATRLabels(objectPrefix);
+    }
+
+    bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
+    bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
+    if(inpShowTHLabels && g_thLabelsMode != 0) {
+        if(showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+    }
+}
     void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
         if(id == CHARTEVENT_KEYDOWN)
@@ -1184,7 +1268,7 @@ void ApplyLinesVisibility()
         string mutableHideKey = inpHideKey;
     StringToUpper(mutableHideKey);
     int hideKeyCode = StringGetCharacter(mutableHideKey, 0);
-    if(lparam == hideKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpHideKey))
         {
         string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
     double currentState = 0.0;
@@ -1277,15 +1361,17 @@ void ApplyLinesVisibility()
 
     // Defer recalculation to next OnCalculate tick
     g_redrawTHLevelsNeeded = true;
+
+    // Re-apply label visibility consistently (ATR + TH mode split)
+    string objectPrefixLocal = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+    SetATRLabelsVisibility(objectPrefixLocal, (g_atrLabelsVisible && inpShowATRLabels));
+    SetTHLabelsVisibility(objectPrefixLocal, (inpShowTHLabels ? g_thLabelsMode : 0));
     }
     // Direct ChartRedraw for F key (ThrottledChartRedraw skips when hidden)
             ChartRedraw();
     return;
         }
-    string mutableLinesKey = inpLinesToggleKey;
-    StringToUpper(mutableLinesKey);
-    int linesKeyCode = StringGetCharacter(mutableLinesKey, 0);
-    if(lparam == linesKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpLinesToggleKey))
         {            g_linesVisible = !g_linesVisible;
     string gvar_name = "Biotak_LinesVisible_" + GetCachedChartIdStr();
     GlobalVariableSet(gvar_name, g_linesVisible ? 1.0 : 0.0);
@@ -1317,10 +1403,7 @@ void ApplyLinesVisibility()
     ThrottledChartRedraw();
     return;
         }
-    string mutableCustomKey = inpCustomPriceKey;
-    StringToUpper(mutableCustomKey);
-    int customKeyCode = StringGetCharacter(mutableCustomKey, 0);
-    if(lparam == customKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpCustomPriceKey))
         {            
             g_waitingForCustomPriceClick = true;
     g_customPriceKeyboardOverride = true;
@@ -1379,10 +1462,7 @@ void ApplyLinesVisibility()
     return;
             }
         }
-    string mutableTriggerKey = inpTriggerLevelsKey;
-    StringToUpper(mutableTriggerKey);
-    int triggerKeyCode = StringGetCharacter(mutableTriggerKey, 0);
-    if(lparam == triggerKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpTriggerLevelsKey))
         {            g_triggerLevelsEnabled = !g_triggerLevelsEnabled;
     string triggerGvarName = "Biotak_TriggerLevels_" + GetCachedChartIdStr();
     GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled);
@@ -1401,10 +1481,7 @@ void ApplyLinesVisibility()
     ThrottledChartRedraw();
     return;
         }
-    string mutableATRKey = inpATRLabelsKey;
-    StringToUpper(mutableATRKey);
-    int atrKeyCode = StringGetCharacter(mutableATRKey, 0);
-    if(lparam == atrKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpATRLabelsKey))
         {
         // If user disabled ATR in Inputs, keep it off (and persist off)
     string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
@@ -1428,18 +1505,37 @@ void ApplyLinesVisibility()
     ChartRedraw();
     return;
         }
-    string mutableTH3Key = inpTH3ToolKey;
-    StringToUpper(mutableTH3Key);
-    int th3KeyCode = StringGetCharacter(mutableTH3Key, 0);
-    if(lparam == th3KeyCode)
+
+    // TH labels toggle
+    if(IsHotkeyPressed(lparam, sparam, inpTHLabelsKey))
+        {
+        string thGvar = "Biotak_THLabels_" + GetCachedChartIdStr();
+    if(!inpShowTHLabels) {
+        g_thLabelsMode = 0;
+        g_thLabelsVisible = false;
+        GlobalVariableSet(thGvar, 0.0);
+    } else {
+        if(g_thLabelsMode < 0 || g_thLabelsMode > 3) g_thLabelsMode = 0;
+        g_thLabelsMode = (g_thLabelsMode + 1) % 4; // OFF->FRACTAL->STANDARD->BOTH->OFF
+        g_thLabelsVisible = (g_thLabelsMode != 0);
+        GlobalVariableSet(thGvar, (double)g_thLabelsMode);
+    }
+    string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+    SetTHLabelsVisibility(objectPrefix, (inpShowTHLabels ? g_thLabelsMode : 0));
+    g_labelsRelayoutNeeded = true;
+    RedrawLabelsOnly();
+    #ifdef ENABLE_DEBUG_LOGS
+        Print("🧾 TH Labels mode=", g_thLabelsMode, " (0=OFF,1=FRACTAL,2=STANDARD,3=BOTH)");
+    #endif
+    ChartRedraw();
+    return;
+        }
+    if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
         {
             ToggleTH3Tool();
     ThrottledChartRedraw();        }
-    if(lparam == th3KeyCode) return;
-    string mutableStepModeKey = inpStepModeKey;
-    StringToUpper(mutableStepModeKey);
-    int stepModeKeyCode = StringGetCharacter(mutableStepModeKey, 0);
-    if(lparam == stepModeKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey)) return;
+    if(IsHotkeyPressed(lparam, sparam, inpStepModeKey))
         {            ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     ENUM_STEP_CALCULATION_MODE newMode = (ENUM_STEP_CALCULATION_MODE)(((int)currentMode + 1) % 6);
     g_stepModeOverride = (int)newMode;
@@ -1555,10 +1651,7 @@ void ApplyLinesVisibility()
         return;
     }
 
-    string mutableResetKey = inpResetKey;
-    StringToUpper(mutableResetKey);
-    int resetKeyCode = StringGetCharacter(mutableResetKey, 0);
-    if(lparam == resetKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpResetKey))
         {            g_stepModeOverride = -1;
     g_factorValueOverride = 0;
     g_th3FreqOverride = 0;
@@ -1567,6 +1660,15 @@ void ApplyLinesVisibility()
     g_triggerLevelsEnabled = inpShowTrigger;
     g_linesVisible = inpShowLines;
     g_atrLabelsVisible = inpShowATRLabels;
+    if(inpShowTHLabels) {
+        if(inpShowFractalTHs && inpShowStandardTHs) g_thLabelsMode = 3;
+        else if(inpShowFractalTHs) g_thLabelsMode = 1;
+        else if(inpShowStandardTHs) g_thLabelsMode = 2;
+        else g_thLabelsMode = 0;
+    } else {
+        g_thLabelsMode = 0;
+    }
+    g_thLabelsVisible = (g_thLabelsMode != 0);
     if(inpEnableTH3Tool) {
                 UpdateAllTH3Objects();
             }
@@ -1582,6 +1684,7 @@ void ApplyLinesVisibility()
     GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
     GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
     GlobalVariableDel("Biotak_ATRLabels_" + chartIdStr);
+    GlobalVariableDel("Biotak_THLabels_" + chartIdStr);
     GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
     GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
     GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
@@ -1602,10 +1705,7 @@ void ApplyLinesVisibility()
     ThrottledChartRedraw();
     return;
         }
-    string mutableLockKey = inpLockKey;
-    StringToUpper(mutableLockKey);
-    int lockKeyCode = StringGetCharacter(mutableLockKey, 0);
-    if(lparam == lockKeyCode)
+    if(IsHotkeyPressed(lparam, sparam, inpLockKey))
         {
         bool hadCustomPrice = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
     double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;

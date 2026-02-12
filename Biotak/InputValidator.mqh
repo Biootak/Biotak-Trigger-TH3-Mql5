@@ -81,6 +81,7 @@ bool ValidateHotkeysUniqueAndSafe() {
     if(!ValidateHotkeyString(inpStepModeKey, "StepModeKey")) return false;
     if(!ValidateHotkeyString(inpTH3ToolKey, "TH3ToolKey")) return false;
     if(!ValidateHotkeyString(inpATRLabelsKey, "ATRLabelsKey")) return false;
+    if(!ValidateHotkeyString(inpTHLabelsKey, "THLabelsKey")) return false;
     if(!ValidateHotkeyString(inpResetKey, "ResetKey")) return false;
 
     // Reserved hardcoded keys used elsewhere
@@ -89,17 +90,18 @@ bool ValidateHotkeysUniqueAndSafe() {
 
     int codes[];
     string names[];
-    ArrayResize(codes, 9);
-    ArrayResize(names, 9);
+    ArrayResize(codes, 10);
+    ArrayResize(names, 10);
     codes[0] = GetHotkeyCodeUpper(inpHideKey);         names[0] = "HideKey";
     codes[1] = GetHotkeyCodeUpper(inpLinesToggleKey);  names[1] = "LinesToggleKey";
     codes[2] = GetHotkeyCodeUpper(inpLockKey);         names[2] = "LockKey";
     codes[3] = GetHotkeyCodeUpper(inpCustomPriceKey);  names[3] = "CustomPriceKey";
     codes[4] = GetHotkeyCodeUpper(inpTriggerLevelsKey);names[4] = "TriggerLevelsKey";
     codes[5] = GetHotkeyCodeUpper(inpATRLabelsKey);    names[5] = "ATRLabelsKey";
-    codes[6] = GetHotkeyCodeUpper(inpTH3ToolKey);      names[6] = "TH3ToolKey";
-    codes[7] = GetHotkeyCodeUpper(inpStepModeKey);     names[7] = "StepModeKey";
-    codes[8] = GetHotkeyCodeUpper(inpResetKey);        names[8] = "ResetKey";
+    codes[6] = GetHotkeyCodeUpper(inpTHLabelsKey);     names[6] = "THLabelsKey";
+    codes[7] = GetHotkeyCodeUpper(inpTH3ToolKey);      names[7] = "TH3ToolKey";
+    codes[8] = GetHotkeyCodeUpper(inpStepModeKey);     names[8] = "StepModeKey";
+    codes[9] = GetHotkeyCodeUpper(inpResetKey);        names[9] = "ResetKey";
 
     // Disallow reserved conflicts
     for(int i=0; i<ArraySize(codes); i++) {

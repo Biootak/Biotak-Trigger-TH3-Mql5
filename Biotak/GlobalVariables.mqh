@@ -37,6 +37,8 @@ static bool g_customPriceKeyboardOverride = false;
 static bool g_triggerLevelsEnabled = true;
 static bool g_linesVisible = true;
 static bool g_atrLabelsVisible = true;
+static bool g_thLabelsVisible = true;
+static int  g_thLabelsMode = 0; // 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH
 static int g_stepModeOverride = -1;        // -1 = use input, 0-5 = override
 static double g_factorValueOverride = 0;   // 0 = use input, >0 = override
 static int g_factorColorOverride = -1;     // -1 = use input
@@ -129,7 +131,7 @@ uint g_isHiddenCacheTime = 0;
         string chartIdStr = GetCachedChartIdStr();
     string symbolName = SanitizeSymbolName(GetCachedSymbol());
     string gvars[];
-    ArrayResize(gvars, 12);
+    ArrayResize(gvars, 13);
     gvars[0]  = "Biotak_isHidden_" + chartIdStr;
     gvars[1]  = "Biotak_CustomPrice_" + symbolName;
     gvars[2]  = "Biotak_LockTF_" + chartIdStr;
@@ -142,6 +144,7 @@ uint g_isHiddenCacheTime = 0;
     gvars[9]  = "Biotak_TH3FreqIdx_" + chartIdStr;
     gvars[10] = "Biotak_LinesVisible_" + chartIdStr;
     gvars[11] = "Biotak_ATRLabels_" + chartIdStr;
+    gvars[12] = "Biotak_THLabels_" + chartIdStr;
     for(int i = 0; i < ArraySize(gvars); i++) {
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }
