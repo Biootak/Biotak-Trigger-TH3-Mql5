@@ -502,25 +502,18 @@ void CalculateATRBatch(double &results[]) {
     int tf = GetEffectiveTimeframe();
     ENUM_TIMEFRAMES etf = (ENUM_TIMEFRAMES)tf;
     
-    // Batch copy OHLC data in 4 calls instead of ~1000 individual calls
-    double highArr[], lowArr[], closeArr[], openArr[];
-    // Need maxPeriod + 3 bars for complete TR calculation
-    // - maxPeriod bars for TR calculation (bar 1 to bar maxPeriod)
-    // - 1 extra bar (bar 0, current - we'll skip it)
-    // - 1 extra bar for prevClose of bar maxPeriod (bar maxPeriod+1)
-    // Total: maxPeriod + 2 bars to copy, but we need maxPeriod + 3 to have prevClose for oldest
-    // Actually: We copy bars 0 to maxPeriod+1, which is maxPeriod+2 bars
-    // For bar maxPeriod, we need close of bar maxPeriod+1
+    // Batch copy HLC data in 3 calls instead of ~1000 individual calls
+    // PERF: CopyOpen removed — not needed for True Range (H-L, |H-prevC|, |L-prevC|)
+    double highArr[], lowArr[], closeArr[];
     int copyCount = MathMin(maxPeriod + 2, barsAvailable);
     int copiedHigh  = CopyHigh(_Symbol, etf, 0, copyCount, highArr);
     int copiedLow   = CopyLow(_Symbol, etf, 0, copyCount, lowArr);
     int copiedClose = CopyClose(_Symbol, etf, 0, copyCount, closeArr);
-    int copiedOpen  = CopyOpen(_Symbol, etf, 0, copyCount, openArr);
     if(copiedHigh < copyCount || copiedLow < copyCount || 
-       copiedClose < copyCount || copiedOpen < copyCount) {
+       copiedClose < copyCount) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBatch: CopyXxx failed (H:", copiedHigh, " L:", copiedLow,
-              " C:", copiedClose, " O:", copiedOpen, " needed:", copyCount, "), falling back");
+              " C:", copiedClose, " needed:", copyCount, "), falling back");
     #endif
         // Fallback to per-bar method
         // Use completed bars only (start from bar 1)
@@ -601,7 +594,6 @@ void CalculateATRBatch(double &results[]) {
     ArrayFree(highArr);
     ArrayFree(lowArr);
     ArrayFree(closeArr);
-    ArrayFree(openArr);
     
     // Calculate ATR for each period using pre-computed TR values
     int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
@@ -984,17 +976,17 @@ void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targ
     }
     
     // Use batch CopyXxx for target timeframe
+    // PERF: CopyOpen removed — not needed for True Range calculation
     int maxPeriod = ATR_PERIOD_6;
-    double highArr[], lowArr[], closeArr[], openArr[];
+    double highArr[], lowArr[], closeArr[];
     int copyCount = MathMin(maxPeriod + 2, barsAvailable);
     
     int copiedHigh  = CopyHigh(_Symbol, targetTF, 0, copyCount, highArr);
     int copiedLow   = CopyLow(_Symbol, targetTF, 0, copyCount, lowArr);
     int copiedClose = CopyClose(_Symbol, targetTF, 0, copyCount, closeArr);
-    int copiedOpen  = CopyOpen(_Symbol, targetTF, 0, copyCount, openArr);
     
     if(copiedHigh < copyCount || copiedLow < copyCount || 
-       copiedClose < copyCount || copiedOpen < copyCount) {
+       copiedClose < copyCount) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ CalculateATRBatchForTimeframe: CopyXxx failed for TF=", targetTF);
         #endif
@@ -1030,7 +1022,6 @@ void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targ
     ArrayFree(highArr);
     ArrayFree(lowArr);
     ArrayFree(closeArr);
-    ArrayFree(openArr);
     
     // Calculate ATR for each period
     int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 

@@ -6,6 +6,29 @@
 #define Digits _Digits
 #define Point  _Point
 
+// PERF: Cached Bid/Ask to avoid repeated SymbolInfoDouble() syscalls per tick.
+// Call CacheTickPrices() once at the top of OnCalculateHandler/RedrawAllObjects,
+// then use GetCachedBid()/GetCachedAsk() everywhere else in that tick.
+static double g_cachedBid = 0.0;
+static double g_cachedAsk = 0.0;
+static uint   g_tickPriceCacheTime = 0;
+
+void CacheTickPrices() {
+    g_cachedBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    g_cachedAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    g_tickPriceCacheTime = GetTickCount();
+}
+
+double GetCachedBid() {
+    if(g_tickPriceCacheTime == 0) CacheTickPrices();
+    return g_cachedBid;
+}
+
+double GetCachedAsk() {
+    if(g_tickPriceCacheTime == 0) CacheTickPrices();
+    return g_cachedAsk;
+}
+
 // MQL4 MarketInfo mode constants
 #define MODE_POINT          16
 #define MODE_DIGITS         12
@@ -51,26 +74,29 @@ double MarketInfo(string symbol, int mode) {
     default:                  return 0.0;
     }
 }
+// PERF: Reuse a single static MqlDateTime struct to avoid stack allocation per call
+static MqlDateTime g_tempDt;
+
     int TimeHour(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.hour;
+    TimeToStruct(time, g_tempDt); return g_tempDt.hour;
 }
     int TimeMinute(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.min;
+    TimeToStruct(time, g_tempDt); return g_tempDt.min;
 }
     int TimeSeconds(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.sec;
+    TimeToStruct(time, g_tempDt); return g_tempDt.sec;
 }
     int TimeDay(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.day;
+    TimeToStruct(time, g_tempDt); return g_tempDt.day;
 }
     int TimeMonth(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.mon;
+    TimeToStruct(time, g_tempDt); return g_tempDt.mon;
 }
     int TimeYear(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.year;
+    TimeToStruct(time, g_tempDt); return g_tempDt.year;
 }
     int TimeDayOfWeek(datetime time) {
-    MqlDateTime dt; TimeToStruct(time, dt); return dt.day_of_week;
+    TimeToStruct(time, g_tempDt); return g_tempDt.day_of_week;
 }
     int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
         if(tf == PERIOD_CURRENT || tf == 0) tf = (ENUM_TIMEFRAMES)GetCachedPeriod();
@@ -104,7 +130,8 @@ bool g_atrHandleCacheInitialized = false;
 }
     double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atr_period, int shift) {
         if(symbol == NULL || symbol == "") symbol = _Symbol;
-    InitATRCache();
+    // PERF: InitATRCache() is called from OnInit; skip redundant per-call init check
+    if(!g_atrHandleCacheInitialized) InitATRCache();
     int handle = INVALID_HANDLE;
     for(int i = 0; i < g_atrHandleCacheCount; i++) {
         if(g_atrHandleCache[i].symbol == symbol &&

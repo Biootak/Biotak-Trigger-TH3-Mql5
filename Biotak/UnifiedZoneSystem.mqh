@@ -67,20 +67,26 @@ bool CreateUnifiedZone(const string zoneName,
 }
 
 // Read zone config from global input parameters
+// PERF: Cached per frame — inputs don't change between zone draws in same redraw cycle
 SUnifiedZoneConfig GetUnifiedZoneConfig()
 {
-    SUnifiedZoneConfig config;
-    config.enabled = inpShowMidZones;
-    config.transparency = MathMax(0, MathMin(100, inpMidZoneTransparency));
+    static SUnifiedZoneConfig cachedConfig;
+    static uint lastTick = 0;
+    uint currentTick = GetTickCount();
+    if(currentTick == lastTick) return cachedConfig;
+    lastTick = currentTick;
+
+    cachedConfig.enabled = inpShowMidZones;
+    cachedConfig.transparency = MathMax(0, MathMin(100, inpMidZoneTransparency));
 
     double hp = inpMidZoneHeightPercent / 100.0;
     if(hp < MIN_ZONE_HEIGHT_PERCENT) hp = MIN_ZONE_HEIGHT_PERCENT;
     if(hp > MAX_ZONE_HEIGHT_PERCENT) hp = MAX_ZONE_HEIGHT_PERCENT;
-    config.heightPercent = hp;
+    cachedConfig.heightPercent = hp;
 
-    config.defaultColor = clrDarkGray;
-    config.style = inpMidZoneStyle;
-    return config;
+    cachedConfig.defaultColor = clrDarkGray;
+    cachedConfig.style = inpMidZoneStyle;
+    return cachedConfig;
 }
 
 // Simple zone for modes without structure/trigger separation

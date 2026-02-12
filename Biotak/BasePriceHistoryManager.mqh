@@ -247,8 +247,9 @@
     string uniqueTimeBlocks[];
     string uniqueEntries[];
     int uniqueCount = 0;
-    ArrayResize(uniqueTimeBlocks, 0);
-    ArrayResize(uniqueEntries, 0);
+    // PERF: Pre-allocate to count (worst case = no duplicates) instead of grow-by-1
+    ArrayResize(uniqueTimeBlocks, count);
+    ArrayResize(uniqueEntries, count);
     for(int i = 0; i < count; i++)
     {
         int pipePos = StringFind(history[i], "|");
@@ -256,7 +257,8 @@
     string timeBlock = StringSubstr(history[i], 0, pipePos);
     bool found = false;
     int foundIndex = -1;
-    for(int j = 0; j < uniqueCount; j++)
+    // PERF: Reverse search — duplicates are typically adjacent/near-end
+    for(int j = uniqueCount - 1; j >= 0; j--)
         {
         if(uniqueTimeBlocks[j] == timeBlock)
             {
@@ -269,9 +271,7 @@
         {            uniqueEntries[foundIndex] = history[i];
         }
         else
-        {            ArrayResize(uniqueTimeBlocks, uniqueCount + 1, 64);
-    ArrayResize(uniqueEntries, uniqueCount + 1, 64);
-    uniqueTimeBlocks[uniqueCount] = timeBlock;
+        {            uniqueTimeBlocks[uniqueCount] = timeBlock;
     uniqueEntries[uniqueCount] = history[i];
     uniqueCount++;
         }

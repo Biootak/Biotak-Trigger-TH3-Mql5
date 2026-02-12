@@ -2134,26 +2134,21 @@ int GetValidatedBaseMultiplier() {
 //+------------------------------------------------------------------+
 static int g_cachedBaseMultiplier = -1;
     static int g_cachedIntervals[5];
-    void GetCachedIntervals(const int baseMultiplier, int &intervals[]) {
+    
+    // PERF: Ensure intervals cache is valid without copying to a local array
+    void EnsureIntervalsCache(const int baseMultiplier) {
         int validatedMultiplier = baseMultiplier;
-    if(validatedMultiplier < 2 || validatedMultiplier > 9) {
-        validatedMultiplier = 3;
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ GetCachedIntervals: Invalid base ", baseMultiplier, 
-              " auto-corrected to ", validatedMultiplier);
-    #endif
-    }
-    if(g_cachedBaseMultiplier != validatedMultiplier) {        for(int i = 0; i < 5; i++) {
-            g_cachedIntervals[i] = CalculateStructureInterval(validatedMultiplier, i + 1);
+        if(validatedMultiplier < 2 || validatedMultiplier > 9)
+            validatedMultiplier = 3;
+        if(g_cachedBaseMultiplier != validatedMultiplier) {
+            for(int i = 0; i < 5; i++)
+                g_cachedIntervals[i] = CalculateStructureInterval(validatedMultiplier, i + 1);
+            g_cachedBaseMultiplier = validatedMultiplier;
         }
-        g_cachedBaseMultiplier = validatedMultiplier;
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("📊 Structure intervals calculated for base ", validatedMultiplier, 
-              ": L1=", g_cachedIntervals[0], ", L2=", g_cachedIntervals[1], 
-              ", L3=", g_cachedIntervals[2], ", L4=", g_cachedIntervals[3], 
-              ", L5=", g_cachedIntervals[4]);
-    #endif
     }
+    
+    void GetCachedIntervals(const int baseMultiplier, int &intervals[]) {
+        EnsureIntervalsCache(baseMultiplier);
     // PERF: Skip ArrayResize when caller's array is already correct size
     if(ArraySize(intervals) != 5) {
         ArrayResize(intervals, 5);
@@ -2223,41 +2218,39 @@ int GetHighestStructureLevel(const int step, const int &intervals[]) {
         // PERF: Compute intervals once and reuse for both structure and trigger checks
         bool isStructureLevel = false;
         if(inpShowStructure) {
+        // PERF: Use g_cachedIntervals directly — no local array alloc or copy
         int baseMultiplier = GetValidatedBaseMultiplier();
-    int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
-    if(intervals[4] > 0 && stepCount % intervals[4] == 0 && inpShowStructureL5) {
+    EnsureIntervalsCache(baseMultiplier);
+    if(g_cachedIntervals[4] > 0 && stepCount % g_cachedIntervals[4] == 0 && inpShowStructureL5) {
             outColor = inpStructureL5Color;
     outStyle = inpStructureL5Style;
     outWidth = inpStructureL5Width;
     return true;
         }
-    if(intervals[3] > 0 && stepCount % intervals[3] == 0 && inpShowStructureL4) {
+    if(g_cachedIntervals[3] > 0 && stepCount % g_cachedIntervals[3] == 0 && inpShowStructureL4) {
             outColor = inpStructureL4Color;
     outStyle = inpStructureL4Style;
     outWidth = inpStructureL4Width;
     return true;
         }
-    if(intervals[2] > 0 && stepCount % intervals[2] == 0 && inpShowStructureL3) {
+    if(g_cachedIntervals[2] > 0 && stepCount % g_cachedIntervals[2] == 0 && inpShowStructureL3) {
             outColor = inpStructureL3Color;
     outStyle = inpStructureL3Style;
     outWidth = inpStructureL3Width;
     return true;
         }
-    if(intervals[1] > 0 && stepCount % intervals[1] == 0 && inpShowStructureL2) {
+    if(g_cachedIntervals[1] > 0 && stepCount % g_cachedIntervals[1] == 0 && inpShowStructureL2) {
             outColor = inpStructureL2Color;
     outStyle = inpStructureL2Style;
     outWidth = inpStructureL2Width;
     return true;
         }
-    if(intervals[0] > 0 && stepCount % intervals[0] == 0 && inpShowStructureL1) {
+    if(g_cachedIntervals[0] > 0 && stepCount % g_cachedIntervals[0] == 0 && inpShowStructureL1) {
             outColor = inpStructureL1Color;
     outStyle = inpStructureL1Style;
     outWidth = inpStructureL1Width;
     return true;
         }
-        // If we reach here, structure is enabled but this step doesn't match any structure level
-        // isStructureLevel remains false — no need to recheck
     }
     // PERF: If structure block above didn't return, this step is NOT a structure level.
     // No need to recompute intervals — just check triggerEnabled directly.
@@ -2288,24 +2281,24 @@ int GetHighestStructureLevel(const int step, const int &intervals[]) {
 color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, const int baseMultiplier) {    if(!inpShowMidZones) return clrNONE;
     if(currentStep <= 0) return clrNONE;
     if(inpShowStructure) {
+        // PERF: Use g_cachedIntervals directly — no local array alloc or copy
         int validatedMultiplier = baseMultiplier;
     if(validatedMultiplier < 2 || validatedMultiplier > 9) {
             validatedMultiplier = GetValidatedBaseMultiplier();        }
-    int intervals[];
-    GetCachedIntervals(validatedMultiplier, intervals);
-    if(intervals[4] > 0 && currentStep % intervals[4] == 0 && inpShowStructureL5) {
+    EnsureIntervalsCache(validatedMultiplier);
+    if(g_cachedIntervals[4] > 0 && currentStep % g_cachedIntervals[4] == 0 && inpShowStructureL5) {
         return inpStructureL5Color;
         }
-    if(intervals[3] > 0 && currentStep % intervals[3] == 0 && inpShowStructureL4) {
+    if(g_cachedIntervals[3] > 0 && currentStep % g_cachedIntervals[3] == 0 && inpShowStructureL4) {
         return inpStructureL4Color;
         }
-    if(intervals[2] > 0 && currentStep % intervals[2] == 0 && inpShowStructureL3) {
+    if(g_cachedIntervals[2] > 0 && currentStep % g_cachedIntervals[2] == 0 && inpShowStructureL3) {
         return inpStructureL3Color;
         }
-    if(intervals[1] > 0 && currentStep % intervals[1] == 0 && inpShowStructureL2) {
+    if(g_cachedIntervals[1] > 0 && currentStep % g_cachedIntervals[1] == 0 && inpShowStructureL2) {
         return inpStructureL2Color;
         }
-    if(intervals[0] > 0 && currentStep % intervals[0] == 0 && inpShowStructureL1) {
+    if(g_cachedIntervals[0] > 0 && currentStep % g_cachedIntervals[0] == 0 && inpShowStructureL1) {
         return inpStructureL1Color;
         }
     }
@@ -2436,10 +2429,9 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     if(inpShowMidZones) {
         bool isStructureLevel = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                         isStructureLevel = true;
     break;
                     }
@@ -2517,10 +2509,9 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     if(inpShowMidZones) {
         bool isStructureLevel = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                         isStructureLevel = true;
     break;
                     }
@@ -2606,10 +2597,10 @@ bool DrawUnifiedZone(
     if(!inpShowMidZones) return false;
     bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        // PERF: Use g_cachedIntervals directly
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                 isCurrentStructure = true;
     break;
             }
@@ -2731,10 +2722,9 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(inpShowStructure) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                             isCurrentStructure = true;
     break;
                         }
@@ -2818,10 +2808,9 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(inpShowStructure) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                             isCurrentStructure = true;
     break;
                         }
@@ -2961,10 +2950,9 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                         isCurrentStructure = true;
     break;
                     }
@@ -3046,10 +3034,9 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                         isCurrentStructure = true;
     break;
                     }
@@ -3416,6 +3403,21 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     bool triggerEnabled = IsTriggerLevelsEnabled();
     bool structureEnabled = inpShowStructure;
     int baseMultiplier = GetValidatedBaseMultiplier();
+    
+    // PERF: Cache frequently called values before loops
+    int cachedDigits = GetCachedDigits();
+    double cachedPoint = GetCachedPoint();
+    
+    // PERF: Viewport culling — compute visible price range
+    double vpTop = 0, vpBottom = 0;
+    double chartPriceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+    double chartPriceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+    if(chartPriceMin > 0 && chartPriceMax > chartPriceMin) {
+        double vpPadding = (chartPriceMax - chartPriceMin) * 0.1;
+        vpTop = chartPriceMax + vpPadding;
+        vpBottom = chartPriceMin - vpPadding;
+    }
+    
     double cumulative = 0;
     int levelsAbove = 0;
     int iterationCount = 0;
@@ -3429,7 +3431,13 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     #endif
     break;
         }
-    priceLevel = NormalizeDouble(priceLevel, GetCachedDigits());
+    priceLevel = NormalizeDouble(priceLevel, cachedDigits);
+    
+    // PERF: Viewport culling — skip off-screen levels
+    if(vpTop > 0 && (priceLevel > vpTop || priceLevel < vpBottom)) {
+        continue;
+    }
+    
     bool isBase = (i % 2 == 0);
     color levelColor;
     ENUM_LINE_STYLE levelStyle;
@@ -3456,7 +3464,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
                     (isBase ? "📏 Base" : "📐 Large"), i + 1, 
-                    DoubleToString(priceLevel, GetCachedDigits()), factor, step / GetCachedPoint()));
+                    DoubleToString(priceLevel, cachedDigits), factor, step / cachedPoint));
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
@@ -3476,7 +3484,13 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     #endif
     break;
         }
-    priceLevel = NormalizeDouble(priceLevel, GetCachedDigits());
+    priceLevel = NormalizeDouble(priceLevel, cachedDigits);
+    
+    // PERF: Viewport culling — skip off-screen levels
+    if(vpTop > 0 && (priceLevel > vpTop || priceLevel < vpBottom)) {
+        continue;
+    }
+    
     bool isBase = (i % 2 == 0);
     color levelColor;
     ENUM_LINE_STYLE levelStyle;
@@ -3502,7 +3516,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
                     (isBase ? "📏 Base" : "📐 Large"), i + 1, 
-                    DoubleToString(priceLevel, GetCachedDigits()), factor, step / GetCachedPoint()));
+                    DoubleToString(priceLevel, cachedDigits), factor, step / cachedPoint));
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
@@ -3583,6 +3597,22 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     int zoneCount = 0;
     double halfStep = stepSize / 2.0;
     double zoneHeight = halfStep * 0.25;
+    
+    // PERF: Viewport culling — skip levels outside visible chart area
+    double vpTop = 0, vpBottom = 0;
+    double chartPriceMin = ChartGetDouble(0, CHART_PRICE_MIN, 0);
+    double chartPriceMax = ChartGetDouble(0, CHART_PRICE_MAX, 0);
+    if(chartPriceMin > 0 && chartPriceMax > chartPriceMin) {
+        double vpPadding = (chartPriceMax - chartPriceMin) * 0.1;
+        vpTop = chartPriceMax + vpPadding;
+        vpBottom = chartPriceMin - vpPadding;
+    }
+    
+    // PERF: Cache frequently called values before loop
+    int cachedDigits = GetCachedDigits();
+    bool triggerEnabled = IsTriggerLevelsEnabled();
+    bool shouldShowLine = !triggerEnabled;
+    
     for(int i = 1; i <= totalLevels; i++) {
         double levelPrice = startPrice + (direction * stepSize * i);
     if(levelPrice < lowPrice || levelPrice > highPrice) {
@@ -3590,15 +3620,21 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             Print("⚠️ Level ", i, " outside range: ", DoubleToString(levelPrice, Digits));
     #endif
     continue;        }
-    double normalizedPrice = NormalizeDouble(levelPrice, GetCachedDigits());
+    double normalizedPrice = NormalizeDouble(levelPrice, cachedDigits);
+    
+    // PERF: Viewport culling — skip off-screen levels entirely
+    if(vpTop > 0 && (normalizedPrice > vpTop || normalizedPrice < vpBottom)) {
+        continue;
+    }
+    
     if(inpShowMidZones) {
         double prevPrice = (i == 1) ? startPrice : (startPrice + (direction * stepSize * (i-1)));
-    prevPrice = NormalizeDouble(prevPrice, GetCachedDigits());
+    prevPrice = NormalizeDouble(prevPrice, cachedDigits);
     double midPoint = (normalizedPrice + prevPrice) / 2.0;
     double zoneTop = midPoint + zoneHeight;
     double zoneBottom = midPoint - zoneHeight;
-    zoneTop = NormalizeDouble(zoneTop, GetCachedDigits());
-    zoneBottom = NormalizeDouble(zoneBottom, GetCachedDigits());
+    zoneTop = NormalizeDouble(zoneTop, cachedDigits);
+    zoneBottom = NormalizeDouble(zoneBottom, cachedDigits);
     if(zoneTop <= highPrice && zoneBottom >= lowPrice) {
         string zoneName = objectPrefix + "Factor_Zone_" + IntegerToString(i);
     if(CreateFactorMidZone(zoneName, zoneTop, zoneBottom, 
@@ -3615,7 +3651,6 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             }
         }
     string levelName = objectPrefix + "Factor_" + IntegerToString(i);
-    bool shouldShowLine = !IsTriggerLevelsEnabled();
     bool objectExists = (ObjectFind(0, levelName) >= 0);
     if(shouldShowLine) {            if(!objectExists) {
                 if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
@@ -3624,23 +3659,25 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     #endif
     continue;
                 }
-            }
-    ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
-    ObjectSetInteger(0, levelName, OBJPROP_COLOR, inpFactorLevelColor);
+            // PERF: Set all properties only on creation
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, inpFactorLevelColor);
     ObjectSetInteger(0, levelName, OBJPROP_STYLE, inpFactorLevelStyle);
     ObjectSetInteger(0, levelName, OBJPROP_WIDTH, inpFactorLevelWidth);
     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
     ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
+    ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                StringFormat("Factor Level %d | %s | F=%.2f", 
+                    i, DoubleToString(normalizedPrice, cachedDigits), factor));
+            }
+    // PERF: For existing objects, only update price and visibility
+    ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
     if(!g_linesVisible) {
                 ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
             } else {
                 ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
             }
-    ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
-                StringFormat("Factor Level %d | %s | F=%.2f", 
-                    i, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
     levelsDrawn++;
         } else {
         if(objectExists) {
@@ -3797,10 +3834,9 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStepAbove % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStepAbove % g_cachedIntervals[j] == 0) {
                         isCurrentStructure = true;
     break;
                     }
@@ -3876,10 +3912,9 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStepBelow % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStepBelow % g_cachedIntervals[j] == 0) {
                         isCurrentStructure = true;
     break;
                     }
@@ -4041,10 +4076,9 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                         isCurrentStructure = true;
     break;
                     }
@@ -4138,10 +4172,9 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     if(inpShowMidZones) {
         bool isCurrentStructure = false;
     if(structureEnabled) {
-        int intervals[];
-    GetCachedIntervals(baseMultiplier, intervals);
+        EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
-        if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
                         isCurrentStructure = true;
     break;
                     }

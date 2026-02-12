@@ -9,7 +9,9 @@
 // Optional compile-time profiler (no inputs; when disabled it compiles out)
 // Enable by defining ENABLE_TH3_PROFILER (presence macro).
 // Default: enabled only in DEBUG_BUILD.
-#define ENABLE_TH3_PROFILER
+// PERF FIX: Profiler was unconditionally enabled, adding GetMicrosecondCount() +
+// string search overhead to every profiled section. Now only in DEBUG_BUILD.
+// #define ENABLE_TH3_PROFILER
 
 #ifndef ENABLE_TH3_PROFILER
     #ifdef DEBUG_BUILD

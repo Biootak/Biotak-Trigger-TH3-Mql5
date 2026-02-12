@@ -700,18 +700,25 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     #endif
     }
     }
-    for(int i = 0; i < totalEntries - 1; i++)
+    // PERF: Comb sort — O(n log n) average, replaces O(n²) bubble sort
+    int gap = totalEntries;
+    double shrink = 1.3;
+    bool sorted = false;
+    while(!sorted)
     {
-        for(int j = i + 1; j < totalEntries; j++)
+        gap = (int)(gap / shrink);
+        if(gap <= 1) { gap = 1; sorted = true; }
+        for(int i = 0; i + gap < totalEntries; i++)
         {
-        if(timeBlocks[i] > timeBlocks[j])
+            if(timeBlocks[i] > timeBlocks[i + gap])
             {
-        string tempTime = timeBlocks[i];
-    string tempEntry = entries[i];
-    timeBlocks[i] = timeBlocks[j];
-    entries[i] = entries[j];
-    timeBlocks[j] = tempTime;
-    entries[j] = tempEntry;
+                string tempTime = timeBlocks[i];
+                string tempEntry = entries[i];
+                timeBlocks[i] = timeBlocks[i + gap];
+                entries[i] = entries[i + gap];
+                timeBlocks[i + gap] = tempTime;
+                entries[i + gap] = tempEntry;
+                sorted = false;
             }
         }
     }

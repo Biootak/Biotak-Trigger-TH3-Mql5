@@ -7,17 +7,27 @@ datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1) {
         datetime currentTime = TimeGMT();
     int barsToCheck = 7 * 24 * 60;
     int gapThresholdMinutes = 120;
-    for(int i = 1; i < barsToCheck && i < iBars(_Symbol, timeframe); i++) {
-        datetime currentBarTime = iTime(_Symbol, timeframe, i);
-    datetime previousBarTime = iTime(_Symbol, timeframe, i - 1);
-    if(currentTime - currentBarTime > 7 * 86400) break;
-    int gapMinutes = (int)((previousBarTime - currentBarTime) / 60);
-    if(gapMinutes > gapThresholdMinutes) return currentBarTime;
+    int totalBars = iBars(_Symbol, timeframe);
+    if(totalBars <= 0) return GetStartOfTradingDay(Symbol(), currentTime);
+    
+    // PERF: Batch-fetch bar times with CopyTime instead of individual iTime calls
+    int barsToCopy = MathMin(barsToCheck, totalBars);
+    datetime barTimes[];
+    int copied = CopyTime(_Symbol, timeframe, 0, barsToCopy, barTimes);
+    if(copied <= 1) return GetStartOfTradingDay(Symbol(), currentTime);
+    
+    // CopyTime returns ascending: barTimes[0]=oldest, barTimes[copied-1]=newest
+    // Scan from most recent backward looking for session gap.
+    // Session start is the first bar AFTER a detected gap.
+    for(int j = copied - 2; j >= 0; j--) {
+        if(currentTime - barTimes[j] > 7 * 86400) break;
+    int gapMinutes = (int)((barTimes[j + 1] - barTimes[j]) / 60);
+    if(gapMinutes > gapThresholdMinutes) return barTimes[j + 1];
     }
+    // Fallback: first bar >= 24h ago
     datetime twentyFourHoursAgo = currentTime - 86400;
-    for(int i = iBars(_Symbol, timeframe) - 1; i >= 0; i--) {
-        datetime barTime = iTime(_Symbol, timeframe, i);
-    if(barTime >= twentyFourHoursAgo) return barTime;
+    for(int j = 0; j < copied; j++) {
+        if(barTimes[j] >= twentyFourHoursAgo) return barTimes[j];
     }
     return GetStartOfTradingDay(Symbol(), currentTime);
 }

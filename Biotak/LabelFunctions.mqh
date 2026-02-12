@@ -960,14 +960,19 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         ObjectDelete(0, targetsObjName);
     }
     
+    // PERF: Track which objects are newly created vs existing for fast-path updates
+    bool mainCreated = false, stepsCreated = false, targetsCreated = false;
     if (ObjectFind(0, mainObjName) < 0) {
         if (!ObjectCreate(0, mainObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    mainCreated = true;
     }
     if (ObjectFind(0, stepsObjName) < 0) {
         if (!ObjectCreate(0, stepsObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    stepsCreated = true;
     }
     if (inpShowTHTargets && ObjectFind(0, targetsObjName) < 0) {
         if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
+    targetsCreated = true;
     }
     string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
     string mainText = StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips);
@@ -975,31 +980,35 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     if(inpShowTHTargets) {
         ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
     ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
-    SetLabelFont(targetsObjName);
+    if(targetsCreated) SetLabelFont(targetsObjName);
     }
     ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
     ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
     ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
     ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
-    SetLabelFont(mainObjName);
-    SetLabelFont(stepsObjName);
-    // TH labels are always bottom-left for consistent UX
+    if(mainCreated) SetLabelFont(mainObjName);
+    if(stepsCreated) SetLabelFont(stepsObjName);
+    // PERF: Static properties only on creation — corner, anchor, selectable, hidden never change
     ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
     ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
-    if(inpShowTHTargets) {
+    if(targetsCreated && inpShowTHTargets) {
         ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, targetsObjName, OBJPROP_ANCHOR, anchor);
     ObjectSetInteger(0, targetsObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, targetsObjName, OBJPROP_HIDDEN, false);
     }
+    if(mainCreated) {
     ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
+    ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
+    }
+    if(stepsCreated) {
     ObjectSetInteger(0, stepsObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, stepsObjName, OBJPROP_ANCHOR, anchor);
-    ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, stepsObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
     ObjectSetInteger(0, stepsObjName, OBJPROP_HIDDEN, false);
+    }
     int labelXDistance = MathAbs(xPos);
     int bottomPadding = 0;
     int lineGap = inpLabelRowGap;
@@ -1103,16 +1112,18 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int xStep = horizontalPadding;
     int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
     int lineHeight = GetLabelLineHeight(inpShowTHTargets, rowSpacing);
-    ArrayResize(g_storedTHs, 0); // Clear existing stored THs before displaying fractal THs
-    ArrayResize(g_labelPositions, 0); // Clear label positions
-    for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
+    // PERF: Pre-allocate to known fractal count instead of zero-then-grow
+    int fractalCount = ArraySize(FRACTAL_TIMEFRAMES);
+    ArrayResize(g_storedTHs, fractalCount);
+    ArrayResize(g_labelPositions, fractalCount);
+    int storedCount = 0;
+    for(int i = 0; i < fractalCount; i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
     double percentage = MODIFIED_FRACTAL_PERCENTAGES[i];
     double thPoints = CalculateTHPoints(dailyPriceForTH, digits, percentage);
-    int thIndex = ArraySize(g_storedTHs);
-    ArrayResize(g_storedTHs, thIndex + 1, 16);  // Reserve extra
-        g_storedTHs[thIndex].timeframeName = timeframeName;
-    g_storedTHs[thIndex].thValue = thPoints;
+    g_storedTHs[storedCount].timeframeName = timeframeName;
+    g_storedTHs[storedCount].thValue = thPoints;
+    storedCount++;
     StoreLabelPosition(timeframeName, currentXPos, currentYPos);
         double thValuePips = NormalizeDouble((thPoints * GetCachedPoint()) / GetCachedPipSize(), 1);
         double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
@@ -1192,8 +1203,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
     double percentage = CalculatePercentage(STANDARD_MINUTES[i]);
     double thPoints = CalculateTHPoints(dailyPriceForTH, digits, percentage);
+    // PERF: Pre-expand with reserve instead of grow-by-1
     int thIndex = ArraySize(g_storedTHs);
-    ArrayResize(g_storedTHs, thIndex + 1, 16);  // Reserve extra
+    ArrayResize(g_storedTHs, thIndex + 1, ArraySize(STANDARD_TIMEFRAMES));
         g_storedTHs[thIndex].timeframeName = timeframeName;
     g_storedTHs[thIndex].thValue = thPoints;
         double thValuePips = NormalizeDouble((thPoints * GetCachedPoint()) / GetCachedPipSize(), 1);

@@ -287,7 +287,9 @@ void UpdateAllTH3Objects()
     int totalObjects = ObjectsTotal(0, 0, -1);
     string patternNames[];
     int patternCount = 0;
-    ArrayResize(patternNames, 0);
+    // PERF: Pre-allocate with reserve to avoid repeated ArrayResize(+1)
+    int reserveSize = MathMin(totalObjects, 64);
+    ArrayResize(patternNames, reserveSize);
 
     for(int i = 0; i < totalObjects; i++) {
         string name = ObjectName(0, i, 0, -1);
@@ -305,7 +307,8 @@ void UpdateAllTH3Objects()
         }
 
         if(!exists) {
-            ArrayResize(patternNames, patternCount + 1);
+            if(patternCount >= ArraySize(patternNames))
+                ArrayResize(patternNames, patternCount * 2 + 1);
             patternNames[patternCount] = baseName;
             patternCount++;
         }

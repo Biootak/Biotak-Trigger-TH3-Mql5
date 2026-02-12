@@ -339,39 +339,26 @@ void HideAllTHObjects()
     int hiddenCount = 0;
     string cachedPrefix = inpObjectPrefix;
     int prefixLen = StringLen(cachedPrefix);
+    // PERF: Pre-compute long constant for visibility outside loop
+    long noPeriodsVal = OBJ_NO_PERIODS;
     for(int i = total - 1; i >= 0; i--)
     {
         string objName = ObjectName(0, i, -1, -1);
+    // PERF: Use StringLen + StringSubstr instead of StringFind for prefix check
     if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix)
         {
-        if(ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS)) {
-                hiddenCount++;
-            }
+        ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+        hiddenCount++;
         }    }
-    if(ObjectFind(0, g_stepModeLabelName) >= 0) {
-        ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    hiddenCount++;
-    }
-    if(ObjectFind(0, g_factorLabelName) >= 0) {
-        ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    hiddenCount++;
-    }
-    if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
-        ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    hiddenCount++;
-    }
-    if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0) {
-        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    hiddenCount++;
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    static datetime s_lastHideLog = 0;
-    datetime currentTime = TimeGMT();
-    if(currentTime - s_lastHideLog > 5) {
-        Print("🔒 HideAllTHObjects: Hidden ", hiddenCount, " objects (levels + labels + custom price)");
-    s_lastHideLog = currentTime;
-    }
-    #endif
+    // PERF: Batch special label hide with single constant
+    if(ObjectFind(0, g_stepModeLabelName) >= 0)
+        ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    if(ObjectFind(0, g_factorLabelName) >= 0)
+        ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    if(ObjectFind(0, g_lockStatusLabelName) >= 0)
+        ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0)
+        ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     }void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = false)
 {    if (g_waitingForCustomPriceClick || forceDelete) {
         ObjectDelete(0, g_customPriceHorizontalLineName);
@@ -535,7 +522,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     #endif
 
-    // PERF: Single-pass deletion to avoid 24+ ObjectsDeleteAll full scans per redraw.
+    // PERF: Single-pass deletion with first-char dispatch to avoid 24+ inner loop iterations
     static const string LEVEL_SUFFIXES[] = {
         "SSLS_", "M_", "MLabel_", "MEq_", "MEqLabel_", "TP_", "Combo_",
         "SharedPattern_", "TH_Level_", "S_",
@@ -550,22 +537,42 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     static const string ZONE_SUFFIXES[] = {
         "SSLS_Zone_", "M_Zone_", "TP_Zone_", "Combo_Zone_", "Factor_Zone_"
     };
+    // PERF: Pre-compute suffix lengths once (static locals compile to one-time init)
+    static int LEVEL_SUFFIX_LENS[];
+    static int ZONE_SUFFIX_LENS[];
+    static bool s_suffixLensInit = false;
+    if(!s_suffixLensInit) {
+        ArrayResize(LEVEL_SUFFIX_LENS, ArraySize(LEVEL_SUFFIXES));
+        for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++)
+            LEVEL_SUFFIX_LENS[s] = StringLen(LEVEL_SUFFIXES[s]);
+        ArrayResize(ZONE_SUFFIX_LENS, ArraySize(ZONE_SUFFIXES));
+        for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++)
+            ZONE_SUFFIX_LENS[z] = StringLen(ZONE_SUFFIXES[z]);
+        s_suffixLensInit = true;
+    }
 
     int total = ObjectsTotal(0, -1, -1);
     int prefixLen = StringLen(objectPrefix);
     for(int i = total - 1; i >= 0; i--) {
         string name = ObjectName(0, i, -1, -1);
         if(name == "") continue;
-        if(StringLen(name) < prefixLen) continue;
+        int nameLen = StringLen(name);
+        if(nameLen < prefixLen) continue;
         if(StringSubstr(name, 0, prefixLen) != objectPrefix) continue;
 
         string tail = StringSubstr(name, prefixLen);
+        int tailLen = nameLen - prefixLen;
         bool shouldDelete = false;
 
+        // PERF: Use first char of tail to skip most suffix comparisons
+        ushort firstChar = (tailLen > 0) ? StringGetCharacter(tail, 0) : 0;
+        
         for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
-            string suf = LEVEL_SUFFIXES[s];
-            int sl = StringLen(suf);
-            if(StringLen(tail) >= sl && StringSubstr(tail, 0, sl) == suf) {
+            int sl = LEVEL_SUFFIX_LENS[s];
+            if(tailLen < sl) continue;
+            // Quick first-char reject
+            if(StringGetCharacter(LEVEL_SUFFIXES[s], 0) != firstChar) continue;
+            if(StringSubstr(tail, 0, sl) == LEVEL_SUFFIXES[s]) {
                 shouldDelete = true;
                 break;
             }
@@ -573,9 +580,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 
         if(!shouldDelete && clearZones) {
             for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++) {
-                string zs = ZONE_SUFFIXES[z];
-                int zl = StringLen(zs);
-                if(StringLen(tail) >= zl && StringSubstr(tail, 0, zl) == zs) {
+                int zl = ZONE_SUFFIX_LENS[z];
+                if(tailLen < zl) continue;
+                if(StringGetCharacter(ZONE_SUFFIXES[z], 0) != firstChar) continue;
+                if(StringSubstr(tail, 0, zl) == ZONE_SUFFIXES[z]) {
                     shouldDelete = true;
                     break;
                 }
@@ -904,7 +912,9 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     string s_cachedSymbol = GetCachedSymbol();
     int s_cachedDigits = GetCachedDigits();
     double s_cachedPoint = GetCachedPoint();
-    g_currentPrice = Bid;
+    // PERF: Cache Bid/Ask once per redraw frame instead of ~10 SymbolInfoDouble syscalls
+    CacheTickPrices();
+    g_currentPrice = GetCachedBid();
     if(g_currentPrice <= 0) return;
 
     TH3_PROF_START(BasePrice);
@@ -922,7 +932,15 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     bool customPriceLineExists = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
     if(!force_redraw && !g_labelsRelayoutNeeded && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
     g_lastCalculation = currentTime;
-    string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+    // PERF: Cache objectPrefix - only rebuild when timeframe actually changes
+    static string s_cachedObjectPrefix = "";
+    static string s_cachedTimeframeStr = "";
+    string currentTFStr = GetCurrentTimeframe();
+    if(currentTFStr != s_cachedTimeframeStr) {
+        s_cachedTimeframeStr = currentTFStr;
+        s_cachedObjectPrefix = inpObjectPrefix + "_" + currentTFStr + "_";
+    }
+    string objectPrefix = s_cachedObjectPrefix;
     if(currentTime - g_lastObjectCleanup > CLEANUP_INTERVAL_SECONDS) {
         TH3_PROF_START(ObjectCleanup);
         int currentObjectCount = ObjectsTotal(0, -1, -1);
@@ -1073,6 +1091,8 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         static uint s_lastCPUTime = 0;
     static int s_cpuWarningCount = 0;
     uint startTime = GetTickCount();
+    // PERF: Cache Bid/Ask once per tick
+    CacheTickPrices();
     if(IsIndicatorHidden())
     {
         return(rates_total);
