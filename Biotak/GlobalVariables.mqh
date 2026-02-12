@@ -10,6 +10,7 @@ static datetime g_lastCalculation = 0;
 static datetime g_lastHistoricalUpdate = 0;
 static bool g_initialized = false;
 static bool g_calculatedOnce = false;
+static bool g_labelsRelayoutNeeded = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
 bool g_redrawTHLevelsNeeded = true;
 bool g_forceClearOnNextDraw = false;

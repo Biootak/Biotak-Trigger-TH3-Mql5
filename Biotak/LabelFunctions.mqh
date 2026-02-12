@@ -64,6 +64,14 @@ bool DrawMainLevels(const string prefix) {
     double s_cachedPointValue = GetCachedPoint();
     int s_cachedDigits = GetCachedDigits();
     string s_cachedSymbol = GetCachedSymbol();
+    double s_cachedPipSize = GetCachedPipSize();
+    if(IsZero(s_cachedPointValue, EPSILON_PRICE) || IsZero(s_cachedPipSize, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("DrawTHLevels: Invalid point/pip size for symbol ", s_cachedSymbol);
+        #endif
+        return;
+    }
+    const double pipsPerPoint = s_cachedPointValue / s_cachedPipSize;
     string prefix=objectPrefix+"TH_Level_";
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     double timeframePercentage=GetTimeframeTH();
@@ -292,7 +300,7 @@ bool DrawMainLevels(const string prefix) {
                     case 5: {
         string tfL5 = GetShortTimeframeName(GetTimeframeForStructureLevel(5));
     lineNameAbove = prefix + "StructureLevel5_Up_" + IntegerToString(stepCountAbove / intervals[4]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, digits), basisLabel, quintupleStructureTFTHStepSizePoints / 10.0);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[4]);
     lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
     percentageTooltip = structurePercentages[4];
@@ -300,7 +308,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     case 4: {
                         lineNameAbove = prefix + "StructureLevel4_Up_" + IntegerToString(stepCountAbove / intervals[3]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, digits), basisLabel, quadrupleStructureTFTHStepSizePoints / 10.0);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[3]);
     lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
     percentageTooltip = structurePercentages[3];
@@ -308,7 +316,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     case 3: {
                         lineNameAbove = prefix + "StructureLevel3_Up_" + IntegerToString(stepCountAbove / intervals[2]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, digits), basisLabel, tripleStructureTFTHStepSizePoints / 10.0);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, digits), basisLabel, tripleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[2]);
     lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
     percentageTooltip = structurePercentages[2];
@@ -316,7 +324,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     case 2: {
                         lineNameAbove = prefix + "StructureLevel2_Up_" + IntegerToString(stepCountAbove / intervals[1]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, digits), basisLabel, doubleStructureTFTHStepSizePoints / 10.0);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, digits), basisLabel, doubleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[1]);
     lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
     percentageTooltip = structurePercentages[1];
@@ -324,7 +332,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     default: { // case 1
                         lineNameAbove = prefix + "StructureLevel1_Up_" + IntegerToString(stepCountAbove / intervals[0]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, digits), basisLabel, structureTFTHStepSizePoints / 10.0);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, digits), basisLabel, structureTFTHStepSizePoints * pipsPerPoint);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[0]);
     lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
     percentageTooltip = structurePercentages[0];
@@ -336,8 +344,8 @@ bool DrawMainLevels(const string prefix) {
                 lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCountAbove);
     tooltipAbove = StringFormat("[%s] +%d | Price: %s | L: %.1f, S: %.1f pips",
                     shortCurrentTFCached, stepCountAbove, DoubleToString(priceLevelAbove, digits),
-                    cachedLongStep * thStepSizePoints / 10.0,
-                    cachedShortStep * thStepSizePoints / 10.0);
+                    cachedLongStep * thStepSizePoints * pipsPerPoint,
+                    cachedShortStep * thStepSizePoints * pipsPerPoint);
     levelInfoAbove = StringFormat("%s +%d", shortCurrentTFCached, stepCountAbove);
     lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
     percentageTooltip = timeframePercentage;
@@ -447,7 +455,7 @@ bool DrawMainLevels(const string prefix) {
                 switch(structLevel) {
                     case 5: {
                         lineNameBelow = prefix + "StructureLevel5_Down_" + IntegerToString(stepCountBelow / intervals[4]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, digits), basisLabel, quintupleStructureTFTHStepSizePoints / 10.0);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4]);
     lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
     percentageTooltip = structurePercentages[4];
@@ -455,7 +463,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     case 4: {
                         lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, digits), basisLabel, quadrupleStructureTFTHStepSizePoints / 10.0);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
     lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
     percentageTooltip = structurePercentages[3];
@@ -463,7 +471,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     case 3: {
                         lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, digits), basisLabel, tripleStructureTFTHStepSizePoints / 10.0);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, digits), basisLabel, tripleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
     lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
     percentageTooltip = structurePercentages[2];
@@ -471,7 +479,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     case 2: {
                         lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, digits), basisLabel, doubleStructureTFTHStepSizePoints / 10.0);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, digits), basisLabel, doubleStructureTFTHStepSizePoints * pipsPerPoint);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
     lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
     percentageTooltip = structurePercentages[1];
@@ -479,7 +487,7 @@ bool DrawMainLevels(const string prefix) {
                     }
                     default: {
                         lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, digits), basisLabel, structureTFTHStepSizePoints / 10.0);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, digits), basisLabel, structureTFTHStepSizePoints * pipsPerPoint);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
     lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
     percentageTooltip = structurePercentages[0];
@@ -490,14 +498,14 @@ bool DrawMainLevels(const string prefix) {
                 lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCountBelow);
     tooltipBelow = StringFormat("[%s] -%d | Price: %s | L: %.1f, S: %.1f pips",
                     shortCurrentTFCached, stepCountBelow, DoubleToString(priceLevelBelow, digits),
-                    cachedLongStep * thStepSizePoints / 10.0,
-                    cachedShortStep * thStepSizePoints / 10.0);
+                    cachedLongStep * thStepSizePoints * pipsPerPoint,
+                    cachedShortStep * thStepSizePoints * pipsPerPoint);
     levelInfoBelow = StringFormat("%s -%d", shortCurrentTFCached, stepCountBelow);
     lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
     percentageTooltip = timeframePercentage;
             }
-    double pipsToLevelBelow = NormalizeDouble(MathAbs(priceLevelBelow - g_currentPrice) / pointValue / 10.0, 1);
-    tooltipBelow = StringFormat("%s | Dist: %.1f pips", tooltipBelow, pipsToLevelBelow);
+    double pipsToLevelBelow = CalculatePipsDistance(priceLevelBelow, g_currentPrice);
+    tooltipBelow = FormatTooltipWithDistance(tooltipBelow, priceLevelBelow);
     CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
     if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
             
@@ -553,7 +561,10 @@ bool DrawMainLevels(const string prefix) {
     bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
     
     // Calculate ATR, SS, LS values (same ratios as TH)
-    double atrPips = NormalizeDouble(atrValuePoints / 10.0, 1);
+    double point = GetCachedPoint();
+    double pipSize = GetCachedPipSize();
+    if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE)) return false;
+    double atrPips = NormalizeDouble((atrValuePoints * point) / pipSize, 1);
     double shortStepPips = NormalizeDouble(atrPips * 1.5, 1);
     double longStepPips = NormalizeDouble(atrPips * 2.0, 1);
     double target3x = MathFloor(atrPips * 3.0);
@@ -649,8 +660,9 @@ bool DrawMainLevels(const string prefix) {
     
     ATR_PRINT("=== DisplayATRLabels: Starting ===");
     double point = GetSymbolPoint();
+    double pipSize = GetCachedPipSize();
     int digits = GetCachedDigits();
-    if(IsZero(point, EPSILON_PRICE) || digits == 0) return;
+    if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE) || digits == 0) return;
     
     // Clean up old ATR label objects
     string currentTFStr = IntegerToString(Period());
@@ -736,7 +748,7 @@ bool DrawMainLevels(const string prefix) {
     continue;
         }
     double atrPoints = atrValue / point;
-    double atrPips = NormalizeDouble(atrPoints / 10.0, 1);
+    double atrPips = NormalizeDouble(atrValue / pipSize, 1);
     double shortStepPips = NormalizeDouble(atrPips * 1.5, 1);
     double longStepPips = NormalizeDouble(atrPips * 2.0, 1);
     double target3x = MathFloor(atrPips * 3.0);
@@ -776,11 +788,47 @@ bool DrawMainLevels(const string prefix) {
     
     ATR_PRINT("=== DisplayATRLabels: Completed ===");
 }
+
+// Fast ATR labels hide/show without deletion (O(1) object operations)
+void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
+    // Match DisplayATRLabels naming
+    string currentTFStr = IntegerToString(Period());
+    string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
+    string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+
+    // F key (global hide) always wins
+    bool shouldShow = (visible && !IsIndicatorHidden());
+    long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+
+    string titleObjName = uniquePrefix + "ATR_Title";
+    if(ObjectFind(0, titleObjName) >= 0) {
+        ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, tf);
+    }
+
+    for(int i = 0; i < ArraySize(allTimeframes); i++) {
+        string tfName = allTimeframes[i];
+        string mainObj = uniquePrefix + "ATR_" + tfName;
+        string stepsObj = uniquePrefix + "ATR_Steps_" + tfName;
+        string targetsObj = uniquePrefix + "ATR_Targets_" + tfName;
+
+        if(ObjectFind(0, mainObj) >= 0)  ObjectSetInteger(0, mainObj, OBJPROP_TIMEFRAMES, tf);
+        if(ObjectFind(0, stepsObj) >= 0) ObjectSetInteger(0, stepsObj, OBJPROP_TIMEFRAMES, tf);
+
+        // Targets obey inpShowATRTargets even when visible
+        if(ObjectFind(0, targetsObj) >= 0) {
+            if(shouldShow && inpShowATRTargets) ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            else                                ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
+    }
+}
     bool CreateTHLabel(const string objectPrefix, const string timeframeName, const double thValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
     if (!inpShowTHLabels) return true;
     
     // Calculate TH, SS, LS values
-    double thValuePips = NormalizeDouble(thValuePoints / 10.0, 1);
+    double point = GetCachedPoint();
+    double pipSize = GetCachedPipSize();
+    if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE)) return false;
+    double thValuePips = NormalizeDouble((thValuePoints * point) / pipSize, 1);
     double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
     double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
     double target3x = MathFloor(thValuePips * 3.0);
@@ -816,7 +864,7 @@ bool DrawMainLevels(const string prefix) {
     ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
     SetLabelFont(mainObjName);
     SetLabelFont(stepsObjName);
-    ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
+    ENUM_BASE_CORNER corner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM) ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
     ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
     if(inpShowTHTargets) {
         ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
@@ -899,8 +947,10 @@ bool DrawMainLevels(const string prefix) {
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    int titleYPos = inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom;
-    int titleAdjustment = inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight;
+    bool useBottomCorner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM);
+    int titleYPos = useBottomCorner ? (inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom)
+                                    : (inpLabelsMarginTop + g_currentLabelYOffset);
+    int titleAdjustment = useBottomCorner ? (inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight) : 0;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int sectionGap = inpSectionGap;
     string thTitleObjName = objectPrefix + "TH_Title";
@@ -910,7 +960,7 @@ bool DrawMainLevels(const string prefix) {
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
+    ENUM_BASE_CORNER corner = useBottomCorner ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
     ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, corner);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
@@ -948,7 +998,7 @@ bool DrawMainLevels(const string prefix) {
         g_storedTHs[thIndex].timeframeName = timeframeName;
     g_storedTHs[thIndex].thValue = thPoints;
     StoreLabelPosition(timeframeName, currentXPos, currentYPos);
-        double thValuePips = NormalizeDouble(thPoints / 10.0, 1);
+        double thValuePips = NormalizeDouble((thPoints * GetCachedPoint()) / GetCachedPipSize(), 1);
         double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
         double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
         double target3x = MathFloor(thValuePips * 3.0);
@@ -974,7 +1024,8 @@ bool DrawMainLevels(const string prefix) {
     }
     // Update global Y offset for next section (StandardTHs)
     int fractalConsumedY = (currentYPos - startYPos) + lineHeight;
-    g_currentLabelYOffsetBottom += fractalConsumedY + sectionGap;
+    if(useBottomCorner) g_currentLabelYOffsetBottom += fractalConsumedY + sectionGap;
+    else                g_currentLabelYOffset       += fractalConsumedY + sectionGap;
 }
     void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
         double point = GetSymbolPoint();
@@ -990,8 +1041,10 @@ bool DrawMainLevels(const string prefix) {
     int singleLineHeight = inpFontSize + lineGap;
     int titleHeight = singleLineHeight;
     // Title on same row as first item (horizontal) or above it (vertical)
-    int titleYPos = inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom;
-    int titleAdjustment = inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight;
+    bool useBottomCorner = (inpLabelCornerPosition == LABEL_CORNER_LEFT_BOTTOM);
+    int titleYPos = useBottomCorner ? (inpLabelsMarginTop + inpLabelsMarginBottom + g_currentLabelYOffsetBottom)
+                                    : (inpLabelsMarginTop + g_currentLabelYOffset);
+    int titleAdjustment = useBottomCorner ? (inpShowTHTargets ? (singleLineHeight * 2) : singleLineHeight) : 0;
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int titleWidth = (int)CalculateTextWidth("TH:");
     int labelStartX = GetLabelStartX(startXPos, titleWidth, horizontalPadding, isVerticalLayout);
@@ -1008,7 +1061,7 @@ bool DrawMainLevels(const string prefix) {
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, useBottomCorner ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + titleAdjustment);
@@ -1032,7 +1085,7 @@ bool DrawMainLevels(const string prefix) {
     ArrayResize(g_storedTHs, thIndex + 1, 16);  // Reserve extra
         g_storedTHs[thIndex].timeframeName = timeframeName;
     g_storedTHs[thIndex].thValue = thPoints;
-        double thValuePips = NormalizeDouble(thPoints / 10.0, 1);
+        double thValuePips = NormalizeDouble((thPoints * GetCachedPoint()) / GetCachedPipSize(), 1);
         double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
         double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
         double target3x = MathFloor(thValuePips * 3.0);
@@ -1057,7 +1110,8 @@ bool DrawMainLevels(const string prefix) {
         }
     }
     int standardConsumedY = (currentYPos - startYPos) + lineHeight;
-    g_currentLabelYOffsetBottom += standardConsumedY + inpSectionGap;
+    if(useBottomCorner) g_currentLabelYOffsetBottom += standardConsumedY + inpSectionGap;
+    else                g_currentLabelYOffset       += standardConsumedY + inpSectionGap;
 }
     void StoreLabelPosition(const string name, const int xPos, const int yPos) {
     for(int i=0; i<ArraySize(g_labelPositions); i++) {

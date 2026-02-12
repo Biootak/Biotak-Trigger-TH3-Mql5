@@ -70,6 +70,10 @@ int OnInitHandler() {    InitializeGlobalCache();
         }
     } else {        g_atrLabelsVisible = inpShowATRLabels;
     }
+    // Input setting is the master switch: if disabled in Inputs, force runtime state off
+    if(!inpShowATRLabels) {
+        g_atrLabelsVisible = false;
+    }
     int validationResult = ValidateInputs();
     if(validationResult != INIT_SUCCEEDED) {
         return validationResult;
@@ -402,6 +406,9 @@ void HideAllTHObjects()
     g_factorValueOverride = 0.0;
     string linesGvarName = "Biotak_LinesVisible_" + chartIdStrLocal;
     GlobalVariableDel(linesGvarName);
+    // ATR labels hotkey override should not survive parameter changes
+    string atrLabelsGvarName = "Biotak_ATRLabels_" + chartIdStrLocal;
+    GlobalVariableDel(atrLabelsGvarName);
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
     GlobalVariableSet(th3UpdateFlag, 1.0);
     GlobalVariableTemp(th3UpdateFlag);
@@ -815,13 +822,15 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     return;
                 }
     #ifdef ENABLE_DEBUG_LOGS
+                double pipSizeDbg = GetCachedPipSize();
+    if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
                 Print("🎵 FACTOR_STEP: Harmonic Mode");
     Print("   BaseStep=", DoubleToString(baseStepSize, Digits), 
-                      " (", DoubleToString(baseStepSize / Point, 1), " pips)");
+                      " (", DoubleToString(baseStepSize / pipSizeDbg, 1), " pips)");
     Print("   Ratio=", harmonicRatio, 
                       " (", DoubleToString((harmonicRatio - 1.0) * 100, 1), "% larger)");
     Print("   LargeStep=", DoubleToString(baseStepSize * harmonicRatio, Digits),
-                      " (", DoubleToString(baseStepSize * harmonicRatio / Point, 1), " pips)");
+                      " (", DoubleToString(baseStepSize * harmonicRatio / pipSizeDbg, 1), " pips)");
     #endif
     DrawFactorLevelsHarmonicFromCenter(objectPrefix, data.midpointPrice, 
                                                    g_highestHigh, g_lowestLow,
@@ -838,8 +847,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
                 }
     #ifdef ENABLE_DEBUG_LOGS
                 Print("📏 FACTOR_STEP: Standard Mode");
+    double pipSizeDbg = GetCachedPipSize();
+    if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
     Print("   StepSize=", DoubleToString(factorStepSize, Digits),
-                      " (", DoubleToString(factorStepSize / Point, 1), " pips)");
+                      " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     #endif
     DrawFactorLevelsFromCenter(objectPrefix, data.midpointPrice, 
                                           g_highestHigh, g_lowestLow, 
@@ -887,7 +898,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     g_redrawTHLevelsNeeded = true;
     }
     bool customPriceLineExists = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
-    if(!force_redraw && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
+    if(!force_redraw && !g_labelsRelayoutNeeded && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
     g_lastCalculation = currentTime;
     string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
     if(currentTime - g_lastObjectCleanup > CLEANUP_INTERVAL_SECONDS) {
@@ -943,17 +954,19 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
 
     DrawMainLevels(objectPrefix);
-    if(!g_calculatedOnce)
+    bool needLabels = (!g_calculatedOnce) || g_labelsRelayoutNeeded;
+    if(needLabels)
     {        if (g_dailyClosePriceForTH == EMPTY_VALUE)
         {
             g_dailyClosePriceForTH = thBasePrice;        }
     g_currentLabelYOffset = 0;  // Reset top label stacking offset
     g_currentLabelYOffsetBottom = 0;  // Reset bottom label stacking offset
-    if(g_atrLabelsVisible) DisplayATRLabels(objectPrefix);
+    if(g_atrLabelsVisible && inpShowATRLabels) DisplayATRLabels(objectPrefix);
     if(inpShowTHLabels && inpShowFractalTHs) DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     if(inpShowTHLabels && inpShowStandardTHs) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-    if(inpShowTHLevels) g_redrawTHLevelsNeeded = true;
+    if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
     g_calculatedOnce = true;
+    g_labelsRelayoutNeeded = false;
     }
     g_dailyClosePriceForTH = thBasePrice;
     string gvarName = "Biotak_CustomPrice_" + s_cachedSymbol;
@@ -1210,6 +1223,21 @@ void ApplyLinesVisibility()
         string objName = ObjectName(0, i, -1, -1);
     if(StringLen(objName) >= prefixLenF && StringSubstr(objName, 0, prefixLenF) == cachedPrefixF)
                     {
+        // Keep ATR objects hidden if ATR labels are disabled (A key / Inputs)
+        bool isATRObject = (StringFind(objName, "ATR_") >= 0);
+        if(isATRObject) {
+            bool atrShouldShow = (g_atrLabelsVisible && inpShowATRLabels);
+            if(!atrShouldShow) {
+                ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            } else {
+                // Targets obey inpShowATRTargets
+                if(StringFind(objName, "ATR_Targets_") >= 0 && !inpShowATRTargets)
+                    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                else
+                    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            }
+            continue;
+        }
         // Keep trigger objects hidden if triggers are disabled
         bool isTriggerObject = (StringFind(objName, "TriggerTH_Up_") >= 0 || 
                                                StringFind(objName, "TriggerTH_Down_") >= 0);
@@ -1251,7 +1279,9 @@ void ApplyLinesVisibility()
     g_redrawTHLevelsNeeded = true;
     }
     // Direct ChartRedraw for F key (ThrottledChartRedraw skips when hidden)
-            ChartRedraw();        }
+            ChartRedraw();
+    return;
+        }
     string mutableLinesKey = inpLinesToggleKey;
     StringToUpper(mutableLinesKey);
     int linesKeyCode = StringGetCharacter(mutableLinesKey, 0);
@@ -1285,6 +1315,7 @@ void ApplyLinesVisibility()
             Print("📊 Lines ", (g_linesVisible ? "VISIBLE" : "HIDDEN"));
     #endif
     ThrottledChartRedraw();
+    return;
         }
     string mutableCustomKey = inpCustomPriceKey;
     StringToUpper(mutableCustomKey);
@@ -1325,6 +1356,7 @@ void ApplyLinesVisibility()
             Print("📍 Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
     #endif
     ThrottledChartRedraw();
+    return;
         }
     if(lparam == 27)        {
         string symbolName = GetCachedSymbol();
@@ -1344,6 +1376,7 @@ void ApplyLinesVisibility()
                 Print("Custom price mode cancelled - returned to Input Parameter setting");
     #endif
     ThrottledChartRedraw();
+    return;
             }
         }
     string mutableTriggerKey = inpTriggerLevelsKey;
@@ -1366,34 +1399,34 @@ void ApplyLinesVisibility()
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
     ThrottledChartRedraw();
+    return;
         }
     string mutableATRKey = inpATRLabelsKey;
     StringToUpper(mutableATRKey);
     int atrKeyCode = StringGetCharacter(mutableATRKey, 0);
     if(lparam == atrKeyCode)
         {
-        g_atrLabelsVisible = !g_atrLabelsVisible;
+        // If user disabled ATR in Inputs, keep it off (and persist off)
     string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
-    GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
-    if(!g_atrLabelsVisible) {
-        // Fast hide: delete all ATR label objects
-        int total = ObjectsTotal(0, -1, -1);
-        string cachedPrefix = inpObjectPrefix;
-        int prefixLen = StringLen(cachedPrefix);
-        for(int i = total - 1; i >= 0; i--) {
-            string objName = ObjectName(0, i, -1, -1);
-            if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix && StringFind(objName, "ATR_") >= 0) {
-                ObjectDelete(0, objName);
-            }
-        }
+    if(!inpShowATRLabels) {
+        g_atrLabelsVisible = false;
+        GlobalVariableSet(atrGvarNameKey, 0.0);
     } else {
-        // Fast show: force label recreation on next OnCalculate
-        g_calculatedOnce = false;
+        g_atrLabelsVisible = !g_atrLabelsVisible;
+        GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
     }
+
+    // O(1) visibility toggle (no delete, no chart-wide scan)
+    string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+    SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible && inpShowATRLabels);
+
+    // Schedule lightweight relayout so TH labels move up/down on next tick (no lag on keydown)
+    g_labelsRelayoutNeeded = true;
     #ifdef ENABLE_DEBUG_LOGS
         Print("📊 ATR Labels ", (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
     #endif
     ChartRedraw();
+    return;
         }
     string mutableTH3Key = inpTH3ToolKey;
     StringToUpper(mutableTH3Key);
@@ -1402,6 +1435,7 @@ void ApplyLinesVisibility()
         {
             ToggleTH3Tool();
     ThrottledChartRedraw();        }
+    if(lparam == th3KeyCode) return;
     string mutableStepModeKey = inpStepModeKey;
     StringToUpper(mutableStepModeKey);
     int stepModeKeyCode = StringGetCharacter(mutableStepModeKey, 0);
@@ -1417,6 +1451,7 @@ void ApplyLinesVisibility()
     g_calculatedOnce = false;  // FIX: Force label refresh on mode change
     RedrawAllObjects(true);
     ThrottledChartRedraw();
+    return;
         }
     // KEY '1' — Decrease Factor
     if(lparam == '1') {
@@ -1449,6 +1484,7 @@ void ApplyLinesVisibility()
         g_redrawTHLevelsNeeded = true;
         RedrawAllObjects(true);
         ThrottledChartRedraw();
+        return;
     }
 
     // KEY '2' — Increase Factor
@@ -1482,6 +1518,7 @@ void ApplyLinesVisibility()
         g_redrawTHLevelsNeeded = true;
         RedrawAllObjects(true);
         ThrottledChartRedraw();
+        return;
     }
 
     // KEY '3' — Decrease TH3 Frequency
@@ -1498,6 +1535,7 @@ void ApplyLinesVisibility()
             UpdateAllTH3Objects();
             ThrottledChartRedraw();
         }
+        return;
     }
 
     // KEY '4' — Increase TH3 Frequency
@@ -1514,6 +1552,7 @@ void ApplyLinesVisibility()
             UpdateAllTH3Objects();
             ThrottledChartRedraw();
         }
+        return;
     }
 
     string mutableResetKey = inpResetKey;
@@ -1561,6 +1600,7 @@ void ApplyLinesVisibility()
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
     ThrottledChartRedraw();
+    return;
         }
     string mutableLockKey = inpLockKey;
     StringToUpper(mutableLockKey);
@@ -1610,6 +1650,7 @@ void ApplyLinesVisibility()
             }
             
             ThrottledChartRedraw();
+    return;
         }
     }
     if(g_abcdDrawing || 

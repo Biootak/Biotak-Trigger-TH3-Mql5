@@ -47,6 +47,85 @@ bool ValidateWidth(int width, const string name) {
     }
     return true;
 }
+
+bool ValidateHotkeyString(const string key, const string name) {
+    if(StringLen(key) <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("ERROR: ", name, " is empty");
+        #endif
+        return false;
+    }
+    // We only use first character, so enforce 1-char to avoid surprising behavior
+    if(StringLen(key) != 1) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("ERROR: ", name, " must be exactly 1 character (got '", key, "')");
+        #endif
+        return false;
+    }
+    return true;
+}
+
+int GetHotkeyCodeUpper(const string key) {
+    string k = key;
+    StringToUpper(k);
+    return (int)StringGetCharacter(k, 0);
+}
+
+bool ValidateHotkeysUniqueAndSafe() {
+    // Validate shape
+    if(!ValidateHotkeyString(inpHideKey, "HideKey")) return false;
+    if(!ValidateHotkeyString(inpLinesToggleKey, "LinesToggleKey")) return false;
+    if(!ValidateHotkeyString(inpLockKey, "LockKey")) return false;
+    if(!ValidateHotkeyString(inpCustomPriceKey, "CustomPriceKey")) return false;
+    if(!ValidateHotkeyString(inpTriggerLevelsKey, "TriggerLevelsKey")) return false;
+    if(!ValidateHotkeyString(inpStepModeKey, "StepModeKey")) return false;
+    if(!ValidateHotkeyString(inpTH3ToolKey, "TH3ToolKey")) return false;
+    if(!ValidateHotkeyString(inpATRLabelsKey, "ATRLabelsKey")) return false;
+    if(!ValidateHotkeyString(inpResetKey, "ResetKey")) return false;
+
+    // Reserved hardcoded keys used elsewhere
+    int reserved[] = {'1','2','3','4'};
+    string reservedNames[] = {"'1' (Factor -)","'2' (Factor +)","'3' (TH3 Freq -)","'4' (TH3 Freq +)"};
+
+    int codes[];
+    string names[];
+    ArrayResize(codes, 9);
+    ArrayResize(names, 9);
+    codes[0] = GetHotkeyCodeUpper(inpHideKey);         names[0] = "HideKey";
+    codes[1] = GetHotkeyCodeUpper(inpLinesToggleKey);  names[1] = "LinesToggleKey";
+    codes[2] = GetHotkeyCodeUpper(inpLockKey);         names[2] = "LockKey";
+    codes[3] = GetHotkeyCodeUpper(inpCustomPriceKey);  names[3] = "CustomPriceKey";
+    codes[4] = GetHotkeyCodeUpper(inpTriggerLevelsKey);names[4] = "TriggerLevelsKey";
+    codes[5] = GetHotkeyCodeUpper(inpATRLabelsKey);    names[5] = "ATRLabelsKey";
+    codes[6] = GetHotkeyCodeUpper(inpTH3ToolKey);      names[6] = "TH3ToolKey";
+    codes[7] = GetHotkeyCodeUpper(inpStepModeKey);     names[7] = "StepModeKey";
+    codes[8] = GetHotkeyCodeUpper(inpResetKey);        names[8] = "ResetKey";
+
+    // Disallow reserved conflicts
+    for(int i=0; i<ArraySize(codes); i++) {
+        for(int r=0; r<ArraySize(reserved); r++) {
+            if(codes[i] == reserved[r]) {
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("ERROR: ", names[i], " conflicts with reserved key ", reservedNames[r]);
+                #endif
+                return false;
+            }
+        }
+    }
+
+    // Uniqueness
+    for(int i=0; i<ArraySize(codes); i++) {
+        for(int j=i+1; j<ArraySize(codes); j++) {
+            if(codes[i] == codes[j]) {
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("ERROR: Hotkey conflict: ", names[i], " and ", names[j], " use the same key");
+                #endif
+                return false;
+            }
+        }
+    }
+    return true;
+}
     int ValidateInputs() {
     // Base Price Threshold
     if(!ValidateRange(inpBasePriceThresholdPercent, 0.0001, 10.0, "BasePriceThreshold"))
@@ -133,6 +212,9 @@ bool ValidateWidth(int width, const string name) {
 
     // Combo validation
     ValidateComboModeConfiguration();
+
+    // Hotkeys (must be unique, 1-char, and not collide with reserved numeric keys)
+    if(!ValidateHotkeysUniqueAndSafe()) return INIT_PARAMETERS_INCORRECT;
     #ifdef ENABLE_DEBUG_LOGS
     Print("All input validations passed");
     #endif

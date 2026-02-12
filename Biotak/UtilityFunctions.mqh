@@ -72,9 +72,9 @@ void ThrottledChartRedraw(bool forceRedraw = false) {
     }
 }
     double CalculatePipsDistance(const double price1, const double price2) {
-        double cachedPoint = GetCachedPoint();
-    if(IsZero(cachedPoint, EPSILON_PRICE)) return 0.0;
-    return NormalizeDouble(MathAbs(price1 - price2) / cachedPoint / 10.0, 1);
+        double pipSize = GetCachedPipSize();
+    if(IsZero(pipSize, EPSILON_PRICE)) return 0.0;
+    return NormalizeDouble(MathAbs(price1 - price2) / pipSize, 1);
 }
     string FormatTooltipWithDistance(const string baseTooltip, const double priceLevel) {
         double pips = CalculatePipsDistance(priceLevel, g_currentPrice);
