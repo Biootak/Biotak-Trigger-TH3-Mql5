@@ -5,7 +5,6 @@
 static double g_highestHigh = EMPTY_VALUE;
 static double g_lowestLow = EMPTY_VALUE;
 static double g_currentPrice = 0.0;
-static bool g_isHidden = false;
 static datetime g_lastCalculation = 0;
 static datetime g_lastHistoricalUpdate = 0;
 static bool g_initialized = false;

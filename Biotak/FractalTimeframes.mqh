@@ -104,21 +104,8 @@ double GetTimeframePercentage(const string timeframe) {
 // Convert long timeframe name to short format
 // e.g., "H1+M4" -> "H1.4", "D2+H20+M16" -> "D2.20.16"
 string GetShortTimeframeName(const string longTimeframeName) {
-    // Simple timeframes - return as is
-    if (longTimeframeName == "M1" || longTimeframeName == "M4" || longTimeframeName == "M16") {
-        return longTimeframeName;
-    }
-    
-    // Composite timeframes - convert to short format
-    if (longTimeframeName == "H1+M4") return "H1.4";
-    if (longTimeframeName == "H4+M16") return "H4.16";
-    if (longTimeframeName == "H17+M4") return "H17.4";
-    if (longTimeframeName == "D2+H20+M16") return "D2.20.16";
-    if (longTimeframeName == "D11+H9+M4") return "D11.9.4";
-    if (longTimeframeName == "D45+H12+M16") return "D45.12.16";
-    
-    // No match found - return original
-    return longTimeframeName;
+    int idx = FindFractalTimeframeIndex(longTimeframeName);
+    return (idx >= 0) ? FRACTAL_SHORT_NAMES[idx] : longTimeframeName;
 }
 
 // Get timeframe name for a structure level (L1-L5)

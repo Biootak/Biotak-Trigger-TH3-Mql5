@@ -189,7 +189,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         } else {
             s_lastInputFont = inpFontName;
     safeFontName = inpFontName;
-    string validFonts[9] = {"Arial", "Arial Black", "Courier New", "Tahoma", "Verdana",
+    static string validFonts[9] = {"Arial", "Arial Black", "Courier New", "Tahoma", "Verdana",
                                 "Times New Roman", "Calibri", "Segoe UI", "Consolas"};
     bool fontValid = false;
     for(int i = 0; i < 9; i++) {

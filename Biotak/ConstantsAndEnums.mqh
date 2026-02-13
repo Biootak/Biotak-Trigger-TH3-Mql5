@@ -37,6 +37,10 @@
     "M1", "M4", "M16", "H1+M4", "H4+M16", "H17+M4",
     "D2+H20+M16", "D11+H9+M4", "D45+H12+M16"
 };
+const string FRACTAL_SHORT_NAMES[] = {
+    "M1", "M4", "M16", "H1.4", "H4.16", "H17.4",
+    "D2.20.16", "D11.9.4", "D45.12.16"
+};
 // Adjusted by factor 1.0415625 so H17+M4 (1024min) = 66.66% instead of 64%
 // These percentages MUST match MotiveWave Constants.java FRACTAL_PERCENTAGES
 const double MODIFIED_FRACTAL_PERCENTAGES[] = {
@@ -45,7 +49,7 @@ const double MODIFIED_FRACTAL_PERCENTAGES[] = {
     0.0833,   // M16: 8.33%
     0.1666,   // H1+M4: 16.66%
     0.3333,   // H4+M16: 33.33%
-    0.6666,   // H17+M4: 66.66% ✓
+    0.6666,   // H17+M4: 66.66% [OK]
     1.3332,   // D2+H20+M16: 133.32%
     2.6664,   // D11+H9+M4: 266.64%
     5.3328    // D45+H12+M16: 533.28%
@@ -238,7 +242,7 @@ enum ENUM_COMBO_COMPONENT_ITEM {
 //|                                                                  |
 //| USAGE EXAMPLE (N-ARY):                                           |
 //| Component 1: Trigger SS                                          |
-//| Operator 1: Geometric Mean (All)  ← Collects ALL components     |
+//| Operator 1: Geometric Mean (All)  <- Collects ALL components     |
 //| Component 2: Pattern LS                                          |
 //| Operator 2: [Ignored]                                            |
 //| Component 3: Structure TH                                        |
@@ -400,8 +404,8 @@ enum ENUM_COMBO_PRESET {
     
     // These presets redirect to Advanced Mode for full control
     // ═══════════════════════════════════════════════════════════════
-    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) → Redirects to Advanced Mode
-    COMBO_PRESET_MANUAL_TRIPLE = 14         // Advanced Triple: User-defined (3 components) → Redirects to Advanced Mode
+    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) -> Redirects to Advanced Mode
+    COMBO_PRESET_MANUAL_TRIPLE = 14         // Advanced Triple: User-defined (3 components) -> Redirects to Advanced Mode
 };
 
 // Mode label duration options
@@ -450,7 +454,7 @@ enum ENUM_ZONE_STYLE {
 
 enum ENUM_TH3_DRAWING_MODE {
     TH3_MODE_STEPS = 0,         // Steps Mode (2-point drag)
-    TH3_MODE_ABCD = 1           // AB=CD Mode (3-point click: A, B, C → calculates D)
+    TH3_MODE_ABCD = 1           // AB=CD Mode (3-point click: A, B, C -> calculates D)
 };
 
 //+------------------------------------------------------------------+

@@ -57,9 +57,7 @@ struct STHCacheEntry {
     static int g_cachedPeriod = -1;
     static int g_cachedPeriodSeconds = -1;
     static datetime g_cachedPeriodSecondsUpdate = 0;
-    #ifndef MIN_SAFE_DIVISIONS
-#define MIN_SAFE_DIVISIONS 0.001
-#endif
+
     double GetCachedTHCalculation(double basePrice, double percentage, int digits) {    if(!g_thCache.valid) {
         return 0.0;
     }

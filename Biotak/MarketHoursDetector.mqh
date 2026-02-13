@@ -3,6 +3,9 @@
 
 #property copyright "Biotak"
 
+#define FOREX_METALS_DAY_START_HOUR  22  // 10 PM GMT
+#define CRYPTO_DEFAULT_DAY_START_HOUR 0  // Midnight GMT
+
 enum ENUM_MARKET_TYPE {
     MARKET_FOREX,
     MARKET_METALS,
@@ -36,9 +39,9 @@ ENUM_MARKET_TYPE DetectMarketType(string symbol) {
     ENUM_MARKET_TYPE mt = DetectMarketType(symbol);
     switch(mt) {
         case MARKET_FOREX:
-        case MARKET_METALS:  return 22;
-    case MARKET_CRYPTO:  return 0;
-    default:             return 0;
+        case MARKET_METALS:  return FOREX_METALS_DAY_START_HOUR;
+    case MARKET_CRYPTO:  return CRYPTO_DEFAULT_DAY_START_HOUR;
+    default:             return CRYPTO_DEFAULT_DAY_START_HOUR;
     }
 }
     datetime GetStartOfTradingDay(string symbol, datetime currentTime) {
@@ -49,8 +52,8 @@ ENUM_MARKET_TYPE DetectMarketType(string symbol) {
     dt.min = 0;
     dt.sec = 0;
     datetime startTime = StructToTime(dt);
-    if(startHour == 22 && currentTime < startTime)
-        startTime -= 86400;
+    if(startHour == FOREX_METALS_DAY_START_HOUR && currentTime < startTime)
+        startTime -= SECONDS_PER_DAY;
     return startTime;
 }
     string GetMarketTypeName(ENUM_MARKET_TYPE marketType) {

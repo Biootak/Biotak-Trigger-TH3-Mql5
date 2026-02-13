@@ -55,8 +55,9 @@ string GetCachedSymbol() {
 //| NOTE: Period cache is now managed by CalculationCache.mqh        |
 //+------------------------------------------------------------------+
 int GetCachedPeriod() {
-    // Period cache is now managed by CalculationCache.mqh
-    return Period();
+    static int s_cachedPeriod = 0;
+    if(s_cachedPeriod == 0) s_cachedPeriod = Period();
+    return s_cachedPeriod;
 }
 
 //+------------------------------------------------------------------+

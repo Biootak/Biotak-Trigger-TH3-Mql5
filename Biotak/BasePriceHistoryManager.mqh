@@ -421,10 +421,7 @@
     void CleanupOldHistory(int daysToKeep = DEFAULT_DAYS_TO_KEEP)
 {
         datetime cutoffTime = TimeGMT() - (daysToKeep * 24 * 60 * 60);
-    string currentSymbol = Symbol();
-    StringReplace(currentSymbol, "/", "");
-    StringReplace(currentSymbol, "\\", "");
-    StringReplace(currentSymbol, ":", "");
+    string currentSymbol = SanitizeSymbolForFilename(Symbol());
     string searchPattern = HISTORY_DIR + HISTORY_FILE_PREFIX + currentSymbol + "_*" + HISTORY_FILE_EXT;
     string filename;
     int deletedCount = 0;
@@ -500,10 +497,7 @@
 }
     void CleanupTemporaryFiles()
 {
-        string currentSymbol = Symbol();
-    StringReplace(currentSymbol, "/", "");
-    StringReplace(currentSymbol, "\\", "");
-    StringReplace(currentSymbol, ":", "");
+        string currentSymbol = SanitizeSymbolForFilename(Symbol());
     string searchPattern = HISTORY_DIR + HISTORY_FILE_PREFIX + currentSymbol + "_*.tmp";
     string filename;
     int deletedCount = 0;
@@ -579,10 +573,7 @@
 }
     void DeleteAllHistoryFiles()
 {
-        string currentSymbol = Symbol();
-    StringReplace(currentSymbol, "/", "");
-    StringReplace(currentSymbol, "\\", "");
-    StringReplace(currentSymbol, ":", "");
+        string currentSymbol = SanitizeSymbolForFilename(Symbol());
     string searchPattern = HISTORY_DIR + HISTORY_FILE_PREFIX + currentSymbol + "_*" + HISTORY_FILE_EXT;
     string filename;
     int deletedCount = 0;

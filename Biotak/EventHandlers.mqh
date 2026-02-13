@@ -221,18 +221,18 @@ int OnInitHandler() {    InitializeGlobalCache();
     Print("[OK] AUDIT COMPLETE: All critical memory leaks fixed");
     Print("[FAST] OPTIMIZED: API calls cached (Symbol, Digits, Point)");
     Print("[CLEAN] MEMORY: BasePriceManager cleanup added");
-    Print("🔧 BUILD: Debug/Production modes with compile-time optimization");
-    Print("🔧 FEATURES: Multiple step modes (TH, SS/LS, M, TP, Combo)");
+    Print("[CFG] BUILD: Debug/Production modes with compile-time optimization");
+    Print("[CFG] FEATURES: Multiple step modes (TH, SS/LS, M, TP, Combo)");
     Print("[SAVE] PERSISTENT: Settings saved to GlobalVariables (survive terminal restart)");
     Print("To enable 'Chart Shift': Right-click chart > Chart Shift (or F11)");
     #endif
     if(shouldBeHidden) {        g_redrawTHLevelsNeeded = false;
     #ifdef ENABLE_DEBUG_LOGS
-        Print("🔒 OnInit: Indicator in HIDDEN state - objects will be hidden when created");
+        Print("[LOCK] OnInit: Indicator in HIDDEN state - objects will be hidden when created");
     #endif
     } else {        g_redrawTHLevelsNeeded = true;
     #ifdef ENABLE_DEBUG_LOGS
-        Print("👁 OnInit: Indicator VISIBLE - objects will be created normally");
+        Print("[SHOW] OnInit: Indicator VISIBLE - objects will be created normally");
     #endif
     }
     return INIT_SUCCEEDED;
@@ -354,23 +354,22 @@ void DeleteAllIndicatorObjects() {
         // Clear all ATR and TH labels to apply new settings
         string currentTFStr = IntegerToString(Period());
         string uniquePrefix = inpObjectPrefix + "TF" + currentTFStr + "_";
-        string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+        string tfLabels[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
         
         // Delete ATR labels
         ObjectDelete(0, uniquePrefix + "ATR_Title");
-        for(int i = 0; i < ArraySize(allTimeframes); i++) {
-            ObjectDelete(0, uniquePrefix + "ATR_" + allTimeframes[i]);
-            ObjectDelete(0, uniquePrefix + "ATR_Steps_" + allTimeframes[i]);
-            ObjectDelete(0, uniquePrefix + "ATR_Targets_" + allTimeframes[i]);
+        for(int i = 0; i < ArraySize(tfLabels); i++) {
+            ObjectDelete(0, uniquePrefix + "ATR_" + tfLabels[i]);
+            ObjectDelete(0, uniquePrefix + "ATR_Steps_" + tfLabels[i]);
+            ObjectDelete(0, uniquePrefix + "ATR_Targets_" + tfLabels[i]);
         }
         
         // Delete TH labels
         ObjectDelete(0, inpObjectPrefix + "TH_Title");
-        string fractalTFs[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
-        for(int i = 0; i < ArraySize(fractalTFs); i++) {
-            ObjectDelete(0, inpObjectPrefix + "TH_" + fractalTFs[i]);
-            ObjectDelete(0, inpObjectPrefix + "TH_Steps_" + fractalTFs[i]);
-            ObjectDelete(0, inpObjectPrefix + "TH_Targets_" + fractalTFs[i]);
+        for(int i = 0; i < ArraySize(tfLabels); i++) {
+            ObjectDelete(0, inpObjectPrefix + "TH_" + tfLabels[i]);
+            ObjectDelete(0, inpObjectPrefix + "TH_Steps_" + tfLabels[i]);
+            ObjectDelete(0, inpObjectPrefix + "TH_Targets_" + tfLabels[i]);
         }
         
         string symbolName = GetCachedSymbol();
@@ -652,7 +651,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         {
             StepCalculationData data;
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
-    double controlValue = CalculateControlValue(data.shortStep, data.longStep);
+    double controlValue = data.shortStep;
     double controlValuePrice = controlValue;
     if(inpMStepBasisType == MSTEP_BASIS_C_BASED) {
                 DrawMLevels(objectPrefix, data.midpointPrice, controlValuePrice,
@@ -774,7 +773,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     #ifdef ENABLE_DEBUG_LOGS
                 double pipSizeDbg = GetCachedPipSize();
     if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
-                Print("🎵 FACTOR_STEP: Harmonic Mode");
+                Print("[HARM] FACTOR_STEP: Harmonic Mode");
     Print("   BaseStep=", DoubleToString(factorStepSize, Digits), 
                       " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     Print("   Ratio=", harmonicRatio, 
@@ -789,7 +788,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
                 
             } else {
     #ifdef ENABLE_DEBUG_LOGS
-                Print("📏 FACTOR_STEP: Standard Mode");
+                Print("[STD] FACTOR_STEP: Standard Mode");
     double pipSizeDbg = GetCachedPipSize();
     if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
     Print("   StepSize=", DoubleToString(factorStepSize, Digits),
@@ -988,7 +987,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastLevelRedrawLog = 0;
     if(TimeCurrent() - s_lastLevelRedrawLog > 5) {
-            Print("[MT4] 🎨 REDRAWING LEVELS | Base Price: ", DoubleToString(g_dailyClosePriceForTH, Digits), 
+            Print("[MT4] [DRAW] REDRAWING LEVELS | Base Price: ", DoubleToString(g_dailyClosePriceForTH, Digits), 
                   " | Mode: ", GetStepModeName(GetCurrentStepMode()));
     s_lastLevelRedrawLog = TimeCurrent();
         }
@@ -1080,7 +1079,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             }
             else if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("🔴 CRITICAL: ", totalObjects, " objects approaching MT4 limit (64000)!");
+                Print("[CRIT] CRITICAL: ", totalObjects, " objects approaching MT4 limit (64000)!");
     Print("[CLEAN] EMERGENCY: Using ObjectsDeleteAll for cleanup...");
     #endif
     int deleted = 0;
@@ -1097,7 +1096,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(elapsed > CPU_WARNING_MS) {
         if(elapsed > CPU_CRITICAL_MS) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("🔴 CRITICAL CPU: OnCalculate took ", elapsed, "ms! Reduce inpMaxTHLevels!");
+            Print("[CRIT] CRITICAL CPU: OnCalculate took ", elapsed, "ms! Reduce inpMaxTHLevels!");
     #endif
     }
         else if(s_lastCPUTime == 0 || GetTickCount() - s_lastCPUTime > 60000) {
@@ -1231,7 +1230,7 @@ void AdjustTH3Frequency(int direction)
     if(isBecomingHidden)
             {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("🔒 F key: Hiding all objects");
+                Print("[LOCK] F key: Hiding all objects");
     #endif
     HideAllTHObjects();
     CleanupCustomPriceObjects(false, true);
@@ -1240,7 +1239,7 @@ void AdjustTH3Frequency(int direction)
             else
             {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("👁 F key: Showing all objects");
+                Print("[SHOW] F key: Showing all objects");
     #endif
     // Fast show: toggle visibility instead of delete+recreate
     int total = ObjectsTotal(0, -1, -1);
@@ -1412,11 +1411,11 @@ void AdjustTH3Frequency(int direction)
     GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled);
     if(g_triggerLevelsEnabled) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("🔵 Trigger Levels: ON");
+                Print("[ON] Trigger Levels: ON");
     #endif
     } else {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚪ Trigger Levels: OFF");
+                Print("[OFF] Trigger Levels: OFF");
     #endif
     }
     g_forceClearOnNextDraw = true;
@@ -1469,7 +1468,7 @@ void AdjustTH3Frequency(int direction)
     g_labelsRelayoutNeeded = true;
     RedrawLabelsOnly();
     #ifdef ENABLE_DEBUG_LOGS
-        Print("🧾 TH Labels mode=", g_thLabelsMode, " (0=OFF,1=FRACTAL,2=STANDARD,3=BOTH)");
+        Print("[TH] TH Labels mode=", g_thLabelsMode, " (0=OFF,1=FRACTAL,2=STANDARD,3=BOTH)");
     #endif
     ChartRedraw();
     return;
@@ -1477,8 +1476,9 @@ void AdjustTH3Frequency(int direction)
     if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
         {
             ToggleTH3Tool();
-    ThrottledChartRedraw();        }
-    if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey)) return;
+    ThrottledChartRedraw();
+    return;
+        }
     if(IsHotkeyPressed(lparam, sparam, inpStepModeKey))
         {            ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     ENUM_STEP_CALCULATION_MODE newMode = (ENUM_STEP_CALCULATION_MODE)(((int)currentMode + 1) % 6);
@@ -1569,13 +1569,13 @@ void AdjustTH3Frequency(int direction)
             {
                 g_lockedPeriod = GetCachedPeriod();
     #ifdef ENABLE_DEBUG_LOGS
-                Print("🔒 Timeframe locked to: ", GetCurrentTimeframe());
+                Print("[LOCK] Timeframe locked to: ", GetCurrentTimeframe());
     #endif
     }
             else
             {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("🔓 Timeframe unlocked - now following chart timeframe: ", GetCurrentTimeframe());
+                Print("[UNLOCK] Timeframe unlocked - now following chart timeframe: ", GetCurrentTimeframe());
     #endif
     }
     UpdateLockStatusLabel();

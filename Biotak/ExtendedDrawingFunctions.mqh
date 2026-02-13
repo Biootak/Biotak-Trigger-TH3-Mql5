@@ -257,8 +257,7 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
     break;
     case FACTOR_BASIS_LS:            stepSize = GetStepSizeForBasisType(basePrice, 2.0, PERIOD_CURRENT);
     break;
-    case FACTOR_BASIS_TH:            stepSize = GetStepSizeForBasisType(basePrice, 1.0, PERIOD_CURRENT);
-    break;
+    case FACTOR_BASIS_TH:
     case FACTOR_BASIS_TRIGGER:            stepSize = GetStepSizeForBasisType(basePrice, 1.0, PERIOD_CURRENT);
     break;
     case FACTOR_BASIS_PATTERN:            stepSize = GetStepSizeForBasisType(basePrice, 1.0, GetPatternTimeframe());
@@ -568,9 +567,7 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
             Print("[WARN] GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
     Print("   TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
     Print("   SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
-    #ifdef ENABLE_DEBUG_LOGS
             Print("   LS: ", (ls > 0 ? DoubleToString(ls, Digits) : "INVALID"));
-    #endif
     #endif
     if(validCount == 1) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -833,14 +830,10 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
     if(count > 0) {
         Print("[OK] CollectQuickTestComponents: Collected ", count, " components");
     for(int i = 0; i < count; i++) {
-        #ifdef ENABLE_DEBUG_LOGS
             Print("   [", i, "] = ", EnumToString(components[i]));
-    #endif
     }
     } else {
-        #ifdef ENABLE_DEBUG_LOGS
         Print("[ERR] CollectQuickTestComponents: No components collected!");
-    #endif
     }
     #endif
     return count;
@@ -898,9 +891,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
     case MEAN_GEOMETRIC: meanTypeName = "Geometric"; break;
     case MEAN_HARMONIC: meanTypeName = "Harmonic"; break;
     }
-    #ifdef ENABLE_DEBUG_LOGS
     Print("[OK] Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=", 
-    #endif
     DoubleToString(result, Digits));
     #endif
     return NormalizeDouble(result, GetCachedDigits());
@@ -982,9 +973,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
         Print("[WARN] Dual Group: Component 3 invalid or failed");
     Print("   Component 3: ", EnumToString(inpComboComp3));
     Print("   Fallback: Using Group 1 result only");
-    #ifdef ENABLE_DEBUG_LOGS
         Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-    #endif
     #endif
     #ifdef ENABLE_DEBUG_LOGS
         Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3), 
@@ -1035,9 +1024,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
         if(op == OP_NONE) {
             Print(" ApplyOperationWithComponent: Operator is NONE, skipping");
         } else {
-        #ifdef ENABLE_DEBUG_LOGS
             Print(" ApplyOperationWithComponent: Component is IGNORE, skipping");
-    #endif
     }
     #endif
     return currentVal;
@@ -1312,13 +1299,13 @@ double CalculateComboStepSize(const double basePrice) {
     }
     else if(inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print(" MANUAL_TRIPLE preset detected → Redirecting to Advanced Mode");
+        Print(" MANUAL_TRIPLE preset detected -> Redirecting to Advanced Mode");
     #endif
     return CalculateCalculatorModeStepSize(basePrice);
     }
     else if(inpComboPreset == COMBO_PRESET_MANUAL_DUAL) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print(" MANUAL_DUAL preset detected → Redirecting to Advanced Mode");
+        Print(" MANUAL_DUAL preset detected -> Redirecting to Advanced Mode");
     #endif
     return CalculateCalculatorModeStepSize(basePrice);
     }    
@@ -1874,9 +1861,7 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
     Print("[OK] GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
     Print("   TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
     Print("   TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
-    #ifdef ENABLE_DEBUG_LOGS
     Print("   Operation=", EnumToString(operation));
-    #endif
     #endif
 }
 ENUM_TIMEFRAMES GetPatternTimeframe() {
@@ -1913,12 +1898,12 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
 //|                                                                  |
 //| USAGE:                                                           |
 //| Check from HIGHEST to LOWEST level for proper hierarchy:        |
-//| if(step % L5 == 0) → Level 5                                    |
-//| else if(step % L4 == 0) → Level 4                               |
-//| else if(step % L3 == 0) → Level 3                               |
-//| else if(step % L2 == 0) → Level 2                               |
-//| else if(step % L1 == 0) → Level 1                               |
-//| else → Trigger                                                   |
+//| if(step % L5 == 0) -> Level 5                                    |
+//| else if(step % L4 == 0) -> Level 4                               |
+//| else if(step % L3 == 0) -> Level 3                               |
+//| else if(step % L2 == 0) -> Level 2                               |
+//| else if(step % L1 == 0) -> Level 1                               |
+//| else -> Trigger                                                   |
 //+------------------------------------------------------------------+
 int CalculateStructureInterval(const int baseMultiplier, const int level) {
         if(baseMultiplier < 2 || baseMultiplier > 9) {
@@ -2218,13 +2203,11 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         if(logicalStep == 1) {
             Print("========== MT4 FIRST LEVEL DEBUG ==========");
     Print("Anchor (midpoint): ", DoubleToString(midpointPrice, 10));
-    #ifdef ENABLE_DEBUG_LOGS
             Print("Step distance (LS): ", DoubleToString(dist, 10));
     Print("First level price: ", DoubleToString(priceLevel, 10));
     Print("Formula: ", DoubleToString(midpointPrice, 10), " + ", DoubleToString(dist, 10), " = ", DoubleToString(priceLevel, 10));
     Print("===========================================");
-    Print("🔵 MT4 FIRST LEVEL: ", DoubleToString(priceLevel, 10), " (LS=", DoubleToString(dist, 10), ")");
-    #endif
+    Print("[ON] MT4 FIRST LEVEL: ", DoubleToString(priceLevel, 10), " (LS=", DoubleToString(dist, 10), ")");
     }
     #endif
     if(checkCustomPrice) {
@@ -3131,7 +3114,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, midName, OBJPROP_SELECTED, false);
     ObjectSetInteger(0, midName, OBJPROP_BACK, false);
     ObjectSetString(0, midName, OBJPROP_TOOLTIP, 
-            StringFormat("🎯 Harmonic Center | %s | F=%.2f | R=%.3f", 
+            StringFormat("[TARGET] Harmonic Center | %s | F=%.2f | R=%.3f", 
                 DoubleToString(midpoint, GetCachedDigits()), factor, harmonicRatio));
     } else {
         ObjectSetDouble(0, midName, OBJPROP_PRICE, midpoint);
@@ -3219,7 +3202,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
     ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
-                    (isBase ? "📏 Base" : "📐 Large"), i + 1, 
+                    (isBase ? "[STD] Base" : "[CALC] Large"), i + 1, 
                     DoubleToString(priceLevel, cachedDigits), factor, step / cachedPoint));
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
@@ -3271,7 +3254,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
     ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
                 StringFormat("%s Step %d | %s | F=%.2f | Δ=%.1f", 
-                    (isBase ? "📏 Base" : "📐 Large"), i + 1, 
+                    (isBase ? "[STD] Base" : "[CALC] Large"), i + 1, 
                     DoubleToString(priceLevel, cachedDigits), factor, step / cachedPoint));
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);

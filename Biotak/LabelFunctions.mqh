@@ -259,7 +259,7 @@ bool DrawMainLevels(const string prefix) {
     ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
     int lineWidth;
             
-            // PERFORMANCE FIX: Early viewport culling � skip ALL string work for off-screen levels
+            // PERFORMANCE FIX: Early viewport culling - skip ALL string work for off-screen levels
             bool isAboveVisible = (priceLevelAbove >= vpBottom && priceLevelAbove <= vpTop);
             
             // Determine which level type this step is (needed for both counting and drawing)
@@ -413,7 +413,7 @@ bool DrawMainLevels(const string prefix) {
     ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
     int lineWidth;
             
-            // PERFORMANCE FIX: Early viewport culling � skip ALL string work for off-screen levels
+            // PERFORMANCE FIX: Early viewport culling - skip ALL string work for off-screen levels
             bool isBelowVisible = (priceLevelBelow >= vpBottom && priceLevelBelow <= vpTop);
             
             // Determine level type (needed for counting even off-screen)
@@ -581,13 +581,13 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     string mainText = StringFormat("%s: %.1f", timeframeName, atrPips);
     string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
 
-    // PERF: Check if objects already exist with correct text � skip redundant ObjectSet calls
+    // PERF: Check if objects already exist with correct text - skip redundant ObjectSet calls
     bool mainExists = (ObjectFind(0, mainObjName) >= 0);
     bool stepsExists = (ObjectFind(0, stepsObjName) >= 0);
     bool targetsExists = (inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0);
 
     if(mainExists && stepsExists) {
-        // Objects already configured � only update text/color if changed
+        // Objects already configured - only update text/color if changed
         string curMainText = ObjectGetString(0, mainObjName, OBJPROP_TEXT);
         string curStepsText = ObjectGetString(0, stepsObjName, OBJPROP_TEXT);
         bool textChanged = (curMainText != mainText || curStepsText != stepsText);
@@ -739,7 +739,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
         if(!anyChanged && MathAbs(pips - s_lastATRPips[i]) > 0.05) anyChanged = true;
     }
     if(!anyChanged) {
-        // ATR values unchanged � skip expensive object operations
+        // ATR values unchanged - skip expensive object operations
         TH3_PROF_END(ATRLabels);
         return;
     }
@@ -759,7 +759,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
         clrBlack         // MN1
     };
     
-    // Layout setup � ATR renders FIRST (at the top)
+    // Layout setup - ATR renders FIRST (at the top)
     bool isVerticalLayout = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL);
     int rowSpacing = inpLabelRowGap;
     int horizontalPadding = inpLabelColumnGap;
@@ -986,7 +986,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
     if(mainCreated) SetLabelFont(mainObjName);
     if(stepsCreated) SetLabelFont(stepsObjName);
-    // PERF: Static properties only on creation � corner, anchor, selectable, hidden never change
+    // PERF: Static properties only on creation - corner, anchor, selectable, hidden never change
     ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
     ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
     if(targetsCreated && inpShowTHTargets) {

@@ -135,10 +135,6 @@ double CalculateShortStep(const double thValue) {
     // Formula from EventHandlers.mqh: TP = E * 3 = TH * TP_MULTIPLIER
     return eValue * 3.0;
 }
-    double CalculateControlValue(const double shortStep, const double longStep) {
-    // Logic deduced from typical Biotak patterns
-    return shortStep;
-}
 
 // Reconstructed CalculateSharedPatternStep
 double CalculateSharedPatternStep(const double currentStructure, const double currentPattern,
@@ -163,13 +159,7 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
 //| Complete overflow and division-by-zero protection  |
 //+------------------------------------------------------------------+
 
-#ifndef MAX_FACTOR_VALUE
-#define MAX_FACTOR_VALUE 10000.0
-#endif
-    #ifndef MIN_FACTOR_VALUE
-#define MIN_FACTOR_VALUE 0.01
-#endif
-    double CalculateFactorStepSize(const double highPrice, const double lowPrice, const double factor) {
+double CalculateFactorStepSize(const double highPrice, const double lowPrice, const double factor) {
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL FIX #1: Validate prices with epsilon
     // ═══════════════════════════════════════════════════════════════
