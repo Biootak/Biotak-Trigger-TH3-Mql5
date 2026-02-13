@@ -44,26 +44,43 @@ string GetCurrentTimeframe() {
     }
     return "W" + IntegerToString(minutes / 10080);
 }
+
+//+------------------------------------------------------------------+
+//| Convert minutes to nearest ENUM_TIMEFRAMES (DRY helper)          |
+//| Replaces 6+ duplicate if/else chains across the codebase        |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES MinutesToTimeframe(int minutes) {
+    if(minutes <= 1)      return PERIOD_M1;
+    if(minutes <= 5)      return PERIOD_M5;
+    if(minutes <= 15)     return PERIOD_M15;
+    if(minutes <= 30)     return PERIOD_M30;
+    if(minutes <= 60)     return PERIOD_H1;
+    if(minutes <= 240)    return PERIOD_H4;
+    if(minutes <= 1440)   return PERIOD_D1;
+    if(minutes <= 10080)  return PERIOD_W1;
+    return PERIOD_MN1;
+}
+
+//+------------------------------------------------------------------+
+//| Convert minutes to fractal timeframe string (DRY helper)         |
+//| Maps chart period minutes to TH fractal names                   |
+//+------------------------------------------------------------------+
+string MinutesToFractalString(int minutes) {
+    if(minutes <= 1)      return "M1";
+    if(minutes <= 5)      return "M4";
+    if(minutes <= 15)     return "M16";
+    if(minutes <= 30)     return "M16";
+    if(minutes <= 60)     return "H1+M4";
+    if(minutes <= 240)    return "H4+M16";
+    if(minutes <= 1440)   return "D2+H20+M16";
+    if(minutes <= 10080)  return "D11+H9+M4";
+    return "D45+H12+M16";
+}
+
     int GetHigherPatternTimeframePeriod() {
         int currentMinutes = (g_timeframeLocked && g_lockedPeriod > 0) ? PeriodMinutes((ENUM_TIMEFRAMES)g_lockedPeriod) : PeriodMinutes();
     int higherMinutes = currentMinutes * 4;
-    if(higherMinutes == 1) return PERIOD_M1;
-    if(higherMinutes == 5) return PERIOD_M5;
-    if(higherMinutes == 15) return PERIOD_M15;
-    if(higherMinutes == 30) return PERIOD_M30;
-    if(higherMinutes == 60) return PERIOD_H1;
-    if(higherMinutes == 240) return PERIOD_H4;
-    if(higherMinutes == 1440) return PERIOD_D1;
-    if(higherMinutes == 10080) return PERIOD_W1;
-    if(higherMinutes >= 43200) return PERIOD_MN1;
-    if(higherMinutes < 5) return PERIOD_M1;
-    if(higherMinutes < 15) return PERIOD_M5;
-    if(higherMinutes < 30) return PERIOD_M15;
-    if(higherMinutes < 60) return PERIOD_M30;
-    if(higherMinutes < 240) return PERIOD_H1;
-    if(higherMinutes < 1440) return PERIOD_H4;
-    if(higherMinutes < 10080) return PERIOD_D1;
-    return PERIOD_W1;
+    return (int)MinutesToTimeframe(higherMinutes);
 }
     #endif
     // TIMEFRAME_FUNCTIONS_MQH

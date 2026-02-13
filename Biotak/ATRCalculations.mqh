@@ -862,29 +862,6 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
 }
 
 //+------------------------------------------------------------------+
-//| Convert Minutes to ENUM_TIMEFRAMES                               |
-//| BUGFIX: Helper function for direct timeframe ATR calculation     |
-//+------------------------------------------------------------------+
-ENUM_TIMEFRAMES MinutesToTimeframe(const int minutes) {
-    switch(minutes) {
-        case 1:     return PERIOD_M1;
-        case 5:     return PERIOD_M5;
-        case 15:    return PERIOD_M15;
-        case 30:    return PERIOD_M30;
-        case 60:    return PERIOD_H1;
-        case 240:   return PERIOD_H4;
-        case 1440:  return PERIOD_D1;
-        case 10080: return PERIOD_W1;
-        case 43200: return PERIOD_MN1;
-        default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ MinutesToTimeframe: Unknown minutes (", minutes, "), defaulting to current TF");
-            #endif
-            return _Period;
-    }
-}
-
-//+------------------------------------------------------------------+
 //| Calculate Weighted ATR for Specific Timeframe                    |
 //| BUGFIX: Direct calculation from target TF data (no scaling)      |
 //+------------------------------------------------------------------+

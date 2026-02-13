@@ -156,5 +156,27 @@ uint g_isHiddenCacheTime = 0;
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }
 }
+
+//+------------------------------------------------------------------+
+//| Restore a boolean state from GlobalVariable (DRY helper)         |
+//| Returns the stored value if valid (0.0 or 1.0), otherwise       |
+//| resets to defaultVal and returns it.                             |
+//+------------------------------------------------------------------+
+bool RestoreBoolGlobalVar(const string gvarName, bool defaultVal) {
+    if(GlobalVariableCheck(gvarName)) {
+        double gvarValue = GlobalVariableGet(gvarName);
+        bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
+        bool isOne  = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
+        if(isZero || isOne) {
+            return isOne;
+        } else {
+            DEBUG_PRINTF2("OnInit: Corrupted state for ", gvarName, ", resetting");
+            GlobalVariableSet(gvarName, defaultVal ? 1.0 : 0.0);
+            return defaultVal;
+        }
+    }
+    return defaultVal;
+}
+
     #endif
     // GLOBAL_VARIABLES_MQH

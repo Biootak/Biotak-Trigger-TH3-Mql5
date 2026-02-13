@@ -15,7 +15,6 @@ const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125;
 
 // Multipliers
 const int ZONE_EXTENSION_MULTIPLIER = 100;
-const int ALPHA_SCALE_FACTOR = 255;
 const int PERCENTAGE_TO_DECIMAL = 100;
 
 // Performance
@@ -93,7 +92,7 @@ double PercentToDecimal(double percent) {
     int TransparencyToAlpha(int transparency) {
         if(transparency < MIN_TRANSPARENCY_PERCENT) transparency = MIN_TRANSPARENCY_PERCENT;
     if(transparency > MAX_TRANSPARENCY_PERCENT) transparency = MAX_TRANSPARENCY_PERCENT;
-    return (int)((MAX_TRANSPARENCY_PERCENT - transparency) * ALPHA_SCALE_FACTOR / PERCENTAGE_TO_DECIMAL);
+    return (int)((MAX_TRANSPARENCY_PERCENT - transparency) * MAX_ALPHA_VALUE / PERCENTAGE_TO_DECIMAL);
 }
     bool IsValidTransparency(int transparency) {
     return (transparency >= MIN_TRANSPARENCY_PERCENT && transparency <= MAX_TRANSPARENCY_PERCENT);

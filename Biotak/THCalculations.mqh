@@ -76,7 +76,7 @@
     
     // Use IsZero for float comparison instead of == 0.0
     static double s_pointValue = 0.0;
-    if(IsZero(s_pointValue, EPSILON_PRICE)) s_pointValue = GetSymbolPoint();
+    if(IsZero(s_pointValue, EPSILON_PRICE)) s_pointValue = GetCachedPoint();
     if(IsZero(s_pointValue, EPSILON_PRICE)) return 0;
     double thStepPriceUnits = (price * percentage) / 100.0;
     return thStepPriceUnits <= 0 ? 0 : (thStepPriceUnits / s_pointValue);
@@ -310,4 +310,19 @@ double CalculateMDistance(const double controlValue) {
     // M Distance is Control Value divided by ATR_FACTOR_M (3.0)
     // If Control Value is SS (1.5 * Structure), then M Distance = 0.5 * Structure (Pattern)
     return controlValue / ATR_FACTOR_M;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate percentage for standard timeframe (from StandardTimeframes.mqh)
+//+------------------------------------------------------------------+
+double CalculateStandardPercentage(const int timeInMinutes) {
+    if(timeInMinutes <= 0) return 0.0;
+    int baseTimeMinutes = 1;
+    double basePercentage = 2.083;  // Adjusted so 1024min = 66.66%
+    if(timeInMinutes <= baseTimeMinutes) return basePercentage / 100.0;
+    else {
+        double timeRatio = (double)timeInMinutes / baseTimeMinutes;
+        double doublingFactor = MathLog(timeRatio) / MathLog(4.0);
+        return (basePercentage * MathPow(2.0, doublingFactor)) / 100.0;
+    }
 }

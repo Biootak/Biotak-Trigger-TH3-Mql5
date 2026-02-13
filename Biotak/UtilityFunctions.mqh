@@ -36,18 +36,6 @@ void ThrottledChartRedraw(bool forceRedraw = false) {
     if(nowMs - g_lastChartRedrawTime > CHART_REDRAW_THROTTLE_MS) {        ChartRedraw();
     g_lastChartRedrawTime = nowMs;
     }}
-    double GetSymbolPoint() {
-        static double point = 0;
-    if(point == 0) {        point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-    if(point == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("GetSymbolPoint: Failed to get point value for symbol ", _Symbol);
-    #endif
-    return 0;
-        }
-    }
-    return point;
-}
     double GetArrayMax(const double &array[]) {
         int size=ArraySize(array);
     if(size<=0) return EMPTY_VALUE;
@@ -141,46 +129,6 @@ string GetComboPresetName(const ENUM_COMBO_PRESET preset) {
     case COMBO_PRESET_MANUAL_DUAL:          return "Manual Dual";
     case COMBO_PRESET_MANUAL_TRIPLE:        return "Manual Triple";
     default:                                return "Unknown";
-    }
-}
-    double GetSharedComponentValue(ENUM_COMBO_COMPONENT_ITEM component, double structure, double pattern, double trigger) {
-        #ifdef ENABLE_DEBUG_LOGS
-    Print("⚠️ DEPRECATED: GetSharedComponentValue called - use CalculateComboStepSize instead");
-    #endif
-    switch(component) {        case COMP_SUB_TH:          return trigger * 0.25;
-    case COMP_SUB_SS:          return trigger * 0.375;
-    case COMP_SUB_LS:          return trigger * 0.5;
-    case COMP_TRIGGER_TH:      return trigger;
-    case COMP_TRIGGER_SS:      return trigger * 1.5;
-    case COMP_TRIGGER_LS:      return trigger * 2.0;
-    case COMP_PATTERN_TH:      return pattern;
-    case COMP_PATTERN_SS:      return pattern * 1.5;
-    case COMP_PATTERN_LS:      return pattern * 2.0;
-    case COMP_STRUCTURE_TH:    return structure;
-    case COMP_STRUCTURE_SS:    return structure * 1.5;
-    case COMP_STRUCTURE_LS:    return structure * 2.0;
-    case COMP_IGNORE:          return 0.0;
-    default:                   return trigger;    }
-}
-    string GetSharedComponentName(ENUM_COMBO_COMPONENT_ITEM component) {
-        #ifdef ENABLE_DEBUG_LOGS
-    Print("⚠️ DEPRECATED: GetSharedComponentName called - use Preset system instead");
-    #endif
-    switch(component) {
-        case COMP_SUB_TH:          return "Sub-TH";
-    case COMP_SUB_SS:          return "Sub-SS";
-    case COMP_SUB_LS:          return "Sub-LS";
-    case COMP_TRIGGER_TH:      return "Trigger-TH";
-    case COMP_TRIGGER_SS:      return "Trigger-SS";
-    case COMP_TRIGGER_LS:      return "Trigger-LS";
-    case COMP_PATTERN_TH:      return "Pattern-TH";
-    case COMP_PATTERN_SS:      return "Pattern-SS";
-    case COMP_PATTERN_LS:      return "Pattern-LS";
-    case COMP_STRUCTURE_TH:    return "Structure-TH";
-    case COMP_STRUCTURE_SS:    return "Structure-SS";
-    case COMP_STRUCTURE_LS:    return "Structure-LS";
-    case COMP_IGNORE:          return "Ignore";
-    default:                   return "Unknown";
     }
 }
 

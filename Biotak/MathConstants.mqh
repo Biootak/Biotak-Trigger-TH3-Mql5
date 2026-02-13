@@ -30,8 +30,7 @@
 #define GOLDEN_RATIO 1.618033988749895
 #define GOLDEN_RATIO_INVERSE 0.618033988749895
 
-// Percentage Conversions
-#define PERCENT_TO_DECIMAL 100.0
+// Percentage Conversions (use ProjectConstants.mqh PERCENTAGE_TO_DECIMAL for duplicate)
 #define DECIMAL_TO_PERCENT 100.0
 
 // Fractal Percentages (MotiveWave-compatible)
@@ -56,15 +55,12 @@ const double FRACTAL_PERCENT_D45H12M16= 5.3328;
 #define GANN_1X4_ANGLE  14.036
 #define GANN_1X8_ANGLE  7.125
 
-// Time Conversions
-#define SECONDS_IN_MINUTE 60
+// Time Conversions (use ProjectConstants.mqh SECONDS_PER_* for duplicates)
 #define MINUTES_IN_HOUR   60
 #define HOURS_IN_DAY      24
 #define DAYS_IN_WEEK      7
 #define DAYS_IN_MONTH_AVG 30
 #define DAYS_IN_YEAR      365
-#define SECONDS_IN_HOUR   3600
-#define SECONDS_IN_DAY    86400
 #define SECONDS_IN_WEEK   604800
 
 // Price Scaling

@@ -1519,16 +1519,8 @@ double CalculateComboStepSize(const double basePrice) {
 //+------------------------------------------------------------------+
 string GetCurrentFractalTimeframe() {
         int minutes = PeriodMinutes();
-    if(minutes == 1) return "M1";
-    else if(minutes == 5) return "M4";
-    else if(minutes == 15) return "M16";
-    else if(minutes == 30) return "M16";
-    else if(minutes == 60) return "H1+M4";
-    else if(minutes == 240) return "H4+M16";
-    else if(minutes == 1440) return "D2+H20+M16";
-    else if(minutes == 10080) return "D11+H9+M4";
-    else if(minutes == 43200) return "D45+H12+M16";
-    else return "M1";}
+    return MinutesToFractalString(minutes);
+}
 
 //+------------------------------------------------------------------+
 //| Get TH percentage for specific timeframe period                  |
@@ -1545,7 +1537,6 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
     #endif
     return th;
     }
-    string timeframeStr = "";
     int minutes = 0;
     switch(period) {
         case PERIOD_M1:  minutes = 1; break;
@@ -1570,15 +1561,7 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
             break;
         }
     }
-    if(minutes == 1) timeframeStr = "M1";
-    else if(minutes <= 5) timeframeStr = "M4";
-    else if(minutes <= 15) timeframeStr = "M16";
-    else if(minutes <= 30) timeframeStr = "M16";
-    else if(minutes <= 60) timeframeStr = "H1+M4";
-    else if(minutes <= 240) timeframeStr = "H4+M16";
-    else if(minutes <= 1440) timeframeStr = "D2+H20+M16";
-    else if(minutes <= 10080) timeframeStr = "D11+H9+M4";
-    else timeframeStr = "D45+H12+M16";
+    string timeframeStr = MinutesToFractalString(minutes);
     double th = CalculateTimeframeTH(timeframeStr);
     #ifdef ENABLE_DEBUG_LOGS
     Print("GetTimeframeTHForPeriod: ", period, " (", minutes, "min) -> ", 
@@ -1595,22 +1578,8 @@ ENUM_TIMEFRAMES GetSubTimeframe() {
         int currentMinutes = PeriodMinutes();
     int subMinutes = currentMinutes / 4;
     if(subMinutes < 1) subMinutes = 1;
-    ENUM_TIMEFRAMES result;
-    if(subMinutes <= 1) result = PERIOD_M1;
-    else if(subMinutes <= 5) result = PERIOD_M5;
-    else if(subMinutes <= 15) result = PERIOD_M15;
-    else if(subMinutes <= 30) result = PERIOD_M30;
-    else if(subMinutes <= 60) result = PERIOD_H1;
-    else if(subMinutes <= 360) result = PERIOD_H4;
-    else if(subMinutes <= 1440) result = PERIOD_D1;
-    else if(subMinutes <= 4320) result = PERIOD_D1;
-    else if(subMinutes <= 10080) result = PERIOD_W1;
-    else if(subMinutes <= 20000) result = PERIOD_W1;
-    else result = PERIOD_MN1;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("GetSubTimeframe: Current=", currentMinutes, "min, Sub=", 
-          subMinutes, "min (÷4) -> ", result);
-    #endif
+    ENUM_TIMEFRAMES result = MinutesToTimeframe(subMinutes);
+    DEBUG_PRINTF3("GetSubTimeframe: Current=", currentMinutes, "min, Sub=", subMinutes);
     return result;
 }
 
@@ -1632,15 +1601,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         int currentMinutes = PeriodMinutes();
     int subMinutes = currentMinutes / 16;
     if(subMinutes < 1) subMinutes = 1;
-    if(subMinutes <= 1) result = PERIOD_M1;
-    else if(subMinutes <= 5) result = PERIOD_M5;
-    else if(subMinutes <= 15) result = PERIOD_M15;
-    else if(subMinutes <= 30) result = PERIOD_M30;
-    else if(subMinutes <= 60) result = PERIOD_H1;
-    else if(subMinutes <= 360) result = PERIOD_H4;
-    else if(subMinutes <= 1440) result = PERIOD_D1;
-    else if(subMinutes <= 10080) result = PERIOD_W1;
-    else result = PERIOD_MN1;
+    result = MinutesToTimeframe(subMinutes);
             }
             break;
     case COMBO_TF_TRIGGER:            result = GetSubTimeframe();
@@ -2018,20 +1979,8 @@ ENUM_TIMEFRAMES GetPatternTimeframe() {
         int currentMinutes = PeriodMinutes();
     int patternMinutes = currentMinutes * 4;
     if(patternMinutes > 43200) patternMinutes = 43200;
-    ENUM_TIMEFRAMES result;
-    if(patternMinutes <= 1) result = PERIOD_M1;
-    else if(patternMinutes <= 5) result = PERIOD_M5;
-    else if(patternMinutes <= 15) result = PERIOD_M15;
-    else if(patternMinutes <= 30) result = PERIOD_M30;
-    else if(patternMinutes <= 60) result = PERIOD_H1;
-    else if(patternMinutes <= 240) result = PERIOD_H4;
-    else if(patternMinutes <= 1440) result = PERIOD_D1;
-    else if(patternMinutes <= 10080) result = PERIOD_W1;
-    else result = PERIOD_MN1;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("GetPatternTimeframe: Current=", currentMinutes, "min, Pattern=", 
-          patternMinutes, "min (4x) -> ", result);
-    #endif
+    ENUM_TIMEFRAMES result = MinutesToTimeframe(patternMinutes);
+    DEBUG_PRINTF3("GetPatternTimeframe: Current=", currentMinutes, "min -> ", patternMinutes);
     return result;
 }
 
@@ -2044,20 +1993,8 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
         int currentMinutes = PeriodMinutes();
     int structureMinutes = currentMinutes * 16;
     if(structureMinutes > 43200) structureMinutes = 43200;
-    ENUM_TIMEFRAMES result;
-    if(structureMinutes <= 1) result = PERIOD_M1;
-    else if(structureMinutes <= 5) result = PERIOD_M5;
-    else if(structureMinutes <= 15) result = PERIOD_M15;
-    else if(structureMinutes <= 30) result = PERIOD_M30;
-    else if(structureMinutes <= 60) result = PERIOD_H1;
-    else if(structureMinutes <= 240) result = PERIOD_H4;
-    else if(structureMinutes <= 1440) result = PERIOD_D1;
-    else if(structureMinutes <= 10080) result = PERIOD_W1;
-    else result = PERIOD_MN1;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("GetStructureTimeframe: Current=", currentMinutes, "min, Structure=", 
-          structureMinutes, "min (16x) -> ", result);
-    #endif
+    ENUM_TIMEFRAMES result = MinutesToTimeframe(structureMinutes);
+    DEBUG_PRINTF3("GetStructureTimeframe: Current=", currentMinutes, "min -> ", structureMinutes);
     return result;
 }
 
@@ -2838,7 +2775,6 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     #endif
     }
 
-#include "DrawingPipeline.mqh"
 void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice, 
                           const double stepSizePrice, const string modeName,
                           const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)

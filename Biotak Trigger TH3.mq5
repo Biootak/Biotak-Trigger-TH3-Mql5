@@ -22,7 +22,7 @@
 #include "Biotak\FloatingPointHelper.mqh"
 #include "Biotak\ObjectCountManager.mqh"
 #include "Biotak\PerformanceOptimizations.mqh"
-#include "Biotak\InputValidationEnhanced.mqh"
+
 #include "Biotak\GlobalVariables.mqh"
 
 #include "Biotak\UtilityFunctions.mqh"
@@ -37,12 +37,12 @@
 #include "Biotak\ObjectCache.mqh"
 #include "Biotak\PropertyChangeDetector.mqh"
 #include "Biotak\VisibilityManager.mqh"
-#include "Biotak\RedrawFlagManager.mqh"
+
 
 // Calculations
 #include "Biotak\TimeframeFunctions.mqh"
 #include "Biotak\FractalTimeframes.mqh"
-#include "Biotak\StandardTimeframes.mqh"
+
 #include "Biotak\THCalculations.mqh"
 #include "Biotak\ATRCalculations.mqh"
 #include "Biotak\BasePriceManager.mqh"
@@ -53,9 +53,7 @@
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\UnifiedZoneSystem.mqh"
 #include "Biotak\ZoneTrackingHelpers.mqh"
-#include "Biotak\DrawingPipeline.mqh"
-#include "Biotak\ZoneCalculator.mqh"
-#include "Biotak\ZoneRenderer.mqh"
+
 #include "Biotak\LabelFunctions.mqh"
 #include "Biotak\AlertFunctions.mqh"
 #include "Biotak\HistoricalDataFunctions.mqh"

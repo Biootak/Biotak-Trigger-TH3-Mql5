@@ -711,7 +711,7 @@ bool DrawMainLevels(const string prefix) {
     if(!g_atrLabelsVisible) return;
     
     ATR_PRINT("=== DisplayATRLabels: Starting ===");
-    double point = GetSymbolPoint();
+    double point = GetCachedPoint();
     double pipSize = GetCachedPipSize();
     int digits = GetCachedDigits();
     if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE) || digits == 0) return;
@@ -1063,7 +1063,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     return true;
 }
     void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-        double point = GetSymbolPoint();
+        double point = GetCachedPoint();
     // OPTIMIZATION: Use cached Digits
     int digits = GetCachedDigits();
     // Use IsZero for float comparison instead of == 0
@@ -1154,7 +1154,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     g_currentLabelYOffsetBottom += fractalConsumedY + sectionGap;
 }
     void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-        double point = GetSymbolPoint();
+        double point = GetCachedPoint();
     // OPTIMIZATION: Use cached Digits
     int digits = GetCachedDigits();
     // Use IsZero for float comparison instead of == 0
@@ -1201,7 +1201,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     }
     for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
-    double percentage = CalculatePercentage(STANDARD_MINUTES[i]);
+    double percentage = CalculateStandardPercentage(STANDARD_MINUTES[i]);
     double thPoints = CalculateTHPoints(dailyPriceForTH, digits, percentage);
     // PERF: Pre-expand with reserve instead of grow-by-1
     int thIndex = ArraySize(g_storedTHs);

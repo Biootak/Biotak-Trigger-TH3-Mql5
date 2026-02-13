@@ -3,75 +3,12 @@
 
 int OnInitHandler() {    InitializeGlobalCache();
     string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool shouldBeHidden = false;
-    if(GlobalVariableCheck(gvar_name)) {
-        double gvarValue = GlobalVariableGet(gvar_name);
-    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
-    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-    if(isZero || isOne) {
-            shouldBeHidden = isOne;        } else {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ OnInit: Corrupted hidden state detected!");
-    Print("   Expected: 0.0 or 1.0");
-    Print("   Actual: ", DoubleToString(gvarValue, 10));
-    Print("   Action: Resetting to visible (0.0)");
-    #endif
-    GlobalVariableSet(gvar_name, 0.0);
-    shouldBeHidden = false;
-        }
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🔧 OnInit: shouldBeHidden=", shouldBeHidden);
-    #endif
+    bool shouldBeHidden = RestoreBoolGlobalVar(gvar_name, false);
+    DEBUG_PRINTF("OnInit: shouldBeHidden=", shouldBeHidden);
     string chartIdStr = GetCachedChartIdStr();
-    string triggerGvarName = "Biotak_TriggerLevels_" + chartIdStr;
-    if(GlobalVariableCheck(triggerGvarName)) {
-        double gvarValue = GlobalVariableGet(triggerGvarName);
-    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
-    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-    if(isZero || isOne) {
-            g_triggerLevelsEnabled = isOne;
-        } else {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ OnInit: Corrupted trigger state (", DoubleToString(gvarValue, 10), "), resetting to default");
-    #endif
-    GlobalVariableSet(triggerGvarName, inpShowTrigger ? 1.0 : 0.0);
-    g_triggerLevelsEnabled = inpShowTrigger;
-        }
-    } else {        g_triggerLevelsEnabled = inpShowTrigger;
-    }
-    string linesGvarName = "Biotak_LinesVisible_" + chartIdStr;
-    if(GlobalVariableCheck(linesGvarName)) {
-        double gvarValue = GlobalVariableGet(linesGvarName);
-    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
-    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-    if(isZero || isOne) {
-            g_linesVisible = isOne;
-        } else {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ OnInit: Corrupted lines state (", DoubleToString(gvarValue, 10), "), resetting to default");
-    #endif
-    GlobalVariableSet(linesGvarName, inpShowLines ? 1.0 : 0.0);
-    g_linesVisible = inpShowLines;
-        }
-    } else {        g_linesVisible = inpShowLines;
-    }
-    string atrGvarName = "Biotak_ATRLabels_" + chartIdStr;
-    if(GlobalVariableCheck(atrGvarName)) {
-        double gvarValue = GlobalVariableGet(atrGvarName);
-    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
-    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-    if(isZero || isOne) {
-            g_atrLabelsVisible = isOne;
-        } else {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ OnInit: Corrupted ATR labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
-    #endif
-    GlobalVariableSet(atrGvarName, inpShowATRLabels ? 1.0 : 0.0);
-    g_atrLabelsVisible = inpShowATRLabels;
-        }
-    } else {        g_atrLabelsVisible = inpShowATRLabels;
-    }
+    g_triggerLevelsEnabled = RestoreBoolGlobalVar("Biotak_TriggerLevels_" + chartIdStr, inpShowTrigger);
+    g_linesVisible = RestoreBoolGlobalVar("Biotak_LinesVisible_" + chartIdStr, inpShowLines);
+    g_atrLabelsVisible = RestoreBoolGlobalVar("Biotak_ATRLabels_" + chartIdStr, inpShowATRLabels);
     // Input setting is the master switch: if disabled in Inputs, force runtime state off
     if(!inpShowATRLabels) {
         g_atrLabelsVisible = false;
@@ -378,10 +315,21 @@ void HideAllTHObjects()
 }
 
 #endif // EVENT_HANDLERS_MQH
+
+//+------------------------------------------------------------------+
+//| Delete all indicator objects (DRY helper for OnDeinit)           |
+//+------------------------------------------------------------------+
+void DeleteAllIndicatorObjects() {
+    ObjectsDeleteAll(0, inpObjectPrefix);
+    ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
+    ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
+    ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
+    ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
+    ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
+}
+
     void OnDeinitHandler(const int reason) {
-        #ifdef ENABLE_DEBUG_LOGS
-    Print("🧹 Starting cleanup - Reason: ", reason);
-    #endif
+        DEBUG_PRINT("Starting cleanup");
     ReleaseATRHandle();
     EventKillTimer();
     if(ObjectFind(0, g_stepModeLabelName) >= 0) {
@@ -398,17 +346,10 @@ void HideAllTHObjects()
     }
     if(reason == REASON_REMOVE)
     {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("🗑️ Indicator removed - cleaning all GlobalVariables");
-    #endif
+        DEBUG_PRINT("Indicator removed - cleaning all GlobalVariables");
     CleanupAllGlobalVariables();
-    ObjectsDeleteAll(0, inpObjectPrefix);
+    DeleteAllIndicatorObjects();
     ObjectsDeleteAll(0, "TH3_Structure_");
-    ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
     }
     else if(reason == REASON_PARAMETERS)
     {
@@ -452,38 +393,20 @@ void HideAllTHObjects()
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
     GlobalVariableSet(th3UpdateFlag, 1.0);
     GlobalVariableTemp(th3UpdateFlag);
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("💾 OnDeinit (REASON_PARAMETERS) - reset overrides, settings will take priority");
-    #endif
-    ObjectsDeleteAll(0, inpObjectPrefix);
-    ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
+    DEBUG_PRINT("OnDeinit (REASON_PARAMETERS) - reset overrides");
+    DeleteAllIndicatorObjects();
     }
     else
     {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("💾 OnDeinit (reason=", reason, ") - keeping persistent data for next session");
-    #endif
-    ObjectsDeleteAll(0, inpObjectPrefix);
-    ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
+        DEBUG_PRINTF("OnDeinit (reason=", reason);
+    DeleteAllIndicatorObjects();
     }
     CleanupCustomPriceObjects(false, true);
     Comment("");
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🧹 Freeing arrays...");
-    #endif
+    DEBUG_PRINT("Freeing arrays...");
     ArrayFree(g_storedTHs);
     ArrayFree(g_labelPositions);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("🧹 Cleaning up managers...");
-    #endif
+    DEBUG_PRINT("Cleaning up managers...");
     CleanupBasePriceManager();
     CleanupATRCache();
     CleanupObjectCountManager();
@@ -498,9 +421,7 @@ void HideAllTHObjects()
     g_dailyClosePriceForTH = EMPTY_VALUE;
     g_objectCountLast = 0;
     g_lastObjectCleanup = 0;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Cleanup completed successfully - All resources freed");
-    #endif
+    DEBUG_PRINT("Cleanup completed successfully");
     }
 
 //+------------------------------------------------------------------+
@@ -1189,19 +1110,6 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         }
     }
     return rates_total;
-}
-
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Apply Lines Visibility State to All Line Objects                 |
-
-//|                                                                  |
-//| Removed redundant loop - visibility now set during     |
-//| object creation in CreateTHLineObject()                         |
-//| This function kept as stub for backward compatibility           |
-//+------------------------------------------------------------------+
-void ApplyLinesVisibility()
-{    return;
 }
 
 // Robust hotkey matcher: compares both key code (lparam) and key text (sparam)
