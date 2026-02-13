@@ -1,48 +1,37 @@
-﻿#ifndef INPUT_VALIDATOR_MQH
+#ifndef INPUT_VALIDATOR_MQH
 #define INPUT_VALIDATOR_MQH
 
 bool ValidateWidth(int width, const string name) {
         if(width <= 0 || width > 10) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " (", width, ") out of range [1-10]");
-    #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", width, ") out of range [1-10]");
     return false;
     }
     return true;
 }
     bool ValidateRange(double value, double minVal, double maxVal, const string name) {
         if(value < minVal || value > maxVal) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " (", DoubleToString(value, 3), ") out of range [",
-              DoubleToString(minVal, 3), "-", DoubleToString(maxVal, 3), "]");
-    #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", DoubleToString(value, 3), ") out of range [");
     return false;
     }
     return true;
 }
     bool ValidatePositive(int value, const string name) {
         if(value <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " (", value, ") must be positive");
-    #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", value, ") must be positive");
     return false;
     }
     return true;
 }
     bool ValidateNonNegative(int value, const string name) {
         if(value < 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " (", value, ") must be non-negative");
-    #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", value, ") must be non-negative");
     return false;
     }
     return true;
 }
     bool ValidateTransparency(int value, const string name) {
         if(value < 0 || value > 100) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " (", value, ") out of range [0-100]");
-    #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", value, ") out of range [0-100]");
     return false;
     }
     return true;
@@ -50,16 +39,12 @@ bool ValidateWidth(int width, const string name) {
 
 bool ValidateHotkeyString(const string key, const string name) {
     if(StringLen(key) <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " is empty");
-        #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " is empty");
         return false;
     }
     // We only use first character, so enforce 1-char to avoid surprising behavior
     if(StringLen(key) != 1) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ERROR: ", name, " must be exactly 1 character (got '", key, "')");
-        #endif
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " must be exactly 1 character (got '", key, "')");
         return false;
     }
     return true;
@@ -107,9 +92,7 @@ bool ValidateHotkeysUniqueAndSafe() {
     for(int i=0; i<ArraySize(codes); i++) {
         for(int r=0; r<ArraySize(reserved); r++) {
             if(codes[i] == reserved[r]) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("ERROR: ", names[i], " conflicts with reserved key ", reservedNames[r]);
-                #endif
+                _LOG_GATE_E Print("[E][INIT] ERROR: ", names[i], " conflicts with reserved key ", reservedNames[r]);
                 return false;
             }
         }
@@ -119,9 +102,7 @@ bool ValidateHotkeysUniqueAndSafe() {
     for(int i=0; i<ArraySize(codes); i++) {
         for(int j=i+1; j<ArraySize(codes); j++) {
             if(codes[i] == codes[j]) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("ERROR: Hotkey conflict: ", names[i], " and ", names[j], " use the same key");
-                #endif
+                _LOG_GATE_E Print("[E][INIT] ERROR: Hotkey conflict: ", names[i], " and ", names[j], " use the same key");
                 return false;
             }
         }
@@ -185,9 +166,7 @@ bool ValidateHotkeysUniqueAndSafe() {
 
     // Performance warnings
     if(inpMaxLevels > MAX_SAFE_LEVELS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("WARNING: TH Levels exceed MAX_SAFE_LEVELS (", MAX_SAFE_LEVELS, ")");
-    #endif
+        _LOG_GATE_W Print("[W][INIT] WARNING: TH Levels exceed MAX_SAFE_LEVELS (", MAX_SAFE_LEVELS, ")");
     }
 
     // Transparency
@@ -217,9 +196,7 @@ bool ValidateHotkeysUniqueAndSafe() {
 
     // Hotkeys (must be unique, 1-char, and not collide with reserved numeric keys)
     if(!ValidateHotkeysUniqueAndSafe()) return INIT_PARAMETERS_INCORRECT;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("All input validations passed");
-    #endif
+    _LOG_GATE_I Print("[I][INIT] All input validations passed");
     return INIT_SUCCEEDED;
 }
     void ValidateComboModeConfiguration() {
@@ -231,7 +208,7 @@ bool ValidateHotkeysUniqueAndSafe() {
     case COMBO_MODE_ADVANCED:   modeName = "Advanced"; break;
     default:                    modeName = "Unknown"; break;
     }
-    Print("Combo Mode: ", modeName);
+    Print("[D][INIT] Combo Mode: ", modeName);
     if(inpComboMode == COMBO_MODE_ADVANCED) {
         int activeComponents = 0;
     if(inpComboComp1 != COMP_IGNORE) activeComponents++;
@@ -239,10 +216,10 @@ bool ValidateHotkeysUniqueAndSafe() {
     if(inpComboComp3 != COMP_IGNORE) activeComponents++;
     if(inpComboComp4 != COMP_IGNORE) activeComponents++;
     if(activeComponents == 0) {
-            Print("WARNING: All combo components set to IGNORE");
+            Print("[W][INIT] WARNING: All combo components set to IGNORE");
         }
     if(inpComboOp1 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp1 <= OP_MAX_ALL) {
-            Print("N-ARY operator detected: topology will be ignored");
+            Print("[D][INIT] N-ARY operator detected: topology will be ignored");
         }
     }
     #endif

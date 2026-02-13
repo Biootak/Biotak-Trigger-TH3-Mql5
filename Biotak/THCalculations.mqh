@@ -1,4 +1,4 @@
-﻿#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
 
 // Include centralized math constants
@@ -21,35 +21,25 @@
     double CalculateTH(const double price, const int digits, const double percentage) {
     // Use epsilon for floating-point comparison
     if(price < EPSILON_PRICE || percentage < EPSILON_PERCENTAGE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTH: Invalid input - price=", DoubleToString(price, 10), 
-              ", percentage=", DoubleToString(percentage, 10));
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateTH: Invalid input - price=", DoubleToString(price, 10));
     return 0;
     }
     
     // SECURITY: Prevent overflow with proper bounds
     if(price > MAX_SAFE_PRICE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTH: Price too large (", DoubleToString(price, 5), "), exceeds MAX_SAFE_PRICE");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateTH: Price too large (", DoubleToString(price, 5), "), exceeds MAX_SAFE_PRICE");
     return 0;
     }
     
     // VALIDATION: Digits range check
     if(digits < 0 || digits > 8) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTH: Invalid digits (", digits, "), must be 0-8");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateTH: Invalid digits (", digits, "), must be 0-8");
     return 0;
     }
     
     // VALIDATION: Percentage range with hard limit
     if(percentage > MAX_SAFE_PERCENTAGE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTH: Percentage too large (", DoubleToString(percentage, 3), 
-              "%), exceeds MAX_SAFE_PERCENTAGE");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateTH: Percentage too large (", DoubleToString(percentage, 3));
     return 0;
     }
     
@@ -140,7 +130,7 @@ double CalculateShortStep(const double thValue) {
 double CalculateSharedPatternStep(const double currentStructure, const double currentPattern,
                                  const double higherPatternStructure, const double higherPatternPattern) {
         #ifdef ENABLE_DEBUG_LOGS
-    Print("CalculateSharedPatternStep: currentS=", currentStructure, 
+    Print("[D][TH] CalculateSharedPatternStep: currentS=", currentStructure,
           ", currentP=", currentPattern, ", higherS=", higherPatternStructure, 
           ", higherP=", higherPatternPattern);
     #endif
@@ -164,17 +154,11 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     // CRITICAL FIX #1: Validate prices with epsilon
     // ═══════════════════════════════════════════════════════════════
     if(highPrice < EPSILON_PRICE || lowPrice < EPSILON_PRICE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, Digits), 
-              ", Low=", DoubleToString(lowPrice, Digits));
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, Digits));
     return 0;
     }
     if(highPrice <= lowPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, Digits), 
-              ") must be greater than Low (", DoubleToString(lowPrice, Digits), ")");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, Digits));
     return 0;
     }
     
@@ -184,10 +168,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     double range = highPrice - lowPrice;
     double minRange = GetCachedPoint() * 10; // At least 10 pips
     if(range < minRange) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits), 
-              ") - minimum ", DoubleToString(minRange, Digits), " required");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits));
     return 0;
     }
     
@@ -195,17 +176,11 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     // CRITICAL FIX #3: Validate factor BEFORE any calculation
     // ═══════════════════════════════════════════════════════════════
     if(factor < MIN_FACTOR_VALUE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Factor too small (", DoubleToString(factor, 2), 
-              ") - minimum ", DoubleToString(MIN_FACTOR_VALUE, 2), " required");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Factor too small (", DoubleToString(factor, 2));
     return 0;
     }
     if(factor > MAX_FACTOR_VALUE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Factor too large (", DoubleToString(factor, 2), 
-              ") - maximum ", DoubleToString(MAX_FACTOR_VALUE, 2), " allowed");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Factor too large (", DoubleToString(factor, 2));
     return 0;
     }
     
@@ -223,18 +198,13 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     // CRITICAL: Use MIN_SAFE_DIVISIONS instead of EPSILON_GENERAL
     // EPSILON_GENERAL (1e-9) is too small and can cause precision loss
     if(divisions < MIN_SAFE_DIVISIONS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Divisions too small (", DoubleToString(divisions, 10), 
-              ") - minimum required: ", DoubleToString(MIN_SAFE_DIVISIONS, 10));
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Divisions too small (", DoubleToString(divisions, 10));
     return 0;
     }
     
     // Validate divisions result for overflow
     if(divisions > 1000000.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Invalid divisions calculated (too large): ", divisions);
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid divisions calculated (too large): ", divisions);
     return 0;
     }
     
@@ -243,9 +213,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     
     // Validate SafeDivide result
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: SafeDivide returned invalid result");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: SafeDivide returned invalid result");
     return 0;
     }
     
@@ -253,21 +221,15 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     // CRITICAL FIX #6: Validate result is reasonable
     // ═══════════════════════════════════════════════════════════════
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Invalid step size result: ", stepSize);
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid step size result: ", stepSize);
     return 0;
     }
     if(stepSize < GetCachedPoint() * 0.1) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
     return 0;
     }
     if(stepSize > range) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateFactorStepSize: Step size (", stepSize, ") exceeds range (", range, ")");
-    #endif
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Step size (", stepSize, ") exceeds range (", range, ")");
     return 0;
     }
     

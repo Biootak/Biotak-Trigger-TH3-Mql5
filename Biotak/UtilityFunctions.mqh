@@ -1,4 +1,4 @@
-﻿
+
 #property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 #ifndef UTILITY_FUNCTIONS_MQH
@@ -152,7 +152,9 @@ void ClearAllModeLabels() {
     void ApplyModeLabelStyle(const string name, const color textColor, const int yOffsetExtra = 0) {
         ObjectSetInteger(0, name, OBJPROP_CORNER, inpModeLabelCorner);
     ObjectSetInteger(0, name, OBJPROP_XDISTANCE, inpModeLabelXDistance);
-    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra + g_currentLabelYOffset);
+    // FIX: Use g_modeLabelYOffset (finalized after label render) instead of live g_currentLabelYOffset
+    // This prevents overlap when mode labels are created before/after label stacking
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra + g_modeLabelYOffset);
     ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpModeLabelFontSize);
@@ -260,38 +262,26 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
                           const double zoneHeight, const color zoneColor, const int transparency)
 {
         if(StringLen(zoneName) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateGenericMidZone: Empty zone name");
-    #endif
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Empty zone name");
     return false;
     }
     if(prevPrice <= 0 || currentPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateGenericMidZone: Invalid prices - Prev=", DoubleToString(prevPrice, Digits), 
-              ", Current=", DoubleToString(currentPrice, Digits));
-    #endif
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid prices - Prev=", DoubleToString(prevPrice, Digits));
     return false;
     }
     if(prevPrice == currentPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CreateGenericMidZone: Prices are equal - no zone needed");
-    #endif
+        _LOG_GATE_W Print("[W][ZONE] CreateGenericMidZone: Prices are equal - no zone needed");
     return false;
     }
     if(zoneHeight <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateGenericMidZone: Invalid zone height: ", DoubleToString(zoneHeight, Digits));
-    #endif
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid zone height: ", DoubleToString(zoneHeight, Digits));
     return false;
     }
     double midPoint = (prevPrice + currentPrice) / 2.0;
     double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
     double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
     if(upperPrice <= lowerPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateGenericMidZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, Digits), 
-              ", Lower=", DoubleToString(lowerPrice, Digits));
-    #endif
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, Digits));
     return false;
     }    
     SZoneCreationRequest request;
@@ -305,16 +295,10 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     request.endTime = 0;
     SZoneCreationResult result = CreateZone(request);
     if(!result.success) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateGenericMidZone: Factory failed for '", zoneName, "' - ", result.errorMessage, 
-              " (Code: ", result.errorCode, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Factory failed for '", zoneName, "' - ", result.errorMessage);
     return false;
     }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] CreateGenericMidZone: Created/Updated '", zoneName, "' [", 
-          DoubleToString(lowerPrice, Digits), " - ", DoubleToString(upperPrice, Digits), "]");
-    #endif
+    _LOG_GATE_I Print("[I][ZONE] CreateGenericMidZone: Created/Updated '", zoneName, "' [");
     return true;
 }
     #endif

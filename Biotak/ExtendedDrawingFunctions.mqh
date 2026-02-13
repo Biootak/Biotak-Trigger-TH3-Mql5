@@ -1,4 +1,4 @@
-﻿#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link "@biotak"
 #include "UnifiedZoneSystem.mqh"
 #include "ZoneTrackingHelpers.mqh"
@@ -174,61 +174,42 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
 //+------------------------------------------------------------------+
 double GetDefaultFactorValue(const double basePrice) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Invalid base price (", basePrice, "), using fallback");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetDefaultFactorValue: Invalid base price (", basePrice, "), using fallback");
     return 50.0;    }
     if(g_highestHigh <= 0 || g_lowestLow <= 0 || g_highestHigh <= g_lowestLow) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Invalid historical range, using fallback");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetDefaultFactorValue: Invalid historical range, using fallback");
     return 50.0;    }
     double range = g_highestHigh - g_lowestLow;
     if(range <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Invalid range (", range, "), using fallback");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetDefaultFactorValue: Invalid range (", range, "), using fallback");
     return 50.0;
     }
     double stepSize = GetStepSizeForFactorBasis(basePrice, inpFactorAutoBasis);
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Invalid step size, using fallback");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetDefaultFactorValue: Invalid step size, using fallback");
     return 50.0;
     }
     double denominator = stepSize * 2.0;
     if(denominator <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Invalid denominator, using fallback");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetDefaultFactorValue: Invalid denominator, using fallback");
     return 50.0;
     }
     double minDenominator = range / 10000.0;
     if(denominator < minDenominator) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Step size too small (", DoubleToString(stepSize, 8), 
-              "), would produce factor > 10000, clamping to 1000");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW] GetDefaultFactorValue: Step size too small (", DoubleToString(stepSize, 8));
     return 1000.0;
     }
     double factor = range / denominator;
     if(factor > 10000) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Factor too large (", DoubleToString(factor, 2), 
-              "), clamping to 1000 for usability");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW] GetDefaultFactorValue: Factor too large (", DoubleToString(factor, 2));
     factor = 1000.0;
     } else if(factor < 0.01) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetDefaultFactorValue: Factor too small (", DoubleToString(factor, 4), 
-              "), clamping to 1.0 for usability");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW] GetDefaultFactorValue: Factor too small (", DoubleToString(factor, 4));
     factor = 1.0;
     }
     double result = NormalizeDouble(MathMax(0.01, MathMin(10000, factor)), 2);
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetDefaultFactorValue: Basis=", EnumToString(inpFactorAutoBasis),
+    Print("[D][DRAW] GetDefaultFactorValue: Basis=", EnumToString(inpFactorAutoBasis),
           ", basePrice=", DoubleToString(basePrice, Digits), 
           ", Range=", DoubleToString(range, Digits),
           ", StepSize=", DoubleToString(stepSize, Digits),
@@ -244,9 +225,7 @@ double GetDefaultFactorValue(const double basePrice) {
 //+------------------------------------------------------------------+
 double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_BASIS basis) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForFactorBasis: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForFactorBasis: Invalid basePrice=", basePrice);
     return 0;
     }
     double stepSize = 0;
@@ -267,23 +246,15 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
     case FACTOR_BASIS_COMBO:            stepSize = GetComboStepSizeForFactor(basePrice);
     break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] GetStepSizeForFactorBasis: Unknown basis=", basis, ", using Control");
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] GetStepSizeForFactorBasis: Unknown basis=", basis, ", using Control");
     stepSize = GetStepSizeForBasisType(basePrice, 1.75, PERIOD_CURRENT);
     break;
     }
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForFactorBasis: Failed to calculate step for basis=", 
-              EnumToString(basis));
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForFactorBasis: Failed to calculate step for basis=");
     return 0;
     }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] GetStepSizeForFactorBasis: Basis=", EnumToString(basis), 
-          ", Step=", DoubleToString(stepSize, Digits));
-    #endif
+    _LOG_GATE_I Print("[I][DRAW] GetStepSizeForFactorBasis: Basis=", EnumToString(basis));
     return stepSize;
 }
 
@@ -295,56 +266,40 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
 double GetStepSizeForBasisType(const double basePrice, const double multiplier, 
                                 const ENUM_TIMEFRAMES timeframe) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForBasisType: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForBasisType: Invalid basePrice=", basePrice);
     return 0;
     }
     if(multiplier <= 0 || multiplier > 10.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForBasisType: Invalid multiplier=", multiplier);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForBasisType: Invalid multiplier=", multiplier);
     return 0;
     }
     double thPercentage = GetTimeframeTHForPeriod(timeframe);
     if(thPercentage <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForBasisType: Invalid TH%=", thPercentage, " for TF=", timeframe);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForBasisType: Invalid TH%=", thPercentage, " for TF=", timeframe);
     return 0;
     }
     double thPriceUnits = (basePrice * thPercentage) / 100.0;
     if(thPriceUnits <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForBasisType: Invalid TH price units=", thPriceUnits);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForBasisType: Invalid TH price units=", thPriceUnits);
     return 0;
     }
     double stepSize = thPriceUnits * multiplier;
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForBasisType: Zero or negative stepSize=", stepSize);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForBasisType: Zero or negative stepSize=", stepSize);
     return 0;
     }
     if(stepSize > basePrice * 0.5) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetStepSizeForBasisType: Suspiciously large stepSize=", stepSize, 
+        Print("[W][DRAW] GetStepSizeForBasisType: Suspiciously large stepSize=", stepSize,
               " (> 50% of basePrice=", basePrice, ")");
-    Print("   TH%=", DoubleToString(thPercentage, 4), ", Mult=", multiplier);
+    Print("[D][DRAW]    TH%=", DoubleToString(thPercentage, 4), ", Mult=", multiplier);
     #endif
     }
     double minReasonableStep = basePrice * EPSILON_ANGLE;
     if(stepSize < minReasonableStep) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetStepSizeForBasisType: Suspiciously small stepSize=", stepSize, 
-              " (< 0.0001% of basePrice=", basePrice, ")");
-    #endif
+        _LOG_GATE_W Print("[W][DRAW] GetStepSizeForBasisType: Suspiciously small stepSize=", stepSize);
     }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] GetStepSizeForBasisType: TF=", timeframe, ", Mult=", multiplier, 
-          ", TH%=", DoubleToString(thPercentage, 4), ", Step=", DoubleToString(stepSize, Digits));
-    #endif
+    _LOG_GATE_I Print("[I][DRAW] GetStepSizeForBasisType: TF=", timeframe, ", Mult=", multiplier);
     return stepSize;
 }
 
@@ -373,51 +328,35 @@ double CalculateTripleComboStepSize(const double basePrice,
                                     const ENUM_COMBO_STEP_TYPE step3,
                                     const ENUM_COMBO_OPERATION operation) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid basePrice=", basePrice);
     return 0;
     }
     if(tf1 < COMBO_TF_SUB || tf1 > COMBO_TF_STRUCTURE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid tf1=", tf1);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid tf1=", tf1);
     return 0;
     }
     if(tf2 < COMBO_TF_SUB || tf2 > COMBO_TF_STRUCTURE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid tf2=", tf2);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid tf2=", tf2);
     return 0;
     }
     if(tf3 < COMBO_TF_SUB || tf3 > COMBO_TF_STRUCTURE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid tf3=", tf3);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid tf3=", tf3);
     return 0;
     }
     if(step1 < COMBO_STEP_TH || step1 > COMBO_STEP_LS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid step1=", step1);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid step1=", step1);
     return 0;
     }
     if(step2 < COMBO_STEP_TH || step2 > COMBO_STEP_LS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid step2=", step2);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid step2=", step2);
     return 0;
     }
     if(step3 < COMBO_STEP_TH || step3 > COMBO_STEP_LS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid step3=", step3);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid step3=", step3);
     return 0;
     }
     if(operation < COMBO_OP_AVERAGE || operation > COMBO_OP_WEIGHTED) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid operation=", operation);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid operation=", operation);
     return 0;
     }    
     ENUM_TIMEFRAMES timeframe1 = GetTimeframeByType(tf1);
@@ -430,9 +369,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     double stepValue2 = GetStepSizeForBasisType(basePrice, multiplier2, timeframe2);
     double stepValue3 = GetStepSizeForBasisType(basePrice, multiplier3, timeframe3);
     if(stepValue1 <= 0 || stepValue2 <= 0 || stepValue3 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid step values");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid step values");
     return 0;
     }
     double result = 0;
@@ -442,9 +379,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     case COMBO_OP_ADD:            {
         double maxSafeValue = DBL_MAX / 3.0;
     if(stepValue1 > maxSafeValue || stepValue2 > maxSafeValue || stepValue3 > maxSafeValue) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("[ERR] Overflow risk in COMBO_OP_ADD (triple), using safe fallback");
-    #endif
+                    _LOG_GATE_E Print("[E][DRAW] Overflow risk in COMBO_OP_ADD (triple), using safe fallback");
     result = MathMax(stepValue1, MathMax(stepValue2, stepValue3));
                 } else {
                     result = stepValue1 + stepValue2 + stepValue3;
@@ -456,17 +391,12 @@ double CalculateTripleComboStepSize(const double basePrice,
     case COMBO_OP_MAX:            result = MathMax(stepValue1, MathMax(stepValue2, stepValue3));
     break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] CalculateTripleComboStepSize: Unsupported operation=", operation, 
-                  ", using Average");
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] CalculateTripleComboStepSize: Unsupported operation=", operation);
     result = (stepValue1 + stepValue2 + stepValue3) / 3.0;
     break;
     }
     if(result <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateTripleComboStepSize: Invalid result=", result);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateTripleComboStepSize: Invalid result=", result);
     return 0;
     }
     double maxStep = MathMax(stepValue1, MathMax(stepValue2, stepValue3));
@@ -490,24 +420,24 @@ double CalculateTripleComboStepSize(const double basePrice,
     }
     if(isSuspicious) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateTripleComboStepSize: Suspicious result detected");
-    Print("   Operation=", EnumToString(operation));
-    Print("   Step1=", DoubleToString(stepValue1, Digits), 
+        Print("[W][DRAW] CalculateTripleComboStepSize: Suspicious result detected");
+    Print("[D][DRAW]    Operation=", EnumToString(operation));
+    Print("[D][DRAW]    Step1=", DoubleToString(stepValue1, Digits),
               ", Step2=", DoubleToString(stepValue2, Digits), 
               ", Step3=", DoubleToString(stepValue3, Digits));
-    Print("   Result=", DoubleToString(result, Digits), 
+    Print("[D][DRAW]    Result=", DoubleToString(result, Digits),
               " (min=", DoubleToString(minStep, Digits), 
               ", max=", DoubleToString(maxStep, Digits), ")");
-    Print("   Using fallback: average");
+    Print("[D][DRAW]    Using fallback: average");
     #endif
     result = (stepValue1 + stepValue2 + stepValue3) / 3.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] CalculateTripleComboStepSize: SUCCESS");
-    Print("   TF1=", EnumToString(tf1), ", Step1=", DoubleToString(stepValue1, Digits));
-    Print("   TF2=", EnumToString(tf2), ", Step2=", DoubleToString(stepValue2, Digits));
-    Print("   TF3=", EnumToString(tf3), ", Step3=", DoubleToString(stepValue3, Digits));
-    Print("   Operation=", EnumToString(operation), ", Result=", DoubleToString(result, Digits));
+    Print("[I][DRAW] CalculateTripleComboStepSize: SUCCESS");
+    Print("[D][DRAW]    TF1=", EnumToString(tf1), ", Step1=", DoubleToString(stepValue1, Digits));
+    Print("[D][DRAW]    TF2=", EnumToString(tf2), ", Step2=", DoubleToString(stepValue2, Digits));
+    Print("[D][DRAW]    TF3=", EnumToString(tf3), ", Step3=", DoubleToString(stepValue3, Digits));
+    Print("[D][DRAW]    Operation=", EnumToString(operation), ", Result=", DoubleToString(result, Digits));
     #endif
     return result;
 }
@@ -557,28 +487,20 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     if(ss > 0) validCount++;
     if(ls > 0) validCount++;
     if(validCount == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] GetStepSizeFromComponent: All MEAN components invalid for ", EnumToString(comp));
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] GetStepSizeFromComponent: All MEAN components invalid for ", EnumToString(comp));
     return 0;
         }
     if(validCount < 3) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
-    Print("   TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
-    Print("   SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
-            Print("   LS: ", (ls > 0 ? DoubleToString(ls, Digits) : "INVALID"));
+            Print("[W][DRAW] GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
+    Print("[E][DRAW]    TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
+    Print("[E][DRAW]    SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
+            Print("[E][DRAW]    LS: ", (ls > 0 ? DoubleToString(ls, Digits) : "INVALID"));
     #endif
     if(validCount == 1) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print(" MEAN COMPONENT INFO: ", EnumToString(comp), 
-                      " - Only 1/3 values valid. Result equals the single valid value.");
-    #endif
+                _LOG_GATE_D Print("[D][DRAW]  MEAN COMPONENT INFO: ", EnumToString(comp));
     } else if(validCount == 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print(" MEAN COMPONENT INFO: ", EnumToString(comp), 
-                      " - Only 2/3 values valid. Mean calculated from 2 values.");
-    #endif
+                _LOG_GATE_D Print("[D][DRAW]  MEAN COMPONENT INFO: ", EnumToString(comp));
     }
         }
     double validValues[];
@@ -589,7 +511,7 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     if(ls > 0) validValues[idx++] = ls;
     double result = CalculateMeanByType(validValues, inpAggregateMeanType);
     #ifdef ENABLE_DEBUG_LOGS
-        Print("[OK] GetStepSizeFromComponent: MEAN component ", EnumToString(comp), 
+        Print("[I][DRAW] GetStepSizeFromComponent: MEAN component ", EnumToString(comp),
               " = ", DoubleToString(result, Digits), " (", validCount, "/3 valid values, ",
               EnumToString(inpAggregateMeanType), " mean)");
     #endif
@@ -627,18 +549,14 @@ double CalculateGeometricMeanN(const double &values[]) {
     double logSum = 0;
     for(int i = 0; i < n; i++) {
         if(values[i] <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] CalculateGeometricMeanN: Non-positive value at index ", i, ": ", values[i]);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] CalculateGeometricMeanN: Non-positive value at index ", i, ": ", values[i]);
     return 0;
         }
     logSum += MathLog(values[i]);
     }
     double result = MathExp(logSum / n);
     if(result <= 0 || result > DBL_MAX / 2.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateGeometricMeanN: Invalid result=", result);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateGeometricMeanN: Invalid result=", result);
     return 0;
     }
     return result;
@@ -670,9 +588,7 @@ double CalculateHarmonicMeanN(const double &values[]) {
     double reciprocalSum = 0;
     for(int i = 0; i < n; i++) {
         if(MathAbs(values[i]) < EPSILON_ANGLE) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] CalculateHarmonicMeanN: Zero/near-zero value at index ", i, ": ", values[i]);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] CalculateHarmonicMeanN: Zero/near-zero value at index ", i, ": ", values[i]);
     return 0;
         }
         reciprocalSum += 1.0 / values[i];
@@ -721,9 +637,7 @@ double CalculateMaxN(const double &values[]) {
 double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType) {
         int n = ArraySize(values);
     if(n == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateMeanByType: Empty array");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateMeanByType: Empty array");
     return 0;
     }
     if(n == 1) return values[0];
@@ -731,29 +645,18 @@ double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType
     switch(meanType) {
         case MEAN_ARITHMETIC:
             result = CalculateArithmeticMeanN(values);
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("[OK] CalculateMeanByType: Arithmetic Mean of ", n, " values = ", 
-                  DoubleToString(result, Digits));
-    #endif
+            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Arithmetic Mean of ", n, " values = ");
     break;
     case MEAN_GEOMETRIC:
             result = CalculateGeometricMeanN(values);
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("[OK] CalculateMeanByType: Geometric Mean of ", n, " values = ", 
-                  DoubleToString(result, Digits));
-    #endif
+            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Geometric Mean of ", n, " values = ");
     break;
     case MEAN_HARMONIC:
             result = CalculateHarmonicMeanN(values);
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("[OK] CalculateMeanByType: Harmonic Mean of ", n, " values = ", 
-                  DoubleToString(result, Digits));
-    #endif
+            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Harmonic Mean of ", n, " values = ");
     break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] CalculateMeanByType: Unknown mean type ", meanType);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] CalculateMeanByType: Unknown mean type ", meanType);
     return 0;
     }
     return result;
@@ -797,9 +700,7 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
             useTrigger = true;
     break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] CollectQuickTestComponents: Unknown preset=", inpQuickTestPreset);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] CollectQuickTestComponents: Unknown preset=", inpQuickTestPreset);
     return 0;
     }
     int maxComponents = 4;
@@ -828,12 +729,12 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
     ArrayResize(components, count);
     #ifdef ENABLE_DEBUG_LOGS
     if(count > 0) {
-        Print("[OK] CollectQuickTestComponents: Collected ", count, " components");
+        Print("[I][DRAW] CollectQuickTestComponents: Collected ", count, " components");
     for(int i = 0; i < count; i++) {
-            Print("   [", i, "] = ", EnumToString(components[i]));
+            Print("[D][DRAW]    [", i, "] = ", EnumToString(components[i]));
     }
     } else {
-        Print("[ERR] CollectQuickTestComponents: No components collected!");
+        Print("[E][DRAW] CollectQuickTestComponents: No components collected!");
     }
     #endif
     return count;
@@ -847,17 +748,13 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
 //+------------------------------------------------------------------+
 double CalculateQuickTestStepSize(const double basePrice) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateQuickTestStepSize: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateQuickTestStepSize: Invalid basePrice=", basePrice);
     return 0;
     }
     ENUM_COMBO_COMPONENT_ITEM selectedComponents[];
     int componentCount = CollectQuickTestComponents(selectedComponents);
     if(componentCount == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Quick Test: No components selected");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Quick Test: No components selected");
     Alert("[WARN] QUICK TEST MODE ERROR\n\nNo components selected!\nPlease select at least one timeframe in Quick Test settings.");
     return 0;
     }
@@ -866,22 +763,16 @@ double CalculateQuickTestStepSize(const double basePrice) {
     for(int i = 0; i < componentCount; i++) {
         double val = GetStepSizeFromComponent(basePrice, selectedComponents[i]);
     if(val <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] Quick Test: Component ", selectedComponents[i], " returned invalid value");
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] Quick Test: Component ", selectedComponents[i], " returned invalid value");
     return 0;
         }
         
         componentValues[i] = val;
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("  Component[", i, "] = ", DoubleToString(val, Digits));
-    #endif
+        _LOG_GATE_D Print("[D][DRAW]   Component[", i, "] = ", DoubleToString(val, Digits));
     }
     double result = CalculateMeanByType(componentValues, inpQuickTestMeanType);
     if(result <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Quick Test: Mean calculation failed");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Quick Test: Mean calculation failed");
     return 0;
     }
     #ifdef ENABLE_DEBUG_LOGS
@@ -891,7 +782,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
     case MEAN_GEOMETRIC: meanTypeName = "Geometric"; break;
     case MEAN_HARMONIC: meanTypeName = "Harmonic"; break;
     }
-    Print("[OK] Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=", 
+    Print("[I][DRAW] Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=",
     DoubleToString(result, Digits));
     #endif
     return NormalizeDouble(result, GetCachedDigits());
@@ -912,24 +803,18 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     case OP_MULTIPLY: 
             return value1 * value2;
     case OP_DIVIDE:            if(MathAbs(value2) < EPSILON_ANGLE) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[ERR] ApplyCalculatorOperator: Division by zero/near-zero detected! value2=", DoubleToString(value2, 8));
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] ApplyCalculatorOperator: Division by zero/near-zero detected! value2=", DoubleToString(value2, 8));
     return 0;            }
     return value1 / value2;
     case OP_AVERAGE:            return (value1 + value2) / 2.0;
     case OP_GEOMETRIC_MEAN:            if(value1 <= 0 || value2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[ERR] ApplyCalculatorOperator: Geometric mean requires positive values! value1=", value1, " value2=", value2);
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] ApplyCalculatorOperator: Geometric mean requires positive values! value1=", value1, " value2=", value2);
     return 0;
             }
     return MathSqrt(value1 * value2);
     case OP_HARMONIC_MEAN: {
         if(MathAbs(value1) < EPSILON_ANGLE || MathAbs(value2) < EPSILON_ANGLE) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[ERR] ApplyCalculatorOperator: Harmonic mean requires non-zero values! value1=", value1, " value2=", value2);
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] ApplyCalculatorOperator: Harmonic mean requires non-zero values! value1=", value1, " value2=", value2);
     return 0;
             }
     double sum = value1 + value2;
@@ -945,74 +830,67 @@ double ApplyCalculatorOperator(const double value1, const double value2,
 }
     double CalculateDualGroupTopology(const double basePrice) {
         if(inpComboComp1 == COMP_IGNORE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Calculator Mode (Dual): Component 1 cannot be IGNORE");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Calculator Mode (Dual): Component 1 cannot be IGNORE");
     Alert("[WARN] ADVANCED MODE ERROR (Dual Group Topology)\n\nComponent 1 cannot be IGNORE!\nDual Group topology requires at least Component 1.");
     return 0;
     }
     double valG1 = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(valG1 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Calculator Mode (Dual): Component 1 calculation failed");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Calculator Mode (Dual): Component 1 calculation failed");
     Alert("[WARN] ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
     return 0;
     }
     valG1 = ApplyOperationWithComponent(valG1, inpComboOp1, inpComboComp2, basePrice);
     if(inpComboOp2 == OP_NONE || inpComboComp3 == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print(" Dual Group: Only Group 1 active (Op2=NONE or Comp3=IGNORE)");
-    Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
+        Print("[D][DRAW]  Dual Group: Only Group 1 active (Op2=NONE or Comp3=IGNORE)");
+    Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, Digits));
     #endif
     return valG1;
     }
     double valG2 = GetStepSizeFromComponent(basePrice, inpComboComp3);
     if(valG2 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Dual Group: Component 3 invalid or failed");
-    Print("   Component 3: ", EnumToString(inpComboComp3));
-    Print("   Fallback: Using Group 1 result only");
-        Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
+        Print("[E][DRAW] Dual Group: Component 3 invalid or failed");
+    Print("[D][DRAW]    Component 3: ", EnumToString(inpComboComp3));
+    Print("[D][DRAW]    Fallback: Using Group 1 result only");
+        Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, Digits));
     #endif
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3), 
-              ") calculation failed. Using Group 1 result only.");
-    #endif
+        _LOG_GATE_W Print("[W][DRAW] DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3));
     return valG1;
     }
     valG2 = ApplyOperationWithComponent(valG2, inpComboOp3, inpComboComp4, basePrice);
     if(valG2 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Dual Group: Group 2 calculation failed after Op3");
-    Print("   Op3: ", EnumToString(inpComboOp3));
-    Print("   Component 4: ", EnumToString(inpComboComp4));
-    Print("   Fallback: Using Group 1 result only");
-    Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-    Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
+        Print("[E][DRAW] Dual Group: Group 2 calculation failed after Op3");
+    Print("[D][DRAW]    Op3: ", EnumToString(inpComboOp3));
+    Print("[D][DRAW]    Component 4: ", EnumToString(inpComboComp4));
+    Print("[D][DRAW]    Fallback: Using Group 1 result only");
+    Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, Digits));
+    Print("[E][DRAW] DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
     #endif
     return valG1;
     }
     double finalResult = ApplyCalculatorOperator(valG1, valG2, inpComboOp2);
     if(finalResult <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Dual Group: Final combination failed");
-    Print("   Group 1: ", DoubleToString(valG1, Digits));
-    Print("   Op2: ", EnumToString(inpComboOp2));
-    Print("   Group 2: ", DoubleToString(valG2, Digits));
-    Print("   Result: ", DoubleToString(finalResult, Digits));
-    Print("   Fallback: Using Group 1 result only");
-    Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2), 
+        Print("[E][DRAW] Dual Group: Final combination failed");
+    Print("[D][DRAW]    Group 1: ", DoubleToString(valG1, Digits));
+    Print("[D][DRAW]    Op2: ", EnumToString(inpComboOp2));
+    Print("[D][DRAW]    Group 2: ", DoubleToString(valG2, Digits));
+    Print("[D][DRAW]    Result: ", DoubleToString(finalResult, Digits));
+    Print("[D][DRAW]    Fallback: Using Group 1 result only");
+    Print("[W][DRAW] DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2),
               ") produced invalid result. Using Group 1 result only.");
     #endif
     return valG1;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] Dual Group: SUCCESS");
-    Print("   Group 1: ", DoubleToString(valG1, Digits));
-    Print("   Op2: ", EnumToString(inpComboOp2));
-    Print("   Group 2: ", DoubleToString(valG2, Digits));
-    Print("   Final Result: ", DoubleToString(finalResult, Digits));
+    Print("[I][DRAW] Dual Group: SUCCESS");
+    Print("[D][DRAW]    Group 1: ", DoubleToString(valG1, Digits));
+    Print("[D][DRAW]    Op2: ", EnumToString(inpComboOp2));
+    Print("[D][DRAW]    Group 2: ", DoubleToString(valG2, Digits));
+    Print("[D][DRAW]    Final Result: ", DoubleToString(finalResult, Digits));
     #endif
     return finalResult;
 }
@@ -1022,9 +900,9 @@ double ApplyCalculatorOperator(const double value1, const double value2,
                                   const double basePrice) {    if (op == OP_NONE || nextComp == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
         if(op == OP_NONE) {
-            Print(" ApplyOperationWithComponent: Operator is NONE, skipping");
+            Print("[W][DRAW]  ApplyOperationWithComponent: Operator is NONE, skipping");
         } else {
-            Print(" ApplyOperationWithComponent: Component is IGNORE, skipping");
+            Print("[W][DRAW]  ApplyOperationWithComponent: Component is IGNORE, skipping");
     }
     #endif
     return currentVal;
@@ -1032,11 +910,11 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double nextVal = GetStepSizeFromComponent(basePrice, nextComp);
     if (nextVal <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] ApplyOperationWithComponent: Next component invalid");
-    Print("   Component: ", EnumToString(nextComp));
-    Print("   Operator: ", EnumToString(op));
-    Print("   Keeping current value: ", DoubleToString(currentVal, Digits));
-    Print("[WARN] CALCULATOR WARNING: Component ", EnumToString(nextComp), 
+        Print("[E][DRAW] ApplyOperationWithComponent: Next component invalid");
+    Print("[D][DRAW]    Component: ", EnumToString(nextComp));
+    Print("[D][DRAW]    Operator: ", EnumToString(op));
+    Print("[D][DRAW]    Keeping current value: ", DoubleToString(currentVal, Digits));
+    Print("[W][DRAW] CALCULATOR WARNING: Component ", EnumToString(nextComp),
               " calculation failed. Skipping operation ", EnumToString(op));
     #endif
     return currentVal;
@@ -1044,18 +922,18 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double result = ApplyCalculatorOperator(currentVal, nextVal, op);
     if (result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] ApplyOperationWithComponent: Operation produced invalid result");
-    Print("   Current: ", DoubleToString(currentVal, Digits));
-    Print("   Operator: ", EnumToString(op));
-    Print("   Next: ", DoubleToString(nextVal, Digits));
-    Print("   Result: ", DoubleToString(result, Digits));
-    Print("   Fallback to current value");
-    Print("[WARN] CALCULATOR WARNING: Operation ", EnumToString(op), 
+        Print("[E][DRAW] ApplyOperationWithComponent: Operation produced invalid result");
+    Print("[D][DRAW]    Current: ", DoubleToString(currentVal, Digits));
+    Print("[D][DRAW]    Operator: ", EnumToString(op));
+    Print("[D][DRAW]    Next: ", DoubleToString(nextVal, Digits));
+    Print("[D][DRAW]    Result: ", DoubleToString(result, Digits));
+    Print("[D][DRAW]    Fallback to current value");
+    Print("[W][DRAW] CALCULATOR WARNING: Operation ", EnumToString(op),
               " produced invalid result. Keeping previous value.");
     #endif
     return currentVal;    }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] ApplyOperationWithComponent: ", DoubleToString(currentVal, Digits), 
+    Print("[I][DRAW] ApplyOperationWithComponent: ", DoubleToString(currentVal, Digits),
           " ", EnumToString(op), " ", DoubleToString(nextVal, Digits), 
           " = ", DoubleToString(result, Digits));
     #endif
@@ -1063,17 +941,13 @@ double ApplyCalculatorOperator(const double value1, const double value2,
 }
     double CalculateLinearTopology(const double basePrice) {
         if(inpComboComp1 == COMP_IGNORE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Calculator Mode (Linear): Component 1 is IGNORE");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Calculator Mode (Linear): Component 1 is IGNORE");
     Alert("[WARN] ADVANCED MODE ERROR (Linear Topology)\n\nComponent 1 cannot be IGNORE!\nLinear topology requires at least Component 1.");
     return 0;
     }
     double result = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(result <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Calculator Mode (Linear): Component 1 calculation failed");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Calculator Mode (Linear): Component 1 calculation failed");
     Alert("[WARN] ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
     return 0;
     }
@@ -1093,9 +967,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
 //+------------------------------------------------------------------+
 double CalculateCalculatorModeStepSize(const double basePrice) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateCalculatorModeStepSize: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateCalculatorModeStepSize: Invalid basePrice=", basePrice);
     return 0;
     }
     if(inpComboOp1 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp1 <= OP_MAX_ALL) {
@@ -1131,9 +1003,7 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
         }
     int componentCount = ArraySize(componentValues);
     if(componentCount == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] N-ARY Mode: No valid components found");
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] N-ARY Mode: No valid components found");
     Alert("[WARN] ADVANCED MODE ERROR (N-ary Operator)\n\nAll components are set to IGNORE!\nPlease select at least one component.");
     return 0;
         }
@@ -1143,65 +1013,44 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     if(inpComboComp3 != COMP_IGNORE) expectedComponents++;
     if(inpComboComp4 != COMP_IGNORE) expectedComponents++;
     if(componentCount < expectedComponents) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] N-ARY Mode: Only ", componentCount, "/", expectedComponents, " components valid");
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] N-ARY Mode: Only ", componentCount, "/", expectedComponents, " components valid");
     Print(" N-ARY OPERATOR INFO: Using ", componentCount, " valid components out of ", 
                   expectedComponents, " selected.");
         }
     #ifdef ENABLE_DEBUG_LOGS
-        Print(" N-ARY Mode: Collected ", componentCount, " valid components");
+        Print("[D][DRAW]  N-ARY Mode: Collected ", componentCount, " valid components");
     for(int i = 0; i < componentCount; i++) {
-            Print("   Component[", i, "] = ", DoubleToString(componentValues[i], Digits));
+            Print("[D][DRAW]    Component[", i, "] = ", DoubleToString(componentValues[i], Digits));
         }
     #endif
     double naryResult = 0;
     switch(inpComboOp1) {
             case OP_GEOMETRIC_MEAN_ALL:
                 naryResult = CalculateGeometricMeanN(componentValues);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[OK] N-ARY Mode: Geometric Mean of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-    #endif
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Geometric Mean of ", componentCount, " components = ");
     break;
     case OP_ARITHMETIC_MEAN_ALL:
                 naryResult = CalculateArithmeticMeanN(componentValues);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[OK] N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-    #endif
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ");
     break;
     case OP_HARMONIC_MEAN_ALL:
                 naryResult = CalculateHarmonicMeanN(componentValues);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[OK] N-ARY Mode: Harmonic Mean of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-    #endif
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Harmonic Mean of ", componentCount, " components = ");
     break;
     case OP_MIN_ALL:
                 naryResult = CalculateMinN(componentValues);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[OK] N-ARY Mode: Minimum of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-    #endif
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Minimum of ", componentCount, " components = ");
     break;
     case OP_MAX_ALL:
                 naryResult = CalculateMaxN(componentValues);
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[OK] N-ARY Mode: Maximum of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-    #endif
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Maximum of ", componentCount, " components = ");
     break;
     default:
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("[ERR] N-ARY Mode: Unknown operator ", inpComboOp1);
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] N-ARY Mode: Unknown operator ", inpComboOp1);
     return 0;
         }
     if(naryResult <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] N-ARY Mode: Result is <= 0");
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] N-ARY Mode: Result is <= 0");
     return 0;
         }
     return NormalizeDouble(naryResult, GetCachedDigits());
@@ -1214,16 +1063,11 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
         finalResult = CalculateDualGroupTopology(basePrice);
     }
     if(finalResult <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] Calculator Mode Result is <= 0");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Calculator Mode Result is <= 0");
     return 0;
     }
     finalResult = NormalizeDouble(finalResult, GetCachedDigits());
-    #ifdef ENABLE_DEBUG_LOGS
-    string topoName = (inpComboTopology == TOPOLOGY_LINEAR) ? "LINEAR" : "DUAL_GROUP";
-    Print("[OK] Calculator Mode [", topoName, "]: Result=", DoubleToString(finalResult, Digits));
-    #endif
+    _LOG_GATE_I Print("[I][DRAW] Calculator Mode [", EnumToString(inpComboTopology), "]: Result=", DoubleToString(finalResult, GetCachedDigits()));
     return finalResult;
 }
 
@@ -1250,37 +1094,27 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
 // Validate a combo parameter, logging and alerting on failure. Returns false if invalid.
 bool ValidateComboParam(bool isInvalid, const string paramName, const string paramValue, const string context = "PRESET MODE") {
     if(!isInvalid) return true;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[ERR] CalculateComboStepSize: Invalid ", paramName, "=", paramValue);
-    #endif
+    _LOG_GATE_E Print("[E][DRAW] CalculateComboStepSize: Invalid ", paramName, "=", paramValue);
     Alert("[WARN] ", context, " ERROR\n\nInvalid ", paramName, " configuration!\nPreset: ", EnumToString(inpComboPreset));
     return false;
 }
 
 double CalculateComboStepSize(const double basePrice) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateComboStepSize: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateComboStepSize: Invalid basePrice=", basePrice);
     Alert("[WARN] COMBO MODE ERROR\n\nInvalid base price for calculation.\nPlease check your settings.");
     return 0;
     }
     if(inpComboMode == COMBO_MODE_QUICK_TEST) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[OK] CalculateComboStepSize: QUICK TEST mode detected");
-    #endif
+        _LOG_GATE_I Print("[I][DRAW] CalculateComboStepSize: QUICK TEST mode detected");
     return CalculateQuickTestStepSize(basePrice);
     }
     if(inpComboMode == COMBO_MODE_ADVANCED) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[OK] CalculateComboStepSize: ADVANCED (CALCULATOR) mode detected");
-    #endif
+        _LOG_GATE_I Print("[I][DRAW] CalculateComboStepSize: ADVANCED (CALCULATOR) mode detected");
     return CalculateCalculatorModeStepSize(basePrice);
     }
     if(inpComboMode != COMBO_MODE_PRESET) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateComboStepSize: Invalid mode=", inpComboMode, " (expected PRESET)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] CalculateComboStepSize: Invalid mode=", inpComboMode, " (expected PRESET)");
     Alert("[WARN] COMBO MODE ERROR\n\nInvalid Combo Mode configuration!\nExpected: Preset Mode\nActual: ", EnumToString(inpComboMode));
     return 0;
     }
@@ -1298,15 +1132,11 @@ double CalculateComboStepSize(const double basePrice) {
             tripleOp);
     }
     else if(inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print(" MANUAL_TRIPLE preset detected -> Redirecting to Advanced Mode");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW]  MANUAL_TRIPLE preset detected -> Redirecting to Advanced Mode");
     return CalculateCalculatorModeStepSize(basePrice);
     }
     else if(inpComboPreset == COMBO_PRESET_MANUAL_DUAL) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print(" MANUAL_DUAL preset detected -> Redirecting to Advanced Mode");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW]  MANUAL_DUAL preset detected -> Redirecting to Advanced Mode");
     return CalculateCalculatorModeStepSize(basePrice);
     }    
     ENUM_COMBO_TIMEFRAME_TYPE tf1, tf2;
@@ -1334,13 +1164,13 @@ double CalculateComboStepSize(const double basePrice) {
                                            0.5, 0.5);
     if(!ValidateComboParam(comboStep <= 0, "comboStep", DoubleToString(comboStep, GetCachedDigits()))) return 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] CalculateComboStepSize: SUCCESS");
-    Print("   Preset=", EnumToString(inpComboPreset));
-    Print("   TF1=", EnumToString(tf1), " (", timeframe1, "), Step1Type=", EnumToString(step1Type), 
+    Print("[I][DRAW] CalculateComboStepSize: SUCCESS");
+    Print("[D][DRAW]    Preset=", EnumToString(inpComboPreset));
+    Print("[D][DRAW]    TF1=", EnumToString(tf1), " (", timeframe1, "), Step1Type=", EnumToString(step1Type),
           " (×", multiplier1, "), Value=", DoubleToString(step1, Digits));
-    Print("   TF2=", EnumToString(tf2), " (", timeframe2, "), Step2Type=", EnumToString(step2Type), 
+    Print("[D][DRAW]    TF2=", EnumToString(tf2), " (", timeframe2, "), Step2Type=", EnumToString(step2Type),
           " (×", multiplier2, "), Value=", DoubleToString(step2, Digits));
-    Print("   Operation=", EnumToString(operation), ", Result=", DoubleToString(comboStep, Digits));
+    Print("[D][DRAW]    Operation=", EnumToString(operation), ", Result=", DoubleToString(comboStep, Digits));
     #endif
     return comboStep;
 }
@@ -1350,9 +1180,7 @@ double CalculateComboStepSize(const double basePrice) {
     double GetStepSizeForSharedComponent(const double basePrice, 
                                       const ENUM_COMBO_COMPONENT_ITEM component) {
         if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepSizeForSharedComponent: Invalid basePrice=", basePrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepSizeForSharedComponent: Invalid basePrice=", basePrice);
     return 0;
     }
     
@@ -1424,10 +1252,7 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
         if(period == PERIOD_CURRENT || period == 0) {
         string currentFractal = GetCurrentFractalTimeframe();
     double th = CalculateTimeframeTH(currentFractal);
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("GetTimeframeTHForPeriod: CURRENT (", Period(), "min) -> ", 
-              currentFractal, " = ", DoubleToString(th, 4), "%");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW] GetTimeframeTHForPeriod: CURRENT (", Period(), "min) -> ");
     return th;
     }
     int minutes = 0;
@@ -1446,9 +1271,7 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
     if(seconds > 0) {
                 minutes = seconds / 60;
             } else {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] GetTimeframeTHForPeriod: Unknown period=", period, ", using D45+H12+M16");
-    #endif
+                _LOG_GATE_W Print("[W][DRAW] GetTimeframeTHForPeriod: Unknown period=", period, ", using D45+H12+M16");
     return CalculateTimeframeTH("D45+H12+M16");
             }
             break;
@@ -1456,10 +1279,7 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
     }
     string timeframeStr = MinutesToFractalString(minutes);
     double th = CalculateTimeframeTH(timeframeStr);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("GetTimeframeTHForPeriod: ", period, " (", minutes, "min) -> ", 
-          timeframeStr, " = ", DoubleToString(th, 4), "%");
-    #endif
+    _LOG_GATE_D Print("[D][DRAW] GetTimeframeTHForPeriod: ", period, " (", minutes, "min) -> ");
     return th;
 }
 
@@ -1483,9 +1303,7 @@ ENUM_TIMEFRAMES GetSubTimeframe() {
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         if(tfType < COMBO_TF_SUB || tfType > COMBO_TF_STRUCTURE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
     return (ENUM_TIMEFRAMES)GetCachedPeriod();    }
     
     ENUM_TIMEFRAMES result;
@@ -1504,16 +1322,12 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
     case COMBO_TF_STRUCTURE:            result = GetPatternTimeframe();
     break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
     result = (ENUM_TIMEFRAMES)GetCachedPeriod();
     break;
     }
     if(result <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
     return (ENUM_TIMEFRAMES)GetCachedPeriod();    }
     return result;
 }
@@ -1525,9 +1339,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 //+------------------------------------------------------------------+
 double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
         if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_LS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
     return 1.0;
     }
     double multiplier;
@@ -1542,16 +1354,12 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
             multiplier = 2.0;
     break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] GetStepMultiplier: Unexpected stepType=", stepType, ", using 1.0 (TH)");
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] GetStepMultiplier: Unexpected stepType=", stepType, ", using 1.0 (TH)");
     multiplier = 1.0;
     break;
     }
     if(multiplier <= 0 || multiplier > 10.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetStepMultiplier: Invalid multiplier=", multiplier, " for stepType=", stepType);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetStepMultiplier: Invalid multiplier=", multiplier, " for stepType=", stepType);
     return 1.0;
     }
     return multiplier;
@@ -1577,9 +1385,7 @@ double ApplyComboOperation(const double value1, const double value2,
                            const ENUM_COMBO_OPERATION operation,
                            const double weight1 = 0.5, const double weight2 = 0.5) {
         if(value1 <= 0 || value2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] ApplyComboOperation: Invalid values - v1=", value1, ", v2=", value2);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Invalid values - v1=", value1, ", v2=", value2);
     return 0;
     }
     double result = 0;
@@ -1594,7 +1400,7 @@ double ApplyComboOperation(const double value1, const double value2,
     if(result < minThreshold) {
                 result = avgValue;
     #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] ApplyComboOperation: Subtract result too small (", 
+                Print("[W][DRAW] ApplyComboOperation: Subtract result too small (",
                       DoubleToString(result, Digits), " < ", DoubleToString(minThreshold, Digits), 
                       "), using average=", DoubleToString(avgValue, Digits));
     #endif
@@ -1607,12 +1413,12 @@ double ApplyComboOperation(const double value1, const double value2,
     double overflowThreshold = maxInput * 100.0;
     if(result > overflowThreshold) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] ApplyComboOperation: Multiply overflow detected");
-    Print("   v1=", DoubleToString(value1, Digits), 
+                Print("[W][DRAW] ApplyComboOperation: Multiply overflow detected");
+    Print("[D][DRAW]    v1=", DoubleToString(value1, Digits),
                       ", v2=", DoubleToString(value2, Digits), 
                       ", result=", DoubleToString(result, Digits), 
                       " > threshold=", DoubleToString(overflowThreshold, Digits));
-                Print("   Clamping to max input=", DoubleToString(maxInput, Digits));
+                Print("[D][DRAW]    Clamping to max input=", DoubleToString(maxInput, Digits));
     #endif
                 result = maxInput;
             }
@@ -1625,40 +1431,28 @@ double ApplyComboOperation(const double value1, const double value2,
     break;
     case COMBO_OP_WEIGHTED: {
         if(weight1 < 0 || weight2 < 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[ERR] ApplyComboOperation: Negative weights - w1=", weight1, ", w2=", weight2);
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Negative weights - w1=", weight1, ", w2=", weight2);
     result = (value1 + value2) / 2.0;
     break;
             }
     double weightSum = weight1 + weight2;
     if(weightSum <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[ERR] ApplyComboOperation: Zero weight sum - w1=", weight1, ", w2=", weight2);
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Zero weight sum - w1=", weight1, ", w2=", weight2);
     result = (value1 + value2) / 2.0;
     break;
             }
     result = (value1 * weight1 + value2 * weight2) / weightSum;
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("[OK] ApplyComboOperation: Weighted - w1=", weight1, ", w2=", weight2, 
-                  ", sum=", weightSum, ", normalized result=", result);
-    #endif
+            _LOG_GATE_I Print("[I][DRAW] ApplyComboOperation: Weighted - w1=", weight1, ", w2=", weight2);
     break;
         }
             
         default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] ApplyComboOperation: Unknown operation=", operation);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Unknown operation=", operation);
     result = (value1 + value2) / 2.0;
     break;
     }
     if(result <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] ApplyComboOperation: Invalid result=", result, 
-              " for op=", EnumToString(operation));
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Invalid result=", result);
     return 0;
     }
     double maxInput = MathMax(value1, value2);
@@ -1693,19 +1487,19 @@ double ApplyComboOperation(const double value1, const double value2,
     }
     if(isSuspicious) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] ApplyComboOperation: Suspicious result detected");
-    Print("   Operation=", EnumToString(operation));
-    Print("   v1=", DoubleToString(value1, Digits), 
+        Print("[W][DRAW] ApplyComboOperation: Suspicious result detected");
+    Print("[D][DRAW]    Operation=", EnumToString(operation));
+    Print("[D][DRAW]    v1=", DoubleToString(value1, Digits),
               ", v2=", DoubleToString(value2, Digits));
-    Print("   Result=", DoubleToString(result, Digits), 
+    Print("[D][DRAW]    Result=", DoubleToString(result, Digits),
               " (min=", DoubleToString(minInput, Digits), 
               ", max=", DoubleToString(maxInput, Digits), ")");
-    Print("   Using fallback: average");
+    Print("[D][DRAW]    Using fallback: average");
     #endif
     result = (value1 + value2) / 2.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] ApplyComboOperation: v1=", DoubleToString(value1, Digits), 
+    Print("[I][DRAW] ApplyComboOperation: v1=", DoubleToString(value1, Digits),
           ", v2=", DoubleToString(value2, Digits), 
           ", op=", EnumToString(operation), 
           ", result=", DoubleToString(result, Digits));
@@ -1847,9 +1641,7 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
             }
             break;
     default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] GetPresetConfiguration: Unknown preset=", preset, ", using Legacy");
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] GetPresetConfiguration: Unknown preset=", preset, ", using Legacy");
     tf1 = COMBO_TF_TRIGGER;
     step1 = COMBO_STEP_SS;
     tf2 = COMBO_TF_PATTERN;
@@ -1858,10 +1650,10 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
     break;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
-    Print("   TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
-    Print("   TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
-    Print("   Operation=", EnumToString(operation));
+    Print("[I][DRAW] GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
+    Print("[D][DRAW]    TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
+    Print("[D][DRAW]    TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
+    Print("[D][DRAW]    Operation=", EnumToString(operation));
     #endif
 }
 ENUM_TIMEFRAMES GetPatternTimeframe() {
@@ -1907,15 +1699,11 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
 //+------------------------------------------------------------------+
 int CalculateStructureInterval(const int baseMultiplier, const int level) {
         if(baseMultiplier < 2 || baseMultiplier > 9) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Invalid base multiplier: ", baseMultiplier, " (must be 2-9)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Invalid base multiplier: ", baseMultiplier, " (must be 2-9)");
     return 0;
     }
     if(level < 1 || level > 5) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Invalid level: ", level, " (must be 1-5)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] Invalid level: ", level, " (must be 1-5)");
     return 0;
     }
     return (int)MathPow(baseMultiplier, level);
@@ -1933,10 +1721,7 @@ int CalculateStructureInterval(const int baseMultiplier, const int level) {
 int GetValidatedBaseMultiplier() {
         int baseMultiplier = (int)inpStructureBase;
     if(baseMultiplier < 2 || baseMultiplier > 9) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetValidatedBaseMultiplier: Invalid value ", baseMultiplier, 
-              " detected, auto-correcting to default: 3");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetValidatedBaseMultiplier: Invalid value ", baseMultiplier);
     return 3;    }
     return baseMultiplier;
 }
@@ -2008,29 +1793,21 @@ int GetHighestStructureLevel(const int step, const int &intervals[]) {
         if(step == 0) return 0;
     int absStep = MathAbs(step);
     if(absStep <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetHighestStructureLevel: Invalid step=", step);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetHighestStructureLevel: Invalid step=", step);
     return 0;
     }
     int arraySize = ArraySize(intervals);
     if(arraySize != 5) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] GetHighestStructureLevel: Invalid intervals array size=", arraySize, " (expected 5)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] GetHighestStructureLevel: Invalid intervals array size=", arraySize, " (expected 5)");
     return 0;
     }
     for(int i = 0; i < 5; i++) {
         if(intervals[i] <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] GetHighestStructureLevel: Invalid interval[", i, "]=", intervals[i]);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] GetHighestStructureLevel: Invalid interval[", i, "]=", intervals[i]);
     return 0;
         }
     if(i > 0 && intervals[i] <= intervals[i-1]) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] GetHighestStructureLevel: Intervals not in ascending order at index ", i);
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] GetHighestStructureLevel: Intervals not in ascending order at index ", i);
     return 0;
         }
     }
@@ -2134,9 +1911,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
                     const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
         if(ssValue <= 0 || lsValue <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawSSLSLevels: Invalid SS/LS values");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawSSLSLevels: Invalid SS/LS values");
     return;
     }
     double stepDistances[2];
@@ -2171,14 +1946,15 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
     ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
-        
         ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
                        "Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
+    }
+    if(!g_linesVisible) {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     }
     int drawnAbove = 0;
     int logicalStep = 0;
@@ -2187,9 +1963,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawSSLSLevels: Failed to initialize zone tracking (Above)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawSSLSLevels: Failed to initialize zone tracking (Above)");
     return;    }
     int maxIterations = effectiveMaxAbove * 2;
     int iterations = 0;
@@ -2201,13 +1975,13 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     double priceLevel = midpointPrice + cumulative;
     #ifdef ENABLE_DEBUG_LOGS
         if(logicalStep == 1) {
-            Print("========== MT4 FIRST LEVEL DEBUG ==========");
-    Print("Anchor (midpoint): ", DoubleToString(midpointPrice, 10));
-            Print("Step distance (LS): ", DoubleToString(dist, 10));
-    Print("First level price: ", DoubleToString(priceLevel, 10));
-    Print("Formula: ", DoubleToString(midpointPrice, 10), " + ", DoubleToString(dist, 10), " = ", DoubleToString(priceLevel, 10));
-    Print("===========================================");
-    Print("[ON] MT4 FIRST LEVEL: ", DoubleToString(priceLevel, 10), " (LS=", DoubleToString(dist, 10), ")");
+            Print("[D][DRAW] ========== MT4 FIRST LEVEL DEBUG ==========");
+    Print("[D][DRAW] Anchor (midpoint): ", DoubleToString(midpointPrice, 10));
+            Print("[D][DRAW] Step distance (LS): ", DoubleToString(dist, 10));
+    Print("[D][DRAW] First level price: ", DoubleToString(priceLevel, 10));
+    Print("[D][DRAW] Formula: ", DoubleToString(midpointPrice, 10), " + ", DoubleToString(dist, 10), " = ", DoubleToString(priceLevel, 10));
+    Print("[D][DRAW] ===========================================");
+    Print("[D][DRAW] [ON] MT4 FIRST LEVEL: ", DoubleToString(priceLevel, 10), " (LS=", DoubleToString(dist, 10), ")");
     }
     #endif
     if(checkCustomPrice) {
@@ -2248,6 +2022,11 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
+    if(!g_linesVisible) {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        } else {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        }
         
         drawnAbove++;
     if(inpShowMidZones) {
@@ -2269,9 +2048,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawSSLSLevels: Failed to initialize zone tracking (Below)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawSSLSLevels: Failed to initialize zone tracking (Below)");
     return;    }
     maxIterations = effectiveMaxBelow * 2;
     iterations = 0;
@@ -2319,6 +2096,11 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
+    if(!g_linesVisible) {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        } else {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        }
         
         drawnBelow++;
     if(inpShowMidZones) {
@@ -2335,7 +2117,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     }
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
-        Print("[OK] DrawSSLSLevels: Drew ", zoneCountAbove, " zones above, ", 
+        Print("[I][DRAW] DrawSSLSLevels: Drew ", zoneCountAbove, " zones above, ",
               zoneCountBelow, " zones below");
     }
     #endif
@@ -2392,9 +2174,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
                  const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
         if(controlDistance <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawMLevels: Invalid control distance");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawMLevels: Invalid control distance");
     return;
     }
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
@@ -2425,14 +2205,15 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
     ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
-        
         ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
                        "Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
+    }
+    if(!g_linesVisible) {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     }
     int logicalStep = 1;
     int drawnAbove = 0;
@@ -2441,9 +2222,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawMLevels: Failed to initialize zone tracking (Above)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawMLevels: Failed to initialize zone tracking (Above)");
     return;    }
     int maxIterations = effectiveMaxAbove * 2;
     int iterations = 0;
@@ -2494,6 +2273,11 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             } else {
                 ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
             };
+    if(!g_linesVisible) {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            } else {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            }
     drawnAbove++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, inpShowStructure);
@@ -2518,9 +2302,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawMLevels: Failed to initialize zone tracking (Below)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawMLevels: Failed to initialize zone tracking (Below)");
     return;    }
     maxIterations = effectiveMaxBelow * 2;
     iterations = 0;
@@ -2571,6 +2353,11 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             } else {
                 ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
             };
+    if(!g_linesVisible) {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            } else {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            }
     drawnBelow++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, inpShowStructure);
@@ -2590,7 +2377,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     }
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
-        Print("[OK] DrawMLevels: Drew ", zoneCountAbove, " zones above, ", 
+        Print("[I][DRAW] DrawMLevels: Drew ", zoneCountAbove, " zones above, ",
               zoneCountBelow, " zones below");
     }
     #endif
@@ -2600,14 +2387,9 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
                           const double stepSizePrice, const string modeName,
                           const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
-        #ifdef ENABLE_DEBUG_LOGS
-    Print("DrawTHLevelsWithStep: Mode=", modeName, " Mid=", DoubleToString(midpointPrice, Digits),
-          " Step=", DoubleToString(stepSizePrice, Digits), " MaxAbove=", maxLevelsAbove, " MaxBelow=", maxLevelsBelow);
-    #endif
+    _LOG_GATE_D Print("[D][DRAW] DrawTHLevelsWithStep: Mode=", modeName, " Mid=", DoubleToString(midpointPrice, Digits));
     if(stepSizePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawTHLevelsWithStep: Invalid step size - ABORTING");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawTHLevelsWithStep: Invalid step size - ABORTING");
     return;
     }
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
@@ -2643,6 +2425,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
+    if(!g_linesVisible) {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
     int logicalStep = 1;
     int drawnAbove = 0;
     int zoneCountAbove = 0;
@@ -2650,9 +2437,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawTHLevelsWithStep: Failed to initialize zone tracking (Above)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawTHLevelsWithStep: Failed to initialize zone tracking (Above)");
     return;    }
     double maxPriceLimit = (isCustomPriceMode) ? 0 : g_highestHigh;
     double minPriceLimit = (isCustomPriceMode) ? 0 : g_lowestLow;
@@ -2703,6 +2488,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
         };
+    if(!g_linesVisible) {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        } else {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        }
     drawnAbove++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
@@ -2727,9 +2517,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawTHLevelsWithStep: Failed to initialize zone tracking (Below)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawTHLevelsWithStep: Failed to initialize zone tracking (Below)");
     return;    }
     maxIterations = effectiveMaxBelow * 2;
     iterations = 0;
@@ -2778,6 +2566,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
         };
+    if(!g_linesVisible) {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        } else {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        }
     drawnBelow++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
@@ -2796,19 +2589,17 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         CleanupSurplusObjects(objectPrefix + modeName + "_Zone_Below_", logicalStep);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] DrawTHLevelsWithStep COMPLETED for mode: ", modeName);
-    Print("   Levels drawn: Above=", drawnAbove, ", Below=", drawnBelow);
-    Print("   Zones drawn: Above=", zoneCountAbove, ", Below=", zoneCountBelow);
-    Print("═══════════════════════════════════════════════════════════");
+    Print("[I][DRAW] DrawTHLevelsWithStep COMPLETED for mode: ", modeName);
+    Print("[D][DRAW]    Levels drawn: Above=", drawnAbove, ", Below=", drawnBelow);
+    Print("[D][DRAW]    Zones drawn: Above=", zoneCountAbove, ", Below=", zoneCountBelow);
+    Print("[D][DRAW] ═══════════════════════════════════════════════════════════");
     #endif
     }
     void DrawMEqualLevels(const string objectPrefix, const double midpointPrice, const double mDistance,
                       const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
 {
         if(mDistance <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawMEqualLevels: Invalid M distance");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawMEqualLevels: Invalid M distance");
     return;
     }
     int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxLevels;
@@ -2840,6 +2631,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
                        "M-Equal Midpoint (Start) - " + DoubleToString(midpointPrice, GetCachedDigits()));
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
+    }
+    if(!g_linesVisible) {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     }
     int step = 1;
     double price = midpointPrice + mDistance;
@@ -2882,6 +2678,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
         };
+    if(!g_linesVisible) {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        } else {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        }
     if(inpShowMidZones) {
         string zoneName = objectPrefix + "MEq_Zone_Above_" + IntegerToString(step);
     if(CreateSimpleZone(zoneName, lastDrawnPriceAbove, price, levelColor)) {
@@ -2937,6 +2738,11 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
         };
+    if(!g_linesVisible) {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        } else {
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        }
     if(inpShowMidZones) {
         string zoneName = objectPrefix + "MEq_Zone_Below_" + IntegerToString(step);
     if(CreateSimpleZone(zoneName, lastDrawnPriceBelow, price, levelColor)) {
@@ -2953,7 +2759,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     }
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
-        Print("[OK] DrawMEqualLevels: Drew ", zoneCountAbove, " zones above, ", 
+        Print("[I][DRAW] DrawMEqualLevels: Drew ", zoneCountAbove, " zones above, ",
               zoneCountBelow, " zones below");
     }
     #endif
@@ -2988,6 +2794,11 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical HIGH | %s | Range: %.0f pips", 
             DoubleToString(highPrice, GetCachedDigits()), rangePips));
+    if(!g_linesVisible) {
+        ObjectSetInteger(0, highLineName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, highLineName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
     string lowLineName = objectPrefix + "Factor_Low";
     if(ObjectFind(0, lowLineName) < 0) {
         ObjectCreate(0, lowLineName, OBJ_HLINE, 0, 0, lowPrice);
@@ -3001,6 +2812,11 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical LOW | %s | Range: %.0f pips", 
             DoubleToString(lowPrice, GetCachedDigits()), rangePips));
+    if(!g_linesVisible) {
+        ObjectSetInteger(0, lowLineName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else {
+        ObjectSetInteger(0, lowLineName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
     string highLabelName = objectPrefix + "Factor_High_Label";
     if(ObjectFind(0, highLabelName) < 0) {
         ObjectCreate(0, highLabelName, OBJ_TEXT, 0, TimeCurrent(), highPrice);
@@ -3046,65 +2862,46 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
                               const double baseStepSize, const double harmonicRatio)
 {
         if(StringLen(objectPrefix) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Empty object prefix");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Empty object prefix");
     return;
     }
     if(highPrice <= 0 || lowPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Invalid prices - High=", highPrice, ", Low=", lowPrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Invalid prices - High=", highPrice, ", Low=", lowPrice);
     return;
     }
     if(highPrice <= lowPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Invalid range - High must be > Low");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Invalid range - High must be > Low");
     return;
     }
     if(baseStepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Invalid base step size: ", baseStepSize);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Invalid base step size: ", baseStepSize);
     return;
     }
     if(harmonicRatio < MIN_HARMONIC_RATIO) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Ratio too small (", harmonicRatio, 
-              ") - must be >= ", MIN_HARMONIC_RATIO, " for meaningful alternation");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Ratio too small (", harmonicRatio);
     return;
     }
     if(harmonicRatio > MAX_HARMONIC_RATIO) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Ratio too large (", harmonicRatio, 
-              ") - must be <= ", MAX_HARMONIC_RATIO);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Ratio too large (", harmonicRatio);
     return;
     }
     double largeStepSize = baseStepSize * harmonicRatio;
     double range = highPrice - lowPrice;
     if(largeStepSize > range) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] DrawFactorLevelsHarmonic: Large step (", largeStepSize, 
-              ") exceeds range (", range, ") - adjusting");
-    #endif
+        _LOG_GATE_W Print("[W][DRAW] DrawFactorLevelsHarmonic: Large step (", largeStepSize);
     largeStepSize = range * 0.5;    }
     double midpoint = NormalizeDouble((highPrice + lowPrice) / 2.0, GetCachedDigits());
     #ifdef ENABLE_DEBUG_LOGS
-    Print("═══ DrawFactorLevelsHarmonic ═══");
-    Print("High=", highPrice, ", Low=", lowPrice, ", Range=", range);
-    Print("Midpoint=", midpoint, ", Factor=", factor);
-    Print("BaseStep=", baseStepSize, ", LargeStep=", largeStepSize);
-    Print("Ratio=", harmonicRatio, " (", DoubleToString((harmonicRatio - 1.0) * 100, 1), "% larger)");
+    Print("[D][DRAW] ═══ DrawFactorLevelsHarmonic ═══");
+    Print("[D][DRAW] High=", highPrice, ", Low=", lowPrice, ", Range=", range);
+    Print("[D][DRAW] Midpoint=", midpoint, ", Factor=", factor);
+    Print("[D][DRAW] BaseStep=", baseStepSize, ", LargeStep=", largeStepSize);
+    Print("[D][DRAW] Ratio=", harmonicRatio, " (", DoubleToString((harmonicRatio - 1.0) * 100, 1), "% larger)");
     #endif
     string midName = objectPrefix + "Factor_Mid_0";
     if(ObjectFind(0, midName) < 0) {
         if(!ObjectCreate(0, midName, OBJ_HLINE, 0, 0, midpoint)) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] Failed to create midpoint level. Error: ", GetLastError());
-    #endif
+            _LOG_GATE_E Print("[E][DRAW] Failed to create midpoint level. Error: ", GetLastError());
     return;
         }
     ObjectSetInteger(0, midName, OBJPROP_COLOR, C'255,140,0');
@@ -3127,16 +2924,11 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     int maxLevelsPerSide = (int)MathCeil(halfRange / avgStep);
     const int MAX_HARMONIC_LEVELS = 2500;
     if(maxLevelsPerSide > MAX_HARMONIC_LEVELS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Clamping levels from ", maxLevelsPerSide, " to ", MAX_HARMONIC_LEVELS);
-    #endif
+        _LOG_GATE_W Print("[W][DRAW] Clamping levels from ", maxLevelsPerSide, " to ", MAX_HARMONIC_LEVELS);
     maxLevelsPerSide = MAX_HARMONIC_LEVELS;
     }
     if(baseStepSize < GetCachedPoint() * 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonic: Base step too small (", baseStepSize, 
-              ") - must be >= ", Point * 2);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonic: Base step too small (", baseStepSize);
     return;
     }
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -3189,9 +2981,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     string levelName = objectPrefix + "Factor_Up_" + IntegerToString(i + 1);
     if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] Failed to create level above ", i + 1, ". Error: ", GetLastError());
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] Failed to create level above ", i + 1, ". Error: ", GetLastError());
     continue;
             }
             ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
@@ -3241,9 +3031,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     string levelName = objectPrefix + "Factor_Down_" + IntegerToString(i + 1);
     if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] Failed to create level below ", i + 1, ". Error: ", GetLastError());
-    #endif
+                _LOG_GATE_E Print("[E][DRAW] Failed to create level below ", i + 1, ". Error: ", GetLastError());
     continue;
             }
             ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
@@ -3263,9 +3051,9 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         levelsBelow++;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] DrawFactorLevelsHarmonic: Drew ", levelsAbove, " levels above, ", 
+    Print("[I][DRAW] DrawFactorLevelsHarmonic: Drew ", levelsAbove, " levels above, ",
           levelsBelow, " levels below midpoint");
-    Print("Total: ", (levelsAbove + levelsBelow + 1), " levels (including midpoint)");
+    Print("[D][DRAW] Total: ", (levelsAbove + levelsBelow + 1), " levels (including midpoint)");
     #endif
     }
 
@@ -3274,27 +3062,19 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
                              const double lowPrice, const double factor, const double stepSize)
 {
         if(StringLen(objectPrefix) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevelsAligned: Empty object prefix");
-    #endif
+        _LOG_GATE_D Print("[D][DRAW] DrawFactorLevelsAligned: Empty object prefix");
     return;
     }
     if(highPrice <= 0 || lowPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevelsAligned: Invalid prices - High=", highPrice, ", Low=", lowPrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsAligned: Invalid prices - High=", highPrice, ", Low=", lowPrice);
     return;
     }
     if(highPrice <= lowPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevelsAligned: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsAligned: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
     return;
     }
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevelsAligned: Invalid step size: ", stepSize);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsAligned: Invalid step size: ", stepSize);
     return;
     }
     double currentPrice = Bid;
@@ -3302,7 +3082,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     double distToLow = MathAbs(currentPrice - lowPrice);
     bool startFromHigh = (distToHigh > distToLow);
     #ifdef ENABLE_DEBUG_LOGS
-    Print("Factor Direction: Price=", DoubleToString(currentPrice, Digits),
+    Print("[D][DRAW] Factor Direction: Price=", DoubleToString(currentPrice, Digits),
           ", DistHigh=", DoubleToString(distToHigh, Digits),
           ", DistLow=", DoubleToString(distToLow, Digits),
           ", Start=", (startFromHigh ? "HIGH" : "LOW"));
@@ -3311,7 +3091,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     int totalLevels = (int)MathFloor(range / stepSize);
     if(totalLevels <= 1) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevelsAligned: Not enough space (totalLevels=", totalLevels, 
+        Print("[D][DRAW] DrawFactorLevelsAligned: Not enough space (totalLevels=", totalLevels,
               ", range=", DoubleToString(range, Digits), 
               ", stepSize=", DoubleToString(stepSize, Digits), ")");
     #endif
@@ -3319,14 +3099,11 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     }
     const int MAX_FACTOR_LEVELS = 5000;
     if(totalLevels > MAX_FACTOR_LEVELS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevelsAligned: WARNING - Too many levels (", totalLevels, 
-              "), clamping to ", MAX_FACTOR_LEVELS);
-    #endif
+        _LOG_GATE_W Print("[W][DRAW] DrawFactorLevelsAligned: WARNING - Too many levels (", totalLevels);
     totalLevels = MAX_FACTOR_LEVELS;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("DrawFactorLevelsAligned: High=", highPrice, ", Low=", lowPrice, 
+    Print("[D][DRAW] DrawFactorLevelsAligned: High=", highPrice, ", Low=", lowPrice,
           ", Factor=", factor, ", StepSize=", stepSize, ", TotalLevels=", totalLevels,
           ", StartFrom=", (startFromHigh ? "HIGH" : "LOW"));
     #endif
@@ -3355,9 +3132,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     for(int i = 1; i <= totalLevels; i++) {
         double levelPrice = startPrice + (direction * stepSize * i);
     if(levelPrice < lowPrice || levelPrice > highPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] Level ", i, " outside range: ", DoubleToString(levelPrice, Digits));
-    #endif
+            _LOG_GATE_W Print("[W][DRAW] Level ", i, " outside range: ", DoubleToString(levelPrice, Digits));
     continue;        }
     double normalizedPrice = NormalizeDouble(levelPrice, cachedDigits);
     
@@ -3380,7 +3155,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
                                       inpFactorLevelColor,                                      inpMidZoneStyle,                                      inpMidZoneTransparency)) {
                     zoneCount++;
     #ifdef ENABLE_DEBUG_LOGS
-                    Print("[OK] Zone ", i, ": Between ", DoubleToString(prevPrice, Digits),
+                    Print("[I][DRAW] Zone ", i, ": Between ", DoubleToString(prevPrice, Digits),
                           " and ", DoubleToString(normalizedPrice, Digits),
                           " | Mid=", DoubleToString(midPoint, Digits),
                           " | Height=", DoubleToString(zoneHeight, Digits),
@@ -3393,9 +3168,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
     bool objectExists = (ObjectFind(0, levelName) >= 0);
     if(shouldShowLine) {            if(!objectExists) {
                 if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("DrawFactorLevelsAligned: Failed to create level ", i, ", Error: ", GetLastError());
-    #endif
+                    _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsAligned: Failed to create level ", i, ", Error: ", GetLastError());
     continue;
                 }
             // PERF: Set all properties only on creation
@@ -3427,8 +3200,8 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         CleanupSurplusObjects(objectPrefix + "Factor_Zone_", totalLevels + 1);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] DrawFactorLevelsAligned: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
-    Print("   halfStep=", DoubleToString(halfStep, Digits), 
+    Print("[I][DRAW] DrawFactorLevelsAligned: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("[D][DRAW]    halfStep=", DoubleToString(halfStep, Digits),
           ", zoneHeight=", DoubleToString(zoneHeight, Digits), " (25% of halfStep = 12.5% each side)");
     #endif
     }
@@ -3445,27 +3218,19 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                                         const int maxLevelsAbove, const int maxLevelsBelow)
 {
         if(StringLen(objectPrefix) == 0 || centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid inputs");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonicFromCenter: Invalid inputs");
     return;
     }
     if(highPrice <= lowPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid range - High must be > Low");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonicFromCenter: Invalid range - High must be > Low");
     return;
     }
     if(baseStepSize <= 0 || harmonicRatio < MIN_HARMONIC_RATIO || harmonicRatio > MAX_HARMONIC_RATIO) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid step or ratio");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonicFromCenter: Invalid step or ratio");
     return;
     }
     if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid level counts");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonicFromCenter: Invalid level counts");
     return;
     }
     double historicalRange = highPrice - lowPrice;
@@ -3477,9 +3242,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     if(centerPrice > viewportTop || centerPrice < viewportBottom) {
         safeMaxAbove = (int)MathMin(safeMaxAbove, 100);
     safeMaxBelow = (int)MathMin(safeMaxBelow, 100);
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Harmonic: Center outside viewport - limiting to ", safeMaxAbove, "/", safeMaxBelow);
-    #endif
+        _LOG_GATE_W Print("[W][DRAW] Harmonic: Center outside viewport - limiting to ", safeMaxAbove, "/", safeMaxBelow);
     }
     double largeStepSize = baseStepSize * harmonicRatio;
     double avgStepSize = (baseStepSize + largeStepSize) / 2.0;
@@ -3487,7 +3250,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     int levelsDrawn = 0;
     int zoneCount = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("DrawFactorLevelsHarmonicFromCenter: Center=", DoubleToString(centerPrice, Digits),
+    Print("[D][DRAW] DrawFactorLevelsHarmonicFromCenter: Center=", DoubleToString(centerPrice, Digits),
           ", BaseStep=", DoubleToString(baseStepSize, Digits),
           ", LargeStep=", DoubleToString(largeStepSize, Digits),
           ", MaxAbove=", maxLevelsAbove, ", MaxBelow=", maxLevelsBelow);
@@ -3520,9 +3283,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Above)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Above)");
     return;    }
     int logicalStepAbove = 0;
     for(int i = 0; i < safeMaxAbove; i++) {
@@ -3589,9 +3350,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Below)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Below)");
     return;    }
     int logicalStepBelow = 0;
     for(int i = 0; i < safeMaxBelow; i++) {
@@ -3654,8 +3413,8 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Below_", logicalStepBelow + 1);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] DrawFactorLevelsHarmonicFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
-    Print("   Above=", levelsAboveCount, "/", maxLevelsAbove,
+    Print("[I][DRAW] DrawFactorLevelsHarmonicFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("[D][DRAW]    Above=", levelsAboveCount, "/", maxLevelsAbove,
           ", Below=", levelsBelowCount, "/", maxLevelsBelow);
     #endif
     }
@@ -3673,34 +3432,23 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
                                 const int maxLevelsAbove, const int maxLevelsBelow)
 {
         if(StringLen(objectPrefix) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Empty object prefix");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Empty object prefix");
     return;
     }
     if(centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Invalid prices - Center=", centerPrice, 
-              ", High=", highPrice, ", Low=", lowPrice);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Invalid prices - Center=", centerPrice);
     return;
     }
     if(highPrice <= lowPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Invalid range - High must be > Low");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Invalid range - High must be > Low");
     return;
     }
     if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Invalid step size: ", stepSize);
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Invalid step size: ", stepSize);
     return;
     }
     if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Invalid level counts");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Invalid level counts");
     return;
     }
     int safeMaxAbove = (maxLevelsAbove > MAX_SAFE_LEVELS) ? MAX_SAFE_LEVELS : maxLevelsAbove;
@@ -3711,7 +3459,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     double vpTop = vpChartMax + vpRange;
     double vpBottom = vpChartMin - vpRange;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("DrawFactorLevelsFromCenter: Center=", DoubleToString(centerPrice, Digits),
+    Print("[D][DRAW] DrawFactorLevelsFromCenter: Center=", DoubleToString(centerPrice, Digits),
           ", High=", DoubleToString(highPrice, Digits), 
           ", Low=", DoubleToString(lowPrice, Digits),
           ", StepSize=", DoubleToString(stepSize, Digits),
@@ -3755,9 +3503,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Above)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Above)");
     return;    }
     int logicalStep = 1;
     int levelsAboveCount = 0;
@@ -3841,9 +3587,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Below)");
-    #endif
+        _LOG_GATE_E Print("[E][DRAW] DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Below)");
     return;    }
     
     logicalStep = 1;
@@ -3926,8 +3670,8 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         CleanupSurplusObjects(objectPrefix + "Factor_Zone_Below_", logicalStep);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] DrawFactorLevelsFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
-    Print("   Center=", DoubleToString(normalizedCenter, Digits),
+    Print("[I][DRAW] DrawFactorLevelsFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("[D][DRAW]    Center=", DoubleToString(normalizedCenter, Digits),
           ", Above=", levelsAboveCount, "/", maxLevelsAbove, 
           ", Below=", levelsBelowCount, "/", maxLevelsBelow);
     #endif

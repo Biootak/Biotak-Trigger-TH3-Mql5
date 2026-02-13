@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                            ATRCalculations.mqh   |
 //|                                                                  |
 //| ATR-Based Calculations for Biotak Trigger TH3                   |
@@ -151,9 +151,7 @@ double CalculateTrueRange(const int barIndex) {
     
     // AUDIT FIX: Validate bar index
     if(barIndex < 0 || barIndex >= totalBars) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateTrueRange: Invalid bar index (", barIndex, "/", totalBars, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateTrueRange: Invalid bar index (", barIndex, "/", totalBars, ")");
     return 0.0;
     }
     double high, low, prevClose;
@@ -165,9 +163,7 @@ double CalculateTrueRange(const int barIndex) {
         // Validate array bounds before access
         int currentBars = Bars(_Symbol, _Period);
     if(barIndex >= currentBars) {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] CalculateTrueRange: barIndex exceeds Bars (", barIndex, "/", currentBars, ")");
-    #endif
+            _LOG_GATE_W Print("[W][ATR] CalculateTrueRange: barIndex exceeds Bars (", barIndex, "/", currentBars, ")");
     return 0.0;
         }
         
@@ -199,17 +195,13 @@ double CalculateTrueRange(const int barIndex) {
     if(!IsValidPrice(high, EPSILON_PRICE) || 
        !IsValidPrice(low, EPSILON_PRICE) || 
        !IsValidPrice(prevClose, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateTrueRange: Invalid price data (H:", high, " L:", low, " PC:", prevClose, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateTrueRange: Invalid price data (H:", high, " L:", low, " PC:", prevClose, ")");
     return 0.0;
     }
     
     // AUDIT FIX: Validate high >= low
     if(IsLess(high, low, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateTrueRange: High < Low (H:", high, " L:", low, ")");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateTrueRange: High < Low (H:", high, " L:", low, ")");
     return 0.0;
     }
     
@@ -236,9 +228,7 @@ double CalculateTrueRange(const int barIndex) {
 double CalculateSimpleATR(const int period) {
     // AUDIT FIX: Validate period range
     if(period <= 0 || period > 10000) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateSimpleATR: Invalid period (", period, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateSimpleATR: Invalid period (", period, ")");
     return 0.0;
     }
     
@@ -246,9 +236,7 @@ double CalculateSimpleATR(const int period) {
     
     int barsAvailable = GetEffectiveBars();
     if(barsAvailable <= period) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateSimpleATR: Not enough bars (", barsAvailable, " < ", period, ")");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateSimpleATR: Not enough bars (", barsAvailable, " < ", period, ")");
     return 0.0;
     }
     double sumTR = 0.0;
@@ -351,16 +339,12 @@ void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
     int barsAvailable = iBars(_Symbol, tf);
     
     if(barsAvailable <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatchWilders: No bars available for TF=", tf);
-        #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateATRBatchWilders: No bars available for TF=", tf);
         return;
     }
     
     if(barsAvailable < ATR_PERIOD_1 + 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatchWilders: Not enough bars (", barsAvailable, ") for TF=", tf);
-        #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateATRBatchWilders: Not enough bars (", barsAvailable, ") for TF=", tf);
         return;
     }
     
@@ -378,10 +362,7 @@ void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
     int copiedClose = CopyClose(_Symbol, tf, 0, copyCount, closeArr);
     
     if(copiedHigh < copyCount || copiedLow < copyCount || copiedClose < copyCount) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatchWilders: CopyXxx failed for TF=", tf,
-              " (H:", copiedHigh, " L:", copiedLow, " C:", copiedClose, " need:", copyCount, ")");
-        #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateATRBatchWilders: CopyXxx failed for TF=", tf);
         // Fallback: per-bar CalculateTrueRange with Wilder's (only for current TF)
         if(tf == _Period || tf == PERIOD_CURRENT) {
             int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3,
@@ -488,10 +469,10 @@ void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
     static datetime s_lastWildersLog = 0;
     datetime now = TimeCurrent();
     if(now - s_lastWildersLog > 300) {
-        Print("[OK] CalculateATRBatchWilders: TF=", tf, " bars=", barsAvailable,
+        Print("[I][ATR] CalculateATRBatchWilders: TF=", tf, " bars=", barsAvailable,
               " copied=", copyCount, " trCount=", trCount);
         for(int p = 0; p < 6; p++) {
-            Print("   ATR[", periods[p], "]=", DoubleToString(results[p], _Digits));
+            Print("[D][ATR]    ATR[", periods[p], "]=", DoubleToString(results[p], _Digits));
         }
         s_lastWildersLog = now;
     }
@@ -518,9 +499,7 @@ void CalculateATRBatch(double &results[]) {
     
     // AUDIT FIX: Validate bars available
     if(barsAvailable <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatch: No bars available");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: No bars available");
     return;
     }
     
@@ -529,17 +508,13 @@ void CalculateATRBatch(double &results[]) {
     // Need period + 1 bars: period bars for TR + 1 for prevClose
     // But start from bar 1 (completed), so need period + 2 total bars
     if(barsAvailable < ATR_PERIOD_1 + 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatch: Not enough bars (", barsAvailable, "), need at least ", ATR_PERIOD_1 + 2);
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: Not enough bars (", barsAvailable, "), need at least ", ATR_PERIOD_1 + 2);
     return;
     }
     
     // If limited bars, calculate what we can and skip larger periods
     if(barsAvailable <= ATR_PERIOD_6 + 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatch: Limited bars (", barsAvailable, "), calculating available periods only");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: Limited bars (", barsAvailable, "), calculating available periods only");
     int periods_limited[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
                                  ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
     for(int p = 0; p < 6; p++) {
@@ -548,10 +523,7 @@ void CalculateATRBatch(double &results[]) {
                 results[p] = CalculateSimpleATR(periods_limited[p]);
             } else {
                 results[p] = 0.0;
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] CalculateATRBatch: Skipping ATR period ", periods_limited[p], 
-                      " (need ", periods_limited[p] + 2, " bars, have ", barsAvailable, ")");
-    #endif
+                _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: Skipping ATR period ", periods_limited[p]);
     }
         }
         return;
@@ -573,10 +545,7 @@ void CalculateATRBatch(double &results[]) {
     int copiedClose = CopyClose(_Symbol, etf, 0, copyCount, closeArr);
     if(copiedHigh < copyCount || copiedLow < copyCount || 
        copiedClose < copyCount) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateATRBatch: CopyXxx failed (H:", copiedHigh, " L:", copiedLow,
-              " C:", copiedClose, " needed:", copyCount, "), falling back");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateATRBatch: CopyXxx failed (H:", copiedHigh, " L:", copiedLow);
         // Fallback to per-bar method
         // Use completed bars only (start from bar 1)
         double trFallback[];
@@ -612,9 +581,7 @@ void CalculateATRBatch(double &results[]) {
     // Compute TR from batch arrays using shared helper
     double trValues[];
     if(ArrayResize(trValues, maxPeriod) != maxPeriod) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("CalculateATRBatch: Failed to resize TR array");
-        #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateATRBatch: Failed to resize TR array");
         return;
     }
     
@@ -649,18 +616,14 @@ double CalculateWeightedATR() {
     
     // AUDIT FIX: Validate bars available
     if(effectiveBars <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateWeightedATR: No bars available");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateWeightedATR: No bars available");
     return 0.0;
     }
     
     // AUDIT FIX: Validate TimeCurrent()
     datetime currentTime = TimeCurrent();
     if(currentTime == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateWeightedATR: TimeCurrent() returned 0");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateWeightedATR: TimeCurrent() returned 0");
         // Use cached value if available
         if(g_atrCacheInitialized && g_atrCache.valid) {
         return g_atrCache.weightedATR;
@@ -693,9 +656,7 @@ double CalculateWeightedATR() {
     
     // AUDIT FIX: Validate array size before access
     if(ArraySize(atrValues) < 6) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateWeightedATR: ATR batch calculation failed, array size=", ArraySize(atrValues));
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATR: ATR batch calculation failed, array size=", ArraySize(atrValues));
     return 0.0;
     }
     
@@ -707,9 +668,7 @@ double CalculateWeightedATR() {
     
     // AUDIT FIX: Validate weights array size
     if(ArraySize(weights) != 6) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateWeightedATR: Invalid weights array size");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATR: Invalid weights array size");
     return 0.0;
     }
     
@@ -721,9 +680,7 @@ double CalculateWeightedATR() {
             // AUDIT FIX: Check for potential overflow before multiplication
             double temp = atrValues[i] * weights[i];
     if(temp > 1e10) {  // Sanity check
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] CalculateWeightedATR: Overflow detected in weighted sum");
-    #endif
+                _LOG_GATE_W Print("[W][ATR] CalculateWeightedATR: Overflow detected in weighted sum");
     continue;
             }
             weightedSum += temp;
@@ -733,7 +690,7 @@ double CalculateWeightedATR() {
             static datetime s_lastSkipLog = 0;
     datetime now = TimeCurrent();
     if(now - s_lastSkipLog > 300) {  // Log every 5 minutes
-                Print("[WARN] CalculateWeightedATR: Skipping ATR period ", i, " (value is zero)");
+                Print("[W][ATR] CalculateWeightedATR: Skipping ATR period ", i, " (value is zero)");
     s_lastSkipLog = now;
             }
     #endif
@@ -742,9 +699,7 @@ double CalculateWeightedATR() {
     
     // If no valid ATR values, return 0
     if(totalWeight == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateWeightedATR: No valid ATR values available");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATR: No valid ATR values available");
     return 0.0;
     }
     
@@ -753,9 +708,7 @@ double CalculateWeightedATR() {
     
     // AUDIT FIX: Validate result
     if(!IsValidPrice(result, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateWeightedATR: Invalid result (", result, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATR: Invalid result (", result, ")");
     return 0.0;
     }
     
@@ -769,16 +722,16 @@ double CalculateWeightedATR() {
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastATRLog = 0;
     if(currentTime - s_lastATRLog > 300) {  // Log every 5 minutes
-        Print("========== WEIGHTED ATR CALCULATION ==========");
-    Print("ATR₅: ", DoubleToString(atrValues[0], Digits));
-    Print("ATR₁₀: ", DoubleToString(atrValues[1], Digits));
-    Print("ATR₂₁: ", DoubleToString(atrValues[2], Digits));
-    Print("ATR₆₆: ", DoubleToString(atrValues[3], Digits));
-    Print("ATR₁₃₂: ", DoubleToString(atrValues[4], Digits));
-    Print("ATR₂₆₄: ", DoubleToString(atrValues[5], Digits));
-    Print("Weighted ATR: ", DoubleToString(result, Digits));
-    Print("Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
-    Print("==============================================");
+        Print("[D][ATR] ========== WEIGHTED ATR CALCULATION ==========");
+    Print("[D][ATR] ATR₅: ", DoubleToString(atrValues[0], Digits));
+    Print("[D][ATR] ATR₁₀: ", DoubleToString(atrValues[1], Digits));
+    Print("[D][ATR] ATR₂₁: ", DoubleToString(atrValues[2], Digits));
+    Print("[D][ATR] ATR₆₆: ", DoubleToString(atrValues[3], Digits));
+    Print("[D][ATR] ATR₁₃₂: ", DoubleToString(atrValues[4], Digits));
+    Print("[D][ATR] ATR₂₆₄: ", DoubleToString(atrValues[5], Digits));
+    Print("[D][ATR] Weighted ATR: ", DoubleToString(result, Digits));
+    Print("[D][ATR] Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
+    Print("[D][ATR] ==============================================");
     s_lastATRLog = TimeCurrent();
     }
     #endif
@@ -802,9 +755,7 @@ double CalculateWeightedATR() {
 double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     // AUDIT FIX: Validate input parameters
     if(currentMinutes <= 0 || targetMinutes <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateHybridATR: Invalid timeframe minutes (current:", currentMinutes, " target:", targetMinutes, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateHybridATR: Invalid timeframe minutes (current:", currentMinutes, " target:", targetMinutes, ")");
     return 0.0;
     }
     
@@ -813,9 +764,7 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     
     // AUDIT FIX: Use IsZero for comparison
     if(IsZero(currentATR, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateHybridATR: Current ATR is zero");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateHybridATR: Current ATR is zero");
     return 0.0;
     }
     
@@ -832,9 +781,7 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     
     // AUDIT FIX: Validate ratio range (sanity check)
     if(ratio < 0.01 || ratio > 100.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateHybridATR: Ratio out of range (", ratio, ")");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateHybridATR: Ratio out of range (", ratio, ")");
     return currentATR; // Return current ATR as fallback
     }
     
@@ -844,9 +791,7 @@ double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
     
     // AUDIT FIX: Validate result
     if(!IsValidPrice(result, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateHybridATR: Invalid result (", result, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateHybridATR: Invalid result (", result, ")");
     return currentATR; // Return current ATR as fallback
     }
     return result;
@@ -865,9 +810,7 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
     // Get bars available for target timeframe
     int targetBars = iBars(_Symbol, targetTF);
     if(targetBars <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateWeightedATRForTimeframe: No bars available for TF=", targetTF);
-        #endif
+        _LOG_GATE_W Print("[W][ATR] CalculateWeightedATRForTimeframe: No bars available for TF=", targetTF);
         return 0.0;
     }
     
@@ -877,9 +820,7 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
     
     // Validate array size
     if(ArraySize(atrValues) < 6) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateWeightedATRForTimeframe: Batch calculation failed for TF=", targetTF);
-        #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATRForTimeframe: Batch calculation failed for TF=", targetTF);
         return 0.0;
     }
     
@@ -900,18 +841,14 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
     }
     
     if(totalWeight == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CalculateWeightedATRForTimeframe: No valid ATR values for TF=", targetTF);
-        #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATRForTimeframe: No valid ATR values for TF=", targetTF);
         return 0.0;
     }
     
     double result = SafeDivide(weightedSum, (double)totalWeight, 0.0, EPSILON_GENERAL);
     
     if(!IsValidPrice(result, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] CalculateWeightedATRForTimeframe: Invalid result for TF=", targetTF);
-        #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateWeightedATRForTimeframe: Invalid result for TF=", targetTF);
         return 0.0;
     }
     
@@ -931,16 +868,12 @@ void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targ
     int barsAvailable = iBars(_Symbol, targetTF);
     
     if(barsAvailable <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("CalculateATRBatchForTimeframe: No bars available for TF=", targetTF);
-        #endif
+        _LOG_GATE_D Print("[D][ATR] CalculateATRBatchForTimeframe: No bars available for TF=", targetTF);
         return;
     }
     
     if(barsAvailable < ATR_PERIOD_1 + 2) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("CalculateATRBatchForTimeframe: Not enough bars for TF=", targetTF);
-        #endif
+        _LOG_GATE_D Print("[D][ATR] CalculateATRBatchForTimeframe: Not enough bars for TF=", targetTF);
         return;
     }
     
@@ -954,9 +887,7 @@ void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targ
     
     if(copiedHigh < copyCount || copiedLow < copyCount || 
        copiedClose < copyCount) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("CalculateATRBatchForTimeframe: CopyXxx failed for TF=", targetTF);
-        #endif
+        _LOG_GATE_E Print("[E][ATR] CalculateATRBatchForTimeframe: CopyXxx failed for TF=", targetTF);
         return;
     }
     
@@ -984,9 +915,7 @@ int GetCurrentTimeframeMinutes() {
     
     // AUDIT FIX: Validate period
     if(period <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetCurrentTimeframeMinutes: Invalid period (", period, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] GetCurrentTimeframeMinutes: Invalid period (", period, ")");
     return 0;
     }
     
@@ -1006,9 +935,7 @@ int GetCurrentTimeframeMinutes() {
             if(period >= 1 && period <= 43200) {
         return period;
             }
-    #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] GetCurrentTimeframeMinutes: Unusual period (", period, ")");
-    #endif
+            _LOG_GATE_W Print("[W][ATR] GetCurrentTimeframeMinutes: Unusual period (", period, ")");
     return period;
     }
 }
@@ -1023,18 +950,14 @@ int GetCurrentTimeframeMinutes() {
 double GetATRForTimeframe(const int targetMinutes) {
     // AUDIT FIX: Validate target minutes
     if(targetMinutes <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetATRForTimeframe: Invalid target minutes (", targetMinutes, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] GetATRForTimeframe: Invalid target minutes (", targetMinutes, ")");
     return 0.0;
     }
     
     // AUDIT FIX: Validate TimeCurrent()
     datetime currentTime = TimeCurrent();
     if(currentTime == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] GetATRForTimeframe: TimeCurrent() returned 0");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] GetATRForTimeframe: TimeCurrent() returned 0");
         // Try to find cached value
         if(g_multiTFCacheInitialized) {
             for(int i = 0; i < g_multiTFCacheCount; i++) {
@@ -1078,16 +1001,12 @@ double GetATRForTimeframe(const int targetMinutes) {
 void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
     // AUDIT FIX: Validate inputs
     if(timeframeMinutes <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] UpdateMultiTFCache: Invalid timeframe minutes (", timeframeMinutes, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] UpdateMultiTFCache: Invalid timeframe minutes (", timeframeMinutes, ")");
     return;
     }
     
     if(!IsValidPrice(atrValue, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] UpdateMultiTFCache: Invalid ATR value (", atrValue, ")");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] UpdateMultiTFCache: Invalid ATR value (", atrValue, ")");
     return;
     }
     
@@ -1098,9 +1017,7 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
     // AUDIT FIX: Validate TimeCurrent()
     datetime currentTime = TimeCurrent();
     if(currentTime == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] UpdateMultiTFCache: TimeCurrent() returned 0, skipping cache update");
-    #endif
+        _LOG_GATE_W Print("[W][ATR] UpdateMultiTFCache: TimeCurrent() returned 0, skipping cache update");
     return;
     }
     
@@ -1133,10 +1050,7 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
         }
         
         targetIndex = oldestIndex;
-    #ifdef ENABLE_DEBUG_LOGS
-        Print(" UpdateMultiTFCache: Cache full, replacing oldest entry (TF=", 
-              g_multiTFCache[oldestIndex].timeframeMinutes, " min)");
-    #endif
+        _LOG_GATE_D Print("[D][ATR]  UpdateMultiTFCache: Cache full, replacing oldest entry (TF=");
     }
     
     // AUDIT FIX: Validate target index before update
@@ -1148,17 +1062,14 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
     #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastCacheLog = 0;
     if(currentTime - s_lastCacheLog > 300) { // Log every 5 minutes
-            Print("[OK] UpdateMultiTFCache: Updated cache entry [", targetIndex, "] TF=", 
+            Print("[I][ATR] UpdateMultiTFCache: Updated cache entry [", targetIndex, "] TF=",
                   timeframeMinutes, " min, ATR=", DoubleToString(atrValue, Digits));
     s_lastCacheLog = currentTime;
         }
     #endif
     } else {
         // AUDIT FIX: Log error if index is invalid
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] UpdateMultiTFCache: Invalid target index (", targetIndex, 
-              "), cache update failed");
-    #endif
+        _LOG_GATE_E Print("[E][ATR] UpdateMultiTFCache: Invalid target index (", targetIndex);
     }
 }
 
@@ -1191,7 +1102,7 @@ void InvalidateATRCache() {
 
     #ifdef ENABLE_DEBUG_LOGS
     if(invalidatedCount > 0) {
-        Print(" InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
+        Print("[E][ATR]  InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
     }
     #endif
 }
@@ -1213,7 +1124,7 @@ void WarmupATRMultiTFCache() {
     static datetime s_lastWarmupLog = 0;
     datetime now = TimeCurrent();
     if(now > 0 && (s_lastWarmupLog == 0 || now - s_lastWarmupLog >= 60)) {
-        Print("[FAST] ATR warmup completed for label timeframes");
+        Print("[I][ATR] [FAST] ATR warmup completed for label timeframes");
         s_lastWarmupLog = now;
     }
     #endif

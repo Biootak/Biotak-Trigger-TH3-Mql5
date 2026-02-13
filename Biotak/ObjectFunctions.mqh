@@ -1,4 +1,4 @@
-﻿#ifndef OBJECT_FUNCTIONS_MQH
+#ifndef OBJECT_FUNCTIONS_MQH
 #define OBJECT_FUNCTIONS_MQH
 
 #include "ObjectCache.mqh"
@@ -6,22 +6,16 @@
 bool CreateTHLineObject(const string name, const double price, const color lineColor, const ENUM_LINE_STYLE style, const int width, const string tooltip, ENUM_LINE_OBJECT_TYPE lineObjectType, bool isSelectable = false) {
 
     if(!CanCreateObject()) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateTHLineObject: Object limit reached, cannot create '", name, "'");
-    #endif
+        _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Object limit reached, cannot create '", name, "'");
     return false;
     }
     if(StringLen(name) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateTHLineObject: Empty object name");
-    #endif
+        _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Empty object name");
     return false;
     }
 
     if(!IsValidPrice(price)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreateTHLineObject: Invalid price (", price, ") for '", name, "'");
-    #endif
+        _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Invalid price (", price, ") for '", name, "'");
     return false;
     }
     double normalizedPrice = NormalizePrice(price);
@@ -43,10 +37,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     if(!objectExists) {
 
         if(!ObjectCreate(0, name, objectType, 0, currentTime, normalizedPrice, (objectType == OBJ_TREND ? futureTime : (datetime)0), normalizedPrice)) {
-        #ifdef ENABLE_DEBUG_LOGS
-            int error = GetLastError();
-    Print("[ERR] CreateTHLineObject: Failed to create '", name, "', error=", error);
-    #endif
+    _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Failed to create '", name, "', error=", GetLastError());
     return false;
         }
     bool propsSuccess = true;
@@ -57,10 +48,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     propsSuccess = propsSuccess && ObjectSetInteger(0, name, OBJPROP_SELECTABLE, isSelectable);
     propsSuccess = propsSuccess && ObjectSetInteger(0, name, OBJPROP_BACK, false);
     if(!propsSuccess) {
-        #ifdef ENABLE_DEBUG_LOGS
-            int error = GetLastError();
-    Print("[WARN] CreateTHLineObject: Failed to set some properties for '", name, "', error=", error);
-    #endif
+    _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Failed to set some properties for '", name, "', error=", GetLastError());
     }
 
         CacheAddObject(name, normalizedPrice, lineColor, style, width);
@@ -89,9 +77,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     if(changedCount == 1) {
         if(changes.priceChanged) {
                 if(!ObjectSetDouble(0, name, OBJPROP_PRICE, normalizedPrice)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                    Print("[WARN] CreateTHLineObject: Failed to update price for '", name, "'");
-    #endif
+                    _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Failed to update price for '", name, "'");
     }
             }
             else if(changes.colorChanged) {
@@ -120,9 +106,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
             }
             
             if(!updateSuccess) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[WARN] CreateTHLineObject: Failed to update some properties for '", name, "'");
-    #endif
+                _LOG_GATE_E Print("[E][LINE] CreateTHLineObject: Failed to update some properties for '", name, "'");
     }
         }
     if(changes.anyChanged) {
@@ -137,22 +121,16 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     bool CreatePipDistanceLabel(const string name, const double price, const double pips, const color textColor, const string levelInfo = "") {
     if(!inpShowPipDistanceLabels) return true;
     if(!CanCreateObject()) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
-    #endif
+        _LOG_GATE_E Print("[E][LINE] CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
     return false;
     }
     if(StringLen(name) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreatePipDistanceLabel: Empty label name");
-    #endif
+        _LOG_GATE_E Print("[E][LINE] CreatePipDistanceLabel: Empty label name");
     return false;
     }
     
     if(!IsValidPrice(price)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CreatePipDistanceLabel: Invalid price (", price, ")");
-    #endif
+        _LOG_GATE_E Print("[E][LINE] CreatePipDistanceLabel: Invalid price (", price, ")");
     return false;
     }
     bool objectExists = CacheObjectExists(name);
@@ -164,10 +142,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
             ObjectDelete(0, name);
     if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                int error = GetLastError();
-    Print("[ERR] CreatePipDistanceLabel: Failed to create '", name, "', error=", error);
-    #endif
+    _LOG_GATE_E Print("[E][LINE] CreatePipDistanceLabel: Failed to create '", name, "', error=", GetLastError());
     return false;
             }
         }

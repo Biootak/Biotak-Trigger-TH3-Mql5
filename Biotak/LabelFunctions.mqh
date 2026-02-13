@@ -54,9 +54,7 @@ bool DrawMainLevels(const string prefix) {
 }
     void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         if(dailyClosePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawTHLevels: Invalid daily close price");
-    #endif
+        _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid daily close price");
     return;
     }
     
@@ -66,9 +64,7 @@ bool DrawMainLevels(const string prefix) {
     string s_cachedSymbol = GetCachedSymbol();
     double s_cachedPipSize = GetCachedPipSize();
     if(IsZero(s_cachedPointValue, EPSILON_PRICE) || IsZero(s_cachedPipSize, EPSILON_PRICE)) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawTHLevels: Invalid point/pip size for symbol ", s_cachedSymbol);
-        #endif
+        _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid point/pip size for symbol ", s_cachedSymbol);
         return;
     }
     const double pointsPerPip = s_cachedPointValue / s_cachedPipSize;
@@ -80,9 +76,7 @@ bool DrawMainLevels(const string prefix) {
     // Use cached values instead of recalculating
     int digits = s_cachedDigits;
     if(digits < 0 || digits > 8) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawTHLevels: Invalid digits value: ", digits);
-    #endif
+        _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid digits value: ", digits);
     return;
     }
     
@@ -102,32 +96,24 @@ bool DrawMainLevels(const string prefix) {
     // TH-based step calculations
     double structureTFPercentage=CalculateTimeframeTH(structureTimeframe);
         if(structureTFPercentage <= 0) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("DrawTHLevels: Invalid structure timeframe percentage");
-            #endif
+            _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid structure timeframe percentage");
             return;
         }
         double structureMultipliers[] = {1.0, 2.0, 4.0, 8.0, 16.0};
         int structureMultipliersCount = ArraySize(structureMultipliers);
         if(ArrayResize(structurePercentages, structureMultipliersCount) != structureMultipliersCount) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("DrawTHLevels: Failed to resize structurePercentages array");
-            #endif
+            _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Failed to resize structurePercentages array");
             return;
         }
         for(int i=0; i<structureMultipliersCount; i++) {
             structurePercentages[i] = structureTFPercentage * structureMultipliers[i];
             if(structurePercentages[i] <= 0) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("DrawTHLevels: Invalid structure percentage at index ", i);
-                #endif
+                _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid structure percentage at index ", i);
                 return;
             }
         }
         if(timeframePercentage<=0) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("DrawTHLevels: Invalid timeframe percentage");
-            #endif
+            _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid timeframe percentage");
             return;
         }
         thStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,timeframePercentage);
@@ -143,9 +129,7 @@ bool DrawMainLevels(const string prefix) {
     
     // Validate step sizes to prevent infinite loops
     if(thStepSizePoints <= 0 || thStepSizePoints < s_cachedPointValue) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("? DrawTHLevels: Invalid thStepSizePoints=", thStepSizePoints, " (must be > Point=", s_cachedPointValue, ")");
-    #endif
+        _LOG_GATE_E Print("[E][LBL] ? DrawTHLevels: Invalid thStepSizePoints=", thStepSizePoints, " (must be > Point=", s_cachedPointValue, ")");
     return;
     }
     if (thStepSizePoints <= 0 || structureTFTHStepSizePoints <= 0 || doubleStructureTFTHStepSizePoints <= 0) return;
@@ -163,13 +147,11 @@ bool DrawMainLevels(const string prefix) {
     // #11: Array bounds checking - get size for safe access
     int intervalSize = ArraySize(intervals);
     if(intervalSize == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("? DrawTHLevels: Empty intervals array, cannot draw structure levels");
-    #endif
+        _LOG_GATE_D Print("[D][LBL] ? DrawTHLevels: Empty intervals array, cannot draw structure levels");
     return;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("?? DrawTHLevels using Base Multiplier: ", baseMultiplier,
+    Print("[D][LBL] ?? DrawTHLevels using Base Multiplier: ", baseMultiplier,
           " ? L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
           ", L4=", intervals[3], ", L5=", intervals[4]);
     #endif
@@ -532,7 +514,7 @@ bool DrawMainLevels(const string prefix) {
         }
     #ifdef ENABLE_DEBUG_LOGS
         if(inpShowMidZones) {
-            Print("? DrawTHLevels: Drew ", zoneCountAbove, " zones above, ", 
+            Print("[D][LBL] ? DrawTHLevels: Drew ", zoneCountAbove, " zones above, ",
                   zoneCountBelow, " zones below");
         }
     #endif
@@ -1247,9 +1229,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     g_labelPositions[size].xPos=xPos;
     g_labelPositions[size].yPos=yPos;
     } else {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("StoreLabelPosition: Failed to resize array");
-    #endif
+        _LOG_GATE_E Print("[E][LBL] StoreLabelPosition: Failed to resize array");
     }
 }
     int GetStoredXPosition(const string name) {
@@ -1293,9 +1273,12 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
 }
     void UpdateLockStatusLabel()
 {
-    // Position: Top-left corner, small and unobtrusive
+    // Position: Top-left corner, below all data labels to avoid overlap
     int xDistance = 5;
-    int yDistance = 15;
+    // FIX: Use g_modeLabelYOffset to stack below ATR/TH labels instead of hardcoded 15
+    int yDistance = inpLabelsMarginTop + g_modeLabelYOffset;
+    // Add extra gap below mode label area (mode label font is larger)
+    yDistance += (inpModeLabelFontSize + 8);
     if(g_timeframeLocked)
     {
         // Create or update label showing locked timeframe (no emoji - MT4 doesn't support)
@@ -1304,9 +1287,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         {
             if(!ObjectCreate(0, g_lockStatusLabelName, OBJ_LABEL, 0, 0, 0))
             {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("Failed to create lock status label. Error: ", GetLastError());
-    #endif
+                _LOG_GATE_E Print("[E][LBL] Failed to create lock status label. Error: ", GetLastError());
     return;
             }
         }

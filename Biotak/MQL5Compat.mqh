@@ -144,7 +144,7 @@ bool g_atrHandleCacheInitialized = false;
     if(handle == INVALID_HANDLE) {
         handle = iATR(symbol, timeframe, atr_period);
     if(handle == INVALID_HANDLE) {
-            PrintFormat("iATRMQL4: Failed ATR handle %s/%s/%d", symbol, EnumToString(timeframe), atr_period);
+            LOG_E(LOG_CAT_ATR, "iATRMQL4: Failed ATR handle " + symbol + "/" + EnumToString(timeframe) + "/" + IntegerToString(atr_period));
     return 0.0;
         }
     static int g_atrEvictSlot = 0;

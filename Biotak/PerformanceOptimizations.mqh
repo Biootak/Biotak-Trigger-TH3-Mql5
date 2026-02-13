@@ -33,9 +33,7 @@ void InitializeGlobalCache() {
     g_cachedChartIdStr = IntegerToString(g_cachedChartId);
     g_cachedPipSize = (g_cachedDigits == 3 || g_cachedDigits == 5) ? g_cachedPoint * 10.0 : g_cachedPoint;
     g_globalCacheInitialized = true;
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("Global cache initialized: Symbol=", g_cachedSymbol, ", ChartID=", g_cachedChartIdStr);
-    #endif
+    LOG_DP2(LOG_CAT_PERF, "Global cache initialized: Symbol=", g_cachedSymbol, ", ChartID=" + g_cachedChartIdStr);
     }
 
 //+------------------------------------------------------------------+

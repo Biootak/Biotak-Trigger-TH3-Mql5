@@ -1,4 +1,4 @@
-﻿#ifndef OBJECT_COUNT_MANAGER_MQH
+#ifndef OBJECT_COUNT_MANAGER_MQH
 #define OBJECT_COUNT_MANAGER_MQH
 
 //+------------------------------------------------------------------+
@@ -53,8 +53,8 @@ bool CanCreateObject()
     // ═══════════════════════════════════════════════════════════════
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("[ERR] CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
-    Print("   Forcing emergency cleanup...");
+        Print("[E][CLN] CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
+    Print("[D][CLN]    Forcing emergency cleanup...");
     #endif
         
         // Emergency cleanup
@@ -65,14 +65,14 @@ bool CanCreateObject()
     g_lastObjectCount = totalObjects;
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[ERR] FATAL: Cannot free objects (", totalObjects, " remaining)");
-    Print("   Please close some charts or remove other indicators");
+            Print("[E][CLN] FATAL: Cannot free objects (", totalObjects, " remaining)");
+    Print("[D][CLN]    Please close some charts or remove other indicators");
     #endif
     return false;
         }
     #ifdef ENABLE_DEBUG_LOGS
-        Print("[OK] Emergency cleanup successful: ", cleanedCount, " objects removed");
-    Print("   Current count: ", totalObjects);
+        Print("[I][CLN] Emergency cleanup successful: ", cleanedCount, " objects removed");
+    Print("[D][CLN]    Current count: ", totalObjects);
     #endif
     }
     
@@ -84,8 +84,8 @@ bool CanCreateObject()
         static datetime s_lastWarning = 0;
     if(currentTime - s_lastWarning > 60) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[WARN] WARNING: Approaching object limit (", totalObjects, "/", MAX_SAFE_OBJECTS, ")");
-    Print("   Consider reducing Max Levels in settings");
+            Print("[W][CLN] WARNING: Approaching object limit (", totalObjects, "/", MAX_SAFE_OBJECTS, ")");
+    Print("[D][CLN]    Consider reducing Max Levels in settings");
     #endif
     s_lastWarning = currentTime;
         }
@@ -106,9 +106,7 @@ int EmergencyCleanupObjects()
     // Prevent cleanup spam (minimum 30 seconds between cleanups)
     // ═══════════════════════════════════════════════════════════════
     if(currentTime - g_lastEmergencyCleanup < 30) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] EmergencyCleanup: Too soon since last cleanup, skipping");
-    #endif
+        _LOG_GATE_W Print("[W][CLN] EmergencyCleanup: Too soon since last cleanup, skipping");
     return 0;
     }
     
@@ -116,8 +114,8 @@ int EmergencyCleanupObjects()
     int deletedCount = 0;
     datetime cutoffTime = currentTime - EMERGENCY_CLEANUP_AGE;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[CLEAN] Emergency cleanup starting...");
-    Print("   Cutoff time: ", TimeToString(cutoffTime, TIME_DATE|TIME_MINUTES));
+    Print("[D][CLN] [CLEAN] Emergency cleanup starting...");
+    Print("[D][CLN]    Cutoff time: ", TimeToString(cutoffTime, TIME_DATE|TIME_MINUTES));
     #endif
     
     // ═══════════════════════════════════════════════════════════════
@@ -158,18 +156,14 @@ int EmergencyCleanupObjects()
             }
         }
     }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("   Phase 1: Deleted ", deletedCount, " old objects");
-    #endif
+    _LOG_GATE_D Print("[D][CLN]    Phase 1: Deleted ", deletedCount, " old objects");
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 2: If still critical, delete ALL non-essential objects
     // ═══════════════════════════════════════════════════════════════
     totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[WARN] Still critical after Phase 1, starting Phase 2...");
-    #endif
+        _LOG_GATE_E Print("[E][CLN] Still critical after Phase 1, starting Phase 2...");
     int phase2Deleted = 0;
         
         // Delete all zones (can be recreated)
@@ -208,18 +202,14 @@ int EmergencyCleanupObjects()
         }
         
         deletedCount += phase2Deleted;
-    #ifdef ENABLE_DEBUG_LOGS
-        Print("   Phase 2: Deleted ", phase2Deleted, " non-essential objects");
-    #endif
+        _LOG_GATE_D Print("[D][CLN]    Phase 2: Deleted ", phase2Deleted, " non-essential objects");
     }
     
     // ═══════════════════════════════════════════════════════════════
     // PHASE 3: Force chart redraw
     // ═══════════════════════════════════════════════════════════════
     ChartRedraw();
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] Emergency cleanup complete: ", deletedCount, " total objects removed");
-    #endif
+    _LOG_GATE_I Print("[I][CLN] Emergency cleanup complete: ", deletedCount, " total objects removed");
     return deletedCount;
 }
 
@@ -252,9 +242,7 @@ void CleanupObjectCountManager()
     g_lastObjectCountCheck = 0;
     g_lastObjectCount = 0;
     g_lastEmergencyCleanup = 0;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] ObjectCountManager cleaned up");
-    #endif
+    _LOG_GATE_I Print("[I][CLN] ObjectCountManager cleaned up");
     }
 
 //+------------------------------------------------------------------+
@@ -293,18 +281,18 @@ void PrintObjectCountStats()
         }
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("╔═══════════════════════════════════════════════════════════════╗");
-    Print("║  OBJECT COUNT STATISTICS                                      ║");
-    Print("╠═══════════════════════════════════════════════════════════════╣");
-    Print("║  Total Objects: ", totalObjects, " / ", MT4_OBJECT_LIMIT);
-    Print("║  Usage: ", DoubleToString(100.0 * totalObjects / MT4_OBJECT_LIMIT, 1), "%");
-    Print("╠═══════════════════════════════════════════════════════════════╣");
-    Print("║  Lines:      ", lines);
-    Print("║  Labels:     ", labels);
-    Print("║  Rectangles: ", rectangles);
-    Print("║  Trends:     ", trends);
-    Print("║  Other:      ", other);
-    Print("╚═══════════════════════════════════════════════════════════════╝");
+    Print("[D][CLN] ╔═══════════════════════════════════════════════════════════════╗");
+    Print("[D][CLN] ║  OBJECT COUNT STATISTICS                                      ║");
+    Print("[D][CLN] ╠═══════════════════════════════════════════════════════════════╣");
+    Print("[D][CLN] ║  Total Objects: ", totalObjects, " / ", MT4_OBJECT_LIMIT);
+    Print("[D][CLN] ║  Usage: ", DoubleToString(100.0 * totalObjects / MT4_OBJECT_LIMIT, 1), "%");
+    Print("[D][CLN] ╠═══════════════════════════════════════════════════════════════╣");
+    Print("[D][CLN] ║  Lines:      ", lines);
+    Print("[D][CLN] ║  Labels:     ", labels);
+    Print("[D][CLN] ║  Rectangles: ", rectangles);
+    Print("[D][CLN] ║  Trends:     ", trends);
+    Print("[D][CLN] ║  Other:      ", other);
+    Print("[D][CLN] ╚═══════════════════════════════════════════════════════════════╝");
     #endif
     }
     #endif

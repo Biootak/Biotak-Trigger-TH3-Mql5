@@ -1,4 +1,4 @@
-﻿#ifndef OBJECT_CACHE_MQH
+#ifndef OBJECT_CACHE_MQH
 #define OBJECT_CACHE_MQH
 
 #property copyright "Biotak"
@@ -67,9 +67,7 @@ int HashObjectName(const string name) {
     
     g_objectCacheHashInitialized = true;
     g_objectCacheSize = 0;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[OK] Object Cache Hash Initialized (", CACHE_HASH_BUCKETS, " buckets)");
-    #endif
+    _LOG_GATE_I Print("[I][SYNC] Object Cache Hash Initialized (", CACHE_HASH_BUCKETS, " buckets)");
     }
     int CacheFindIndex(const string name) {
     if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
@@ -140,9 +138,7 @@ int HashObjectName(const string name) {
     }
     
     // All probed slots occupied - force eviction
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[WARN] Object cache collision - forcing LRU eviction");
-    #endif
+    _LOG_GATE_W Print("[W][SYNC] Object cache collision - forcing LRU eviction");
     EvictLRUEntry();
     
     // Try again after eviction
@@ -163,9 +159,7 @@ int HashObjectName(const string name) {
     }
     if(lruIdx >= 0) {
         // Evict this entry
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[DEL] Evicting LRU cache entry: '", g_objectCacheHash[lruIdx].name, "'");
-    #endif
+        _LOG_GATE_D Print("[D][SYNC] [DEL] Evicting LRU cache entry: '", g_objectCacheHash[lruIdx].name, "'");
     g_objectCacheHash[lruIdx].name = "";
     g_objectCacheHash[lruIdx].occupied = false;
     g_objectCacheHash[lruIdx].deleted = true;  // Tombstone
@@ -185,9 +179,7 @@ int HashObjectName(const string name) {
     g_objectCacheHash[idx].deleted = true;  // Tombstone sentinel
     g_objectCacheHash[idx].lastAccess = 0;
     g_objectCacheSize--;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[DEL] Removed object from cache (size now: ", g_objectCacheSize, ")");
-    #endif
+    _LOG_GATE_D Print("[D][SYNC] [DEL] Removed object from cache (size now: ", g_objectCacheSize, ")");
     }
     void CacheClear() {
     if(!g_objectCacheHashInitialized) return;
@@ -199,9 +191,7 @@ int HashObjectName(const string name) {
     }
     
     g_objectCacheSize = 0;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[SYNC] Object cache cleared");
-    #endif
+    _LOG_GATE_I Print("[I][SYNC] Object cache cleared");
     }
     bool CacheObjectExists(const string name) {
         int idx = CacheFindIndex(name);
@@ -264,9 +254,7 @@ int HashObjectName(const string name) {
         }
     }
     
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("Object cache rebuilt: ", g_objectCacheSize, " objects cached from ", totalObjects, " total chart objects");
-    #endif
+    _LOG_GATE_D Print("[D][SYNC] Object cache rebuilt: ", g_objectCacheSize, " objects cached from ", totalObjects, " total chart objects");
 }
     int CacheValidate() {
     if(!g_objectCacheHashInitialized) return 0;
@@ -282,9 +270,7 @@ int HashObjectName(const string name) {
         }
     }
     if(invalidCount > 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("Cache validation found ", invalidCount, " invalid entries out of ", g_objectCacheSize);
-        #endif
+        _LOG_GATE_E Print("[E][SYNC] Cache validation found ", invalidCount, " invalid entries out of ", g_objectCacheSize);
     }
     return invalidCount;
 }

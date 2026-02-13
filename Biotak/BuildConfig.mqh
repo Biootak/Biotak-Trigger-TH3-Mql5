@@ -83,6 +83,11 @@
 #endif
     #define INDICATOR_VERSION "3.10"
 
+// Include unified logger (after all legacy macro definitions)
+// Enable legacy bridge: remap DEBUG_PRINT/ATR_PRINT/ERROR_PRINT/WARN_PRINT to LOG_* macros
+#define _LOGGER_OVERRIDE_LEGACY
+#include "Logger.mqh"
+
 void PrintBuildInfo()
 {
         #ifdef ENABLE_DEBUG_LOGS

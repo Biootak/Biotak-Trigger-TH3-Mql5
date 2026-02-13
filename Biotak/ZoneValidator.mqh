@@ -1,4 +1,4 @@
-﻿#property copyright "Copyright 2025, Biotak Project"
+#property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 
 #ifndef ZONE_VALIDATOR_MQH
@@ -58,9 +58,7 @@ bool ValidateStepSize(double stepSize)
 
     double price = GetCachedMarketPrice();
     if(price > 0 && stepSize > price * 0.5) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("ValidateStepSize: large stepSize=", stepSize, " vs price=", price);
-        #endif
+        _LOG_GATE_D Print("[D][ZONE] ValidateStepSize: large stepSize=", stepSize, " vs price=", price);
     }
     return true;
 }
@@ -194,18 +192,13 @@ SZoneValidationResultEnhanced ValidateZoneGeometryEnhanced(
 // Log zone creation failure
 void LogZoneCreationFailure(const SZoneValidationResultEnhanced &v, const string zoneName = "")
 {
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("ZONE FAIL: ", zoneName, " code=", v.errorCode, " ", v.errorMessage,
-          " bars=", v.barsCount, " period=", v.periodSeconds);
-    #endif
+    _LOG_GATE_E Print("[E][ZONE] ZONE FAIL: ", zoneName, " code=", v.errorCode, " ", v.errorMessage);
 }
 
 // Log zone creation success
 void LogZoneCreationSuccess(const string zoneName)
 {
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("ZONE OK: ", zoneName);
-    #endif
+    _LOG_GATE_D Print("[D][ZONE] ZONE OK: ", zoneName);
 }
 
 #endif // ZONE_VALIDATOR_MQH

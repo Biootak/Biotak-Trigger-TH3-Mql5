@@ -5,9 +5,9 @@
 #define DEFAULT_DAYS_TO_KEEP 30
 #define MAX_FILE_SIZE_KB 1024
 #ifdef ENABLE_DEBUG_LOGS
-#define HISTORY_PRINT Print
+#define HISTORY_PRINT if(g_loggerCurrentLevel <= LOG_LEVEL_DEBUG) Print
 #else
-#define HISTORY_PRINT if(0) Print
+#define HISTORY_PRINT if(false) Print
 #endif
     string SanitizeSymbolForFilename(const string symbol) {
         string safe = symbol;

@@ -238,3 +238,6 @@ input int inpSectionGap = 23;             // Gap between ATR and TH sections
 input int inpMaxLabelWidth = 250;
 input ENUM_TIMEFRAMES inpHistoricalTimeframe = PERIOD_CURRENT;
 input int inpHistoricalPeriods = 0;
+
+// === Logging ===
+input ENUM_LOG_LEVEL inpLogLevel = LOG_LEVEL_WARN;   // Minimum log level (TRACE=all, OFF=none)

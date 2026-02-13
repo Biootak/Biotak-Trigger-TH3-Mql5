@@ -92,10 +92,10 @@ void TH3ProfEndTag(const string tag) {
                        ? (((double)g_th3ProfTags[idx].totalUs / (double)g_th3ProfTags[idx].count) / 1000.0)
                        : 0.0;
         double maxMs = (double)g_th3ProfTags[idx].maxUs / 1000.0;
-        Print("[PROF] ", tag,
-              " | count=", g_th3ProfTags[idx].count,
-              " avg=", DoubleToString(avgMs, 3), "ms",
-              " max=", DoubleToString(maxMs, 3), "ms");
+        LOG_I(LOG_CAT_PERF, "[PROF] " + tag +
+              " | count=" + IntegerToString((int)g_th3ProfTags[idx].count) +
+              " avg=" + DoubleToString(avgMs, 3) + "ms" +
+              " max=" + DoubleToString(maxMs, 3) + "ms");
         g_th3ProfTags[idx].lastPrint = now;
     }
 }
