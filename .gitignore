@@ -6,6 +6,9 @@
 *.bak
 *.tmp
 *.temp
+*.autosave
+*.mq5~
+*.mqh~
 
 # Log files
 *.log
@@ -83,6 +86,14 @@ history/
 bases/
 logs/
 tester/
+
+# MetaTrader 5 local data (generated locally, not source)
+MQL5/Logs/
+MQL5/Tester/
+MQL5/Files/
+MQL5/Bases/
+MQL5/Profiles/Logs/
+MQL5/Profiles/Tester/
 
 # Compressed archives (usually temporary)
 *.zip
