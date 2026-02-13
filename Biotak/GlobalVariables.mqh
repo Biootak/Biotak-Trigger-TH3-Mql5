@@ -122,13 +122,11 @@ uint g_isHiddenCacheTime = 0;
         if(symbol == s_cachedInput && s_cachedResult != "") return s_cachedResult;
         s_cachedInput = symbol;
         string safe = symbol;
-    StringReplace(safe, "_", "");  StringReplace(safe, "|", "");
-    StringReplace(safe, ":", "");  StringReplace(safe, "/", "");
-    StringReplace(safe, "\\", ""); StringReplace(safe, " ", "");
-    StringReplace(safe, ".", "");  StringReplace(safe, "-", "");
-    StringReplace(safe, "*", "");  StringReplace(safe, "?", "");
-    StringReplace(safe, "<", "");  StringReplace(safe, ">", "");
-    StringReplace(safe, "\"", ""); StringReplace(safe, "'", "");
+    // Remove all unsafe characters via loop
+    static const string unsafeChars[] = {"_","|",":","/","\\", " ",".","*","?","<",">","\"","'","-"};
+    int numChars = ArraySize(unsafeChars);
+    for(int i = 0; i < numChars; i++)
+        StringReplace(safe, unsafeChars[i], "");
     if(StringLen(safe) == 0) safe = "UNKNOWN";
     if(StringLen(safe) > 50) safe = StringSubstr(safe, 0, 50);
     s_cachedResult = safe;

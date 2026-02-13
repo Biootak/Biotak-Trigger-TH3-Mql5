@@ -53,7 +53,7 @@ bool CanCreateObject()
     // ═══════════════════════════════════════════════════════════════
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
+        Print("[ERR] CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
     Print("   Forcing emergency cleanup...");
     #endif
         
@@ -65,13 +65,13 @@ bool CanCreateObject()
     g_lastObjectCount = totalObjects;
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ FATAL: Cannot free objects (", totalObjects, " remaining)");
+            Print("[ERR] FATAL: Cannot free objects (", totalObjects, " remaining)");
     Print("   Please close some charts or remove other indicators");
     #endif
     return false;
         }
     #ifdef ENABLE_DEBUG_LOGS
-        Print("✅ Emergency cleanup successful: ", cleanedCount, " objects removed");
+        Print("[OK] Emergency cleanup successful: ", cleanedCount, " objects removed");
     Print("   Current count: ", totalObjects);
     #endif
     }
@@ -84,7 +84,7 @@ bool CanCreateObject()
         static datetime s_lastWarning = 0;
     if(currentTime - s_lastWarning > 60) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ WARNING: Approaching object limit (", totalObjects, "/", MAX_SAFE_OBJECTS, ")");
+            Print("[WARN] WARNING: Approaching object limit (", totalObjects, "/", MAX_SAFE_OBJECTS, ")");
     Print("   Consider reducing Max Levels in settings");
     #endif
     s_lastWarning = currentTime;
@@ -107,7 +107,7 @@ int EmergencyCleanupObjects()
     // ═══════════════════════════════════════════════════════════════
     if(currentTime - g_lastEmergencyCleanup < 30) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ EmergencyCleanup: Too soon since last cleanup, skipping");
+        Print("[WARN] EmergencyCleanup: Too soon since last cleanup, skipping");
     #endif
     return 0;
     }
@@ -116,7 +116,7 @@ int EmergencyCleanupObjects()
     int deletedCount = 0;
     datetime cutoffTime = currentTime - EMERGENCY_CLEANUP_AGE;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🧹 Emergency cleanup starting...");
+    Print("[CLEAN] Emergency cleanup starting...");
     Print("   Cutoff time: ", TimeToString(cutoffTime, TIME_DATE|TIME_MINUTES));
     #endif
     
@@ -168,7 +168,7 @@ int EmergencyCleanupObjects()
     totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Still critical after Phase 1, starting Phase 2...");
+        Print("[WARN] Still critical after Phase 1, starting Phase 2...");
     #endif
     int phase2Deleted = 0;
         
@@ -180,7 +180,7 @@ int EmergencyCleanupObjects()
         
         // Delete all labels except mode labels
         // GOLD FIX: Cache ObjectsTotal outside loop
-        int totalObjects = ObjectsTotal(0, -1, -1);
+        totalObjects = ObjectsTotal(0, -1, -1);
     for(int i = totalObjects - 1; i >= 0; i--)
         {
         string objName = ObjectName(0, i, -1, -1);
@@ -218,7 +218,7 @@ int EmergencyCleanupObjects()
     // ═══════════════════════════════════════════════════════════════
     ChartRedraw();
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Emergency cleanup complete: ", deletedCount, " total objects removed");
+    Print("[OK] Emergency cleanup complete: ", deletedCount, " total objects removed");
     #endif
     return deletedCount;
 }
@@ -253,7 +253,7 @@ void CleanupObjectCountManager()
     g_lastObjectCount = 0;
     g_lastEmergencyCleanup = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ ObjectCountManager cleaned up");
+    Print("[OK] ObjectCountManager cleaned up");
     #endif
     }
 

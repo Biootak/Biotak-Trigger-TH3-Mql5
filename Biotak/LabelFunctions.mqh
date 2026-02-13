@@ -1,4 +1,4 @@
-﻿
+
 bool DrawMainLevels(const string prefix) {
     // Skip drawing High/Low lines when Custom Price mode is active
     // In Custom Price mode, user defines their own reference point
@@ -71,7 +71,7 @@ bool DrawMainLevels(const string prefix) {
         #endif
         return;
     }
-    const double pipsPerPoint = s_cachedPointValue / s_cachedPipSize;
+    const double pointsPerPip = s_cachedPointValue / s_cachedPipSize;
     string prefix=objectPrefix+"TH_Level_";
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     double timeframePercentage=GetTimeframeTH();
@@ -144,16 +144,16 @@ bool DrawMainLevels(const string prefix) {
     // Validate step sizes to prevent infinite loops
     if(thStepSizePoints <= 0 || thStepSizePoints < s_cachedPointValue) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawTHLevels: Invalid thStepSizePoints=", thStepSizePoints, " (must be > Point=", s_cachedPointValue, ")");
+        Print("? DrawTHLevels: Invalid thStepSizePoints=", thStepSizePoints, " (must be > Point=", s_cachedPointValue, ")");
     #endif
     return;
     }
     if (thStepSizePoints <= 0 || structureTFTHStepSizePoints <= 0 || doubleStructureTFTHStepSizePoints <= 0) return;
     
-    // ═══════════════════════════════════════════════════════════════════
+    // -------------------------------------------------------------------
     // FIX: Use configurable Base Multiplier instead of hardcoded values
     // Matches Java implementation in LevelDrawer.java (getPathForStep)
-    // ═══════════════════════════════════════════════════════════════════
+    // -------------------------------------------------------------------
     int baseMultiplier = GetValidatedBaseMultiplier(); // Use central validation
     
     // Get cached intervals for the base multiplier (base^1, base^2, base^3, base^4, base^5)
@@ -164,16 +164,16 @@ bool DrawMainLevels(const string prefix) {
     int intervalSize = ArraySize(intervals);
     if(intervalSize == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawTHLevels: Empty intervals array, cannot draw structure levels");
+        Print("? DrawTHLevels: Empty intervals array, cannot draw structure levels");
     #endif
     return;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("📊 DrawTHLevels using Base Multiplier: ", baseMultiplier,
-          " → L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
+    Print("?? DrawTHLevels using Base Multiplier: ", baseMultiplier,
+          " ? L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
           ", L4=", intervals[3], ", L5=", intervals[4]);
     #endif
-    // ═══════════════════════════════════════════════════════════════════
+    // -------------------------------------------------------------------
     
     // Get midpoint price using utility function
     double midpointPrice = GetMidpointPrice(g_thStartPointType);
@@ -232,10 +232,10 @@ bool DrawMainLevels(const string prefix) {
         cachedStructTF[3] = GetShortTimeframeName(GetTimeframeForStructureLevel(4));
         cachedStructTF[4] = GetShortTimeframeName(GetTimeframeForStructureLevel(5));
         
-        // ═══════════════════════════════════════════════════════════════
+        // ---------------------------------------------------------------
         // ZONE SUPPORT: Tracking variables for Structure/Trigger separation
         
-        // ═══════════════════════════════════════════════════════════════
+        // ---------------------------------------------------------------
         double lastDrawnPriceAbove = midpointPrice;  // Track last structure level
         double lastTriggerPriceAbove = 0;            // Track last trigger level
         int zoneCountAbove = 0;
@@ -259,7 +259,7 @@ bool DrawMainLevels(const string prefix) {
     ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
     int lineWidth;
             
-            // PERFORMANCE FIX: Early viewport culling — skip ALL string work for off-screen levels
+            // PERFORMANCE FIX: Early viewport culling � skip ALL string work for off-screen levels
             bool isAboveVisible = (priceLevelAbove >= vpBottom && priceLevelAbove <= vpTop);
             
             // Determine which level type this step is (needed for both counting and drawing)
@@ -305,35 +305,35 @@ bool DrawMainLevels(const string prefix) {
                 switch(structLevel) {
                     case 5: {
     lineNameAbove = prefix + "StructureLevel5_Up_" + IntegerToString(stepCountAbove / intervals[4]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[4]);
     lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
     break;
                     }
                     case 4: {
                         lineNameAbove = prefix + "StructureLevel4_Up_" + IntegerToString(stepCountAbove / intervals[3]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[3]);
     lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
     break;
                     }
                     case 3: {
                         lineNameAbove = prefix + "StructureLevel3_Up_" + IntegerToString(stepCountAbove / intervals[2]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, digits), basisLabel, tripleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, digits), basisLabel, tripleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[2]);
     lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
     break;
                     }
                     case 2: {
                         lineNameAbove = prefix + "StructureLevel2_Up_" + IntegerToString(stepCountAbove / intervals[1]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, digits), basisLabel, doubleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, digits), basisLabel, doubleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[1]);
     lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
     break;
                     }
                     default: { // case 1
                         lineNameAbove = prefix + "StructureLevel1_Up_" + IntegerToString(stepCountAbove / intervals[0]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, digits), basisLabel, structureTFTHStepSizePoints * pipsPerPoint);
+    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, digits), basisLabel, structureTFTHStepSizePoints * pointsPerPip);
     levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[0]);
     lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
     break;
@@ -344,8 +344,8 @@ bool DrawMainLevels(const string prefix) {
                 lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCountAbove);
     tooltipAbove = StringFormat("[%s] +%d | Price: %s | L: %.1f, S: %.1f pips",
                     shortCurrentTFCached, stepCountAbove, DoubleToString(priceLevelAbove, digits),
-                    cachedLongStep * thStepSizePoints * pipsPerPoint,
-                    cachedShortStep * thStepSizePoints * pipsPerPoint);
+                    cachedLongStep * thStepSizePoints * pointsPerPip,
+                    cachedShortStep * thStepSizePoints * pointsPerPip);
     levelInfoAbove = StringFormat("%s +%d", shortCurrentTFCached, stepCountAbove);
     lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
             }
@@ -354,13 +354,13 @@ bool DrawMainLevels(const string prefix) {
     CreateTHLineObject(lineNameAbove, priceLevelAbove, lineColor, lineStyle, lineWidth, tooltipAbove, inpTHLineObjectType, false);
     if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, lineColor, levelInfoAbove);
             
-            // ═══════════════════════════════════════════════════════════
+            // -----------------------------------------------------------
             // ZONE SUPPORT: Create zone between levels
             // UNIFIED APPROACH: Use CreateZoneWithSmartFallback
             
             // Uses GetHighestStructureLevel for clean logic
             // Pass fixed step size for consistent zone height
-            // ═══════════════════════════════════════════════════════════
+            // -----------------------------------------------------------
             if(inpShowMidZones) {
                 // PERF: Reuse already-computed structLevel instead of calling GetHighestStructureLevel again
     bool isStructureLevel = (structLevel > 0 && inpShowStructure);
@@ -386,10 +386,10 @@ bool DrawMainLevels(const string prefix) {
     levelCountAbove++;
         }
         
-        // ═══════════════════════════════════════════════════════════════
+        // ---------------------------------------------------------------
         // ZONE SUPPORT: Tracking variables for levels below
         
-        // ═══════════════════════════════════════════════════════════════
+        // ---------------------------------------------------------------
         double lastDrawnPriceBelow = midpointPrice;  // Track last structure level
         double lastTriggerPriceBelow = 0;            // Track last trigger level
         int zoneCountBelow = 0;
@@ -413,7 +413,7 @@ bool DrawMainLevels(const string prefix) {
     ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
     int lineWidth;
             
-            // PERFORMANCE FIX: Early viewport culling — skip ALL string work for off-screen levels
+            // PERFORMANCE FIX: Early viewport culling � skip ALL string work for off-screen levels
             bool isBelowVisible = (priceLevelBelow >= vpBottom && priceLevelBelow <= vpTop);
             
             // Determine level type (needed for counting even off-screen)
@@ -453,35 +453,35 @@ bool DrawMainLevels(const string prefix) {
                 switch(structLevel) {
                     case 5: {
                         lineNameBelow = prefix + "StructureLevel5_Down_" + IntegerToString(stepCountBelow / intervals[4]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4]);
     lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
     break;
                     }
                     case 4: {
                         lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
     lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
     break;
                     }
                     case 3: {
                         lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, digits), basisLabel, tripleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, digits), basisLabel, tripleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
     lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
     break;
                     }
                     case 2: {
                         lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, digits), basisLabel, doubleStructureTFTHStepSizePoints * pipsPerPoint);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, digits), basisLabel, doubleStructureTFTHStepSizePoints * pointsPerPip);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
     lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
     break;
                     }
                     default: {
                         lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, digits), basisLabel, structureTFTHStepSizePoints * pipsPerPoint);
+    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, digits), basisLabel, structureTFTHStepSizePoints * pointsPerPip);
     levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
     lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
     break;
@@ -491,8 +491,8 @@ bool DrawMainLevels(const string prefix) {
                 lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCountBelow);
     tooltipBelow = StringFormat("[%s] -%d | Price: %s | L: %.1f, S: %.1f pips",
                     shortCurrentTFCached, stepCountBelow, DoubleToString(priceLevelBelow, digits),
-                    cachedLongStep * thStepSizePoints * pipsPerPoint,
-                    cachedShortStep * thStepSizePoints * pipsPerPoint);
+                    cachedLongStep * thStepSizePoints * pointsPerPip,
+                    cachedShortStep * thStepSizePoints * pointsPerPip);
     levelInfoBelow = StringFormat("%s -%d", shortCurrentTFCached, stepCountBelow);
     lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
             }
@@ -501,13 +501,13 @@ bool DrawMainLevels(const string prefix) {
     CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
     if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
             
-            // ═══════════════════════════════════════════════════════════
+            // -----------------------------------------------------------
             // ZONE SUPPORT: Create zone between levels
             // UNIFIED APPROACH: Use CreateZoneWithSmartFallback
             
             // Uses GetHighestStructureLevel for clean logic
             // Pass fixed step size for consistent zone height
-            // ═══════════════════════════════════════════════════════════
+            // -----------------------------------------------------------
             if(inpShowMidZones) {
                 // PERF: Reuse already-computed structLevel instead of calling GetHighestStructureLevel again
     bool isStructureLevel = (structLevel > 0 && inpShowStructure);
@@ -532,7 +532,7 @@ bool DrawMainLevels(const string prefix) {
         }
     #ifdef ENABLE_DEBUG_LOGS
         if(inpShowMidZones) {
-            Print("✅ DrawTHLevels: Drew ", zoneCountAbove, " zones above, ", 
+            Print("? DrawTHLevels: Drew ", zoneCountAbove, " zones above, ", 
                   zoneCountBelow, " zones below");
         }
     #endif
@@ -543,6 +543,13 @@ bool DrawMainLevels(const string prefix) {
     void SetLabelFont(const string name) {
     ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpFontSize);
+}
+// Helper: Initialize common properties for an ATR chart label
+void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_POINT anchor) {
+    ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
+    ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
+    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
 }
     string GetBaseTimeframeName(const string fullName) {
         int plusPos = StringFind(fullName, "+");
@@ -574,13 +581,13 @@ bool DrawMainLevels(const string prefix) {
     string mainText = StringFormat("%s: %.1f", timeframeName, atrPips);
     string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
 
-    // PERF: Check if objects already exist with correct text — skip redundant ObjectSet calls
+    // PERF: Check if objects already exist with correct text � skip redundant ObjectSet calls
     bool mainExists = (ObjectFind(0, mainObjName) >= 0);
     bool stepsExists = (ObjectFind(0, stepsObjName) >= 0);
     bool targetsExists = (inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0);
 
     if(mainExists && stepsExists) {
-        // Objects already configured — only update text/color if changed
+        // Objects already configured � only update text/color if changed
         string curMainText = ObjectGetString(0, mainObjName, OBJPROP_TEXT);
         string curStepsText = ObjectGetString(0, stepsObjName, OBJPROP_TEXT);
         bool textChanged = (curMainText != mainText || curStepsText != stepsText);
@@ -655,19 +662,10 @@ bool DrawMainLevels(const string prefix) {
     
     ENUM_BASE_CORNER corner = CORNER_LEFT_UPPER;
     ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
-    ObjectSetInteger(0, mainObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, mainObjName, OBJPROP_ANCHOR, anchor);
-    ObjectSetInteger(0, stepsObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, stepsObjName, OBJPROP_ANCHOR, anchor);
-    ObjectSetInteger(0, mainObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, stepsObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, mainObjName, OBJPROP_HIDDEN, false);
-    ObjectSetInteger(0, stepsObjName, OBJPROP_HIDDEN, false);
+    InitATRChartLabel(mainObjName, corner, anchor);
+    InitATRChartLabel(stepsObjName, corner, anchor);
     if(inpShowATRTargets) {
-        ObjectSetInteger(0, targetsObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_ANCHOR, anchor);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_HIDDEN, false);
+        InitATRChartLabel(targetsObjName, corner, anchor);
     }
     int labelXDistance = MathAbs(xPos);
     int bottomPadding = 20;
@@ -741,7 +739,7 @@ bool DrawMainLevels(const string prefix) {
         if(!anyChanged && MathAbs(pips - s_lastATRPips[i]) > 0.05) anyChanged = true;
     }
     if(!anyChanged) {
-        // ATR values unchanged — skip expensive object operations
+        // ATR values unchanged � skip expensive object operations
         TH3_PROF_END(ATRLabels);
         return;
     }
@@ -761,7 +759,7 @@ bool DrawMainLevels(const string prefix) {
         clrBlack         // MN1
     };
     
-    // Layout setup — ATR renders FIRST (at the top)
+    // Layout setup � ATR renders FIRST (at the top)
     bool isVerticalLayout = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL);
     int rowSpacing = inpLabelRowGap;
     int horizontalPadding = inpLabelColumnGap;
@@ -988,7 +986,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
     if(mainCreated) SetLabelFont(mainObjName);
     if(stepsCreated) SetLabelFont(stepsObjName);
-    // PERF: Static properties only on creation — corner, anchor, selectable, hidden never change
+    // PERF: Static properties only on creation � corner, anchor, selectable, hidden never change
     ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
     ENUM_ANCHOR_POINT anchor = ANCHOR_LEFT_UPPER;
     if(targetsCreated && inpShowTHTargets) {

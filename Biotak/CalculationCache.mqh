@@ -74,7 +74,7 @@ struct STHCacheEntry {
         static int s_thCacheHits = 0;
     s_thCacheHits++;
     if(s_thCacheHits % 100 == 0) {
-            Print("✅ TH Cache Hit #", s_thCacheHits);
+            Print("[OK] TH Cache Hit #", s_thCacheHits);
         }
     #endif
     return g_thCache.result;
@@ -97,7 +97,7 @@ struct STHCacheEntry {
     g_thCache.result = 0.0;
     g_thCache.lastUpdate = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 TH Cache Invalidated");
+    Print("[SYNC] TH Cache Invalidated");
     #endif
     }
     double GetCachedFactorStepSize(double highPrice, double lowPrice, double factor) {    if(!g_factorCache.valid) {
@@ -112,7 +112,7 @@ struct STHCacheEntry {
         static int s_factorCacheHits = 0;
     s_factorCacheHits++;
     if(s_factorCacheHits % 50 == 0) {
-            Print("✅ Factor Cache Hit #", s_factorCacheHits);
+            Print("[OK] Factor Cache Hit #", s_factorCacheHits);
         }
     #endif
     return g_factorCache.stepSize;
@@ -140,7 +140,7 @@ struct STHCacheEntry {
     g_factorCache.stepSize = 0.0;
     g_factorCache.lastUpdate = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Factor Cache Invalidated");
+    Print("[SYNC] Factor Cache Invalidated");
     #endif
     }
     string GetCachedFractalTimeframe(int period) {
@@ -172,7 +172,7 @@ struct STHCacheEntry {
     g_timeframeCache.periodSeconds = -1;
     g_timeframeCache.lastUpdate = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Timeframe Cache Invalidated");
+    Print("[SYNC] Timeframe Cache Invalidated");
     #endif
     }
     int GetCachedPeriodSeconds(int period) {
@@ -186,7 +186,7 @@ struct STHCacheEntry {
     g_cachedPeriodSeconds = periodSeconds;
     g_cachedPeriodSecondsUpdate = TimeCurrent();
     #ifdef ENABLE_DEBUG_LOGS
-    Print("💾 PeriodSeconds Cached: Period=", period, ", Seconds=", periodSeconds);
+    Print("[SAVE] PeriodSeconds Cached: Period=", period, ", Seconds=", periodSeconds);
     #endif
     }
     void InvalidatePeriodSecondsCache() {
@@ -194,7 +194,7 @@ struct STHCacheEntry {
     g_cachedPeriodSeconds = -1;
     g_cachedPeriodSecondsUpdate = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 PeriodSeconds Cache Invalidated");
+    Print("[SYNC] PeriodSeconds Cache Invalidated");
     #endif
     }
     bool GetCachedZoneGeometry(double topPrice, double bottomPrice, 
@@ -214,7 +214,7 @@ struct STHCacheEntry {
         static int s_geometryCacheHits = 0;
     s_geometryCacheHits++;
     if(s_geometryCacheHits % 50 == 0) {
-            Print("✅ Geometry Cache Hit #", s_geometryCacheHits);
+            Print("[OK] Geometry Cache Hit #", s_geometryCacheHits);
         }
     #endif
     return true;
@@ -243,7 +243,7 @@ struct STHCacheEntry {
     g_geometryCache.endTime = 0;
     g_geometryCache.lastUpdate = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Geometry Cache Invalidated");
+    Print("[SYNC] Geometry Cache Invalidated");
     #endif
     }
     double GetCachedExtensionMultiplier(int period, int periodSeconds) {
@@ -256,7 +256,7 @@ struct STHCacheEntry {
     static int s_extensionCacheHits = 0;
     s_extensionCacheHits++;
     if(s_extensionCacheHits % 50 == 0) {
-        Print("✅ Extension Multiplier Cache Hit #", s_extensionCacheHits);
+        Print("[OK] Extension Multiplier Cache Hit #", s_extensionCacheHits);
     }
     #endif
     return g_extensionMultiplierCache.multiplier;
@@ -275,7 +275,7 @@ struct STHCacheEntry {
     g_extensionMultiplierCache.multiplier = 0.0;
     g_extensionMultiplierCache.lastUpdate = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Extension Multiplier Cache Invalidated");
+    Print("[SYNC] Extension Multiplier Cache Invalidated");
     #endif
     }
     void InvalidateTimeframeDependentCaches() {
@@ -286,14 +286,14 @@ struct STHCacheEntry {
     InvalidateGeometryCache();
     InvalidateExtensionMultiplierCache();
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Timeframe-Dependent Caches Invalidated");
+    Print("[SYNC] Timeframe-Dependent Caches Invalidated");
     #endif
     }
     void InvalidateSettingsDependentCaches() {
     InvalidateFactorCache();
     InvalidateGeometryCache();
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Settings-Dependent Caches Invalidated");
+    Print("[SYNC] Settings-Dependent Caches Invalidated");
     #endif
     }
     string GetCacheStatusSummary() {

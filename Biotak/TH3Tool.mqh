@@ -5,6 +5,27 @@
 #define ABCD_DEBOUNCE_MS 300
 
 //+------------------------------------------------------------------+
+//| Helper: Create or update a trend line object                     |
+//+------------------------------------------------------------------+
+void CreateOrUpdateTrendLine(const string name, datetime t1, double p1,
+                             datetime t2, double p2, color clr, int width,
+                             ENUM_LINE_STYLE style, bool rayRight, bool back)
+{
+    if(ObjectFind(0, name) < 0) {
+        ObjectCreate(0, name, OBJ_TREND, 0, t1, p1, t2, p2);
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, rayRight);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_BACK, back);
+    } else {
+        ObjectMove(0, name, 0, t1, p1);
+        ObjectMove(0, name, 1, t2, p2);
+    }
+}
+
+//+------------------------------------------------------------------+
 //| Set active AB=CD pattern (for info label display)                |
 //+------------------------------------------------------------------+
 void SetActiveABCDPattern(string patternName)
@@ -119,7 +140,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             ObjectSetInteger(0, pointName, OBJPROP_BACK, false);
             ObjectSetInteger(0, pointName, OBJPROP_ZORDER, 10);
             ObjectSetString(0, pointName, OBJPROP_TOOLTIP,
-                            "📍 Point " + pointNames[i] + " | Drag to adjust");
+                            "[PIN] Point " + pointNames[i] + " | Drag to adjust");
         } else {
             ObjectMove(0, pointName, 0, pointTimes[i], pointPrice);
         }
@@ -133,33 +154,11 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 
     // Line AB
     string lineAB = mainObjName + "_Line_AB";
-    if(ObjectFind(0, lineAB) < 0) {
-        ObjectCreate(0, lineAB, OBJ_TREND, 0, tA, pA, tB, pB);
-        ObjectSetInteger(0, lineAB, OBJPROP_COLOR, inpABCDLineColor);
-        ObjectSetInteger(0, lineAB, OBJPROP_WIDTH, inpABCDWidth);
-        ObjectSetInteger(0, lineAB, OBJPROP_STYLE, STYLE_SOLID);
-        ObjectSetInteger(0, lineAB, OBJPROP_RAY_RIGHT, false);
-        ObjectSetInteger(0, lineAB, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, lineAB, OBJPROP_BACK, false);
-    } else {
-        ObjectMove(0, lineAB, 0, tA, pA);
-        ObjectMove(0, lineAB, 1, tB, pB);
-    }
+    CreateOrUpdateTrendLine(lineAB, tA, pA, tB, pB, inpABCDLineColor, inpABCDWidth, STYLE_SOLID, false, false);
 
     // Line BC
     string lineBC = mainObjName + "_Line_BC";
-    if(ObjectFind(0, lineBC) < 0) {
-        ObjectCreate(0, lineBC, OBJ_TREND, 0, tB, pB, tC, pC);
-        ObjectSetInteger(0, lineBC, OBJPROP_COLOR, clrGray);
-        ObjectSetInteger(0, lineBC, OBJPROP_WIDTH, 1);
-        ObjectSetInteger(0, lineBC, OBJPROP_STYLE, STYLE_DOT);
-        ObjectSetInteger(0, lineBC, OBJPROP_RAY_RIGHT, false);
-        ObjectSetInteger(0, lineBC, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, lineBC, OBJPROP_BACK, true);
-    } else {
-        ObjectMove(0, lineBC, 0, tB, pB);
-        ObjectMove(0, lineBC, 1, tC, pC);
-    }
+    CreateOrUpdateTrendLine(lineBC, tB, pB, tC, pC, clrGray, 1, STYLE_DOT, false, true);
 
     // Target levels (Step1, Step3, Step5, Step7) from C
     string targetNames[4] = {"Step1", "Step3", "Step5", "Step7"};
@@ -218,31 +217,10 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         string zoneLowerName = mainObjName + "_ZoneLower_" + IntegerToString(i + 1);
 
         if(inpTH3ZoneStyle == TH3_ZONE_LINES) {
-            if(ObjectFind(0, zoneUpperName) < 0) {
-                ObjectCreate(0, zoneUpperName, OBJ_TREND, 0, startTime, upperZone, endTime, upperZone);
-                ObjectSetInteger(0, zoneUpperName, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, zoneUpperName, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
-                ObjectSetInteger(0, zoneUpperName, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, zoneUpperName, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
-                ObjectSetInteger(0, zoneUpperName, OBJPROP_SELECTABLE, false);
-                ObjectSetInteger(0, zoneUpperName, OBJPROP_BACK, true);
-            } else {
-                ObjectMove(0, zoneUpperName, 0, startTime, upperZone);
-                ObjectMove(0, zoneUpperName, 1, endTime, upperZone);
-            }
-
-            if(ObjectFind(0, zoneLowerName) < 0) {
-                ObjectCreate(0, zoneLowerName, OBJ_TREND, 0, startTime, lowerZone, endTime, lowerZone);
-                ObjectSetInteger(0, zoneLowerName, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, zoneLowerName, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
-                ObjectSetInteger(0, zoneLowerName, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, zoneLowerName, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
-                ObjectSetInteger(0, zoneLowerName, OBJPROP_SELECTABLE, false);
-                ObjectSetInteger(0, zoneLowerName, OBJPROP_BACK, true);
-            } else {
-                ObjectMove(0, zoneLowerName, 0, startTime, lowerZone);
-                ObjectMove(0, zoneLowerName, 1, endTime, lowerZone);
-            }
+            CreateOrUpdateTrendLine(zoneUpperName, startTime, upperZone, endTime, upperZone,
+                                    zoneColor, inpTH3ZoneBorderWidth, inpTH3ZoneBorderStyle, inpABCDExtendCD, true);
+            CreateOrUpdateTrendLine(zoneLowerName, startTime, lowerZone, endTime, lowerZone,
+                                    zoneColor, inpTH3ZoneBorderWidth, inpTH3ZoneBorderStyle, inpABCDExtendCD, true);
         }
     }
 

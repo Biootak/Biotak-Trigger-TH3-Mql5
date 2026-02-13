@@ -22,7 +22,7 @@
     // Use epsilon for floating-point comparison
     if(price < EPSILON_PRICE || percentage < EPSILON_PERCENTAGE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTH: Invalid input - price=", DoubleToString(price, 10), 
+        Print("[ERR] CalculateTH: Invalid input - price=", DoubleToString(price, 10), 
               ", percentage=", DoubleToString(percentage, 10));
     #endif
     return 0;
@@ -31,7 +31,7 @@
     // SECURITY: Prevent overflow with proper bounds
     if(price > MAX_SAFE_PRICE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTH: Price too large (", DoubleToString(price, 5), "), exceeds MAX_SAFE_PRICE");
+        Print("[ERR] CalculateTH: Price too large (", DoubleToString(price, 5), "), exceeds MAX_SAFE_PRICE");
     #endif
     return 0;
     }
@@ -39,7 +39,7 @@
     // VALIDATION: Digits range check
     if(digits < 0 || digits > 8) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTH: Invalid digits (", digits, "), must be 0-8");
+        Print("[ERR] CalculateTH: Invalid digits (", digits, "), must be 0-8");
     #endif
     return 0;
     }
@@ -47,13 +47,13 @@
     // VALIDATION: Percentage range with hard limit
     if(percentage > MAX_SAFE_PERCENTAGE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTH: Percentage too large (", DoubleToString(percentage, 3), 
+        Print("[ERR] CalculateTH: Percentage too large (", DoubleToString(percentage, 3), 
               "%), exceeds MAX_SAFE_PERCENTAGE");
     #endif
     return 0;
     }
     
-    // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
+    // [OK] OPTIMIZATION: Check calculation cache before performing arithmetic
     double cachedResult = GetCachedTHCalculation(price, percentage, digits);
     if(cachedResult > 0) {
         return cachedResult;
@@ -85,7 +85,7 @@
         return CalculateTimeframeTH(GetFractalTimeframeForCurrent());
 }
     double CalculateTimeframeTH(const string timeframe) {
-    // ✅ OPTIMIZATION: Check cache first for fractal percentage
+    // [OK] OPTIMIZATION: Check cache first for fractal percentage
     int currentPeriod = GetCachedPeriod();
     double cachedPercentage = GetCachedFractalPercentage(currentPeriod);
     if(cachedPercentage > 0) {
@@ -115,7 +115,7 @@
     return fallbackPercentage;
 }
 
-// ✅ FIXED: Removed duplicate constant definitions
+// [OK] FIXED: Removed duplicate constant definitions
 // Constants are now in MathConstants.mqh:
 // - SS_MULTIPLIER (1.5)
 // - LS_MULTIPLIER (2.0)
@@ -175,14 +175,14 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     // ═══════════════════════════════════════════════════════════════
     if(highPrice < EPSILON_PRICE || lowPrice < EPSILON_PRICE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, Digits), 
+        Print("[ERR] CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, Digits), 
               ", Low=", DoubleToString(lowPrice, Digits));
     #endif
     return 0;
     }
     if(highPrice <= lowPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, Digits), 
+        Print("[ERR] CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, Digits), 
               ") must be greater than Low (", DoubleToString(lowPrice, Digits), ")");
     #endif
     return 0;
@@ -195,7 +195,7 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     double minRange = GetCachedPoint() * 10; // At least 10 pips
     if(range < minRange) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits), 
+        Print("[ERR] CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits), 
               ") - minimum ", DoubleToString(minRange, Digits), " required");
     #endif
     return 0;
@@ -206,20 +206,20 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     // ═══════════════════════════════════════════════════════════════
     if(factor < MIN_FACTOR_VALUE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Factor too small (", DoubleToString(factor, 2), 
+        Print("[ERR] CalculateFactorStepSize: Factor too small (", DoubleToString(factor, 2), 
               ") - minimum ", DoubleToString(MIN_FACTOR_VALUE, 2), " required");
     #endif
     return 0;
     }
     if(factor > MAX_FACTOR_VALUE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Factor too large (", DoubleToString(factor, 2), 
+        Print("[ERR] CalculateFactorStepSize: Factor too large (", DoubleToString(factor, 2), 
               ") - maximum ", DoubleToString(MAX_FACTOR_VALUE, 2), " allowed");
     #endif
     return 0;
     }
     
-    // ✅ OPTIMIZATION: Check calculation cache before performing arithmetic
+    // [OK] OPTIMIZATION: Check calculation cache before performing arithmetic
     double cachedResult = GetCachedFactorStepSize(highPrice, lowPrice, factor);
     if(cachedResult > 0) {
         return cachedResult;
@@ -234,7 +234,7 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     // EPSILON_GENERAL (1e-9) is too small and can cause precision loss
     if(divisions < MIN_SAFE_DIVISIONS) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Divisions too small (", DoubleToString(divisions, 10), 
+        Print("[ERR] CalculateFactorStepSize: Divisions too small (", DoubleToString(divisions, 10), 
               ") - minimum required: ", DoubleToString(MIN_SAFE_DIVISIONS, 10));
     #endif
     return 0;
@@ -243,7 +243,7 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     // Validate divisions result for overflow
     if(divisions > 1000000.0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Invalid divisions calculated (too large): ", divisions);
+        Print("[ERR] CalculateFactorStepSize: Invalid divisions calculated (too large): ", divisions);
     #endif
     return 0;
     }
@@ -254,7 +254,7 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     // Validate SafeDivide result
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: SafeDivide returned invalid result");
+        Print("[ERR] CalculateFactorStepSize: SafeDivide returned invalid result");
     #endif
     return 0;
     }
@@ -264,19 +264,19 @@ double CalculateSharedPatternStep(const double currentStructure, const double cu
     // ═══════════════════════════════════════════════════════════════
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Invalid step size result: ", stepSize);
+        Print("[ERR] CalculateFactorStepSize: Invalid step size result: ", stepSize);
     #endif
     return 0;
     }
     if(stepSize < GetCachedPoint() * 0.1) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
+        Print("[ERR] CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
     #endif
     return 0;
     }
     if(stepSize > range) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateFactorStepSize: Step size (", stepSize, ") exceeds range (", range, ")");
+        Print("[ERR] CalculateFactorStepSize: Step size (", stepSize, ") exceeds range (", range, ")");
     #endif
     return 0;
     }

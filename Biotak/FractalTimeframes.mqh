@@ -17,17 +17,21 @@
     if(currentTimeframe=="MN1") return "D45+H12+M16";
     return "UNKNOWN";
 }
-    string GetStructureTimeframeForCurrent() {
-    // OPTIMIZATION: Cache GetFractalTimeframeForCurrent() result before loop
-    string currentFractalTF = GetFractalTimeframeForCurrent();
-    int currentIndex = -1;
+
+// Shared helper: find index of a timeframe in FRACTAL_TIMEFRAMES array
+int FindFractalTimeframeIndex(const string timeframe) {
     int arraySize = ArraySize(FRACTAL_TIMEFRAMES);
     for(int i = 0; i < arraySize; i++) {
-        if(FRACTAL_TIMEFRAMES[i] == currentFractalTF) {
-            currentIndex = i;
-    break;
-        }
+        if(FRACTAL_TIMEFRAMES[i] == timeframe)
+            return i;
     }
+    return -1;
+}
+
+    string GetStructureTimeframeForCurrent() {
+    string currentFractalTF = GetFractalTimeframeForCurrent();
+    int currentIndex = FindFractalTimeframeIndex(currentFractalTF);
+    int arraySize = ArraySize(FRACTAL_TIMEFRAMES);
     if(currentIndex != -1 && currentIndex + 2 < arraySize) {
         return FRACTAL_TIMEFRAMES[currentIndex + 2];
     }
@@ -61,13 +65,7 @@
     return EMPTY_VALUE;
     }
     // Debug: Print("GetLowerTimeframeTH - Looking for timeframe: ", currentTimeframe, " with offset: ", offset);
-    int matchIndex = -1;
-    for(int i=0; i<arraySize; i++) {
-        if(FRACTAL_TIMEFRAMES[i] == currentTimeframe) {
-            matchIndex = i;
-    break;
-        }
-    }
+    int matchIndex = FindFractalTimeframeIndex(currentTimeframe);
     if(matchIndex == -1) {
         DEBUG_PRINTF("GetLowerTimeframeTH - Error: No matching timeframe found for: ", currentTimeframe);
     return EMPTY_VALUE;
@@ -96,12 +94,9 @@
 
 // Get percentage for a specific timeframe (matching MotiveWave implementation)
 double GetTimeframePercentage(const string timeframe) {
-        int arraySize = ArraySize(FRACTAL_TIMEFRAMES);
-    for(int i = 0; i < arraySize; i++) {
-        if(FRACTAL_TIMEFRAMES[i] == timeframe) {
-        return MODIFIED_FRACTAL_PERCENTAGES[i];
-        }
-    }
+    int idx = FindFractalTimeframeIndex(timeframe);
+    if(idx >= 0)
+        return MODIFIED_FRACTAL_PERCENTAGES[idx];
     // Default fallback
     return 1.0;
 }
@@ -137,13 +132,7 @@ string GetTimeframeForStructureLevel(int level) {
     if(arraySize <= 0) return currentTF;
     
     // Find current TF index
-    int currentIndex = -1;
-    for(int i = 0; i < arraySize; i++) {
-        if(FRACTAL_TIMEFRAMES[i] == currentTF) {
-            currentIndex = i;
-    break;
-        }
-    }
+    int currentIndex = FindFractalTimeframeIndex(currentTF);
     if(currentIndex < 0) return currentTF;
     
     // L1 = current TF, L2 = current + 1, etc.
@@ -165,7 +154,7 @@ string GetOverlapLevelsInfo(int step, const int &intervals[]) {
     int arraySize = ArraySize(intervals);
     if(arraySize != 5) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetOverlapLevelsInfo: Invalid intervals array size=", arraySize);
+        Print("[ERR] GetOverlapLevelsInfo: Invalid intervals array size=", arraySize);
     #endif
     return "";
     }
@@ -189,7 +178,7 @@ string GetOverlapTimeframesInfo(int step, const int &intervals[]) {
     int arraySize = ArraySize(intervals);
     if(arraySize != 5) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetOverlapTimeframesInfo: Invalid intervals array size=", arraySize);
+        Print("[ERR] GetOverlapTimeframesInfo: Invalid intervals array size=", arraySize);
     #endif
     return "";
     }
@@ -215,13 +204,10 @@ const int FRACTAL_TIMEFRAME_MINUTES[] = {
 
 // Get minutes for a fractal timeframe name
 int GetFractalTimeframeMinutes(const string timeframe) {
-    int arraySize = ArraySize(FRACTAL_TIMEFRAMES);
+    int idx = FindFractalTimeframeIndex(timeframe);
     int minutesArraySize = ArraySize(FRACTAL_TIMEFRAME_MINUTES);
-    for(int i = 0; i < arraySize && i < minutesArraySize; i++) {
-        if(FRACTAL_TIMEFRAMES[i] == timeframe) {
-            return FRACTAL_TIMEFRAME_MINUTES[i];
-        }
-    }
+    if(idx >= 0 && idx < minutesArraySize)
+        return FRACTAL_TIMEFRAME_MINUTES[idx];
     // Fallback: use chart period minutes
     return GetCurrentTimeframeMinutes();
 }

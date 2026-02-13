@@ -6,9 +6,7 @@
 
 #include "ZoneFactory.mqh"
 
-#define DEFAULT_ZONE_HEIGHT_PERCENT 0.125
-#define MIN_ZONE_HEIGHT_PERCENT 0.01
-#define MAX_ZONE_HEIGHT_PERCENT 1.0
+// Zone height constants defined in ProjectConstants.mqh (const double)
 
 struct SUnifiedZoneConfig {
     bool enabled;

@@ -81,7 +81,7 @@
     #define ASSERT(condition, msg)
     #define ASSERT_PRICE(price)
 #endif
-    #define INDICATOR_VERSION "3.05"
+    #define INDICATOR_VERSION "3.10"
 
 void PrintBuildInfo()
 {

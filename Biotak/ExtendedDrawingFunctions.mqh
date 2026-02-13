@@ -245,7 +245,7 @@ double GetDefaultFactorValue(const double basePrice) {
 double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_BASIS basis) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForFactorBasis: Invalid basePrice=", basePrice);
+        Print("[ERR] GetStepSizeForFactorBasis: Invalid basePrice=", basePrice);
     #endif
     return 0;
     }
@@ -269,20 +269,20 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
     break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ GetStepSizeForFactorBasis: Unknown basis=", basis, ", using Control");
+            Print("[WARN] GetStepSizeForFactorBasis: Unknown basis=", basis, ", using Control");
     #endif
     stepSize = GetStepSizeForBasisType(basePrice, 1.75, PERIOD_CURRENT);
     break;
     }
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForFactorBasis: Failed to calculate step for basis=", 
+        Print("[ERR] GetStepSizeForFactorBasis: Failed to calculate step for basis=", 
               EnumToString(basis));
     #endif
     return 0;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ GetStepSizeForFactorBasis: Basis=", EnumToString(basis), 
+    Print("[OK] GetStepSizeForFactorBasis: Basis=", EnumToString(basis), 
           ", Step=", DoubleToString(stepSize, Digits));
     #endif
     return stepSize;
@@ -297,40 +297,40 @@ double GetStepSizeForBasisType(const double basePrice, const double multiplier,
                                 const ENUM_TIMEFRAMES timeframe) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForBasisType: Invalid basePrice=", basePrice);
+        Print("[ERR] GetStepSizeForBasisType: Invalid basePrice=", basePrice);
     #endif
     return 0;
     }
     if(multiplier <= 0 || multiplier > 10.0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForBasisType: Invalid multiplier=", multiplier);
+        Print("[ERR] GetStepSizeForBasisType: Invalid multiplier=", multiplier);
     #endif
     return 0;
     }
     double thPercentage = GetTimeframeTHForPeriod(timeframe);
     if(thPercentage <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForBasisType: Invalid TH%=", thPercentage, " for TF=", timeframe);
+        Print("[ERR] GetStepSizeForBasisType: Invalid TH%=", thPercentage, " for TF=", timeframe);
     #endif
     return 0;
     }
     double thPriceUnits = (basePrice * thPercentage) / 100.0;
     if(thPriceUnits <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForBasisType: Invalid TH price units=", thPriceUnits);
+        Print("[ERR] GetStepSizeForBasisType: Invalid TH price units=", thPriceUnits);
     #endif
     return 0;
     }
     double stepSize = thPriceUnits * multiplier;
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForBasisType: Zero or negative stepSize=", stepSize);
+        Print("[ERR] GetStepSizeForBasisType: Zero or negative stepSize=", stepSize);
     #endif
     return 0;
     }
     if(stepSize > basePrice * 0.5) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ GetStepSizeForBasisType: Suspiciously large stepSize=", stepSize, 
+        Print("[WARN] GetStepSizeForBasisType: Suspiciously large stepSize=", stepSize, 
               " (> 50% of basePrice=", basePrice, ")");
     Print("   TH%=", DoubleToString(thPercentage, 4), ", Mult=", multiplier);
     #endif
@@ -338,12 +338,12 @@ double GetStepSizeForBasisType(const double basePrice, const double multiplier,
     double minReasonableStep = basePrice * EPSILON_ANGLE;
     if(stepSize < minReasonableStep) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ GetStepSizeForBasisType: Suspiciously small stepSize=", stepSize, 
+        Print("[WARN] GetStepSizeForBasisType: Suspiciously small stepSize=", stepSize, 
               " (< 0.0001% of basePrice=", basePrice, ")");
     #endif
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ GetStepSizeForBasisType: TF=", timeframe, ", Mult=", multiplier, 
+    Print("[OK] GetStepSizeForBasisType: TF=", timeframe, ", Mult=", multiplier, 
           ", TH%=", DoubleToString(thPercentage, 4), ", Step=", DoubleToString(stepSize, Digits));
     #endif
     return stepSize;
@@ -375,49 +375,49 @@ double CalculateTripleComboStepSize(const double basePrice,
                                     const ENUM_COMBO_OPERATION operation) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid basePrice=", basePrice);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid basePrice=", basePrice);
     #endif
     return 0;
     }
     if(tf1 < COMBO_TF_SUB || tf1 > COMBO_TF_STRUCTURE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid tf1=", tf1);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid tf1=", tf1);
     #endif
     return 0;
     }
     if(tf2 < COMBO_TF_SUB || tf2 > COMBO_TF_STRUCTURE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid tf2=", tf2);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid tf2=", tf2);
     #endif
     return 0;
     }
     if(tf3 < COMBO_TF_SUB || tf3 > COMBO_TF_STRUCTURE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid tf3=", tf3);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid tf3=", tf3);
     #endif
     return 0;
     }
     if(step1 < COMBO_STEP_TH || step1 > COMBO_STEP_LS) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid step1=", step1);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid step1=", step1);
     #endif
     return 0;
     }
     if(step2 < COMBO_STEP_TH || step2 > COMBO_STEP_LS) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid step2=", step2);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid step2=", step2);
     #endif
     return 0;
     }
     if(step3 < COMBO_STEP_TH || step3 > COMBO_STEP_LS) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid step3=", step3);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid step3=", step3);
     #endif
     return 0;
     }
     if(operation < COMBO_OP_AVERAGE || operation > COMBO_OP_WEIGHTED) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid operation=", operation);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid operation=", operation);
     #endif
     return 0;
     }    
@@ -432,7 +432,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     double stepValue3 = GetStepSizeForBasisType(basePrice, multiplier3, timeframe3);
     if(stepValue1 <= 0 || stepValue2 <= 0 || stepValue3 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid step values");
+        Print("[ERR] CalculateTripleComboStepSize: Invalid step values");
     #endif
     return 0;
     }
@@ -444,7 +444,7 @@ double CalculateTripleComboStepSize(const double basePrice,
         double maxSafeValue = DBL_MAX / 3.0;
     if(stepValue1 > maxSafeValue || stepValue2 > maxSafeValue || stepValue3 > maxSafeValue) {
         #ifdef ENABLE_DEBUG_LOGS
-                    Print("❌ Overflow risk in COMBO_OP_ADD (triple), using safe fallback");
+                    Print("[ERR] Overflow risk in COMBO_OP_ADD (triple), using safe fallback");
     #endif
     result = MathMax(stepValue1, MathMax(stepValue2, stepValue3));
                 } else {
@@ -458,7 +458,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ CalculateTripleComboStepSize: Unsupported operation=", operation, 
+            Print("[WARN] CalculateTripleComboStepSize: Unsupported operation=", operation, 
                   ", using Average");
     #endif
     result = (stepValue1 + stepValue2 + stepValue3) / 3.0;
@@ -466,7 +466,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     }
     if(result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateTripleComboStepSize: Invalid result=", result);
+        Print("[ERR] CalculateTripleComboStepSize: Invalid result=", result);
     #endif
     return 0;
     }
@@ -491,7 +491,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     }
     if(isSuspicious) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CalculateTripleComboStepSize: Suspicious result detected");
+        Print("[WARN] CalculateTripleComboStepSize: Suspicious result detected");
     Print("   Operation=", EnumToString(operation));
     Print("   Step1=", DoubleToString(stepValue1, Digits), 
               ", Step2=", DoubleToString(stepValue2, Digits), 
@@ -504,7 +504,7 @@ double CalculateTripleComboStepSize(const double basePrice,
     result = (stepValue1 + stepValue2 + stepValue3) / 3.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ CalculateTripleComboStepSize: SUCCESS");
+    Print("[OK] CalculateTripleComboStepSize: SUCCESS");
     Print("   TF1=", EnumToString(tf1), ", Step1=", DoubleToString(stepValue1, Digits));
     Print("   TF2=", EnumToString(tf2), ", Step2=", DoubleToString(stepValue2, Digits));
     Print("   TF3=", EnumToString(tf3), ", Step3=", DoubleToString(stepValue3, Digits));
@@ -559,13 +559,13 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     if(ls > 0) validCount++;
     if(validCount == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ GetStepSizeFromComponent: All MEAN components invalid for ", EnumToString(comp));
+            Print("[ERR] GetStepSizeFromComponent: All MEAN components invalid for ", EnumToString(comp));
     #endif
     return 0;
         }
     if(validCount < 3) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
+            Print("[WARN] GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
     Print("   TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
     Print("   SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
     #ifdef ENABLE_DEBUG_LOGS
@@ -574,12 +574,12 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     #endif
     if(validCount == 1) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("️ MEAN COMPONENT INFO: ", EnumToString(comp), 
+                Print(" MEAN COMPONENT INFO: ", EnumToString(comp), 
                       " - Only 1/3 values valid. Result equals the single valid value.");
     #endif
     } else if(validCount == 2) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("️ MEAN COMPONENT INFO: ", EnumToString(comp), 
+                Print(" MEAN COMPONENT INFO: ", EnumToString(comp), 
                       " - Only 2/3 values valid. Mean calculated from 2 values.");
     #endif
     }
@@ -592,7 +592,7 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     if(ls > 0) validValues[idx++] = ls;
     double result = CalculateMeanByType(validValues, inpAggregateMeanType);
     #ifdef ENABLE_DEBUG_LOGS
-        Print("✅ GetStepSizeFromComponent: MEAN component ", EnumToString(comp), 
+        Print("[OK] GetStepSizeFromComponent: MEAN component ", EnumToString(comp), 
               " = ", DoubleToString(result, Digits), " (", validCount, "/3 valid values, ",
               EnumToString(inpAggregateMeanType), " mean)");
     #endif
@@ -631,7 +631,7 @@ double CalculateGeometricMeanN(const double &values[]) {
     for(int i = 0; i < n; i++) {
         if(values[i] <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ CalculateGeometricMeanN: Non-positive value at index ", i, ": ", values[i]);
+            Print("[ERR] CalculateGeometricMeanN: Non-positive value at index ", i, ": ", values[i]);
     #endif
     return 0;
         }
@@ -640,7 +640,7 @@ double CalculateGeometricMeanN(const double &values[]) {
     double result = MathExp(logSum / n);
     if(result <= 0 || result > DBL_MAX / 2.0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateGeometricMeanN: Invalid result=", result);
+        Print("[ERR] CalculateGeometricMeanN: Invalid result=", result);
     #endif
     return 0;
     }
@@ -674,7 +674,7 @@ double CalculateHarmonicMeanN(const double &values[]) {
     for(int i = 0; i < n; i++) {
         if(MathAbs(values[i]) < EPSILON_ANGLE) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ CalculateHarmonicMeanN: Zero/near-zero value at index ", i, ": ", values[i]);
+            Print("[ERR] CalculateHarmonicMeanN: Zero/near-zero value at index ", i, ": ", values[i]);
     #endif
     return 0;
         }
@@ -725,7 +725,7 @@ double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType
         int n = ArraySize(values);
     if(n == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateMeanByType: Empty array");
+        Print("[ERR] CalculateMeanByType: Empty array");
     #endif
     return 0;
     }
@@ -735,27 +735,27 @@ double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType
         case MEAN_ARITHMETIC:
             result = CalculateArithmeticMeanN(values);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ CalculateMeanByType: Arithmetic Mean of ", n, " values = ", 
+            Print("[OK] CalculateMeanByType: Arithmetic Mean of ", n, " values = ", 
                   DoubleToString(result, Digits));
     #endif
     break;
     case MEAN_GEOMETRIC:
             result = CalculateGeometricMeanN(values);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ CalculateMeanByType: Geometric Mean of ", n, " values = ", 
+            Print("[OK] CalculateMeanByType: Geometric Mean of ", n, " values = ", 
                   DoubleToString(result, Digits));
     #endif
     break;
     case MEAN_HARMONIC:
             result = CalculateHarmonicMeanN(values);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ CalculateMeanByType: Harmonic Mean of ", n, " values = ", 
+            Print("[OK] CalculateMeanByType: Harmonic Mean of ", n, " values = ", 
                   DoubleToString(result, Digits));
     #endif
     break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ CalculateMeanByType: Unknown mean type ", meanType);
+            Print("[ERR] CalculateMeanByType: Unknown mean type ", meanType);
     #endif
     return 0;
     }
@@ -801,7 +801,7 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
     break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ CollectQuickTestComponents: Unknown preset=", inpQuickTestPreset);
+            Print("[ERR] CollectQuickTestComponents: Unknown preset=", inpQuickTestPreset);
     #endif
     return 0;
     }
@@ -831,7 +831,7 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
     ArrayResize(components, count);
     #ifdef ENABLE_DEBUG_LOGS
     if(count > 0) {
-        Print("✅ CollectQuickTestComponents: Collected ", count, " components");
+        Print("[OK] CollectQuickTestComponents: Collected ", count, " components");
     for(int i = 0; i < count; i++) {
         #ifdef ENABLE_DEBUG_LOGS
             Print("   [", i, "] = ", EnumToString(components[i]));
@@ -839,7 +839,7 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
     }
     } else {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CollectQuickTestComponents: No components collected!");
+        Print("[ERR] CollectQuickTestComponents: No components collected!");
     #endif
     }
     #endif
@@ -855,7 +855,7 @@ int CollectQuickTestComponents(ENUM_COMBO_COMPONENT_ITEM &components[]) {
 double CalculateQuickTestStepSize(const double basePrice) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateQuickTestStepSize: Invalid basePrice=", basePrice);
+        Print("[ERR] CalculateQuickTestStepSize: Invalid basePrice=", basePrice);
     #endif
     return 0;
     }
@@ -863,9 +863,9 @@ double CalculateQuickTestStepSize(const double basePrice) {
     int componentCount = CollectQuickTestComponents(selectedComponents);
     if(componentCount == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Quick Test: No components selected");
+        Print("[ERR] Quick Test: No components selected");
     #endif
-    Alert("⚠️ QUICK TEST MODE ERROR\n\nNo components selected!\nPlease select at least one timeframe in Quick Test settings.");
+    Alert("[WARN] QUICK TEST MODE ERROR\n\nNo components selected!\nPlease select at least one timeframe in Quick Test settings.");
     return 0;
     }
     double componentValues[];
@@ -874,7 +874,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
         double val = GetStepSizeFromComponent(basePrice, selectedComponents[i]);
     if(val <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ Quick Test: Component ", selectedComponents[i], " returned invalid value");
+            Print("[ERR] Quick Test: Component ", selectedComponents[i], " returned invalid value");
     #endif
     return 0;
         }
@@ -887,7 +887,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
     double result = CalculateMeanByType(componentValues, inpQuickTestMeanType);
     if(result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Quick Test: Mean calculation failed");
+        Print("[ERR] Quick Test: Mean calculation failed");
     #endif
     return 0;
     }
@@ -899,7 +899,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
     case MEAN_HARMONIC: meanTypeName = "Harmonic"; break;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=", 
+    Print("[OK] Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=", 
     #endif
     DoubleToString(result, Digits));
     #endif
@@ -922,14 +922,14 @@ double ApplyCalculatorOperator(const double value1, const double value2,
             return value1 * value2;
     case OP_DIVIDE:            if(MathAbs(value2) < EPSILON_ANGLE) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ ApplyCalculatorOperator: Division by zero/near-zero detected! value2=", DoubleToString(value2, 8));
+                Print("[ERR] ApplyCalculatorOperator: Division by zero/near-zero detected! value2=", DoubleToString(value2, 8));
     #endif
     return 0;            }
     return value1 / value2;
     case OP_AVERAGE:            return (value1 + value2) / 2.0;
     case OP_GEOMETRIC_MEAN:            if(value1 <= 0 || value2 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ ApplyCalculatorOperator: Geometric mean requires positive values! value1=", value1, " value2=", value2);
+                Print("[ERR] ApplyCalculatorOperator: Geometric mean requires positive values! value1=", value1, " value2=", value2);
     #endif
     return 0;
             }
@@ -937,7 +937,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     case OP_HARMONIC_MEAN: {
         if(MathAbs(value1) < EPSILON_ANGLE || MathAbs(value2) < EPSILON_ANGLE) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ ApplyCalculatorOperator: Harmonic mean requires non-zero values! value1=", value1, " value2=", value2);
+                Print("[ERR] ApplyCalculatorOperator: Harmonic mean requires non-zero values! value1=", value1, " value2=", value2);
     #endif
     return 0;
             }
@@ -955,23 +955,23 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double CalculateDualGroupTopology(const double basePrice) {
         if(inpComboComp1 == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Calculator Mode (Dual): Component 1 cannot be IGNORE");
+        Print("[ERR] Calculator Mode (Dual): Component 1 cannot be IGNORE");
     #endif
-    Alert("⚠️ ADVANCED MODE ERROR (Dual Group Topology)\n\nComponent 1 cannot be IGNORE!\nDual Group topology requires at least Component 1.");
+    Alert("[WARN] ADVANCED MODE ERROR (Dual Group Topology)\n\nComponent 1 cannot be IGNORE!\nDual Group topology requires at least Component 1.");
     return 0;
     }
     double valG1 = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(valG1 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Calculator Mode (Dual): Component 1 calculation failed");
+        Print("[ERR] Calculator Mode (Dual): Component 1 calculation failed");
     #endif
-    Alert("⚠️ ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
+    Alert("[WARN] ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
     return 0;
     }
     valG1 = ApplyOperationWithComponent(valG1, inpComboOp1, inpComboComp2, basePrice);
     if(inpComboOp2 == OP_NONE || inpComboComp3 == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("️ Dual Group: Only Group 1 active (Op2=NONE or Comp3=IGNORE)");
+        Print(" Dual Group: Only Group 1 active (Op2=NONE or Comp3=IGNORE)");
     Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
     #endif
     return valG1;
@@ -979,7 +979,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double valG2 = GetStepSizeFromComponent(basePrice, inpComboComp3);
     if(valG2 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Dual Group: Component 3 invalid or failed");
+        Print("[WARN] Dual Group: Component 3 invalid or failed");
     Print("   Component 3: ", EnumToString(inpComboComp3));
     Print("   Fallback: Using Group 1 result only");
     #ifdef ENABLE_DEBUG_LOGS
@@ -987,7 +987,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     #endif
     #endif
     #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3), 
+        Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3), 
               ") calculation failed. Using Group 1 result only.");
     #endif
     return valG1;
@@ -995,31 +995,31 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     valG2 = ApplyOperationWithComponent(valG2, inpComboOp3, inpComboComp4, basePrice);
     if(valG2 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Dual Group: Group 2 calculation failed after Op3");
+        Print("[WARN] Dual Group: Group 2 calculation failed after Op3");
     Print("   Op3: ", EnumToString(inpComboOp3));
     Print("   Component 4: ", EnumToString(inpComboComp4));
     Print("   Fallback: Using Group 1 result only");
     Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-    Print("⚠️ DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
+    Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
     #endif
     return valG1;
     }
     double finalResult = ApplyCalculatorOperator(valG1, valG2, inpComboOp2);
     if(finalResult <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Dual Group: Final combination failed");
+        Print("[WARN] Dual Group: Final combination failed");
     Print("   Group 1: ", DoubleToString(valG1, Digits));
     Print("   Op2: ", EnumToString(inpComboOp2));
     Print("   Group 2: ", DoubleToString(valG2, Digits));
     Print("   Result: ", DoubleToString(finalResult, Digits));
     Print("   Fallback: Using Group 1 result only");
-    Print("⚠️ DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2), 
+    Print("[WARN] DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2), 
               ") produced invalid result. Using Group 1 result only.");
     #endif
     return valG1;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Dual Group: SUCCESS");
+    Print("[OK] Dual Group: SUCCESS");
     Print("   Group 1: ", DoubleToString(valG1, Digits));
     Print("   Op2: ", EnumToString(inpComboOp2));
     Print("   Group 2: ", DoubleToString(valG2, Digits));
@@ -1033,10 +1033,10 @@ double ApplyCalculatorOperator(const double value1, const double value2,
                                   const double basePrice) {    if (op == OP_NONE || nextComp == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
         if(op == OP_NONE) {
-            Print("️ ApplyOperationWithComponent: Operator is NONE, skipping");
+            Print(" ApplyOperationWithComponent: Operator is NONE, skipping");
         } else {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("️ ApplyOperationWithComponent: Component is IGNORE, skipping");
+            Print(" ApplyOperationWithComponent: Component is IGNORE, skipping");
     #endif
     }
     #endif
@@ -1045,11 +1045,11 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double nextVal = GetStepSizeFromComponent(basePrice, nextComp);
     if (nextVal <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ ApplyOperationWithComponent: Next component invalid");
+        Print("[WARN] ApplyOperationWithComponent: Next component invalid");
     Print("   Component: ", EnumToString(nextComp));
     Print("   Operator: ", EnumToString(op));
     Print("   Keeping current value: ", DoubleToString(currentVal, Digits));
-    Print("⚠️ CALCULATOR WARNING: Component ", EnumToString(nextComp), 
+    Print("[WARN] CALCULATOR WARNING: Component ", EnumToString(nextComp), 
               " calculation failed. Skipping operation ", EnumToString(op));
     #endif
     return currentVal;
@@ -1057,18 +1057,18 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double result = ApplyCalculatorOperator(currentVal, nextVal, op);
     if (result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ ApplyOperationWithComponent: Operation produced invalid result");
+        Print("[WARN] ApplyOperationWithComponent: Operation produced invalid result");
     Print("   Current: ", DoubleToString(currentVal, Digits));
     Print("   Operator: ", EnumToString(op));
     Print("   Next: ", DoubleToString(nextVal, Digits));
     Print("   Result: ", DoubleToString(result, Digits));
     Print("   Fallback to current value");
-    Print("⚠️ CALCULATOR WARNING: Operation ", EnumToString(op), 
+    Print("[WARN] CALCULATOR WARNING: Operation ", EnumToString(op), 
               " produced invalid result. Keeping previous value.");
     #endif
     return currentVal;    }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ ApplyOperationWithComponent: ", DoubleToString(currentVal, Digits), 
+    Print("[OK] ApplyOperationWithComponent: ", DoubleToString(currentVal, Digits), 
           " ", EnumToString(op), " ", DoubleToString(nextVal, Digits), 
           " = ", DoubleToString(result, Digits));
     #endif
@@ -1077,17 +1077,17 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     double CalculateLinearTopology(const double basePrice) {
         if(inpComboComp1 == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Calculator Mode (Linear): Component 1 is IGNORE");
+        Print("[ERR] Calculator Mode (Linear): Component 1 is IGNORE");
     #endif
-    Alert("⚠️ ADVANCED MODE ERROR (Linear Topology)\n\nComponent 1 cannot be IGNORE!\nLinear topology requires at least Component 1.");
+    Alert("[WARN] ADVANCED MODE ERROR (Linear Topology)\n\nComponent 1 cannot be IGNORE!\nLinear topology requires at least Component 1.");
     return 0;
     }
     double result = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Calculator Mode (Linear): Component 1 calculation failed");
+        Print("[ERR] Calculator Mode (Linear): Component 1 calculation failed");
     #endif
-    Alert("⚠️ ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
+    Alert("[WARN] ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
     return 0;
     }
     result = ApplyOperationWithComponent(result, inpComboOp1, inpComboComp2, basePrice);
@@ -1107,7 +1107,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
 double CalculateCalculatorModeStepSize(const double basePrice) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateCalculatorModeStepSize: Invalid basePrice=", basePrice);
+        Print("[ERR] CalculateCalculatorModeStepSize: Invalid basePrice=", basePrice);
     #endif
     return 0;
     }
@@ -1145,9 +1145,9 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     int componentCount = ArraySize(componentValues);
     if(componentCount == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ N-ARY Mode: No valid components found");
+            Print("[ERR] N-ARY Mode: No valid components found");
     #endif
-    Alert("⚠️ ADVANCED MODE ERROR (N-ary Operator)\n\nAll components are set to IGNORE!\nPlease select at least one component.");
+    Alert("[WARN] ADVANCED MODE ERROR (N-ary Operator)\n\nAll components are set to IGNORE!\nPlease select at least one component.");
     return 0;
         }
     int expectedComponents = 0;
@@ -1157,13 +1157,13 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     if(inpComboComp4 != COMP_IGNORE) expectedComponents++;
     if(componentCount < expectedComponents) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ N-ARY Mode: Only ", componentCount, "/", expectedComponents, " components valid");
+            Print("[WARN] N-ARY Mode: Only ", componentCount, "/", expectedComponents, " components valid");
     #endif
-    Print("️ N-ARY OPERATOR INFO: Using ", componentCount, " valid components out of ", 
+    Print(" N-ARY OPERATOR INFO: Using ", componentCount, " valid components out of ", 
                   expectedComponents, " selected.");
         }
     #ifdef ENABLE_DEBUG_LOGS
-        Print("️ N-ARY Mode: Collected ", componentCount, " valid components");
+        Print(" N-ARY Mode: Collected ", componentCount, " valid components");
     for(int i = 0; i < componentCount; i++) {
             Print("   Component[", i, "] = ", DoubleToString(componentValues[i], Digits));
         }
@@ -1173,47 +1173,47 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
             case OP_GEOMETRIC_MEAN_ALL:
                 naryResult = CalculateGeometricMeanN(componentValues);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ N-ARY Mode: Geometric Mean of ", componentCount, " components = ", 
+                Print("[OK] N-ARY Mode: Geometric Mean of ", componentCount, " components = ", 
                       DoubleToString(naryResult, Digits));
     #endif
     break;
     case OP_ARITHMETIC_MEAN_ALL:
                 naryResult = CalculateArithmeticMeanN(componentValues);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ", 
+                Print("[OK] N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ", 
                       DoubleToString(naryResult, Digits));
     #endif
     break;
     case OP_HARMONIC_MEAN_ALL:
                 naryResult = CalculateHarmonicMeanN(componentValues);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ N-ARY Mode: Harmonic Mean of ", componentCount, " components = ", 
+                Print("[OK] N-ARY Mode: Harmonic Mean of ", componentCount, " components = ", 
                       DoubleToString(naryResult, Digits));
     #endif
     break;
     case OP_MIN_ALL:
                 naryResult = CalculateMinN(componentValues);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ N-ARY Mode: Minimum of ", componentCount, " components = ", 
+                Print("[OK] N-ARY Mode: Minimum of ", componentCount, " components = ", 
                       DoubleToString(naryResult, Digits));
     #endif
     break;
     case OP_MAX_ALL:
                 naryResult = CalculateMaxN(componentValues);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ N-ARY Mode: Maximum of ", componentCount, " components = ", 
+                Print("[OK] N-ARY Mode: Maximum of ", componentCount, " components = ", 
                       DoubleToString(naryResult, Digits));
     #endif
     break;
     default:
                 #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ N-ARY Mode: Unknown operator ", inpComboOp1);
+                Print("[ERR] N-ARY Mode: Unknown operator ", inpComboOp1);
     #endif
     return 0;
         }
     if(naryResult <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ N-ARY Mode: Result is <= 0");
+            Print("[ERR] N-ARY Mode: Result is <= 0");
     #endif
     return 0;
         }
@@ -1228,14 +1228,14 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     }
     if(finalResult <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Calculator Mode Result is <= 0");
+        Print("[ERR] Calculator Mode Result is <= 0");
     #endif
     return 0;
     }
     finalResult = NormalizeDouble(finalResult, GetCachedDigits());
     #ifdef ENABLE_DEBUG_LOGS
     string topoName = (inpComboTopology == TOPOLOGY_LINEAR) ? "LINEAR" : "DUAL_GROUP";
-    Print("✅ Calculator Mode [", topoName, "]: Result=", DoubleToString(finalResult, Digits));
+    Print("[OK] Calculator Mode [", topoName, "]: Result=", DoubleToString(finalResult, Digits));
     #endif
     return finalResult;
 }
@@ -1256,66 +1256,69 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
 //| - Comprehensive error handling                                  |
 //| - Thread-safe (no global state modification)                    |
 //| - Performance optimized with early returns                      |
-//| - NOW SUPPORTS TRIPLE PRESETS! ✅                                |
-//| - NOW SUPPORTS QUICK TEST MODE! ⚡                               |
+//| - NOW SUPPORTS TRIPLE PRESETS! [OK]                                |
+//| - NOW SUPPORTS QUICK TEST MODE! [FAST]                               |
 //+------------------------------------------------------------------+
+
+// Validate a combo parameter, logging and alerting on failure. Returns false if invalid.
+bool ValidateComboParam(bool isInvalid, const string paramName, const string paramValue, const string context = "PRESET MODE") {
+    if(!isInvalid) return true;
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("[ERR] CalculateComboStepSize: Invalid ", paramName, "=", paramValue);
+    #endif
+    Alert("[WARN] ", context, " ERROR\n\nInvalid ", paramName, " configuration!\nPreset: ", EnumToString(inpComboPreset));
+    return false;
+}
+
 double CalculateComboStepSize(const double basePrice) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid basePrice=", basePrice);
+        Print("[ERR] CalculateComboStepSize: Invalid basePrice=", basePrice);
     #endif
-    Alert("⚠️ COMBO MODE ERROR\n\nInvalid base price for calculation.\nPlease check your settings.");
+    Alert("[WARN] COMBO MODE ERROR\n\nInvalid base price for calculation.\nPlease check your settings.");
     return 0;
     }
     if(inpComboMode == COMBO_MODE_QUICK_TEST) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("✅ CalculateComboStepSize: QUICK TEST mode detected");
+        Print("[OK] CalculateComboStepSize: QUICK TEST mode detected");
     #endif
     return CalculateQuickTestStepSize(basePrice);
     }
     if(inpComboMode == COMBO_MODE_ADVANCED) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("✅ CalculateComboStepSize: ADVANCED (CALCULATOR) mode detected");
+        Print("[OK] CalculateComboStepSize: ADVANCED (CALCULATOR) mode detected");
     #endif
     return CalculateCalculatorModeStepSize(basePrice);
     }
     if(inpComboMode != COMBO_MODE_PRESET) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid mode=", inpComboMode, " (expected PRESET)");
+        Print("[ERR] CalculateComboStepSize: Invalid mode=", inpComboMode, " (expected PRESET)");
     #endif
-    Alert("⚠️ COMBO MODE ERROR\n\nInvalid Combo Mode configuration!\nExpected: Preset Mode\nActual: ", EnumToString(inpComboMode));
+    Alert("[WARN] COMBO MODE ERROR\n\nInvalid Combo Mode configuration!\nExpected: Preset Mode\nActual: ", EnumToString(inpComboMode));
     return 0;
     }
-    if(inpComboPreset == COMBO_PRESET_BALANCED_TRIPLE) {
+    // Triple presets: all share same TF/step params, differ only in operation
+    if(inpComboPreset == COMBO_PRESET_BALANCED_TRIPLE ||
+       inpComboPreset == COMBO_PRESET_TRIPLE_CONSERVATIVE ||
+       inpComboPreset == COMBO_PRESET_TRIPLE_AGGRESSIVE) {
+        ENUM_COMBO_OPERATION tripleOp = (inpComboPreset == COMBO_PRESET_BALANCED_TRIPLE)   ? COMBO_OP_AVERAGE :
+                                        (inpComboPreset == COMBO_PRESET_TRIPLE_CONSERVATIVE) ? COMBO_OP_MAX     :
+                                                                                               COMBO_OP_MIN;
         return CalculateTripleComboStepSize(basePrice,
             COMBO_TF_TRIGGER, COMBO_STEP_TH,
             COMBO_TF_PATTERN, COMBO_STEP_TH,
             COMBO_TF_STRUCTURE, COMBO_STEP_TH,
-            COMBO_OP_AVERAGE);
-    }
-    else if(inpComboPreset == COMBO_PRESET_TRIPLE_CONSERVATIVE) {
-        return CalculateTripleComboStepSize(basePrice,
-            COMBO_TF_TRIGGER, COMBO_STEP_TH,
-            COMBO_TF_PATTERN, COMBO_STEP_TH,
-            COMBO_TF_STRUCTURE, COMBO_STEP_TH,
-            COMBO_OP_MAX);
-    }
-    else if(inpComboPreset == COMBO_PRESET_TRIPLE_AGGRESSIVE) {
-        return CalculateTripleComboStepSize(basePrice,
-            COMBO_TF_TRIGGER, COMBO_STEP_TH,
-            COMBO_TF_PATTERN, COMBO_STEP_TH,
-            COMBO_TF_STRUCTURE, COMBO_STEP_TH,
-            COMBO_OP_MIN);
+            tripleOp);
     }
     else if(inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("️ MANUAL_TRIPLE preset detected → Redirecting to Advanced Mode");
+        Print(" MANUAL_TRIPLE preset detected → Redirecting to Advanced Mode");
     #endif
     return CalculateCalculatorModeStepSize(basePrice);
     }
     else if(inpComboPreset == COMBO_PRESET_MANUAL_DUAL) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("️ MANUAL_DUAL preset detected → Redirecting to Advanced Mode");
+        Print(" MANUAL_DUAL preset detected → Redirecting to Advanced Mode");
     #endif
     return CalculateCalculatorModeStepSize(basePrice);
     }    
@@ -1323,107 +1326,28 @@ double CalculateComboStepSize(const double basePrice) {
     ENUM_COMBO_STEP_TYPE step1Type, step2Type;
     ENUM_COMBO_OPERATION operation;
     GetPresetConfiguration(inpComboPreset, tf1, step1Type, tf2, step2Type, operation);
-    if(tf1 < COMBO_TF_SUB || tf1 > COMBO_TF_STRUCTURE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid tf1=", tf1);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid timeframe 1 configuration!\nPreset: ", EnumToString(inpComboPreset));
-    return 0;
-    }
-    if(tf2 < COMBO_TF_SUB || tf2 > COMBO_TF_STRUCTURE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid tf2=", tf2);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid timeframe 2 configuration!\nPreset: ", EnumToString(inpComboPreset));
-    return 0;
-    }
-    if(step1Type < COMBO_STEP_TH || step1Type > COMBO_STEP_LS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid step1Type=", step1Type);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid step type 1 configuration!\nPreset: ", EnumToString(inpComboPreset));
-    return 0;
-    }
-    if(step2Type < COMBO_STEP_TH || step2Type > COMBO_STEP_LS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid step2Type=", step2Type);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid step type 2 configuration!\nPreset: ", EnumToString(inpComboPreset));
-    return 0;
-    }
-    if(operation < COMBO_OP_AVERAGE || operation > COMBO_OP_WEIGHTED) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid operation=", operation);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid operation configuration!\nPreset: ", EnumToString(inpComboPreset));
-    return 0;
-    }    
+    if(!ValidateComboParam(tf1 < COMBO_TF_SUB || tf1 > COMBO_TF_STRUCTURE, "tf1", IntegerToString(tf1))) return 0;
+    if(!ValidateComboParam(tf2 < COMBO_TF_SUB || tf2 > COMBO_TF_STRUCTURE, "tf2", IntegerToString(tf2))) return 0;
+    if(!ValidateComboParam(step1Type < COMBO_STEP_TH || step1Type > COMBO_STEP_LS, "step1Type", IntegerToString(step1Type))) return 0;
+    if(!ValidateComboParam(step2Type < COMBO_STEP_TH || step2Type > COMBO_STEP_LS, "step2Type", IntegerToString(step2Type))) return 0;
+    if(!ValidateComboParam(operation < COMBO_OP_AVERAGE || operation > COMBO_OP_WEIGHTED, "operation", IntegerToString(operation))) return 0;
     ENUM_TIMEFRAMES timeframe1 = GetTimeframeByType(tf1);
     ENUM_TIMEFRAMES timeframe2 = GetTimeframeByType(tf2);
-    if(timeframe1 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid timeframe1 from tf1=", tf1);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nFailed to calculate timeframe 1!\nTimeframe Type: ", EnumToString(tf1));
-    return 0;
-    }
-    if(timeframe2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid timeframe2 from tf2=", tf2);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nFailed to calculate timeframe 2!\nTimeframe Type: ", EnumToString(tf2));
-    return 0;
-    }
+    if(!ValidateComboParam(timeframe1 <= 0, "timeframe1", EnumToString(tf1))) return 0;
+    if(!ValidateComboParam(timeframe2 <= 0, "timeframe2", EnumToString(tf2))) return 0;
     double multiplier1 = GetStepMultiplier(step1Type);
     double multiplier2 = GetStepMultiplier(step2Type);
-    if(multiplier1 <= 0 || multiplier1 > 10.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid multiplier1=", multiplier1);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid step multiplier 1!\nStep Type: ", EnumToString(step1Type));
-    return 0;
-    }
-    if(multiplier2 <= 0 || multiplier2 > 10.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid multiplier2=", multiplier2);
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid step multiplier 2!\nStep Type: ", EnumToString(step2Type));
-    return 0;
-    }
+    if(!ValidateComboParam(multiplier1 <= 0 || multiplier1 > 10.0, "multiplier1", DoubleToString(multiplier1, 2))) return 0;
+    if(!ValidateComboParam(multiplier2 <= 0 || multiplier2 > 10.0, "multiplier2", DoubleToString(multiplier2, 2))) return 0;
     double step1 = GetStepSizeForBasisType(basePrice, multiplier1, timeframe1);
     double step2 = GetStepSizeForBasisType(basePrice, multiplier2, timeframe2);
-    if(step1 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid step1=", step1, 
-              " for TF=", EnumToString(tf1), ", StepType=", EnumToString(step1Type));
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nFailed to calculate step size 1!\nTimeframe: ", EnumToString(tf1), 
-              "\nStep Type: ", EnumToString(step1Type));
-    return 0;
-    }
-    if(step2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid step2=", step2, 
-              " for TF=", EnumToString(tf2), ", StepType=", EnumToString(step2Type));
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nFailed to calculate step size 2!\nTimeframe: ", EnumToString(tf2), 
-              "\nStep Type: ", EnumToString(step2Type));
-    return 0;
-    }
+    if(!ValidateComboParam(step1 <= 0, "step1", DoubleToString(step1, GetCachedDigits()))) return 0;
+    if(!ValidateComboParam(step2 <= 0, "step2", DoubleToString(step2, GetCachedDigits()))) return 0;
     double comboStep = ApplyComboOperation(step1, step2, operation, 
                                            0.5, 0.5);
-    if(comboStep <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CalculateComboStepSize: Invalid comboStep=", comboStep, 
-              " after operation=", EnumToString(operation));
-    #endif
-    Alert("⚠️ PRESET MODE ERROR\n\nInvalid result after Combo operation!\nOperation: ", EnumToString(operation),
-              "\nStep1: ", DoubleToString(step1, GetCachedDigits()), 
-              "\nStep2: ", DoubleToString(step2, GetCachedDigits()));
-    return 0;
-    }
+    if(!ValidateComboParam(comboStep <= 0, "comboStep", DoubleToString(comboStep, GetCachedDigits()))) return 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ CalculateComboStepSize: SUCCESS");
+    Print("[OK] CalculateComboStepSize: SUCCESS");
     Print("   Preset=", EnumToString(inpComboPreset));
     Print("   TF1=", EnumToString(tf1), " (", timeframe1, "), Step1Type=", EnumToString(step1Type), 
           " (×", multiplier1, "), Value=", DoubleToString(step1, Digits));
@@ -1440,13 +1364,15 @@ double CalculateComboStepSize(const double basePrice) {
                                       const ENUM_COMBO_COMPONENT_ITEM component) {
         if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepSizeForSharedComponent: Invalid basePrice=", basePrice);
+        Print("[ERR] GetStepSizeForSharedComponent: Invalid basePrice=", basePrice);
     #endif
     return 0;
     }
     
     ENUM_TIMEFRAMES timeframe;
     double multiplier;
+    // Step type suffix determines multiplier: TH=1.0, SS=1.5, LS=2.0
+    static const double stepMultipliers[3] = {1.0, 1.5, 2.0};
     switch(component) {        case COMP_SUB_TH:
         case COMP_SUB_SS:
         case COMP_SUB_LS:
@@ -1463,46 +1389,26 @@ double CalculateComboStepSize(const double basePrice) {
     else if(subMinutes <= 1440) timeframe = PERIOD_D1;
     else if(subMinutes <= 10080) timeframe = PERIOD_W1;
     else timeframe = PERIOD_MN1;
-    if(component == COMP_SUB_TH) multiplier = 1.0;
-    else if(component == COMP_SUB_SS) multiplier = 1.5;
-    else multiplier = 2.0;
+    multiplier = stepMultipliers[component - COMP_SUB_TH];
     break;
         }
     case COMP_TRIGGER_TH:
-            timeframe = GetSubTimeframe();
-    multiplier = 1.0;
-    break;
     case COMP_TRIGGER_SS:
-            timeframe = GetSubTimeframe();
-    multiplier = 1.5;
-    break;
     case COMP_TRIGGER_LS:
             timeframe = GetSubTimeframe();
-    multiplier = 2.0;
+    multiplier = stepMultipliers[component - COMP_TRIGGER_TH];
     break;
     case COMP_PATTERN_TH:
-            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
-    multiplier = 1.0;
-    break;
     case COMP_PATTERN_SS:
-            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
-    multiplier = 1.5;
-    break;
     case COMP_PATTERN_LS:
             timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
-    multiplier = 2.0;
+    multiplier = stepMultipliers[component - COMP_PATTERN_TH];
     break;
     case COMP_STRUCTURE_TH:
-            timeframe = GetPatternTimeframe();
-    multiplier = 1.0;
-    break;
     case COMP_STRUCTURE_SS:
-            timeframe = GetPatternTimeframe();
-    multiplier = 1.5;
-    break;
     case COMP_STRUCTURE_LS:
             timeframe = GetPatternTimeframe();
-    multiplier = 2.0;
+    multiplier = stepMultipliers[component - COMP_STRUCTURE_TH];
     break;
     default:
             return 0;
@@ -1554,7 +1460,7 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
                 minutes = seconds / 60;
             } else {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ GetTimeframeTHForPeriod: Unknown period=", period, ", using D45+H12+M16");
+                Print("[WARN] GetTimeframeTHForPeriod: Unknown period=", period, ", using D45+H12+M16");
     #endif
     return CalculateTimeframeTH("D45+H12+M16");
             }
@@ -1591,7 +1497,7 @@ ENUM_TIMEFRAMES GetSubTimeframe() {
 ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         if(tfType < COMBO_TF_SUB || tfType > COMBO_TF_STRUCTURE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
+        Print("[ERR] GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
     #endif
     return (ENUM_TIMEFRAMES)GetCachedPeriod();    }
     
@@ -1612,14 +1518,14 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
     break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
+            Print("[WARN] GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
     #endif
     result = (ENUM_TIMEFRAMES)GetCachedPeriod();
     break;
     }
     if(result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
+        Print("[ERR] GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
     #endif
     return (ENUM_TIMEFRAMES)GetCachedPeriod();    }
     return result;
@@ -1633,7 +1539,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
         if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_LS) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
+        Print("[ERR] GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
     #endif
     return 1.0;
     }
@@ -1650,14 +1556,14 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
     break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ GetStepMultiplier: Unexpected stepType=", stepType, ", using 1.0 (TH)");
+            Print("[WARN] GetStepMultiplier: Unexpected stepType=", stepType, ", using 1.0 (TH)");
     #endif
     multiplier = 1.0;
     break;
     }
     if(multiplier <= 0 || multiplier > 10.0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetStepMultiplier: Invalid multiplier=", multiplier, " for stepType=", stepType);
+        Print("[ERR] GetStepMultiplier: Invalid multiplier=", multiplier, " for stepType=", stepType);
     #endif
     return 1.0;
     }
@@ -1685,7 +1591,7 @@ double ApplyComboOperation(const double value1, const double value2,
                            const double weight1 = 0.5, const double weight2 = 0.5) {
         if(value1 <= 0 || value2 <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ ApplyComboOperation: Invalid values - v1=", value1, ", v2=", value2);
+        Print("[ERR] ApplyComboOperation: Invalid values - v1=", value1, ", v2=", value2);
     #endif
     return 0;
     }
@@ -1701,7 +1607,7 @@ double ApplyComboOperation(const double value1, const double value2,
     if(result < minThreshold) {
                 result = avgValue;
     #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ ApplyComboOperation: Subtract result too small (", 
+                Print("[WARN] ApplyComboOperation: Subtract result too small (", 
                       DoubleToString(result, Digits), " < ", DoubleToString(minThreshold, Digits), 
                       "), using average=", DoubleToString(avgValue, Digits));
     #endif
@@ -1714,14 +1620,12 @@ double ApplyComboOperation(const double value1, const double value2,
     double overflowThreshold = maxInput * 100.0;
     if(result > overflowThreshold) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ ApplyComboOperation: Multiply overflow detected");
+                Print("[WARN] ApplyComboOperation: Multiply overflow detected");
     Print("   v1=", DoubleToString(value1, Digits), 
                       ", v2=", DoubleToString(value2, Digits), 
                       ", result=", DoubleToString(result, Digits), 
                       " > threshold=", DoubleToString(overflowThreshold, Digits));
-    #ifdef ENABLE_DEBUG_LOGS
                 Print("   Clamping to max input=", DoubleToString(maxInput, Digits));
-    #endif
     #endif
                 result = maxInput;
             }
@@ -1735,7 +1639,7 @@ double ApplyComboOperation(const double value1, const double value2,
     case COMBO_OP_WEIGHTED: {
         if(weight1 < 0 || weight2 < 0) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ ApplyComboOperation: Negative weights - w1=", weight1, ", w2=", weight2);
+                Print("[ERR] ApplyComboOperation: Negative weights - w1=", weight1, ", w2=", weight2);
     #endif
     result = (value1 + value2) / 2.0;
     break;
@@ -1743,14 +1647,14 @@ double ApplyComboOperation(const double value1, const double value2,
     double weightSum = weight1 + weight2;
     if(weightSum <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ ApplyComboOperation: Zero weight sum - w1=", weight1, ", w2=", weight2);
+                Print("[ERR] ApplyComboOperation: Zero weight sum - w1=", weight1, ", w2=", weight2);
     #endif
     result = (value1 + value2) / 2.0;
     break;
             }
     result = (value1 * weight1 + value2 * weight2) / weightSum;
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ ApplyComboOperation: Weighted - w1=", weight1, ", w2=", weight2, 
+            Print("[OK] ApplyComboOperation: Weighted - w1=", weight1, ", w2=", weight2, 
                   ", sum=", weightSum, ", normalized result=", result);
     #endif
     break;
@@ -1758,14 +1662,14 @@ double ApplyComboOperation(const double value1, const double value2,
             
         default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ ApplyComboOperation: Unknown operation=", operation);
+            Print("[ERR] ApplyComboOperation: Unknown operation=", operation);
     #endif
     result = (value1 + value2) / 2.0;
     break;
     }
     if(result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ ApplyComboOperation: Invalid result=", result, 
+        Print("[ERR] ApplyComboOperation: Invalid result=", result, 
               " for op=", EnumToString(operation));
     #endif
     return 0;
@@ -1802,7 +1706,7 @@ double ApplyComboOperation(const double value1, const double value2,
     }
     if(isSuspicious) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ ApplyComboOperation: Suspicious result detected");
+        Print("[WARN] ApplyComboOperation: Suspicious result detected");
     Print("   Operation=", EnumToString(operation));
     Print("   v1=", DoubleToString(value1, Digits), 
               ", v2=", DoubleToString(value2, Digits));
@@ -1814,7 +1718,7 @@ double ApplyComboOperation(const double value1, const double value2,
     result = (value1 + value2) / 2.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ ApplyComboOperation: v1=", DoubleToString(value1, Digits), 
+    Print("[OK] ApplyComboOperation: v1=", DoubleToString(value1, Digits), 
           ", v2=", DoubleToString(value2, Digits), 
           ", op=", EnumToString(operation), 
           ", result=", DoubleToString(result, Digits));
@@ -1957,7 +1861,7 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
             break;
     default:
             #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ GetPresetConfiguration: Unknown preset=", preset, ", using Legacy");
+            Print("[WARN] GetPresetConfiguration: Unknown preset=", preset, ", using Legacy");
     #endif
     tf1 = COMBO_TF_TRIGGER;
     step1 = COMBO_STEP_SS;
@@ -1967,7 +1871,7 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
     break;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
+    Print("[OK] GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
     Print("   TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
     Print("   TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
     #ifdef ENABLE_DEBUG_LOGS
@@ -2019,13 +1923,13 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
 int CalculateStructureInterval(const int baseMultiplier, const int level) {
         if(baseMultiplier < 2 || baseMultiplier > 9) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Invalid base multiplier: ", baseMultiplier, " (must be 2-9)");
+        Print("[WARN] Invalid base multiplier: ", baseMultiplier, " (must be 2-9)");
     #endif
     return 0;
     }
     if(level < 1 || level > 5) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Invalid level: ", level, " (must be 1-5)");
+        Print("[WARN] Invalid level: ", level, " (must be 1-5)");
     #endif
     return 0;
     }
@@ -2045,7 +1949,7 @@ int GetValidatedBaseMultiplier() {
         int baseMultiplier = (int)inpStructureBase;
     if(baseMultiplier < 2 || baseMultiplier > 9) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ GetValidatedBaseMultiplier: Invalid value ", baseMultiplier, 
+        Print("[WARN] GetValidatedBaseMultiplier: Invalid value ", baseMultiplier, 
               " detected, auto-correcting to default: 3");
     #endif
     return 3;    }
@@ -2120,27 +2024,27 @@ int GetHighestStructureLevel(const int step, const int &intervals[]) {
     int absStep = MathAbs(step);
     if(absStep <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ GetHighestStructureLevel: Invalid step=", step);
+        Print("[WARN] GetHighestStructureLevel: Invalid step=", step);
     #endif
     return 0;
     }
     int arraySize = ArraySize(intervals);
     if(arraySize != 5) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ GetHighestStructureLevel: Invalid intervals array size=", arraySize, " (expected 5)");
+        Print("[ERR] GetHighestStructureLevel: Invalid intervals array size=", arraySize, " (expected 5)");
     #endif
     return 0;
     }
     for(int i = 0; i < 5; i++) {
         if(intervals[i] <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ GetHighestStructureLevel: Invalid interval[", i, "]=", intervals[i]);
+            Print("[ERR] GetHighestStructureLevel: Invalid interval[", i, "]=", intervals[i]);
     #endif
     return 0;
         }
     if(i > 0 && intervals[i] <= intervals[i-1]) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ GetHighestStructureLevel: Intervals not in ascending order at index ", i);
+            Print("[ERR] GetHighestStructureLevel: Intervals not in ascending order at index ", i);
     #endif
     return 0;
         }
@@ -2299,7 +2203,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawSSLSLevels: Failed to initialize zone tracking (Above)");
+        Print("[ERR] DrawSSLSLevels: Failed to initialize zone tracking (Above)");
     #endif
     return;    }
     int maxIterations = effectiveMaxAbove * 2;
@@ -2383,7 +2287,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawSSLSLevels: Failed to initialize zone tracking (Below)");
+        Print("[ERR] DrawSSLSLevels: Failed to initialize zone tracking (Below)");
     #endif
     return;    }
     maxIterations = effectiveMaxBelow * 2;
@@ -2448,7 +2352,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     }
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
-        Print("✅ DrawSSLSLevels: Drew ", zoneCountAbove, " zones above, ", 
+        Print("[OK] DrawSSLSLevels: Drew ", zoneCountAbove, " zones above, ", 
               zoneCountBelow, " zones below");
     }
     #endif
@@ -2555,7 +2459,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawMLevels: Failed to initialize zone tracking (Above)");
+        Print("[ERR] DrawMLevels: Failed to initialize zone tracking (Above)");
     #endif
     return;    }
     int maxIterations = effectiveMaxAbove * 2;
@@ -2632,7 +2536,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawMLevels: Failed to initialize zone tracking (Below)");
+        Print("[ERR] DrawMLevels: Failed to initialize zone tracking (Below)");
     #endif
     return;    }
     maxIterations = effectiveMaxBelow * 2;
@@ -2703,7 +2607,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     }
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
-        Print("✅ DrawMLevels: Drew ", zoneCountAbove, " zones above, ", 
+        Print("[OK] DrawMLevels: Drew ", zoneCountAbove, " zones above, ", 
               zoneCountBelow, " zones below");
     }
     #endif
@@ -2719,7 +2623,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     #endif
     if(stepSizePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawTHLevelsWithStep: Invalid step size - ABORTING");
+        Print("[ERR] DrawTHLevelsWithStep: Invalid step size - ABORTING");
     #endif
     return;
     }
@@ -2764,7 +2668,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawTHLevelsWithStep: Failed to initialize zone tracking (Above)");
+        Print("[ERR] DrawTHLevelsWithStep: Failed to initialize zone tracking (Above)");
     #endif
     return;    }
     double maxPriceLimit = (isCustomPriceMode) ? 0 : g_highestHigh;
@@ -2841,7 +2745,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawTHLevelsWithStep: Failed to initialize zone tracking (Below)");
+        Print("[ERR] DrawTHLevelsWithStep: Failed to initialize zone tracking (Below)");
     #endif
     return;    }
     maxIterations = effectiveMaxBelow * 2;
@@ -2909,7 +2813,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         CleanupSurplusObjects(objectPrefix + modeName + "_Zone_Below_", logicalStep);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ DrawTHLevelsWithStep COMPLETED for mode: ", modeName);
+    Print("[OK] DrawTHLevelsWithStep COMPLETED for mode: ", modeName);
     Print("   Levels drawn: Above=", drawnAbove, ", Below=", drawnBelow);
     Print("   Zones drawn: Above=", zoneCountAbove, ", Below=", zoneCountBelow);
     Print("═══════════════════════════════════════════════════════════");
@@ -3066,7 +2970,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     }
     #ifdef ENABLE_DEBUG_LOGS
     if(inpShowMidZones) {
-        Print("✅ DrawMEqualLevels: Drew ", zoneCountAbove, " zones above, ", 
+        Print("[OK] DrawMEqualLevels: Drew ", zoneCountAbove, " zones above, ", 
               zoneCountBelow, " zones below");
     }
     #endif
@@ -3160,38 +3064,38 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
 {
         if(StringLen(objectPrefix) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Empty object prefix");
+        Print("[ERR] DrawFactorLevelsHarmonic: Empty object prefix");
     #endif
     return;
     }
     if(highPrice <= 0 || lowPrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        Print("[ERR] DrawFactorLevelsHarmonic: Invalid prices - High=", highPrice, ", Low=", lowPrice);
     #endif
     return;
     }
     if(highPrice <= lowPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Invalid range - High must be > Low");
+        Print("[ERR] DrawFactorLevelsHarmonic: Invalid range - High must be > Low");
     #endif
     return;
     }
     if(baseStepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Invalid base step size: ", baseStepSize);
+        Print("[ERR] DrawFactorLevelsHarmonic: Invalid base step size: ", baseStepSize);
     #endif
     return;
     }
     if(harmonicRatio < MIN_HARMONIC_RATIO) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Ratio too small (", harmonicRatio, 
+        Print("[ERR] DrawFactorLevelsHarmonic: Ratio too small (", harmonicRatio, 
               ") - must be >= ", MIN_HARMONIC_RATIO, " for meaningful alternation");
     #endif
     return;
     }
     if(harmonicRatio > MAX_HARMONIC_RATIO) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Ratio too large (", harmonicRatio, 
+        Print("[ERR] DrawFactorLevelsHarmonic: Ratio too large (", harmonicRatio, 
               ") - must be <= ", MAX_HARMONIC_RATIO);
     #endif
     return;
@@ -3200,7 +3104,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     double range = highPrice - lowPrice;
     if(largeStepSize > range) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ DrawFactorLevelsHarmonic: Large step (", largeStepSize, 
+        Print("[WARN] DrawFactorLevelsHarmonic: Large step (", largeStepSize, 
               ") exceeds range (", range, ") - adjusting");
     #endif
     largeStepSize = range * 0.5;    }
@@ -3216,7 +3120,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     if(ObjectFind(0, midName) < 0) {
         if(!ObjectCreate(0, midName, OBJ_HLINE, 0, 0, midpoint)) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ Failed to create midpoint level. Error: ", GetLastError());
+            Print("[ERR] Failed to create midpoint level. Error: ", GetLastError());
     #endif
     return;
         }
@@ -3241,13 +3145,13 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     const int MAX_HARMONIC_LEVELS = 2500;
     if(maxLevelsPerSide > MAX_HARMONIC_LEVELS) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Clamping levels from ", maxLevelsPerSide, " to ", MAX_HARMONIC_LEVELS);
+        Print("[WARN] Clamping levels from ", maxLevelsPerSide, " to ", MAX_HARMONIC_LEVELS);
     #endif
     maxLevelsPerSide = MAX_HARMONIC_LEVELS;
     }
     if(baseStepSize < GetCachedPoint() * 2) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonic: Base step too small (", baseStepSize, 
+        Print("[ERR] DrawFactorLevelsHarmonic: Base step too small (", baseStepSize, 
               ") - must be >= ", Point * 2);
     #endif
     return;
@@ -3279,7 +3183,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     double priceLevel = midpoint + cumulative;
     if(priceLevel > highPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-            if(i == 0) Print("⚠️ First level above midpoint exceeds high - step too large");
+            if(i == 0) Print("[WARN] First level above midpoint exceeds high - step too large");
     #endif
     break;
         }
@@ -3303,7 +3207,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ Failed to create level above ", i + 1, ". Error: ", GetLastError());
+                Print("[WARN] Failed to create level above ", i + 1, ". Error: ", GetLastError());
     #endif
     continue;
             }
@@ -3332,7 +3236,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     double priceLevel = midpoint - cumulative;
     if(priceLevel < lowPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-            if(i == 0) Print("⚠️ First level below midpoint goes below low - step too large");
+            if(i == 0) Print("[WARN] First level below midpoint goes below low - step too large");
     #endif
     break;
         }
@@ -3355,7 +3259,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ Failed to create level below ", i + 1, ". Error: ", GetLastError());
+                Print("[WARN] Failed to create level below ", i + 1, ". Error: ", GetLastError());
     #endif
     continue;
             }
@@ -3376,7 +3280,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         levelsBelow++;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ DrawFactorLevelsHarmonic: Drew ", levelsAbove, " levels above, ", 
+    Print("[OK] DrawFactorLevelsHarmonic: Drew ", levelsAbove, " levels above, ", 
           levelsBelow, " levels below midpoint");
     Print("Total: ", (levelsAbove + levelsBelow + 1), " levels (including midpoint)");
     #endif
@@ -3469,7 +3373,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         double levelPrice = startPrice + (direction * stepSize * i);
     if(levelPrice < lowPrice || levelPrice > highPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ Level ", i, " outside range: ", DoubleToString(levelPrice, Digits));
+            Print("[WARN] Level ", i, " outside range: ", DoubleToString(levelPrice, Digits));
     #endif
     continue;        }
     double normalizedPrice = NormalizeDouble(levelPrice, cachedDigits);
@@ -3493,7 +3397,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
                                       inpFactorLevelColor,                                      inpMidZoneStyle,                                      inpMidZoneTransparency)) {
                     zoneCount++;
     #ifdef ENABLE_DEBUG_LOGS
-                    Print("✅ Zone ", i, ": Between ", DoubleToString(prevPrice, Digits),
+                    Print("[OK] Zone ", i, ": Between ", DoubleToString(prevPrice, Digits),
                           " and ", DoubleToString(normalizedPrice, Digits),
                           " | Mid=", DoubleToString(midPoint, Digits),
                           " | Height=", DoubleToString(zoneHeight, Digits),
@@ -3540,7 +3444,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
         CleanupSurplusObjects(objectPrefix + "Factor_Zone_", totalLevels + 1);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ DrawFactorLevelsAligned: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("[OK] DrawFactorLevelsAligned: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
     Print("   halfStep=", DoubleToString(halfStep, Digits), 
           ", zoneHeight=", DoubleToString(zoneHeight, Digits), " (25% of halfStep = 12.5% each side)");
     #endif
@@ -3559,25 +3463,25 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
 {
         if(StringLen(objectPrefix) == 0 || centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid inputs");
+        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid inputs");
     #endif
     return;
     }
     if(highPrice <= lowPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid range - High must be > Low");
+        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid range - High must be > Low");
     #endif
     return;
     }
     if(baseStepSize <= 0 || harmonicRatio < MIN_HARMONIC_RATIO || harmonicRatio > MAX_HARMONIC_RATIO) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid step or ratio");
+        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid step or ratio");
     #endif
     return;
     }
     if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonicFromCenter: Invalid level counts");
+        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Invalid level counts");
     #endif
     return;
     }
@@ -3591,7 +3495,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         safeMaxAbove = (int)MathMin(safeMaxAbove, 100);
     safeMaxBelow = (int)MathMin(safeMaxBelow, 100);
     #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Harmonic: Center outside viewport - limiting to ", safeMaxAbove, "/", safeMaxBelow);
+        Print("[WARN] Harmonic: Center outside viewport - limiting to ", safeMaxAbove, "/", safeMaxBelow);
     #endif
     }
     double largeStepSize = baseStepSize * harmonicRatio;
@@ -3634,7 +3538,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Above)");
+        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Above)");
     #endif
     return;    }
     int logicalStepAbove = 0;
@@ -3703,7 +3607,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Below)");
+        Print("[ERR] DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Below)");
     #endif
     return;    }
     int logicalStepBelow = 0;
@@ -3767,7 +3671,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
         CleanupSurplusObjects(objectPrefix + "Factor_Harmonic_Zone_Below_", logicalStepBelow + 1);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ DrawFactorLevelsHarmonicFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("[OK] DrawFactorLevelsHarmonicFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
     Print("   Above=", levelsAboveCount, "/", maxLevelsAbove,
           ", Below=", levelsBelowCount, "/", maxLevelsBelow);
     #endif
@@ -3787,32 +3691,32 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
 {
         if(StringLen(objectPrefix) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Empty object prefix");
+        Print("[ERR] DrawFactorLevelsFromCenter: Empty object prefix");
     #endif
     return;
     }
     if(centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Invalid prices - Center=", centerPrice, 
+        Print("[ERR] DrawFactorLevelsFromCenter: Invalid prices - Center=", centerPrice, 
               ", High=", highPrice, ", Low=", lowPrice);
     #endif
     return;
     }
     if(highPrice <= lowPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Invalid range - High must be > Low");
+        Print("[ERR] DrawFactorLevelsFromCenter: Invalid range - High must be > Low");
     #endif
     return;
     }
     if(stepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Invalid step size: ", stepSize);
+        Print("[ERR] DrawFactorLevelsFromCenter: Invalid step size: ", stepSize);
     #endif
     return;
     }
     if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Invalid level counts");
+        Print("[ERR] DrawFactorLevelsFromCenter: Invalid level counts");
     #endif
     return;
     }
@@ -3869,7 +3773,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
                                lastTriggerPriceAbove, lastFallbackPriceAbove)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Above)");
+        Print("[ERR] DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Above)");
     #endif
     return;    }
     int logicalStep = 1;
@@ -3955,7 +3859,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceBelow, 
                                lastTriggerPriceBelow, lastFallbackPriceBelow)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Below)");
+        Print("[ERR] DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Below)");
     #endif
     return;    }
     
@@ -4039,7 +3943,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         CleanupSurplusObjects(objectPrefix + "Factor_Zone_Below_", logicalStep);
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ DrawFactorLevelsFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("[OK] DrawFactorLevelsFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
     Print("   Center=", DoubleToString(normalizedCenter, Digits),
           ", Above=", levelsAboveCount, "/", maxLevelsAbove, 
           ", Below=", levelsBelowCount, "/", maxLevelsBelow);

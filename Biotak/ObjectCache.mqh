@@ -68,7 +68,7 @@ int HashObjectName(const string name) {
     g_objectCacheHashInitialized = true;
     g_objectCacheSize = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Object Cache Hash Initialized (", CACHE_HASH_BUCKETS, " buckets)");
+    Print("[OK] Object Cache Hash Initialized (", CACHE_HASH_BUCKETS, " buckets)");
     #endif
     }
     int CacheFindIndex(const string name) {
@@ -141,7 +141,7 @@ int HashObjectName(const string name) {
     
     // All probed slots occupied - force eviction
     #ifdef ENABLE_DEBUG_LOGS
-    Print("⚠️ Object cache collision - forcing LRU eviction");
+    Print("[WARN] Object cache collision - forcing LRU eviction");
     #endif
     EvictLRUEntry();
     
@@ -164,7 +164,7 @@ int HashObjectName(const string name) {
     if(lruIdx >= 0) {
         // Evict this entry
         #ifdef ENABLE_DEBUG_LOGS
-        Print("🗑️ Evicting LRU cache entry: '", g_objectCacheHash[lruIdx].name, "'");
+        Print("[DEL] Evicting LRU cache entry: '", g_objectCacheHash[lruIdx].name, "'");
     #endif
     g_objectCacheHash[lruIdx].name = "";
     g_objectCacheHash[lruIdx].occupied = false;
@@ -186,7 +186,7 @@ int HashObjectName(const string name) {
     g_objectCacheHash[idx].lastAccess = 0;
     g_objectCacheSize--;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🗑️ Removed object from cache (size now: ", g_objectCacheSize, ")");
+    Print("[DEL] Removed object from cache (size now: ", g_objectCacheSize, ")");
     #endif
     }
     void CacheClear() {
@@ -200,7 +200,7 @@ int HashObjectName(const string name) {
     
     g_objectCacheSize = 0;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🔄 Object cache cleared");
+    Print("[SYNC] Object cache cleared");
     #endif
     }
     bool CacheObjectExists(const string name) {

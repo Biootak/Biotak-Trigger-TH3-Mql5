@@ -54,7 +54,7 @@ void PrintRecentM30Bars(int count = 5)
 #define SYMBOL_STATE_LRU_THRESHOLD 50
 #define SYMBOL_STATE_INACTIVE_HOURS 24
 //+------------------------------------------------------------------+
-//| ✅ LRU Eviction: Remove least recently used symbol states        |
+//| [OK] LRU Eviction: Remove least recently used symbol states        |
 
 //+------------------------------------------------------------------+
 void EvictLeastRecentlyUsedSymbolState() {
@@ -71,13 +71,13 @@ void EvictLeastRecentlyUsedSymbolState() {
     if(oldestIndex < 0) return;
     if((currentTime - oldestTime) < SYMBOL_STATE_INACTIVE_HOURS * 3600) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ EvictLRU: Oldest state only ", 
+        Print("[WARN] EvictLRU: Oldest state only ", 
               (currentTime - oldestTime) / 3600, "h old - not evicting yet");
     #endif
     return;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("🗑️ EvictLRU: Removing symbol '", g_symbolStates[oldestIndex].symbol, 
+    Print("[DEL] EvictLRU: Removing symbol '", g_symbolStates[oldestIndex].symbol, 
           "' (inactive for ", (currentTime - oldestTime) / 3600, "h)");
     #endif
     ArrayFree(g_symbolStates[oldestIndex].basePriceHistory);
@@ -94,7 +94,7 @@ void EvictLeastRecentlyUsedSymbolState() {
         string currentSymbol = _Symbol;
     if(g_symbolStateCount < 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CRITICAL: Corrupted symbol state count (", g_symbolStateCount, ")");
+        Print("[ERR] CRITICAL: Corrupted symbol state count (", g_symbolStateCount, ")");
     #endif
     g_symbolStateCount = 0;
     ArrayResize(g_symbolStates, 0);
@@ -102,7 +102,7 @@ void EvictLeastRecentlyUsedSymbolState() {
     }
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CRITICAL: Symbol state limit reached (", MAX_SYMBOL_STATES, ")");
+        Print("[ERR] CRITICAL: Symbol state limit reached (", MAX_SYMBOL_STATES, ")");
     #endif
     return -1;
     }
@@ -123,14 +123,14 @@ void EvictLeastRecentlyUsedSymbolState() {
     }
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CRITICAL: Symbol state limit reached even after eviction");
+        Print("[ERR] CRITICAL: Symbol state limit reached even after eviction");
     #endif
     return -1;
     }
     int newIndex = g_symbolStateCount;
     if(ArrayResize(g_symbolStates, newIndex + 1, 8) != newIndex + 1) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CRITICAL: Failed to resize symbol states array");
+        Print("[ERR] CRITICAL: Failed to resize symbol states array");
     #endif
     return -1;
     }
@@ -146,7 +146,7 @@ void EvictLeastRecentlyUsedSymbolState() {
     g_symbolStates[newIndex].systemInitialized = false;
     g_symbolStateCount++;
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");
+    Print("[OK] Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");
     #endif
     return newIndex;
 }string GetHistoryEntry(int index)
@@ -235,12 +235,12 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     double percentDiff = MathAbs((restoredPrice - currentBid) / currentBid) * 100.0;
     if(percentDiff <= SANITY_CHECK_THRESHOLD_PERCENT)
     {        validatedPrice = restoredPrice;
-    DEBUG_PRINTF2("[BasePriceManager] ValidateRestoredBasePrice() - ✅ ACCEPTED (diff=", DoubleToString(percentDiff, 2), "%)");
+    DEBUG_PRINTF2("[BasePriceManager] ValidateRestoredBasePrice() - [OK] ACCEPTED (diff=", DoubleToString(percentDiff, 2), "%)");
     return true;
     }
     else
     {        validatedPrice = currentBid;
-    DEBUG_PRINTF5("[BasePriceManager] ValidateRestoredBasePrice() - ⚠️ REJECTED (diff=", DoubleToString(percentDiff, 2), "% > ", DoubleToString(SANITY_CHECK_THRESHOLD_PERCENT, 1), "%), using bid", "");
+    DEBUG_PRINTF5("[BasePriceManager] ValidateRestoredBasePrice() - [WARN] REJECTED (diff=", DoubleToString(percentDiff, 2), "% > ", DoubleToString(SANITY_CHECK_THRESHOLD_PERCENT, 1), "%), using bid", "");
     return false;
     }
 }
@@ -258,7 +258,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     UpdateHistoryFormatVersion(HISTORY_FORMAT_VERSION);
     #ifdef ENABLE_DEBUG_LOGS
         Print("╔═══════════════════════════════════════════════════════════════╗");
-    Print("║  ✅ History cleanup complete. Will rebuild from M30 data.    ║");
+    Print("║  [OK] History cleanup complete. Will rebuild from M30 data.    ║");
     Print("╚═══════════════════════════════════════════════════════════════╝");
     #endif
     }
@@ -319,7 +319,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
                 {
                     needsMigration = true;
     #ifdef ENABLE_DEBUG_LOGS
-                    Print("[BasePriceManager] ✅ Migration needed: Found entry at ", timeStr, " (yesterday's data)");
+                    Print("[BasePriceManager] [OK] Migration needed: Found entry at ", timeStr, " (yesterday's data)");
     #endif
     break;                }
             }
@@ -343,13 +343,13 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     if(FileDelete(filePath))
         {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[BasePriceManager] ✅ Old history file deleted successfully");
+            Print("[BasePriceManager] [OK] Old history file deleted successfully");
     #endif
     }
         else
         {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[BasePriceManager] ⚠️ Could not delete old file (error: ", GetLastError(), ")");
+            Print("[BasePriceManager] [WARN] Could not delete old file (error: ", GetLastError(), ")");
     #endif
     }
     loadedCount = 0;
@@ -404,13 +404,13 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     if(isValid)
                     {
         #ifdef ENABLE_DEBUG_LOGS
-                        Print("║  ✅ BASE PRICE RESTORED: ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
+                        Print("║  [OK] BASE PRICE RESTORED: ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
     #endif
     }
                     else
                     {
         #ifdef ENABLE_DEBUG_LOGS
-                        Print("║  ⚠️ STALE PRICE REJECTED: ", DoubleToString(restoredPrice, Digits), " → ", DoubleToString(g_basePriceCached, Digits));
+                        Print("║  [WARN] STALE PRICE REJECTED: ", DoubleToString(restoredPrice, Digits), " → ", DoubleToString(g_basePriceCached, Digits));
     #endif
     }
     #ifdef ENABLE_DEBUG_LOGS
@@ -495,7 +495,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
             {
                 Print("╔═══════════════════════════════════════════════════════════════╗");
     #ifdef ENABLE_DEBUG_LOGS
-                Print("║  ✅ HISTORY REBUILT SUCCESSFULLY                             ║");
+                Print("║  [OK] HISTORY REBUILT SUCCESSFULLY                             ║");
     Print("║  Total Entries: ", g_historyCount);
     Print("║  Base Price: ", DoubleToString(g_basePriceCached, Digits));
     Print("╚═══════════════════════════════════════════════════════════════╝");
@@ -733,14 +733,14 @@ string ExtractTimeBlock(const string &entry)
     if(!AppendBasePriceHistoryEntry(dt.year, dayOfYear, entry))
         {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ WARNING: Failed to persist history entry to file");
+            Print("[WARN] WARNING: Failed to persist history entry to file");
     #endif
     }
     }
     else
     {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ Skipping duplicate history entry for block ", timeStr);
+        Print("[WARN] Skipping duplicate history entry for block ", timeStr);
     #endif
     }
 }
@@ -1019,7 +1019,7 @@ string ExtractTimeBlock(const string &entry)
     if(m30BarIdx == -1)
         {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[BasePriceManager] ⚠️ No M30 data for block ", blockTimeStr, 
+            Print("[BasePriceManager] [WARN] No M30 data for block ", blockTimeStr, 
                   " (GMT), Server: ", TimeToString(blockStartServer, TIME_MINUTES));
     #endif
     missingDataCount++;
@@ -1029,7 +1029,7 @@ string ExtractTimeBlock(const string &entry)
     if(closePrice <= 0.0)
         {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("[BasePriceManager] ⚠️ Invalid M30 candle price for block ", blockTimeStr, ": ", closePrice);
+            Print("[BasePriceManager] [WARN] Invalid M30 candle price for block ", blockTimeStr, ": ", closePrice);
     #endif
     missingDataCount++;
     continue;
@@ -1147,7 +1147,7 @@ string ExtractTimeBlock(const string &entry)
     Print("╔═══════════════════════════════════════════════════════════════╗");
     #endif
     #ifdef ENABLE_DEBUG_LOGS
-    Print("║  ✅ REBUILD COMPLETE                                          ║");
+    Print("║  [OK] REBUILD COMPLETE                                          ║");
     #endif
     #ifdef ENABLE_DEBUG_LOGS
     Print("║  Total Entries: ", g_historyCount);
@@ -1176,7 +1176,7 @@ void PrintBasePriceHistory()
         if(g_historyCount == 0)
     {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("📊 Base Price History: No entries yet");
+        Print("[DATA] Base Price History: No entries yet");
     #endif
     return;
     }
@@ -1185,7 +1185,7 @@ void PrintBasePriceHistory()
     TimeToStruct(TimeGMT(), dt);
     #ifdef ENABLE_DEBUG_LOGS
     Print("+---------------------------------------------------------------------------------------------------------------------+");
-    Print("|  📊 BASE PRICE HISTORY TODAY (All 30-min updates) - ", g_historyCount, " entries                                                    |");
+    Print("|  [DATA] BASE PRICE HISTORY TODAY (All 30-min updates) - ", g_historyCount, " entries                                                    |");
     Print("+---------------------------------------------------------------------------------------------------------------------+");
     Print("|  Time  | 30-Min Price    | Ref Price (Used)      | Status/D%           | Ref M1     | M1 Old     | M1 New     |");
     Print("|        |                 |                       |                     |            |            |            |");

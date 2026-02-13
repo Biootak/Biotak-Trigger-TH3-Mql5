@@ -20,7 +20,7 @@ ENUM_MARKET_TYPE DetectMarketType(string symbol) {
     if(StringFind(s, "BTC") >= 0 || StringFind(s, "ETH") >= 0 ||
        StringFind(s, "USDT") >= 0 || StringFind(s, "CRYPTO") >= 0)
         return MARKET_CRYPTO;
-    string forexPairs[] = {"EUR","GBP","USD","JPY","CHF","CAD","AUD","NZD"};
+    static string forexPairs[] = {"EUR","GBP","USD","JPY","CHF","CAD","AUD","NZD"};
 
     int forexCount = 0;
     for(int i = 0; i < ArraySize(forexPairs); i++)

@@ -39,15 +39,6 @@ void InitializeGlobalCache() {
     }
 
 //+------------------------------------------------------------------+
-//| Update Period Cache (call when timeframe changes)                |
-
-//| NOTE: Period cache is now managed by CalculationCache.mqh        |
-//+------------------------------------------------------------------+
-void UpdatePeriodCache() {
-    // Period cache is now managed by CalculationCache.mqh
-}
-
-//+------------------------------------------------------------------+
 //| Get Cached Symbol (use instead of Symbol())                      |
 
 //+------------------------------------------------------------------+

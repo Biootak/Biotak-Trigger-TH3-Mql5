@@ -261,26 +261,26 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
 {
         if(StringLen(zoneName) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateGenericMidZone: Empty zone name");
+        Print("[ERR] CreateGenericMidZone: Empty zone name");
     #endif
     return false;
     }
     if(prevPrice <= 0 || currentPrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateGenericMidZone: Invalid prices - Prev=", DoubleToString(prevPrice, Digits), 
+        Print("[ERR] CreateGenericMidZone: Invalid prices - Prev=", DoubleToString(prevPrice, Digits), 
               ", Current=", DoubleToString(currentPrice, Digits));
     #endif
     return false;
     }
     if(prevPrice == currentPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ CreateGenericMidZone: Prices are equal - no zone needed");
+        Print("[WARN] CreateGenericMidZone: Prices are equal - no zone needed");
     #endif
     return false;
     }
     if(zoneHeight <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateGenericMidZone: Invalid zone height: ", DoubleToString(zoneHeight, Digits));
+        Print("[ERR] CreateGenericMidZone: Invalid zone height: ", DoubleToString(zoneHeight, Digits));
     #endif
     return false;
     }
@@ -289,7 +289,7 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
     if(upperPrice <= lowerPrice) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateGenericMidZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, Digits), 
+        Print("[ERR] CreateGenericMidZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, Digits), 
               ", Lower=", DoubleToString(lowerPrice, Digits));
     #endif
     return false;
@@ -306,13 +306,13 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     SZoneCreationResult result = CreateZone(request);
     if(!result.success) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateGenericMidZone: Factory failed for '", zoneName, "' - ", result.errorMessage, 
+        Print("[ERR] CreateGenericMidZone: Factory failed for '", zoneName, "' - ", result.errorMessage, 
               " (Code: ", result.errorCode, ")");
     #endif
     return false;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ CreateGenericMidZone: Created/Updated '", zoneName, "' [", 
+    Print("[OK] CreateGenericMidZone: Created/Updated '", zoneName, "' [", 
           DoubleToString(lowerPrice, Digits), " - ", DoubleToString(upperPrice, Digits), "]");
     #endif
     return true;

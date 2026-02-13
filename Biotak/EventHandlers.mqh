@@ -25,7 +25,7 @@ int OnInitHandler() {    InitializeGlobalCache();
             g_thLabelsVisible = (g_thLabelsMode != 0);
         } else {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("❌ OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
+            Print("[ERR] OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
     #endif
     int defaultMode = 0;
     if(inpShowTHLabels) {
@@ -78,13 +78,13 @@ int OnInitHandler() {    InitializeGlobalCache();
     double validatedCustomPrice = inpCustomTHStartPrice;
     if(validatedCustomPrice < 0.0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Invalid custom price (negative): ", validatedCustomPrice);
+        Print("[ERR] Invalid custom price (negative): ", validatedCustomPrice);
     #endif
     validatedCustomPrice = 0.0;
     }
     if(validatedCustomPrice > 1000000.0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ Invalid custom price (too large): ", validatedCustomPrice);
+        Print("[ERR] Invalid custom price (too large): ", validatedCustomPrice);
     #endif
     validatedCustomPrice = 0.0;
     }
@@ -156,7 +156,7 @@ int OnInitHandler() {    InitializeGlobalCache();
                 g_stepModeOverride = tempMode;
             } else {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ WARNING: Corrupted StepMode GlobalVariable (", tempMode, "), resetting to default");
+                Print("[WARN] WARNING: Corrupted StepMode GlobalVariable (", tempMode, "), resetting to default");
     #endif
     GlobalVariableDel(stepModeGvarName);
     g_stepModeOverride = -1;
@@ -171,7 +171,7 @@ int OnInitHandler() {    InitializeGlobalCache();
                 g_factorValueOverride = val;
             } else {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ WARNING: Invalid Factor GlobalVariable (", val, "), resetting to default");
+                Print("[WARN] WARNING: Invalid Factor GlobalVariable (", val, "), resetting to default");
     #endif
     GlobalVariableDel(factorGvarName);
     g_factorValueOverride = 0.0;
@@ -182,7 +182,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     if(inpFactorMode == FACTOR_MODE_MANUAL) {
         if(inpFactorValue <= 0 || inpFactorValue > MAX_SAFE_FACTOR) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ ERROR: Invalid inpFactorValue (", inpFactorValue, "), clamping to safe range");
+            Print("[WARN] ERROR: Invalid inpFactorValue (", inpFactorValue, "), clamping to safe range");
     #endif
     g_factorValueOverride = 50.0;
         }
@@ -213,17 +213,17 @@ int OnInitHandler() {    InitializeGlobalCache();
         {            UpdateAllTH3Objects();
     GlobalVariableDel(th3UpdateFlag);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("🔄 Updated all TH3 objects with new settings");
+            Print("[SYNC] Updated all TH3 objects with new settings");
     #endif
     }
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ AUDIT COMPLETE: All critical memory leaks fixed");
-    Print("⚡ OPTIMIZED: API calls cached (Symbol, Digits, Point)");
-    Print("🧹 MEMORY: BasePriceManager cleanup added");
+    Print("[OK] AUDIT COMPLETE: All critical memory leaks fixed");
+    Print("[FAST] OPTIMIZED: API calls cached (Symbol, Digits, Point)");
+    Print("[CLEAN] MEMORY: BasePriceManager cleanup added");
     Print("🔧 BUILD: Debug/Production modes with compile-time optimization");
     Print("🔧 FEATURES: Multiple step modes (TH, SS/LS, M, TP, Combo)");
-    Print("💾 PERSISTENT: Settings saved to GlobalVariables (survive terminal restart)");
+    Print("[SAVE] PERSISTENT: Settings saved to GlobalVariables (survive terminal restart)");
     Print("To enable 'Chart Shift': Right-click chart > Chart Shift (or F11)");
     #endif
     if(shouldBeHidden) {        g_redrawTHLevelsNeeded = false;
@@ -232,7 +232,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     #endif
     } else {        g_redrawTHLevelsNeeded = true;
     #ifdef ENABLE_DEBUG_LOGS
-        Print("👁️ OnInit: Indicator VISIBLE - objects will be created normally");
+        Print("👁 OnInit: Indicator VISIBLE - objects will be created normally");
     #endif
     }
     return INIT_SUCCEEDED;
@@ -242,7 +242,7 @@ int OnInitHandler() {    InitializeGlobalCache();
         if(ObjectFind(0, g_customPriceHorizontalLineName) < 0) {
         if(!ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, price)) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ Failed to create custom price line. Error: ", GetLastError());
+            Print("[WARN] Failed to create custom price line. Error: ", GetLastError());
     #endif
     g_customPriceLineCreated = false;
     return false;
@@ -257,7 +257,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, selected);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                  "📍 Custom Price: " + DoubleToString(price, digits) + " | " + tooltipSuffix);
+                  "[PIN] Custom Price: " + DoubleToString(price, digits) + " | " + tooltipSuffix);
     g_customPriceLineCreated = true;
     return true;
 }
@@ -436,7 +436,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastClearLog = 0;
     if(TimeCurrent() - s_lastClearLog > 5) {
-        Print("[MT4] 🧹 CLEARING ALL LEVELS with prefix: ", objectPrefix);
+        Print("[MT4] [CLEAN] CLEARING ALL LEVELS with prefix: ", objectPrefix);
         s_lastClearLog = TimeCurrent();
     }
     #endif
@@ -517,7 +517,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 
     #ifdef ENABLE_DEBUG_LOGS
     if(totalDeleted > 0 || totalFailed > 0) {
-        Print("✅ ClearAllLevels: Deleted=", totalDeleted, ", Failed=", totalFailed);
+        Print("[OK] ClearAllLevels: Deleted=", totalDeleted, ", Failed=", totalFailed);
     }
     #endif
 
@@ -611,7 +611,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     data.midpointPrice = GetMidpointPrice(g_thStartPointType);
     if(data.midpointPrice <= 0 || data.midpointPrice == EMPTY_VALUE) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("⚠️ ERROR: Invalid midpoint price! g_highestHigh=", g_highestHigh, ", g_lowestLow=", g_lowestLow);
+        Print("[WARN] ERROR: Invalid midpoint price! g_highestHigh=", g_highestHigh, ", g_lowestLow=", g_lowestLow);
     #endif
     return false;
     }
@@ -684,7 +684,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     double comboStep = CalculateComboStepSize(dailyClosePrice);
     if(comboStep <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ COMBO_STEP: Failed to calculate combo step");
+                Print("[ERR] COMBO_STEP: Failed to calculate combo step");
     Print("   Base Price: ", dailyClosePrice);
     Print("   Preset: ", EnumToString(inpComboPreset));
     #endif
@@ -721,7 +721,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         {            StepCalculationData data;
     if(!CalculateCommonStepData(dailyClosePrice, data)) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ FACTOR_STEP: Failed to calculate common step data");
+                Print("[ERR] FACTOR_STEP: Failed to calculate common step data");
     #endif
     return;
             }
@@ -744,13 +744,13 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     double factorStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
     if(factorStepSize <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ FACTOR_STEP: Invalid step size calculated");
+                Print("[ERR] FACTOR_STEP: Invalid step size calculated");
     #endif
     return;
             }
     if(factorStepSize < Point * 2) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ FACTOR_STEP: Base step too small (", factorStepSize, 
+                Print("[ERR] FACTOR_STEP: Base step too small (", factorStepSize, 
                       ") - Factor too large or range too small");
     #endif
     return;
@@ -759,13 +759,13 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         double harmonicRatio = inpHarmonicRatio;
     if(harmonicRatio < MIN_HARMONIC_RATIO) {
         #ifdef ENABLE_DEBUG_LOGS
-                    Print("⚠️ FACTOR_STEP: Harmonic ratio too small (", harmonicRatio, 
+                    Print("[WARN] FACTOR_STEP: Harmonic ratio too small (", harmonicRatio, 
                           "), clamping to ", MIN_HARMONIC_RATIO);
     #endif
     harmonicRatio = MIN_HARMONIC_RATIO;
                 } else if(harmonicRatio > MAX_HARMONIC_RATIO) {
         #ifdef ENABLE_DEBUG_LOGS
-                    Print("⚠️ FACTOR_STEP: Harmonic ratio too large (", harmonicRatio, 
+                    Print("[WARN] FACTOR_STEP: Harmonic ratio too large (", harmonicRatio, 
                           "), clamping to ", MAX_HARMONIC_RATIO);
     #endif
     harmonicRatio = MAX_HARMONIC_RATIO;
@@ -802,7 +802,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             }
     DrawFactorBoundaryLines(objectPrefix, g_highestHigh, g_lowestLow, factorValue, factorStepSize);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ FACTOR_STEP: Completed successfully");
+            Print("[OK] FACTOR_STEP: Completed successfully");
     #endif
     break;
         }
@@ -812,13 +812,13 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         {
             DrawTHLevels(objectPrefix, dailyClosePrice);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ TH_STEP: Completed successfully");
+            Print("[OK] TH_STEP: Completed successfully");
     #endif
             break;
         }
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("✅ DrawLevelsBasedOnMode: All operations completed");
+    Print("[OK] DrawLevelsBasedOnMode: All operations completed");
     #endif
     }
     void RedrawAllObjects(bool force_redraw=false)
@@ -961,7 +961,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
                 } else {
                     ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, g_customTHStartPrice);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                  "📍 Custom Price: " + DoubleToString(g_customTHStartPrice, s_cachedDigits) + " | Drag to adjust (live update)");
+                                  "[PIN] Custom Price: " + DoubleToString(g_customTHStartPrice, s_cachedDigits) + " | Drag to adjust (live update)");
                 }
                 
                 g_redrawTHLevelsNeeded = true;
@@ -974,7 +974,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(!lineExists) {
         if(CreateCustomPriceLine(g_customTHStartPrice, s_cachedDigits, false, "Drag to adjust (live update)")) {
             #ifdef ENABLE_DEBUG_LOGS
-                    Print("🔄 Custom price line restored at: ", DoubleToString(g_customTHStartPrice, s_cachedDigits));
+                    Print("[SYNC] Custom price line restored at: ", DoubleToString(g_customTHStartPrice, s_cachedDigits));
             #endif
         }
             }
@@ -1042,14 +1042,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(timeframeChanged) {        InvalidateTimeframeDependentCaches();
     InvalidateATRCache();
     #ifdef ENABLE_DEBUG_LOGS
-        Print("🔄 Timeframe changed: ", s_lastPeriod, " -> ", currentPeriod);
+        Print("[SYNC] Timeframe changed: ", s_lastPeriod, " -> ", currentPeriod);
     #endif
     }
     if(barsChanged) {        InvalidateFactorCache();
     }
     if(customPriceChanged) {        InvalidateTHCache();
     #ifdef ENABLE_DEBUG_LOGS
-        Print("🔄 Custom price changed: ", DoubleToString(s_lastCustomPrice, Digits), 
+        Print("[SYNC] Custom price changed: ", DoubleToString(s_lastCustomPrice, Digits), 
               " -> ", DoubleToString(currentCustomPrice, Digits));
     #endif
     }
@@ -1072,8 +1072,8 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         int totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
-                if(s_cpuWarningCount % 10 == 0) {                    Print("⚠️ Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
-    Print("🧹 Consider reducing inpMaxLevels for better performance");
+                if(s_cpuWarningCount % 10 == 0) {                    Print("[WARN] Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
+    Print("[CLEAN] Consider reducing inpMaxLevels for better performance");
                 }
     #endif
     s_cpuWarningCount++;
@@ -1081,14 +1081,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             else if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
                 Print("🔴 CRITICAL: ", totalObjects, " objects approaching MT4 limit (64000)!");
-    Print("🧹 EMERGENCY: Using ObjectsDeleteAll for cleanup...");
+    Print("[CLEAN] EMERGENCY: Using ObjectsDeleteAll for cleanup...");
     #endif
     int deleted = 0;
     deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);
     deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
     #ifdef ENABLE_DEBUG_LOGS
                 int afterCleanup = ObjectsTotal(0, -1, -1);
-    Print("✅ Emergency cleanup completed. Objects: ", totalObjects, " -> ", afterCleanup, " (deleted=", deleted, ")");
+    Print("[OK] Emergency cleanup completed. Objects: ", totalObjects, " -> ", afterCleanup, " (deleted=", deleted, ")");
     #endif
     }
         }
@@ -1102,7 +1102,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
         else if(s_lastCPUTime == 0 || GetTickCount() - s_lastCPUTime > 60000) {
         #ifdef ENABLE_DEBUG_LOGS
-            Print("⚠️ CPU Warning: OnCalculate took ", elapsed, "ms (threshold: ", CPU_WARNING_MS, "ms)");
+            Print("[WARN] CPU Warning: OnCalculate took ", elapsed, "ms (threshold: ", CPU_WARNING_MS, "ms)");
     #endif
     s_lastCPUTime = GetTickCount();
         }
@@ -1224,7 +1224,7 @@ void AdjustTH3Frequency(int direction)
     bool isBecomingHidden = (currentState == 0.0);
     if(!GlobalVariableSet(gvar_name, isBecomingHidden ? 1.0 : 0.0)) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ F key: Failed to set GlobalVariable, Error: ", GetLastError());
+                Print("[WARN] F key: Failed to set GlobalVariable, Error: ", GetLastError());
     #endif
     }
     RefreshIsHiddenCache();
@@ -1240,7 +1240,7 @@ void AdjustTH3Frequency(int direction)
             else
             {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("👁️ F key: Showing all objects");
+                Print("👁 F key: Showing all objects");
     #endif
     // Fast show: toggle visibility instead of delete+recreate
     int total = ObjectsTotal(0, -1, -1);
@@ -1342,7 +1342,7 @@ void AdjustTH3Frequency(int direction)
                 }
             }
     #ifdef ENABLE_DEBUG_LOGS
-            Print("📊 Lines ", (g_linesVisible ? "VISIBLE" : "HIDDEN"));
+            Print("[DATA] Lines ", (g_linesVisible ? "VISIBLE" : "HIDDEN"));
     #endif
     ThrottledChartRedraw();
     return;
@@ -1376,11 +1376,11 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, true);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                          "📍 Custom Price: " + DoubleToString(currentPrice, Digits) + " | Drag to adjust, Double-click to confirm");
+                          "[PIN] Custom Price: " + DoubleToString(currentPrice, Digits) + " | Drag to adjust, Double-click to confirm");
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
     #ifdef ENABLE_DEBUG_LOGS
-            Print("📍 Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
+            Print("[PIN] Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
     #endif
     ThrottledChartRedraw();
     return;
@@ -1444,7 +1444,7 @@ void AdjustTH3Frequency(int direction)
     // Schedule lightweight relayout so TH labels move up/down on next tick (no lag on keydown)
     g_labelsRelayoutNeeded = true;
     #ifdef ENABLE_DEBUG_LOGS
-        Print("📊 ATR Labels ", (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
+        Print("[DATA] ATR Labels ", (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
     #endif
     ChartRedraw();
     return;
@@ -1598,7 +1598,7 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, false);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                  "📍 Custom Price: " + DoubleToString(savedCustomPrice, Digits) + " | Drag to adjust (live update)");
+                                  "[PIN] Custom Price: " + DoubleToString(savedCustomPrice, Digits) + " | Drag to adjust (live update)");
     g_customPriceLineCreated = true;
                 }
             }
@@ -1663,10 +1663,10 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, true);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "📍 Custom Price Line - Drag to adjust, Double-click to confirm");
+    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price Line - Drag to adjust, Double-click to confirm");
     g_customPriceLineCreated = true;
     #ifdef ENABLE_DEBUG_LOGS
-            Print("📍 Drag the orange dotted line to adjust price. Double-click to confirm.");
+            Print("[PIN] Drag the orange dotted line to adjust price. Double-click to confirm.");
     #endif
     }
         else
@@ -1685,13 +1685,13 @@ void AdjustTH3Frequency(int direction)
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
     GlobalVariableSet(gvarName, selectedPrice);
     GlobalVariableSet(overrideFlagName, 1.0);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "📍 Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
+    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
     #ifdef ENABLE_DEBUG_LOGS
-                Print("✅ Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+                Print("[OK] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
     #endif
     }
         }
@@ -1715,13 +1715,13 @@ void AdjustTH3Frequency(int direction)
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
     GlobalVariableSet(gvarName, selectedPrice);
     GlobalVariableSet(overrideFlagName, 1.0);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "📍 Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
+    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
     #ifdef ENABLE_DEBUG_LOGS
-            Print("✅ Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+            Print("[OK] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
     #endif
     }
     }

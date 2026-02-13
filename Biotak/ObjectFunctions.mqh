@@ -7,20 +7,20 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
 
     if(!CanCreateObject()) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateTHLineObject: Object limit reached, cannot create '", name, "'");
+        Print("[ERR] CreateTHLineObject: Object limit reached, cannot create '", name, "'");
     #endif
     return false;
     }
     if(StringLen(name) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateTHLineObject: Empty object name");
+        Print("[ERR] CreateTHLineObject: Empty object name");
     #endif
     return false;
     }
 
     if(!IsValidPrice(price)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreateTHLineObject: Invalid price (", price, ") for '", name, "'");
+        Print("[ERR] CreateTHLineObject: Invalid price (", price, ") for '", name, "'");
     #endif
     return false;
     }
@@ -45,7 +45,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         if(!ObjectCreate(0, name, objectType, 0, currentTime, normalizedPrice, (objectType == OBJ_TREND ? futureTime : (datetime)0), normalizedPrice)) {
         #ifdef ENABLE_DEBUG_LOGS
             int error = GetLastError();
-    Print("❌ CreateTHLineObject: Failed to create '", name, "', error=", error);
+    Print("[ERR] CreateTHLineObject: Failed to create '", name, "', error=", error);
     #endif
     return false;
         }
@@ -59,7 +59,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     if(!propsSuccess) {
         #ifdef ENABLE_DEBUG_LOGS
             int error = GetLastError();
-    Print("⚠️ CreateTHLineObject: Failed to set some properties for '", name, "', error=", error);
+    Print("[WARN] CreateTHLineObject: Failed to set some properties for '", name, "', error=", error);
     #endif
     }
 
@@ -90,7 +90,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         if(changes.priceChanged) {
                 if(!ObjectSetDouble(0, name, OBJPROP_PRICE, normalizedPrice)) {
         #ifdef ENABLE_DEBUG_LOGS
-                    Print("⚠️ CreateTHLineObject: Failed to update price for '", name, "'");
+                    Print("[WARN] CreateTHLineObject: Failed to update price for '", name, "'");
     #endif
     }
             }
@@ -121,7 +121,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
             
             if(!updateSuccess) {
         #ifdef ENABLE_DEBUG_LOGS
-                Print("⚠️ CreateTHLineObject: Failed to update some properties for '", name, "'");
+                Print("[WARN] CreateTHLineObject: Failed to update some properties for '", name, "'");
     #endif
     }
         }
@@ -138,20 +138,20 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     if(!inpShowPipDistanceLabels) return true;
     if(!CanCreateObject()) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
+        Print("[ERR] CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
     #endif
     return false;
     }
     if(StringLen(name) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreatePipDistanceLabel: Empty label name");
+        Print("[ERR] CreatePipDistanceLabel: Empty label name");
     #endif
     return false;
     }
     
     if(!IsValidPrice(price)) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ CreatePipDistanceLabel: Invalid price (", price, ")");
+        Print("[ERR] CreatePipDistanceLabel: Invalid price (", price, ")");
     #endif
     return false;
     }
@@ -166,7 +166,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
         #ifdef ENABLE_DEBUG_LOGS
                 int error = GetLastError();
-    Print("❌ CreatePipDistanceLabel: Failed to create '", name, "', error=", error);
+    Print("[ERR] CreatePipDistanceLabel: Failed to create '", name, "', error=", error);
     #endif
     return false;
             }

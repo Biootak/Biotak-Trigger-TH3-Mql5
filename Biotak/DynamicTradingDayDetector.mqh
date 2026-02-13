@@ -58,7 +58,6 @@ datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1) {
     dt.sec = 0;
     datetime blockTime = StructToTime(dt);
     int estimatedBlocks = (int)((currentTime - blockTime) / 1800) + 2;
-    ArrayResize(blocks, 0);
     ArrayResize(blocks, estimatedBlocks);
     int blockCount = 0;
     while(blockTime <= currentTime) {

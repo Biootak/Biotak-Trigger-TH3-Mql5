@@ -41,7 +41,7 @@ input ENUM_LINE_STYLE inpTHLineStyle = STYLE_DOT;
 input bool inpBasePriceThresholdEnabled = true;
 
 // ═══════════════════════════════════════════════════════════════════
-// 📊 THRESHOLD SENSITIVITY (Default: 0.066%)
+// [DATA] THRESHOLD SENSITIVITY (Default: 0.066%)
 // ═══════════════════════════════════════════════════════════════════
 // Minimum price change required to trigger base price update.
 // • Lower values (0.01-0.05%): More responsive, more frequent updates
