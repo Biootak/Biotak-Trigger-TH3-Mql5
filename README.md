@@ -1,109 +1,106 @@
 # Biotak Trigger TH3
 
-**MetaTrader 4 Custom Indicator** implementing Professor Saeed Khakestar's TH (Time Harmonic) levels formula.
+**MetaTrader 5 custom indicator** implementing Professor Saeed Khakestar's TH (Time Harmonic) levels formula.
 
 ## Version
-**3.05** - Build Configuration System Added
+
+**3.05**
 
 ## Features
-- TH Level Display with multiple step modes (TH, SS/LS, M, TP, Combo)
-- Fractal Timeframes (M1, M4, M16, H1+M4, H4+M16, etc.)
-- 30-minute Base Price Updates
-- Custom Price Selection
-- Performance Monitoring
-- Alert System
+
+- TH level display with multiple step modes (TH, SS/LS, M, TP, Combo)
+- Fractal timeframes (M1, M4, M16, H1+M4, H4+M16, etc.)
+- 30-minute base price updates
+- Custom price selection
+- Alert system
+- Performance-focused modular architecture
 
 ---
 
-## 🔧 Build Configuration (Debug/Production)
+## Build Modes (Production/Debug)
 
-### Quick Start
-
-| Mode | Action |
-|------|--------|
-| **Production** 🚀 | Default - no changes needed |
-| **Debug** 🔧 | Uncomment `#define DEBUG_BUILD` in `Biotak/BuildConfig.mqh` |
-
-### How to Switch Modes
-
-Edit `Biotak/BuildConfig.mqh`:
-
-```mql4
-// ══════════════════════════════════════════════════════════════════
-// 🔧 UNCOMMENT FOR DEBUG BUILD | برای حالت توسعه آنکامنت کنید
-// ══════════════════════════════════════════════════════════════════
-//#define DEBUG_BUILD    // ← Uncomment this line for Debug mode
-```
-
-### What's Different?
-
-| Feature | Production 🚀 | Debug 🔧 |
-|---------|--------------|----------|
-| Debug logs | ❌ Removed at compile | ✅ Active |
-| Performance tracking | ❌ Removed | ✅ Active |
-| Assertions | ❌ Removed | ✅ Active |
-| Binary size | Smaller | Larger |
-| Speed | Faster | Normal |
-
-### How to Know Which Mode?
-
-Check the Experts tab when indicator loads:
-
-```
-// Production:
-🚀 Biotak Trigger TH3 - Version 3.05
-Build Mode: PRODUCTION
-✅ PRODUCTION BUILD - Optimized for performance
-
-// Debug:
-🔧 Biotak Trigger TH3 - Version 3.05
-Build Mode: DEBUG
-⚠️ DEBUG BUILD - Not for production use!
-```
+To switch build mode, edit `Biotak/BuildConfig.mqh` and uncomment/comment `#define DEBUG_BUILD`.
 
 ---
 
-## Installation
+## Compile (PowerShell)
 
-1. Copy files to `MT4_Data_Folder/MQL4/Indicators/`
-2. Include files go to `MT4_Data_Folder/MQL4/Include/Biotak/`
-3. Compile `Biotak Trigger TH3.mq4` in MetaEditor (F7)
-4. Attach to chart
+Use the project compile script:
+
+- `./compile-th3.ps1` → compile workspace project (default)
+- `./compile-th3.ps1 -Project all` → workspace + installed original + installed refactored
+- `./compile-th3.ps1 -Project installed-original`
+- `./compile-th3.ps1 -SourceFile "C:\path\to\file.mq5"`
+
+### Optional parameters
+
+- `-PrintLog $true|$false`
+- `-LogTailLines 120`
+- `-IncludeRuntimeLogs $true|$false` (collect Experts/Journal snapshot)
+- `-RuntimeLogTailLines 80`
+- `-IncrementalRuntimeLogs $true|$false` (default: only new runtime lines)
+- `-EnableLogCleanup $true|$false`
+- `-LogRetentionDays 14`
+- `-MaxBuildLogs 400`
+- `-WatchRuntimeLogs $true|$false` (live watch after compile)
+- `-WatchSeconds 60`
+- `-WatchPollMs 1000`
+- `-MetaEditorPath "C:\...\metaeditor64.exe"`
+- `-Mql5Dir "C:\Users\...\AppData\Roaming\MetaQuotes\Terminal\...\MQL5"`
+
+### Optional environment variables
+
+- `MT5_METAEDITOR` (full path to `metaeditor64.exe`)
+- `MT5_MQL5_DIR` (full path to `MQL5` folder)
+
+Script output logs are saved in: `build-logs/`.
+
+Each build log can include:
+- compile output from MetaEditor
+- runtime snapshot from latest `MQL5/Logs` (Experts)
+- runtime snapshot from latest terminal `logs` (Journal)
+
+Runtime snapshot behavior:
+- incremental mode (default) appends only new runtime lines since last script run
+- state file is stored at `build-logs/.runtime-log-state.json`
+- if a runtime log is rotated/truncated, script falls back to tail snapshot
+
+Cleanup behavior:
+- old build logs are removed automatically (`LogRetentionDays`)
+- log count is capped (`MaxBuildLogs`)
+
+Watch mode behavior:
+- after compile, script can watch runtime logs live for a short duration
+- prints only new lines during watch interval
+
+---
+
+## Installation (MT5)
+
+1. Copy the project to your MT5 indicators path.
+2. Compile `Biotak Trigger TH3.mq5` in MetaEditor, or use `compile-th3.ps1`.
+3. Attach the indicator to a chart.
 
 ---
 
 ## File Structure
 
 ```
-├── Biotak Trigger TH3.mq4      # Main indicator file
+├── Biotak Trigger TH3.mq5      # Main indicator file
+├── compile-th3.ps1             # Project compile script
 ├── Biotak/
-│   ├── BuildConfig.mqh         # 🆕 Build configuration (Debug/Production)
-│   ├── PropertiesAndInputs.mqh # Input parameters
-│   ├── ConstantsAndEnums.mqh   # Constants and enums
-│   ├── GlobalVariables.mqh     # Global state
-│   ├── THCalculations.mqh      # TH calculation logic
-│   ├── BasePriceManager.mqh    # 30-min base price updates
-│   ├── TimeframeFunctions.mqh  # Timeframe utilities
-│   ├── ObjectFunctions.mqh     # Chart object creation
-│   ├── LabelFunctions.mqh      # Label management
-│   ├── EventHandlers.mqh       # Event processing
-│   ├── AlertFunctions.mqh      # Alert system
-│   ├── PerformanceMonitor.mqh  # Performance tracking
-│   └── Tests/                  # Property-based tests
+│   ├── BuildConfig.mqh
+│   ├── PropertiesAndInputs.mqh
+│   ├── ConstantsAndEnums.mqh
+│   ├── GlobalVariables.mqh
+│   ├── THCalculations.mqh
+│   ├── BasePriceManager.mqh
+│   ├── TimeframeFunctions.mqh
+│   ├── ObjectFunctions.mqh
+│   ├── LabelFunctions.mqh
+│   ├── EventHandlers.mqh
+│   └── ...
 ```
-
----
-
-## Hotkeys
-
-| Key | Action |
-|-----|--------|
-| F | Hide/Show indicator |
-| G | Lock/Unlock timeframe |
-| C | Set custom price |
-| T | Toggle trigger levels |
-| E | Cycle step modes |
-| R | Reset to defaults |
 
 ---
 

@@ -1,4 +1,4 @@
-# MetaTrader 4 / MQL4 Compiled Files
+# MetaTrader compiled files
 *.ex4
 *.ex5
 
@@ -12,6 +12,7 @@
 
 # Log files
 *.log
+build-logs/
 
 # Windows system files
 Thumbs.db
@@ -81,7 +82,7 @@ site/
 .env.local
 secrets.txt
 
-# MT4 Terminal data (if accidentally copied)
+# MetaTrader terminal data (if accidentally copied)
 history/
 bases/
 logs/
