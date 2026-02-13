@@ -249,11 +249,9 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     {
         #ifdef ENABLE_DEBUG_LOGS
         Print("╔═══════════════════════════════════════════════════════════════╗");
-    Print("║  🔄 HISTORY FORMAT UPGRADE DETECTED                          ║");
+    Print("║  HISTORY FORMAT UPGRADE DETECTED                              ║");
     Print("║  Cleaning up old history files with incorrect timestamps...  ║");
-    #ifdef ENABLE_DEBUG_LOGS
         Print("╚═══════════════════════════════════════════════════════════════╝");
-    #endif
     #endif
         
         DeleteAllHistoryFiles();
@@ -275,14 +273,12 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     Print("[BasePriceManager] ╔═══════════════════════════════════════════════════════════════╗");
     Print("[BasePriceManager] ║  TIMEZONE INFORMATION                                         ║");
     Print("[BasePriceManager] ╠═══════════════════════════════════════════════════════════════╣");
-    #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] ║  Server Time: ", TimeToString(serverTime, TIME_DATE|TIME_MINUTES));
     Print("[BasePriceManager] ║  GMT Time:    ", TimeToString(gmtTime, TIME_DATE|TIME_MINUTES));
     Print("[BasePriceManager] ║  Offset:      Server = GMT", (timezoneOffsetHours >= 0 ? "+" : ""), timezoneOffsetHours, " hours");
     Print("[BasePriceManager] ║  Day (Server): ", dtServer.day_of_year + 1);
     Print("[BasePriceManager] ║  Day (GMT):    ", dtGMT.day_of_year + 1);
     Print("[BasePriceManager] ╚═══════════════════════════════════════════════════════════════╝");
-    #endif
     #endif
     PrintRecentM30Bars(5);
     int year = dtGMT.year;
@@ -339,11 +335,9 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     {
         #ifdef ENABLE_DEBUG_LOGS
         Print("╔═══════════════════════════════════════════════════════════════╗");
-    Print("║  🔄 MIGRATION DETECTED - OLD FORMAT WITH SERVER TIME         ║");
+    Print("║  MIGRATION DETECTED - OLD FORMAT WITH SERVER TIME             ║");
     Print("║  Deleting old file and rebuilding with GMT format...         ║");
-    #ifdef ENABLE_DEBUG_LOGS
         Print("╚═══════════════════════════════════════════════════════════════╝");
-    #endif
     #endif
     string filePath = GetHistoryFilePath(year, dayOfYear);
     if(FileDelete(filePath))
@@ -594,124 +588,69 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     #endif
     return lastBarIdx;
 }
+
+//+------------------------------------------------------------------+
+//| PERF: Extract timeBlock key from a history entry (text before |) |
+//+------------------------------------------------------------------+
+string ExtractTimeBlock(const string &entry)
+{
+    int pipePos = StringFind(entry, "|");
+    if(pipePos <= 0) return "";
+    return StringSubstr(entry, 0, pipePos);
+}
+
     void MergeHistoryLists(const string &existingHistory[], const int existingCount,
                        const string &rebuiltHistory[], const int rebuiltCount,
                        string &mergedHistory[], int &mergedCount)
 {
-        #ifdef ENABLE_DEBUG_LOGS
+    #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] MergeHistoryLists() - Merging ", existingCount, " existing + ", rebuiltCount, " rebuilt entries");
     #endif
+
     int maxSize = existingCount + rebuiltCount;
-    int safeMaxSize = (int)(maxSize * 1.1) + 10;
+    if(maxSize <= 0 || maxSize > 10000) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("MergeHistoryLists: Invalid total size: ", maxSize);
+        #endif
+        ArrayResize(mergedHistory, 0);
+        mergedCount = 0;
+        return;
+    }
+
+    // Collect all valid entries and their timeBlock keys
     string timeBlocks[];
     string entries[];
+    ArrayResize(timeBlocks, maxSize);
+    ArrayResize(entries, maxSize);
     int totalEntries = 0;
-    if(safeMaxSize <= 0 || safeMaxSize > 10000) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("❌ MergeHistoryLists: Invalid array size: ", safeMaxSize);
-    #endif
-    ArrayResize(mergedHistory, 0);
-    mergedCount = 0;
-    return;
+
+    // Phase 1: Gather all entries from both sources (no dedup yet — O(n))
+    for(int i = 0; i < existingCount; i++) {
+        if(StringLen(existingHistory[i]) == 0) continue;
+        string tb = ExtractTimeBlock(existingHistory[i]);
+        if(StringLen(tb) == 0) continue;
+        timeBlocks[totalEntries] = tb;
+        entries[totalEntries] = existingHistory[i];
+        totalEntries++;
     }
-    
-    ArrayResize(timeBlocks, safeMaxSize);
-    ArrayResize(entries, safeMaxSize);
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("📊 MergeHistoryLists: Allocated ", safeMaxSize, " slots (", maxSize, " + safety margin)");
-    #endif
-    for(int i = 0; i < existingCount; i++)
-    {
-        string entry = existingHistory[i];
-    if(StringLen(entry) == 0) continue;
-    int pipePos = StringFind(entry, "|");
-    if(pipePos <= 0) continue;
-    string timeBlock = StringSubstr(entry, 0, pipePos);
-    bool exists = false;
-    for(int j = 0; j < totalEntries; j++)
-        {
-        if(timeBlocks[j] == timeBlock)
-            {
-                exists = true;
-    break;
-            }
-        }
-        
-        if(!exists)
-        {
-        if(totalEntries >= safeMaxSize) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ MergeHistoryLists: Buffer overflow prevented at ", totalEntries, " entries");
-    #endif
-    break;
-            }
-    if(totalEntries >= ArraySize(timeBlocks) || totalEntries >= ArraySize(entries)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ MergeHistoryLists: Array size mismatch detected");
-    #endif
-    break;
-            }
-            
-            timeBlocks[totalEntries] = timeBlock;
-    entries[totalEntries] = entry;
-    totalEntries++;
-        }
+    for(int i = 0; i < rebuiltCount; i++) {
+        if(StringLen(rebuiltHistory[i]) == 0) continue;
+        string tb = ExtractTimeBlock(rebuiltHistory[i]);
+        if(StringLen(tb) == 0) continue;
+        timeBlocks[totalEntries] = tb;
+        entries[totalEntries] = rebuiltHistory[i];
+        totalEntries++;
     }
-    for(int i = 0; i < rebuiltCount; i++)
-    {
-        string entry = rebuiltHistory[i];
-    if(StringLen(entry) == 0) continue;
-    int pipePos = StringFind(entry, "|");
-    if(pipePos <= 0) continue;
-    string timeBlock = StringSubstr(entry, 0, pipePos);
-    bool exists = false;
-    for(int j = 0; j < totalEntries; j++)
-        {
-        if(timeBlocks[j] == timeBlock)
-            {
-                exists = true;
-    break;
-            }
-        }
-        
-        if(!exists)
-        {
-        if(totalEntries >= safeMaxSize) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ MergeHistoryLists: Buffer overflow prevented (rebuilt) at ", totalEntries, " entries");
-    #endif
-    break;
-            }
-    if(totalEntries >= ArraySize(timeBlocks) || totalEntries >= ArraySize(entries)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("❌ MergeHistoryLists: Array size mismatch detected (rebuilt)");
-    #endif
-    break;
-            }
-            
-            timeBlocks[totalEntries] = timeBlock;
-    entries[totalEntries] = entry;
-    totalEntries++;
-        }
-        else
-        {
-        #ifdef ENABLE_DEBUG_LOGS
-            Print("[BasePriceManager] MergeHistoryLists() - Skipping duplicate time block: ", timeBlock);
-    #endif
-    }
-    }
-    // PERF: Comb sort — O(n log n) average, replaces O(n²) bubble sort
+
+    // Phase 2: Comb sort by timeBlock — O(n log n) average
     int gap = totalEntries;
     double shrink = 1.3;
     bool sorted = false;
-    while(!sorted)
-    {
+    while(!sorted) {
         gap = (int)(gap / shrink);
         if(gap <= 1) { gap = 1; sorted = true; }
-        for(int i = 0; i + gap < totalEntries; i++)
-        {
-            if(timeBlocks[i] > timeBlocks[i + gap])
-            {
+        for(int i = 0; i + gap < totalEntries; i++) {
+            if(timeBlocks[i] > timeBlocks[i + gap]) {
                 string tempTime = timeBlocks[i];
                 string tempEntry = entries[i];
                 timeBlocks[i] = timeBlocks[i + gap];
@@ -722,12 +661,25 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
             }
         }
     }
+
+    // Phase 3: Deduplicate consecutive identical timeBlocks — O(n)
+    // First entry from each duplicate group wins (existing entries were added first)
+    int uniqueCount = 0;
     ArrayResize(mergedHistory, totalEntries);
-    for(int i = 0; i < totalEntries; i++)
-    {
-        mergedHistory[i] = entries[i];
+    for(int i = 0; i < totalEntries; i++) {
+        if(i == 0 || timeBlocks[i] != timeBlocks[i - 1]) {
+            mergedHistory[uniqueCount] = entries[i];
+            uniqueCount++;
+        }
+        #ifdef ENABLE_DEBUG_LOGS
+        else {
+            Print("[BasePriceManager] MergeHistoryLists() - Skipping duplicate time block: ", timeBlocks[i]);
+        }
+        #endif
     }
-    mergedCount = totalEntries;
+    ArrayResize(mergedHistory, uniqueCount);
+    mergedCount = uniqueCount;
+
     #ifdef ENABLE_DEBUG_LOGS
     Print("[BasePriceManager] MergeHistoryLists() - Merged result: ", mergedCount, " total entries");
     #endif

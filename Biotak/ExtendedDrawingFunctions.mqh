@@ -335,7 +335,7 @@ double GetStepSizeForBasisType(const double basePrice, const double multiplier,
     Print("   TH%=", DoubleToString(thPercentage, 4), ", Mult=", multiplier);
     #endif
     }
-    double minReasonableStep = basePrice * 0.000001;
+    double minReasonableStep = basePrice * EPSILON_ANGLE;
     if(stepSize < minReasonableStep) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("⚠️ GetStepSizeForBasisType: Suspiciously small stepSize=", stepSize, 
@@ -672,7 +672,7 @@ double CalculateHarmonicMeanN(const double &values[]) {
     if(n == 1) return values[0];
     double reciprocalSum = 0;
     for(int i = 0; i < n; i++) {
-        if(MathAbs(values[i]) < 0.000001) {
+        if(MathAbs(values[i]) < EPSILON_ANGLE) {
         #ifdef ENABLE_DEBUG_LOGS
             Print("❌ CalculateHarmonicMeanN: Zero/near-zero value at index ", i, ": ", values[i]);
     #endif
@@ -680,7 +680,7 @@ double CalculateHarmonicMeanN(const double &values[]) {
         }
         reciprocalSum += 1.0 / values[i];
     }
-    if(MathAbs(reciprocalSum) < 0.000001) return 0;
+    if(MathAbs(reciprocalSum) < EPSILON_ANGLE) return 0;
     return n / reciprocalSum;
 }
 
@@ -920,7 +920,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
             return value1 - value2;
     case OP_MULTIPLY: 
             return value1 * value2;
-    case OP_DIVIDE:            if(MathAbs(value2) < 0.000001) {
+    case OP_DIVIDE:            if(MathAbs(value2) < EPSILON_ANGLE) {
         #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ ApplyCalculatorOperator: Division by zero/near-zero detected! value2=", DoubleToString(value2, 8));
     #endif
@@ -935,14 +935,14 @@ double ApplyCalculatorOperator(const double value1, const double value2,
             }
     return MathSqrt(value1 * value2);
     case OP_HARMONIC_MEAN: {
-        if(MathAbs(value1) < 0.000001 || MathAbs(value2) < 0.000001) {
+        if(MathAbs(value1) < EPSILON_ANGLE || MathAbs(value2) < EPSILON_ANGLE) {
         #ifdef ENABLE_DEBUG_LOGS
                 Print("❌ ApplyCalculatorOperator: Harmonic mean requires non-zero values! value1=", value1, " value2=", value2);
     #endif
     return 0;
             }
     double sum = value1 + value2;
-    if(MathAbs(sum) < 0.000001) {
+    if(MathAbs(sum) < EPSILON_ANGLE) {
         return 0;
             }
             return (2.0 * value1 * value2) / sum;
@@ -2364,16 +2364,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         
         drawnAbove++;
     if(inpShowMidZones) {
-        bool isStructureLevel = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                        isStructureLevel = true;
-    break;
-                    }
-                }
-            }
+        bool isStructureLevel = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + "SSLS_Zone_Above_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, priceLevel, isStructureLevel, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -2444,16 +2435,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         
         drawnBelow++;
     if(inpShowMidZones) {
-        bool isStructureLevel = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                        isStructureLevel = true;
-    break;
-                    }
-                }
-            }
+        bool isStructureLevel = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + "SSLS_Zone_Below_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, priceLevel, isStructureLevel, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -2472,80 +2454,50 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     #endif
     }
 
-//| UNIFIED HELPER: Draw Single Level with Unified Logic             |
-
-//|                                                                  |
-//| This function encapsulates the common logic used by all modes   |
-
 //+------------------------------------------------------------------+
-bool DrawUnifiedLevel(
+//| HELPER: Create or update an HLine object                         |
+//| Uses create-vs-update pattern: sets all properties on creation,  |
+//| only updates price on subsequent calls (avoids chart flicker).   |
+//+------------------------------------------------------------------+
+void CreateOrUpdateLevelHLine(
     const string levelName,
     const double price,
-    const int logicalStep,
-    const bool triggerEnabled,
-    const bool structureEnabled,
-    const int baseMultiplier,
-    const color fallbackColor,
-    const ENUM_LINE_STYLE fallbackStyle,
-    const int fallbackWidth,
-    const string tooltip)
+    const color levelColor,
+    const ENUM_LINE_STYLE levelStyle,
+    const int levelWidth,
+    const string tooltip,
+    const bool setBack = false,
+    const bool setZorder = false)
 {
-        color levelColor;
-    ENUM_LINE_STYLE levelStyle;
-    int levelWidth;
-    if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {    } else if(triggerEnabled) {        levelColor = inpTriggerColor;
-    levelStyle = inpTriggerStyle;
-    levelWidth = inpTriggerWidth;
-    } else {        levelColor = fallbackColor;
-    levelStyle = fallbackStyle;
-    levelWidth = fallbackWidth;
-    }
     if(ObjectFind(0, levelName) < 0) {
-        if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price)) {
-        return false;
-        }
+        ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price);
+        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, tooltip);
+        if(setBack)   ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+        if(setZorder)  ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
+    } else {
+        ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
     }
-    
-    ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-    ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
-    ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
-    ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
-    ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
-    ObjectSetString(0, levelName, OBJPROP_TOOLTIP, tooltip);
-    return true;
 }
 
 //+------------------------------------------------------------------+
-//| UNIFIED HELPER: Draw Single Zone with Unified Logic              |
-
+//| HELPER: Check if a logical step is a structure level             |
+//| Returns true if step matches any cached structure interval.      |
 //+------------------------------------------------------------------+
-bool DrawUnifiedZone(
-    const string zoneName,
-    const double currentPrice,
-    const int logicalStep,
-    const bool triggerEnabled,
-    const bool structureEnabled,
-    const int baseMultiplier,
-    const color levelColor,
-    double &lastDrawnPrice,
-    double &lastTriggerPrice)
+bool IsStructureLevel(const int logicalStep, const int baseMultiplier, const bool structureEnabled)
 {
-    if(!inpShowMidZones) return false;
-    bool isCurrentStructure = false;
-    if(structureEnabled) {
-        // PERF: Use g_cachedIntervals directly
-        EnsureIntervalsCache(baseMultiplier);
+    if(!structureEnabled) return false;
+    EnsureIntervalsCache(baseMultiplier);
     for(int j = 0; j < 5; j++) {
         if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                isCurrentStructure = true;
-    break;
-            }
+            return true;
         }
     }
-    return CreateZoneWithSmartFallback(zoneName, currentPrice, isCurrentStructure, levelColor,
-                                      structureEnabled, triggerEnabled,
-                                      lastDrawnPrice, lastTriggerPrice, lastDrawnPrice);
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -2657,16 +2609,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             };
     drawnAbove++;
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(inpShowStructure) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                            isCurrentStructure = true;
-    break;
-                        }
-                    }
-                }
+        bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, inpShowStructure);
     string zoneName = objectPrefix + "M_Zone_Above_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, priceAbove, isCurrentStructure, levelColor,
                                               structureEnabled, triggerEnabled,
@@ -2743,16 +2686,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             };
     drawnBelow++;
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(inpShowStructure) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                            isCurrentStructure = true;
-    break;
-                        }
-                    }
-                }
+        bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, inpShowStructure);
     string zoneName = objectPrefix + "M_Zone_Below_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, priceBelow, isCurrentStructure, levelColor,
                                               structureEnabled, triggerEnabled,
@@ -2884,16 +2818,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         };
     drawnAbove++;
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                        isCurrentStructure = true;
-    break;
-                    }
-                }
-            }
+        bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + modeName + "_Zone_Above_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, priceAbove, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -2968,16 +2893,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         };
     drawnBelow++;
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                        isCurrentStructure = true;
-    break;
-                    }
-                }
-            }
+        bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + modeName + "_Zone_Below_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, priceBelow, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -3768,16 +3684,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             }
         }
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStepAbove % g_cachedIntervals[j] == 0) {
-                        isCurrentStructure = true;
-    break;
-                    }
-                }
-            }
+        bool isCurrentStructure = IsStructureLevel(logicalStepAbove, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + "Factor_Harmonic_Zone_Above_" + IntegerToString(logicalStepAbove);
     if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -3846,16 +3753,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             }
         }
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStepBelow % g_cachedIntervals[j] == 0) {
-                        isCurrentStructure = true;
-    break;
-                    }
-                }
-            }
+        bool isCurrentStructure = IsStructureLevel(logicalStepBelow, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + "Factor_Harmonic_Zone_Below_" + IntegerToString(logicalStepBelow);
     if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -4010,16 +3908,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     levelWidth = inpFactorLevelWidth;
         }
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                        isCurrentStructure = true;
-    break;
-                    }
-                }
-            }
+        bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + "Factor_Zone_Above_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -4106,16 +3995,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     levelWidth = inpFactorLevelWidth;
         }
     if(inpShowMidZones) {
-        bool isCurrentStructure = false;
-    if(structureEnabled) {
-        EnsureIntervalsCache(baseMultiplier);
-    for(int j = 0; j < 5; j++) {
-        if(g_cachedIntervals[j] > 0 && logicalStep % g_cachedIntervals[j] == 0) {
-                        isCurrentStructure = true;
-    break;
-                    }
-                }
-            }
+        bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
     string zoneName = objectPrefix + "Factor_Zone_Below_" + IntegerToString(logicalStep);
     if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -4163,195 +4043,6 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     Print("   Center=", DoubleToString(normalizedCenter, Digits),
           ", Above=", levelsAboveCount, "/", maxLevelsAbove, 
           ", Below=", levelsBelowCount, "/", maxLevelsBelow);
-    #endif
-    }
-
-//+------------------------------------------------------------------+
-//| DEPRECATED: Use DrawFactorLevelsAligned instead                 |
-//| Draw Factor levels between Historical High and Low               |
-
-//| Divides the range into (Factor × 2) equal parts                  |
-//| NOTE: This function is kept for backward compatibility only      |
-//+------------------------------------------------------------------+
-static int s_lastFactorLevelCount = 0;
-void DrawFactorLevels(const string objectPrefix, const double highPrice, 
-                      const double lowPrice, const double factor)
-{
-        if(StringLen(objectPrefix) == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: Empty object prefix");
-    #endif
-    return;
-    }
-    if(highPrice <= 0 || lowPrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: Invalid prices - High=", highPrice, ", Low=", lowPrice);
-    #endif
-    return;
-    }
-    if(highPrice <= lowPrice) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
-    #endif
-    return;
-    }
-    if(factor < 0.01 || factor > 10000) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: Invalid factor (", DoubleToString(factor, 2), ") - must be 0.01-10000");
-    #endif
-    return;
-    }
-    double stepSize = CalculateFactorStepSize(highPrice, lowPrice, factor);
-    if(stepSize <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: Invalid step size calculated");
-    #endif
-    return;
-    }
-    double range = highPrice - lowPrice;
-    int totalLevels = (int)MathFloor(range / stepSize) - 1;
-    if(totalLevels <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: No levels to draw (totalLevels=", totalLevels, 
-              ", factor=", DoubleToString(factor, 2), ", stepSize=", stepSize, ")");
-    #endif
-    return;
-    }
-    const int MAX_FACTOR_LEVELS = 5000;
-    if(totalLevels > MAX_FACTOR_LEVELS) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("DrawFactorLevels: WARNING - Too many levels (", totalLevels, 
-              "), clamping to ", MAX_FACTOR_LEVELS, " for safety");
-    #endif
-    totalLevels = MAX_FACTOR_LEVELS;
-    }
-    double pipSize;
-    if(GetCachedDigits() <= 3) {
-        pipSize = 0.01;    } else {
-        pipSize = 0.0001;    }
-    double rangePips = (highPrice - lowPrice) / pipSize;
-    double stepPips = stepSize / pipSize;
-    if(s_lastFactorLevelCount > totalLevels) {
-        for(int i = totalLevels + 1; i <= s_lastFactorLevelCount; i++) {
-        string staleName = objectPrefix + "Factor_" + IntegerToString(i);
-    if(ObjectFind(0, staleName) >= 0) {
-                ObjectDelete(0, staleName);
-            }
-        }
-    }
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("DrawFactorLevels: High=", highPrice, ", Low=", lowPrice, ", Factor=", factor,
-          ", StepSize=", stepSize, ", TotalLevels=", totalLevels);
-    #endif
-    string highLineName = objectPrefix + "Factor_High";
-    if(ObjectFind(0, highLineName) < 0) {
-        ObjectCreate(0, highLineName, OBJ_HLINE, 0, 0, highPrice);
-    }
-    ObjectSetDouble(0, highLineName, OBJPROP_PRICE, highPrice);
-    ObjectSetInteger(0, highLineName, OBJPROP_COLOR, inpHighColor);
-    ObjectSetInteger(0, highLineName, OBJPROP_STYLE, inpHighStyle);
-    ObjectSetInteger(0, highLineName, OBJPROP_WIDTH, inpHighWidth);
-    ObjectSetInteger(0, highLineName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
-    ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
-        StringFormat("Historical HIGH | %s | Range: %.0f pips", 
-            DoubleToString(highPrice, GetCachedDigits()), rangePips));
-    string lowLineName = objectPrefix + "Factor_Low";
-    if(ObjectFind(0, lowLineName) < 0) {
-        ObjectCreate(0, lowLineName, OBJ_HLINE, 0, 0, lowPrice);
-    }
-    ObjectSetDouble(0, lowLineName, OBJPROP_PRICE, lowPrice);
-    ObjectSetInteger(0, lowLineName, OBJPROP_COLOR, inpLowColor);
-    ObjectSetInteger(0, lowLineName, OBJPROP_STYLE, inpLowStyle);
-    ObjectSetInteger(0, lowLineName, OBJPROP_WIDTH, inpLowWidth);
-    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
-    ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
-        StringFormat("Historical LOW | %s | Range: %.0f pips", 
-            DoubleToString(lowPrice, GetCachedDigits()), rangePips));
-    string highLabelName = objectPrefix + "Factor_High_Label";
-    if(ObjectFind(0, highLabelName) < 0) {
-        ObjectCreate(0, highLabelName, OBJ_TEXT, 0, TimeCurrent(), highPrice);
-    }
-    ObjectSetDouble(0, highLabelName, OBJPROP_PRICE, highPrice);
-    ObjectSetInteger(0, highLabelName, OBJPROP_TIME, TimeCurrent());
-    ObjectSetInteger(0, highLabelName, OBJPROP_COLOR, inpHighColor);
-    ObjectSetInteger(0, highLabelName, OBJPROP_FONTSIZE, 8);
-    ObjectSetInteger(0, highLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
-    ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
-    ObjectSetString(0, highLabelName, OBJPROP_TEXT, 
-        StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
-            DoubleToString(highPrice, GetCachedDigits()), rangePips, factor, stepPips));
-    ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
-    string lowLabelName = objectPrefix + "Factor_Low_Label";
-    if(ObjectFind(0, lowLabelName) < 0) {
-        ObjectCreate(0, lowLabelName, OBJ_TEXT, 0, TimeCurrent(), lowPrice);
-    }
-    ObjectSetDouble(0, lowLabelName, OBJPROP_PRICE, lowPrice);
-    ObjectSetInteger(0, lowLabelName, OBJPROP_TIME, TimeCurrent());
-    ObjectSetInteger(0, lowLabelName, OBJPROP_COLOR, inpLowColor);
-    ObjectSetInteger(0, lowLabelName, OBJPROP_FONTSIZE, 8);
-    ObjectSetInteger(0, lowLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
-    ObjectSetString(0, lowLabelName, OBJPROP_TEXT, 
-        StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
-            DoubleToString(lowPrice, GetCachedDigits()), rangePips, factor, stepPips));
-    ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
-    double currentPrice = Bid;
-    double distanceToHigh = MathAbs(currentPrice - highPrice);
-    double distanceToLow = MathAbs(currentPrice - lowPrice);
-    bool startFromLow = (distanceToLow <= distanceToHigh);
-    double startPrice = startFromLow ? lowPrice : highPrice;
-    double endPrice = startFromLow ? highPrice : lowPrice;
-    int direction = startFromLow ? 1 : -1;
-    int levelNumber = 0;
-    double epsilon = stepSize * 0.001;
-    int maxIterations = totalLevels * 2;
-    int iterations = 0;
-    while(levelNumber < totalLevels && iterations < maxIterations) {
-        iterations++;
-    levelNumber++;
-    double levelPrice = startPrice + (stepSize * levelNumber * direction);
-    if(startFromLow) {
-        if(levelPrice >= (highPrice - epsilon)) break;
-        } else {
-        if(levelPrice <= (lowPrice + epsilon)) break;
-        }
-    string levelName = objectPrefix + "Factor_" + IntegerToString(levelNumber);
-    double normalizedPrice = NormalizeDouble(levelPrice, GetCachedDigits());
-    bool objectExists = (ObjectFind(0, levelName) >= 0);
-    if(!objectExists) {
-            if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("DrawFactorLevels: Failed to create level ", levelNumber, ", Error: ", GetLastError());
-    #endif
-    levelNumber++;
-    continue;
-            }
-    color levelColor = (g_factorColorOverride >= 0) ? (color)g_factorColorOverride : inpFactorLevelColor;
-    ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
-    ObjectSetInteger(0, levelName, OBJPROP_STYLE, inpFactorLevelStyle);
-    ObjectSetInteger(0, levelName, OBJPROP_WIDTH, inpFactorLevelWidth);
-    ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-    ObjectSetInteger(0, levelName, OBJPROP_HIDDEN, false);
-        } else {
-        double oldPrice = ObjectGetDouble(0, levelName, OBJPROP_PRICE);
-    if(MathAbs(oldPrice - normalizedPrice) > GetCachedPoint() * 0.1) {
-                ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
-            }
-        }
-    string tooltip = StringFormat("Factor %d/%d | Price: %s | Step: %.1f pips", 
-            levelNumber, totalLevels, 
-            DoubleToString(normalizedPrice, GetCachedDigits()),
-            stepPips);
-    ObjectSetString(0, levelName, OBJPROP_TOOLTIP, tooltip);
-    levelNumber++;
-    }
-    s_lastFactorLevelCount = levelNumber - 1;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("DrawFactorLevels: Drew ", s_lastFactorLevelCount, " levels");
     #endif
     }
 

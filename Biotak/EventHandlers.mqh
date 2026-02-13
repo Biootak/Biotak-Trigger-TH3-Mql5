@@ -314,8 +314,6 @@ void HideAllTHObjects()
     g_customPriceKeyboardOverride = false;    }
 }
 
-#endif // EVENT_HANDLERS_MQH
-
 //+------------------------------------------------------------------+
 //| Delete all indicator objects (DRY helper for OnDeinit)           |
 //+------------------------------------------------------------------+
@@ -353,12 +351,12 @@ void DeleteAllIndicatorObjects() {
     }
     else if(reason == REASON_PARAMETERS)
     {
-        // پاک کردن تمام لیبل‌های ATR و TH برای اعمال تنظیمات جدید
+        // Clear all ATR and TH labels to apply new settings
         string currentTFStr = IntegerToString(Period());
         string uniquePrefix = inpObjectPrefix + "TF" + currentTFStr + "_";
         string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
         
-        // حذف لیبل‌های ATR
+        // Delete ATR labels
         ObjectDelete(0, uniquePrefix + "ATR_Title");
         for(int i = 0; i < ArraySize(allTimeframes); i++) {
             ObjectDelete(0, uniquePrefix + "ATR_" + allTimeframes[i]);
@@ -366,7 +364,7 @@ void DeleteAllIndicatorObjects() {
             ObjectDelete(0, uniquePrefix + "ATR_Targets_" + allTimeframes[i]);
         }
         
-        // حذف لیبل‌های TH
+        // Delete TH labels
         ObjectDelete(0, inpObjectPrefix + "TH_Title");
         string fractalTFs[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
         for(int i = 0; i < ArraySize(fractalTFs); i++) {
@@ -1150,6 +1148,63 @@ void RedrawLabelsOnly() {
         if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     }
 }
+
+//+------------------------------------------------------------------+
+//| HELPER: Adjust factor value by step (+1 = increase, -1 = decrease)|
+//+------------------------------------------------------------------+
+void AdjustFactorValue(int direction)
+{
+    double currentFactor = g_factorValueOverride;
+    if(currentFactor <= 0) {
+        if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
+            currentFactor = inpFactorValue;
+        } else {
+            currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
+            if(currentFactor <= 0 || currentFactor > MAX_FACTOR_VALUE) {
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("Factor adjust: Invalid factor from GetDefaultFactorValue, using ", DEFAULT_FACTOR_FALLBACK);
+                #endif
+                currentFactor = DEFAULT_FACTOR_FALLBACK;
+            }
+        }
+    }
+    double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : DEFAULT_FACTOR_ADJUST_STEP;
+    double newFactor = NormalizeDouble(currentFactor + step * direction, 2);
+    if(newFactor < MIN_FACTOR_VALUE) newFactor = MIN_FACTOR_VALUE;
+    if(newFactor > MAX_FACTOR_VALUE) newFactor = MAX_FACTOR_VALUE;
+    g_factorValueOverride = newFactor;
+    string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
+    if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("WARNING: Failed to persist Factor value to GlobalVariable");
+        #endif
+    }
+    UpdateFactorLabel(newFactor);
+    g_forceClearOnNextDraw = true;
+    g_redrawTHLevelsNeeded = true;
+    RedrawAllObjects(true);
+    ThrottledChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| HELPER: Adjust TH3 frequency by step (+1 = increase, -1 = decrease)|
+//+------------------------------------------------------------------+
+void AdjustTH3Frequency(int direction)
+{
+    if(!inpEnableTH3Tool) return;
+    double currentFreq = g_th3FreqOverride;
+    if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
+    double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : DEFAULT_TH3_FREQ_ADJUST_STEP;
+    double newFreq = NormalizeDouble(currentFreq + step * direction, 2);
+    if(newFreq < MIN_TH3_FREQUENCY) newFreq = MIN_TH3_FREQUENCY;
+    if(newFreq > MAX_TH3_FREQUENCY) newFreq = MAX_TH3_FREQUENCY;
+    g_th3FreqOverride = newFreq;
+    GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
+    UpdateTH3FreqLabel(newFreq);
+    UpdateAllTH3Objects();
+    ThrottledChartRedraw();
+}
+
     void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
         if(id == CHARTEVENT_KEYDOWN)
@@ -1439,106 +1494,16 @@ void RedrawLabelsOnly() {
     return;
         }
     // KEY '1' — Decrease Factor
-    if(lparam == '1') {
-        double currentFactor = g_factorValueOverride;
-        if(currentFactor <= 0) {
-            if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
-                currentFactor = inpFactorValue;
-            } else {
-                currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
-                if(currentFactor <= 0 || currentFactor > 10000) {
-                    #ifdef ENABLE_DEBUG_LOGS
-                    Print("Factor decrease: Invalid factor from GetDefaultFactorValue, using 50.0");
-                    #endif
-                    currentFactor = 50.0;
-                }
-            }
-        }
-        double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : 0.1;
-        double newFactor = NormalizeDouble(currentFactor - step, 2);
-        if(newFactor < 0.01) newFactor = 0.01;
-        g_factorValueOverride = newFactor;
-        string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
-        if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("WARNING: Failed to persist Factor value to GlobalVariable");
-            #endif
-        }
-        UpdateFactorLabel(newFactor);
-        g_forceClearOnNextDraw = true;
-        g_redrawTHLevelsNeeded = true;
-        RedrawAllObjects(true);
-        ThrottledChartRedraw();
-        return;
-    }
+    if(lparam == '1') { AdjustFactorValue(-1); return; }
 
     // KEY '2' — Increase Factor
-    else if(lparam == '2') {
-        double currentFactor = g_factorValueOverride;
-        if(currentFactor <= 0) {
-            if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
-                currentFactor = inpFactorValue;
-            } else {
-                currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
-                if(currentFactor <= 0 || currentFactor > 10000) {
-                    #ifdef ENABLE_DEBUG_LOGS
-                    Print("Factor increase: Invalid factor from GetDefaultFactorValue, using 50.0");
-                    #endif
-                    currentFactor = 50.0;
-                }
-            }
-        }
-        double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : 0.1;
-        double newFactor = NormalizeDouble(currentFactor + step, 2);
-        if(newFactor > 10000) newFactor = 10000;
-        g_factorValueOverride = newFactor;
-        string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
-        if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("WARNING: Failed to persist Factor value to GlobalVariable");
-            #endif
-        }
-        UpdateFactorLabel(newFactor);
-        g_forceClearOnNextDraw = true;
-        g_redrawTHLevelsNeeded = true;
-        RedrawAllObjects(true);
-        ThrottledChartRedraw();
-        return;
-    }
+    else if(lparam == '2') { AdjustFactorValue(+1); return; }
 
     // KEY '3' — Decrease TH3 Frequency
-    else if(lparam == '3') {
-        if(inpEnableTH3Tool) {
-            double currentFreq = g_th3FreqOverride;
-            if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
-            double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
-            double newFreq = NormalizeDouble(currentFreq - step, 2);
-            if(newFreq < 0.1) newFreq = 0.1;
-            g_th3FreqOverride = newFreq;
-            GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
-            UpdateTH3FreqLabel(newFreq);
-            UpdateAllTH3Objects();
-            ThrottledChartRedraw();
-        }
-        return;
-    }
+    else if(lparam == '3') { AdjustTH3Frequency(-1); return; }
 
     // KEY '4' — Increase TH3 Frequency
-    else if(lparam == '4') {
-        if(inpEnableTH3Tool) {
-            double currentFreq = g_th3FreqOverride;
-            if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
-            double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : 1.0;
-            double newFreq = NormalizeDouble(currentFreq + step, 2);
-            if(newFreq > 1000.0) newFreq = 1000.0;
-            g_th3FreqOverride = newFreq;
-            GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
-            UpdateTH3FreqLabel(newFreq);
-            UpdateAllTH3Objects();
-            ThrottledChartRedraw();
-        }
-        return;
-    }
+    else if(lparam == '4') { AdjustTH3Frequency(+1); return; }
 
     if(IsHotkeyPressed(lparam, sparam, inpResetKey))
         {            g_stepModeOverride = -1;
@@ -1659,7 +1624,7 @@ void RedrawLabelsOnly() {
         static int s_lastW = -1;
         static int s_lastH = -1;
         uint nowMs = GetTickCount();
-        if(nowMs - s_lastLayoutMs < 250) return; // throttle bursts
+        if(nowMs - s_lastLayoutMs < CHART_CHANGE_THROTTLE_MS) return; // throttle bursts
 
         int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
         int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
@@ -1707,7 +1672,7 @@ void RedrawLabelsOnly() {
         else
         {
         uint currentTickCount = GetTickCount();
-    bool isDoubleClick = (currentTickCount - g_lastClickTickCount < 300);
+    bool isDoubleClick = (currentTickCount - g_lastClickTickCount < DOUBLE_CLICK_THRESHOLD_MS);
     g_lastClickTickCount = currentTickCount;
     if (isDoubleClick || !g_customPriceLineCreated)            {
                 g_waitingForCustomPriceClick = false;
@@ -1736,7 +1701,7 @@ void RedrawLabelsOnly() {
     if(id == CHARTEVENT_OBJECT_CLICK && sparam == g_customPriceHorizontalLineName)
     {
         uint currentTickCount = GetTickCount();
-    bool isDoubleClick = (currentTickCount - g_lastClickTickCount < 300);
+    bool isDoubleClick = (currentTickCount - g_lastClickTickCount < DOUBLE_CLICK_THRESHOLD_MS);
     g_lastClickTickCount = currentTickCount;
     if (isDoubleClick)
         {
@@ -1848,3 +1813,4 @@ void RedrawLabelsOnly() {
     }
 }
 
+#endif // EVENT_HANDLERS_MQH

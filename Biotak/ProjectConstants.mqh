@@ -3,6 +3,23 @@
 
 #property copyright " Biotak"
 
+// Factor Limits
+const double MIN_FACTOR_VALUE = 0.01;
+const double MAX_FACTOR_VALUE = 10000.0;
+const double DEFAULT_FACTOR_FALLBACK = 50.0;
+
+// TH3 Frequency Limits
+const double MIN_TH3_FREQUENCY = 0.1;
+const double MAX_TH3_FREQUENCY = 1000.0;
+
+// UI Timing (milliseconds)
+const uint DOUBLE_CLICK_THRESHOLD_MS = 300;
+const uint CHART_CHANGE_THROTTLE_MS = 250;
+
+// Hotkey Defaults
+const double DEFAULT_FACTOR_ADJUST_STEP = 0.1;
+const double DEFAULT_TH3_FREQ_ADJUST_STEP = 1.0;
+
 // Transparency
 const int MIN_TRANSPARENCY_PERCENT = 0;
 const int MAX_TRANSPARENCY_PERCENT = 100;
