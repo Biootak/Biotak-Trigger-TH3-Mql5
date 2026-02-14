@@ -126,6 +126,16 @@ bool DrawMainLevels(const string prefix) {
         tripleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[2]);
         quadrupleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[3]);
         quintupleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[4]);
+        
+        // Apply ATR Adaptive Scaling to all step sizes uniformly
+        // This preserves the fractal 2× ratio between structure levels
+        thStepSizePoints = GetAdaptedStepSize(thStepSizePoints);
+        structureTFTHStepSizePoints = GetAdaptedStepSize(structureTFTHStepSizePoints);
+        doubleStructureTFTHStepSizePoints = GetAdaptedStepSize(doubleStructureTFTHStepSizePoints);
+        tripleStructureTFTHStepSizePoints = GetAdaptedStepSize(tripleStructureTFTHStepSizePoints);
+        quadrupleStructureTFTHStepSizePoints = GetAdaptedStepSize(quadrupleStructureTFTHStepSizePoints);
+        quintupleStructureTFTHStepSizePoints = GetAdaptedStepSize(quintupleStructureTFTHStepSizePoints);
+        
         basisLabel = "TH";
         // TH trigger tooltip multipliers
         cachedLongStepVal = timeframePercentage * 2.0;

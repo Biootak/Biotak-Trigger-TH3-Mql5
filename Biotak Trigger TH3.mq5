@@ -45,6 +45,7 @@
 
 #include "Biotak\THCalculations.mqh"
 #include "Biotak\ATRCalculations.mqh"
+#include "Biotak\AdaptiveScaling.mqh"
 #include "Biotak\BasePriceManager.mqh"
 #include "Biotak\WaveAnalysis.mqh"
 #include "Biotak\FrequencyOptimizer.mqh"

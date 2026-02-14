@@ -122,33 +122,59 @@ enum ENUM_FACTOR_AUTO_BASIS {
 };
 
 //+------------------------------------------------------------------+
-//| Structure Base Multiplier - Valid range 2-9                      |
+//| Volatility Adaptive Mode                                         |
+//|                                                                  |
+//| Controls how level spacing adapts to real market volatility      |
+//|                                                                  |
+//| FIXED: Original behavior — TH = basePrice × fractalPercentage   |
+//| ATR_ADAPTIVE: Scale TH by ATR/TH ratio for volatility match     |
+//| BLENDED: Weighted mix of Fixed and ATR-Adaptive                  |
+//|                                                                  |
+//| In all modes, fractal 2× ratio between levels is preserved.     |
+//+------------------------------------------------------------------+
+enum ENUM_ADAPTIVE_MODE {
+    ADAPTIVE_FIXED = 0,       // Fixed (Original TH — no adaptation)
+    ADAPTIVE_ATR = 1,         // ATR Adaptive (Levels match real volatility)
+    ADAPTIVE_BLENDED = 2      // Blended (Mix of Fixed + ATR Adaptive)
+};
 
+//+------------------------------------------------------------------+
+//| Structure Base Multiplier - Valid range 2-9                      |
 //|                                                                  |
 //| Defines the hierarchical structure levels:                      |
-//| L1 = base^1, L2 = base^2, L3 = base^3, L4 = base^4, L5 = base^5|
+//| L1 = base×1, L2 = base×2, L3 = base×4, L4 = base×8, L5 = base×16|
 //|                                                                  |
-//| Example with base=3: L1=3, L2=9, L3=27, L4=81, L5=243          |
-//| Example with base=4: L1=4, L2=16, L3=64, L4=256, L5=1024       |
+//| Each consecutive level is 2× the previous (fractal ratio).      |
+//| Formula: L(n) = base × 2^(n-1)                                  |
 //|                                                                  |
+//| Example with base=3: L1=3, L2=6, L3=12, L4=24, L5=48           |
+//| Example with base=4: L1=4, L2=8, L3=16, L4=32, L5=64           |
+//| Example with base=9: L1=9, L2=18, L3=36, L4=72, L5=144         |
+//|                                                                  |
+//| All L1-L5 are always reachable within maxLevels=144.            |
 //| NOTE: Value 1 is INVALID because all levels become identical    |
-//| (1^1 = 1^2 = 1^3 = 1^4 = 1^5 = 1)                              |
 //+------------------------------------------------------------------+
 enum ENUM_STRUCTURE_BASE_MULTIPLIER {
     BASE_MULTIPLIER_2 = 2,   // Base 2: L1=2, L2=4, L3=8, L4=16, L5=32
-    BASE_MULTIPLIER_3 = 3,   // Base 3: L1=3, L2=9, L3=27, L4=81, L5=243 [DEFAULT]
-    BASE_MULTIPLIER_4 = 4,   // Base 4: L1=4, L2=16, L3=64, L4=256, L5=1024
-    BASE_MULTIPLIER_5 = 5,   // Base 5: L1=5, L2=25, L3=125, L4=625, L5=3125
-    BASE_MULTIPLIER_6 = 6,   // Base 6: L1=6, L2=36, L3=216, L4=1296, L5=7776
-    BASE_MULTIPLIER_7 = 7,   // Base 7: L1=7, L2=49, L3=343, L4=2401, L5=16807
-    BASE_MULTIPLIER_8 = 8,   // Base 8: L1=8, L2=64, L3=512, L4=4096, L5=32768
-    BASE_MULTIPLIER_9 = 9    // Base 9: L1=9, L2=81, L3=729, L4=6561, L5=59049
+    BASE_MULTIPLIER_3 = 3,   // Base 3: L1=3, L2=6, L3=12, L4=24, L5=48
+    BASE_MULTIPLIER_4 = 4,   // Base 4: L1=4, L2=8, L3=16, L4=32, L5=64
+    BASE_MULTIPLIER_5 = 5,   // Base 5: L1=5, L2=10, L3=20, L4=40, L5=80
+    BASE_MULTIPLIER_6 = 6,   // Base 6: L1=6, L2=12, L3=24, L4=48, L5=96
+    BASE_MULTIPLIER_7 = 7,   // Base 7: L1=7, L2=14, L3=28, L4=56, L5=112
+    BASE_MULTIPLIER_8 = 8,   // Base 8: L1=8, L2=16, L3=32, L4=64, L5=128
+    BASE_MULTIPLIER_9 = 9    // Base 9: L1=9, L2=18, L3=36, L4=72, L5=144
 };
 
 // Harmonic Ratio validation constants
 #define MIN_HARMONIC_RATIO 1.01   
 #define MAX_HARMONIC_RATIO 2.0    
 #define DEFAULT_HARMONIC_RATIO 1.333  // Golden-like ratio (4/3)
+
+// Adaptive Scaling Constants
+#define MIN_SCALING_FACTOR 0.1          // Minimum ATR/TH scaling factor
+#define MAX_SCALING_FACTOR 10.0         // Maximum ATR/TH scaling factor
+#define DEFAULT_SMOOTHING_PERIOD 20     // Default EMA period for scaling factor
+#define DEFAULT_BLEND_RATIO 0.5         // Default blend ratio (50% TH + 50% ATR)
 
 //+------------------------------------------------------------------+
 //| Mean Type Selection (for aggregates and quick test)              |

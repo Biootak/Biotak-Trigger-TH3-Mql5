@@ -31,6 +31,17 @@ input ENUM_APPLIED_PRICE inpTHPriceType = PRICE_CLOSE;
 input ENUM_LINE_STYLE inpTHLineStyle = STYLE_DOT;
 
 // ═══════════════════════════════════════════════════════════════════
+// [ATR] VOLATILITY ADAPTIVE MODE
+// ═══════════════════════════════════════════════════════════════════
+// FIXED: Original TH behavior — levels based purely on price × fractal percentage
+// ATR_ADAPTIVE: Scales TH by real market volatility (ATR/TH ratio)
+// BLENDED: Weighted mix of Fixed and ATR Adaptive (controlled by blend ratio)
+// All modes preserve the fractal 2× ratio between structure levels.
+input ENUM_ADAPTIVE_MODE inpAdaptiveMode = ADAPTIVE_FIXED;    // Volatility Adaptation Mode
+input double inpAdaptiveBlendRatio = 0.5;                      // Blend Ratio (0.0=Fixed, 1.0=ATR) [BLENDED only]
+input int inpAdaptiveSmoothingPeriod = 20;                     // Smoothing Period (EMA for scaling factor)
+
+// ═══════════════════════════════════════════════════════════════════
 // [CFG] BASE PRICE THRESHOLD CONTROL
 // ═══════════════════════════════════════════════════════════════════
 // When ENABLED: Base price updates only if market moves >0.066% (default)

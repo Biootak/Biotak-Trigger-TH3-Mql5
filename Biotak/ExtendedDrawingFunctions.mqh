@@ -1697,9 +1697,16 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
 
 //|                                                                  |
 //| EXAMPLES:                                                        |
+//| NEW FORMULA: L(n) = base × 2^(n-1)  [Fractal 2× ratio]         |
 //| Base=2: L1=2, L2=4, L3=8, L4=16, L5=32                          |
-//| Base=3: L1=3, L2=9, L3=27, L4=81, L5=243                        |
-//| Base=4: L1=4, L2=16, L3=64, L4=256, L5=1024                     |
+//| Base=3: L1=3, L2=6, L3=12, L4=24, L5=48                         |
+//| Base=4: L1=4, L2=8, L3=16, L4=32, L5=64                         |
+//| Base=9: L1=9, L2=18, L3=36, L4=72, L5=144                       |
+//|                                                                  |
+//| This ensures:                                                    |
+//| 1. L(n+1)/L(n) = 2 always (fractal ratio preserved)            |
+//| 2. All L1-L5 are reachable within maxLevels=144                 |
+//| 3. base sets the L1 starting point, not exponential growth      |
 //|                                                                  |
 //| USAGE:                                                           |
 //| Check from HIGHEST to LOWEST level for proper hierarchy:        |
@@ -1719,7 +1726,10 @@ int CalculateStructureInterval(const int baseMultiplier, const int level) {
         _LOG_GATE_E Print("[E][DRAW] Invalid level: ", level, " (must be 1-5)");
     return 0;
     }
-    return (int)MathPow(baseMultiplier, level);
+    // NEW: base × 2^(level-1) instead of base^level
+    // This preserves the fractal 2× ratio: L(n+1)/L(n) = 2
+    // And ensures all L1-L5 are always reachable within maxLevels
+    return baseMultiplier * (int)MathPow(2, level - 1);
 }
 
 //+------------------------------------------------------------------+
@@ -1789,11 +1799,11 @@ static int g_cachedBaseMultiplier = -1;
 //| Returns the highest level (1-5) that this step belongs to       |
 //| Returns 0 if step is not a structure level (i.e., trigger)      |
 //|                                                                  |
-//| EXAMPLES with Base=4:                                            |
+//| EXAMPLES with Base=4 (L1=4, L2=8, L3=16, L4=32, L5=64):       |
 //| Step 4:  Returns 1 (L1 only)                                    |
-//| Step 8:  Returns 1 (L1 only)                                    |
-//| Step 16: Returns 2 (L2, not L1)                                 |
-//| Step 64: Returns 3 (L3, not L2 or L1)                           |
+//| Step 8:  Returns 2 (L2, not L1)                                 |
+//| Step 16: Returns 3 (L3, not L2 or L1)                           |
+//| Step 64: Returns 5 (L5)                                         |
 //| Step 5:  Returns 0 (Trigger, not Structure)                     |
 //|                                                                  |
 //| SECURITY: Full input validation with safe defaults              |

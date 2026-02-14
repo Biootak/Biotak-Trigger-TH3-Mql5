@@ -69,6 +69,10 @@ int OnInitHandler() {    InitializeGlobalCache();
     if(!UpdateHistoricalValues()) {Print("OnInit: UpdateHistoricalValues failed. Error: ", GetLastError()); return INIT_FAILED;}
     g_initialized=true;
     g_calculatedOnce=false;
+    
+    // Initialize ATR Adaptive Scaling system
+    InitializeAdaptiveScaling();
+    
     g_dailyClosePriceForTH=GetPriceForPreviousDay(inpTHPriceType);
     if(g_dailyClosePriceForTH==EMPTY_VALUE) {g_dailyClosePriceForTH=EMPTY_VALUE; Print("OnInit: GetPriceForPreviousDay failed, returning INIT_FAILED."); return INIT_FAILED;}
     string symbolName = GetCachedSymbol();
@@ -592,7 +596,9 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     static double s_lastCustomPrice = 0;
     static int s_lastMaxAbove = 0;
     static int s_lastMaxBelow = 0;
+    static double s_lastScalingFactor = 1.0;
     string currentTF = GetFractalTimeframeForCurrent();
+    double currentScalingFactor = GetCurrentScalingFactor();
     
     if(dailyClosePrice == s_lastDailyClose && 
        currentTF == s_lastTF &&
@@ -600,6 +606,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
        (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || g_customTHStartPrice == s_lastCustomPrice) &&
        inpMaxLevels == s_lastMaxAbove &&
        inpMaxLevels == s_lastMaxBelow &&
+       MathAbs(currentScalingFactor - s_lastScalingFactor) < EPSILON_GENERAL &&
        s_lastDailyClose != 0) {
         data = s_cachedData;
     return true;
@@ -610,6 +617,11 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     // TH-based step calculations
     double timeframePercentage = GetTimeframeTH();
     data.thValue = CalculateTH(dailyClosePrice, digits, timeframePercentage);
+    
+    // Apply ATR Adaptive Scaling to TH value
+    // This preserves the fractal 2× ratio since the same factor scales all levels uniformly
+    data.thValue = GetAdaptedStepSize(data.thValue);
+    
     CalculateFractalValues(data.thValue, data.structureValue, data.patternValue, data.triggerValue);
     
     #ifdef ENABLE_DEBUG_LOGS
@@ -647,6 +659,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     s_lastCustomPrice = g_customTHStartPrice;
     s_lastMaxAbove = inpMaxLevels;
     s_lastMaxBelow = inpMaxLevels;
+    s_lastScalingFactor = currentScalingFactor;
     return true;
 }
     void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
@@ -847,6 +860,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     TH3_PROF_END(BasePrice);
     if(thBasePrice <= 0 || thBasePrice == EMPTY_VALUE) {        thBasePrice = g_dailyClosePriceForTH;
     }
+    
+    // Update ATR Adaptive Scaling factor (only recalculates on new bar close)
+    UpdateATRScalingFactor(thBasePrice, s_cachedDigits);
+    
     static double s_lastDrawnBasePrice = 0.0;
     bool basePriceChanged = (MathAbs(thBasePrice - s_lastDrawnBasePrice) > s_cachedPoint);
     if(basePriceChanged) {
