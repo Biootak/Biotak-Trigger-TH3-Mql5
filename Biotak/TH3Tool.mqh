@@ -130,8 +130,22 @@ void DrawABCDPoints(const string mainObjName, datetime tA, double pA,
     datetime times[3]   = {tA, tB, tC};
     double prices[3]    = {pA, pB, pC};
 
+    // Smart positioning: detect peak/valley for each point
+    bool isHigh[3];
+    isHigh[0] = (pA > pB);  // A is peak if higher than B
+    isHigh[1] = (pB > pA);  // B is peak if higher than A
+    isHigh[2] = (pC > pB);  // C is peak if higher than B (mirrors A's role)
+
+    // Calculate label offset proportional to pattern size
+    double patternRange = MathAbs(pB - pA);
+    double labelOffset = patternRange * inpABCDLabelOffsetPercent / 100.0;
+    if(labelOffset < _Point * 5) labelOffset = _Point * 5;  // minimum offset
+
     for(int i = 0; i < 3; i++) {
         string pointName = mainObjName + TH3_SUFFIX_POINT + names[i];
+        // Dot anchor: ANCHOR_BOTTOM for peaks (dot appears above price),
+        //             ANCHOR_TOP for valleys (dot appears below price)
+        ENUM_ARROW_ANCHOR dotAnchor = isHigh[i] ? ANCHOR_BOTTOM : ANCHOR_TOP;
 
         if(ObjectFind(0, pointName) < 0) {
             ObjectCreate(0, pointName, OBJ_ARROW, 0, times[i], prices[i]);
@@ -142,26 +156,32 @@ void DrawABCDPoints(const string mainObjName, datetime tA, double pA,
             ObjectSetInteger(0, pointName, OBJPROP_SELECTED, false);
             ObjectSetInteger(0, pointName, OBJPROP_BACK, false);
             ObjectSetInteger(0, pointName, OBJPROP_ZORDER, TH3_POINT_ZORDER);
+            ObjectSetInteger(0, pointName, OBJPROP_ANCHOR, dotAnchor);
             ObjectSetString(0, pointName, OBJPROP_TOOLTIP,
                             "[PIN] Point " + names[i] + " | Drag to adjust");
         } else {
             ObjectMove(0, pointName, 0, times[i], prices[i]);
+            ObjectSetInteger(0, pointName, OBJPROP_ANCHOR, dotAnchor);
         }
 
         if(inpABCDShowLabels) {
-            // Create text label near the point marker
+            // Smart label positioning: above peaks, below valleys
             string labelName = mainObjName + TH3_SUFFIX_LABEL + names[i];
+            double labelPrice = isHigh[i] ? (prices[i] + labelOffset) : (prices[i] - labelOffset);
+            ENUM_ANCHOR_POINT labelAnchor = isHigh[i] ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;
+
             if(ObjectFind(0, labelName) < 0) {
-                ObjectCreate(0, labelName, OBJ_TEXT, 0, times[i], prices[i]);
+                ObjectCreate(0, labelName, OBJ_TEXT, 0, times[i], labelPrice);
                 ObjectSetString(0, labelName, OBJPROP_TEXT, "  " + names[i]);
                 ObjectSetInteger(0, labelName, OBJPROP_COLOR, inpABCDPointColor);
                 ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, inpFontSize + 1);
                 ObjectSetString(0, labelName, OBJPROP_FONT, "Arial Bold");
                 ObjectSetInteger(0, labelName, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(0, labelName, OBJPROP_BACK, false);
-                ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+                ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, labelAnchor);
             } else {
-                ObjectMove(0, labelName, 0, times[i], prices[i]);
+                ObjectMove(0, labelName, 0, times[i], labelPrice);
+                ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, labelAnchor);
             }
         } else {
             // Labels disabled — remove if they exist
@@ -417,16 +437,34 @@ void UpdateAllTH3Objects()
 //+------------------------------------------------------------------+
 void CreateABCDTempPoint(const string pointLabel, datetime clickTime, double clickPrice)
 {
+    // Smart positioning: detect if click is near candle high or low
+    // to place the label above peaks and below valleys
+    int barIndex = iBarShift(_Symbol, _Period, clickTime);
+    double candleHigh = iHigh(_Symbol, _Period, barIndex);
+    double candleLow  = iLow(_Symbol, _Period, barIndex);
+    double candleMid  = (candleHigh + candleLow) / 2.0;
+    bool isHigh = (clickPrice >= candleMid);
+
+    // Offset from visible chart range for consistent visual spacing
+    double chartHigh = ChartGetDouble(0, CHART_PRICE_MAX);
+    double chartLow  = ChartGetDouble(0, CHART_PRICE_MIN);
+    double offset = (chartHigh - chartLow) * 0.015;
+    if(offset < _Point * 5) offset = _Point * 5;
+
+    double labelPrice = isHigh ? (clickPrice + offset) : (clickPrice - offset);
+    ENUM_ANCHOR_POINT anchor = isHigh ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;
+
     string objName = TH3_TEMP_PREFIX + pointLabel;
     if(ObjectFind(0, objName) < 0) {
-        ObjectCreate(0, objName, OBJ_TEXT, 0, clickTime, clickPrice);
+        ObjectCreate(0, objName, OBJ_TEXT, 0, clickTime, labelPrice);
     } else {
-        ObjectMove(0, objName, 0, clickTime, clickPrice);
+        ObjectMove(0, objName, 0, clickTime, labelPrice);
     }
     ObjectSetString(0, objName, OBJPROP_TEXT, pointLabel);
     ObjectSetInteger(0, objName, OBJPROP_COLOR, clrOrangeRed);
     ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, inpFontSize + 2);
     ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+    ObjectSetInteger(0, objName, OBJPROP_ANCHOR, anchor);
     ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
 }
 

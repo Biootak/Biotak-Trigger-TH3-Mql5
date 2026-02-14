@@ -26,7 +26,10 @@ bool CreateUnifiedZone(const string zoneName,
     if(!config.enabled) return true;
 
     if(config.style == FACTOR_ZONE_HIDDEN) {
-        if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+        if(ObjectFind(0, zoneName) >= 0) {
+            CacheRemoveObject(zoneName);
+            ObjectDelete(0, zoneName);
+        }
         return true;
     }
 
@@ -152,7 +155,10 @@ bool CreateZoneWithSmartFallback(const string zoneName,
                                                   config.transparency);
         }
         if(config.style == FACTOR_ZONE_HIDDEN) {
-            if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+            if(ObjectFind(0, zoneName) >= 0) {
+                CacheRemoveObject(zoneName);
+                ObjectDelete(0, zoneName);
+            }
             return true;
         }
 

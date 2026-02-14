@@ -4,9 +4,13 @@ bool DrawMainLevels(const string prefix) {
     // In Custom Price mode, user defines their own reference point
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
         // Delete existing High/Low lines if they exist
+        CacheRemoveObject(prefix + "High");
         ObjectDelete(0, prefix + "High");
+    CacheRemoveObject(prefix + "High_PipsLabel");
     ObjectDelete(0, prefix + "High_PipsLabel");
+    CacheRemoveObject(prefix + "Low");
     ObjectDelete(0, prefix + "Low");
+    CacheRemoveObject(prefix + "Low_PipsLabel");
     ObjectDelete(0, prefix + "Low_PipsLabel");
     return true;
     }

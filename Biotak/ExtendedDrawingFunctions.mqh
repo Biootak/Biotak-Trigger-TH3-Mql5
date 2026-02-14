@@ -15,6 +15,7 @@ void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutive
     for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
         string name = prefix + IntegerToString(idx);
     if(ObjectFind(0, name) >= 0) {
+            CacheRemoveObject(name);
             ObjectDelete(0, name);
     misses = 0;        } else {
             misses++;
@@ -100,7 +101,10 @@ bool CreateFactorMidZone(const string zoneName,
                          const int transparency)
 {
         if(zoneStyle == FACTOR_ZONE_HIDDEN) {
-        if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+        if(ObjectFind(0, zoneName) >= 0) {
+            CacheRemoveObject(zoneName);
+            ObjectDelete(0, zoneName);
+        }
     return true;
     }
     if(zoneStyle == FACTOR_ZONE_LINES) {
@@ -119,11 +123,6 @@ bool CreateFactorMidZone(const string zoneName,
     request.startTime = 0;
     request.endTime = 0;
     SZoneCreationResult result = CreateZone(request);
-    if(result.success) {
-        if(IsIndicatorHidden()) {
-            ObjectSetInteger(0, zoneName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
-    }
     return result.success;
 }
 
@@ -145,7 +144,6 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
     if(upperPrice <= lowerPrice) return false;
     string lineTop = zoneName + "_Top";
     string lineBottom = zoneName + "_Bottom";
-    bool isHidden = IsIndicatorHidden();
 
     bool topExists = (ObjectFind(0, lineTop) >= 0);
     if(!topExists) {
@@ -158,7 +156,7 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
     }
     ObjectSetDouble(0, lineTop, OBJPROP_PRICE, upperPrice);
     ObjectSetInteger(0, lineTop, OBJPROP_COLOR, zoneColor);
-    ObjectSetInteger(0, lineTop, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+    ApplyVisibilityState(lineTop, true);
 
     bool bottomExists = (ObjectFind(0, lineBottom) >= 0);
     if(!bottomExists) {
@@ -171,7 +169,7 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
     }
     ObjectSetDouble(0, lineBottom, OBJPROP_PRICE, lowerPrice);
     ObjectSetInteger(0, lineBottom, OBJPROP_COLOR, zoneColor);
-    ObjectSetInteger(0, lineBottom, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+    ApplyVisibilityState(lineBottom, true);
 
     return true;
 }
@@ -1966,11 +1964,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    if(!g_linesVisible) {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ApplyVisibilityState(midpointName, true);
     int drawnAbove = 0;
     int logicalStep = 0;
     double cumulative = 0;
@@ -2037,11 +2031,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        } else {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        }
+        ApplyVisibilityState(levelName, true);
         
         drawnAbove++;
     if(inpShowMidZones) {
@@ -2111,11 +2101,7 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        } else {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        }
+        ApplyVisibilityState(levelName, true);
         
         drawnBelow++;
     if(inpShowMidZones) {
@@ -2225,11 +2211,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    if(!g_linesVisible) {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ApplyVisibilityState(midpointName, true);
     int logicalStep = 1;
     int drawnAbove = 0;
     int zoneCountAbove = 0;
@@ -2288,11 +2270,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             } else {
                 ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
             };
-    if(!g_linesVisible) {
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            } else {
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            }
+            ApplyVisibilityState(levelName, true);
     drawnAbove++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, inpShowStructure);
@@ -2368,11 +2346,7 @@ void DrawMLevels(const string objectPrefix, const double midpointPrice, const do
             } else {
                 ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
             };
-    if(!g_linesVisible) {
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            } else {
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            }
+            ApplyVisibilityState(levelName, true);
     drawnBelow++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, inpShowStructure);
@@ -2440,11 +2414,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    if(!g_linesVisible) {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ApplyVisibilityState(midpointName, true);
     int logicalStep = 1;
     int drawnAbove = 0;
     int zoneCountAbove = 0;
@@ -2503,11 +2473,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceAbove);
         };
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        } else {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        }
+        ApplyVisibilityState(levelName, true);
     drawnAbove++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
@@ -2581,11 +2547,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceBelow);
         };
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        } else {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        }
+        ApplyVisibilityState(levelName, true);
     drawnBelow++;
     if(inpShowMidZones) {
         bool isCurrentStructure = IsStructureLevel(logicalStep, baseMultiplier, structureEnabled);
@@ -2647,11 +2609,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
     } else {
         ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
     }
-    if(!g_linesVisible) {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, midpointName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ApplyVisibilityState(midpointName, true);
     int step = 1;
     double price = midpointPrice + mDistance;
     double lastDrawnPriceAbove = midpointPrice;
@@ -2693,11 +2651,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
         };
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        } else {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        }
+        ApplyVisibilityState(levelName, true);
     if(inpShowMidZones) {
         string zoneName = objectPrefix + "MEq_Zone_Above_" + IntegerToString(step);
     if(CreateSimpleZone(zoneName, lastDrawnPriceAbove, price, levelColor)) {
@@ -2753,11 +2707,7 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
         };
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        } else {
-            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-        }
+        ApplyVisibilityState(levelName, true);
     if(inpShowMidZones) {
         string zoneName = objectPrefix + "MEq_Zone_Below_" + IntegerToString(step);
     if(CreateSimpleZone(zoneName, lastDrawnPriceBelow, price, levelColor)) {
@@ -2787,9 +2737,14 @@ void DrawTHLevelsWithStep(const string objectPrefix, const double midpointPrice,
 void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice, 
                               const double lowPrice, const double factor, const double stepSize)
 {
-        if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {        ObjectDelete(0, objectPrefix + "Factor_High");
+        if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
+    CacheRemoveObject(objectPrefix + "Factor_High");
+    ObjectDelete(0, objectPrefix + "Factor_High");
+    CacheRemoveObject(objectPrefix + "Factor_Low");
     ObjectDelete(0, objectPrefix + "Factor_Low");
+    CacheRemoveObject(objectPrefix + "Factor_High_Label");
     ObjectDelete(0, objectPrefix + "Factor_High_Label");
+    CacheRemoveObject(objectPrefix + "Factor_Low_Label");
     ObjectDelete(0, objectPrefix + "Factor_Low_Label");
     return;
     }
@@ -2809,11 +2764,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical HIGH | %s | Range: %.0f pips", 
             DoubleToString(highPrice, GetCachedDigits()), rangePips));
-    if(!g_linesVisible) {
-        ObjectSetInteger(0, highLineName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, highLineName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ApplyVisibilityState(highLineName, true);
     string lowLineName = objectPrefix + "Factor_Low";
     if(ObjectFind(0, lowLineName) < 0) {
         ObjectCreate(0, lowLineName, OBJ_HLINE, 0, 0, lowPrice);
@@ -2827,11 +2778,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
         StringFormat("Historical LOW | %s | Range: %.0f pips", 
             DoubleToString(lowPrice, GetCachedDigits()), rangePips));
-    if(!g_linesVisible) {
-        ObjectSetInteger(0, lowLineName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, lowLineName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ApplyVisibilityState(lowLineName, true);
     string highLabelName = objectPrefix + "Factor_High_Label";
     if(ObjectFind(0, highLabelName) < 0) {
         ObjectCreate(0, highLabelName, OBJ_TEXT, 0, TimeCurrent(), highPrice);
@@ -2846,6 +2793,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
         StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
             DoubleToString(highPrice, GetCachedDigits()), rangePips, factor, stepPips));
     ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
+    ApplyVisibilityState(highLabelName, false);
     string lowLabelName = objectPrefix + "Factor_Low_Label";
     if(ObjectFind(0, lowLabelName) < 0) {
         ObjectCreate(0, lowLabelName, OBJ_TEXT, 0, TimeCurrent(), lowPrice);
@@ -2860,6 +2808,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
         StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
             DoubleToString(lowPrice, GetCachedDigits()), rangePips, factor, stepPips));
     ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
+    ApplyVisibilityState(lowLabelName, false);
 }
 
 //+------------------------------------------------------------------+
@@ -2931,6 +2880,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     } else {
         ObjectSetDouble(0, midName, OBJPROP_PRICE, midpoint);
     }
+    ApplyVisibilityState(midName, true);
     double stepPattern[2];
     stepPattern[0] = baseStepSize;
     stepPattern[1] = largeStepSize;
@@ -3012,6 +2962,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
+        ApplyVisibilityState(levelName, true);
         
         levelsAbove++;
     }    
@@ -3062,6 +3013,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         } else {
             ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
         }
+        ApplyVisibilityState(levelName, true);
         
         levelsBelow++;
     }
@@ -3200,11 +3152,7 @@ void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice,
             }
     // PERF: For existing objects, only update price and visibility
     ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
-    if(!g_linesVisible) {
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            } else {
-                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            }
+    ApplyVisibilityState(levelName, true);
     levelsDrawn++;
         } else {
         if(objectExists) {
@@ -3279,11 +3227,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     ObjectSetInteger(0, centerName, OBJPROP_WIDTH, 2);
     ObjectSetInteger(0, centerName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, centerName, OBJPROP_BACK, false);
-    if(!g_linesVisible) {
-                ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            } else {
-                ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            }
+    ApplyVisibilityState(centerName, true);
             ObjectSetString(0, centerName, OBJPROP_TOOLTIP,
                 StringFormat("Harmonic Center | %s | F=%.2f | R=%.3f",
                     DoubleToString(normalizedCenter, GetCachedDigits()), factor, harmonicRatio));
@@ -3334,11 +3278,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-    if(!g_linesVisible) {
-                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                } else {
-                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-                }
+    ApplyVisibilityState(levelName, true);
                 ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                     StringFormat("Harmonic +%d (%s) | %s | F=%.2f",
                         logicalStepAbove, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
@@ -3401,11 +3341,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
-    if(!g_linesVisible) {
-                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                } else {
-                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-                }
+    ApplyVisibilityState(levelName, true);
                 ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                     StringFormat("Harmonic -%d (%s) | %s | F=%.2f",
                         logicalStepBelow, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, GetCachedDigits()), factor));
@@ -3496,11 +3432,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     ObjectSetInteger(0, centerLevelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, centerLevelName, OBJPROP_BACK, false);
     ObjectSetInteger(0, centerLevelName, OBJPROP_ZORDER, 1);
-    if(!g_linesVisible) {
-                    ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                } else {
-                    ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-                }
+    ApplyVisibilityState(centerLevelName, true);
                 ObjectSetString(0, centerLevelName, OBJPROP_TOOLTIP, 
                     StringFormat("Factor Center | %s | F=%.2f", 
                         DoubleToString(normalizedCenter, GetCachedDigits()), factor));
@@ -3574,11 +3506,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
     ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
-    if(!g_linesVisible) {
-                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                    } else {
-                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-                    }
+    ApplyVisibilityState(levelName, true);
                     ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                         StringFormat("Factor +%d | %s | F=%.2f",
                             logicalStep, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
@@ -3659,11 +3587,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
     ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
     ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
-    if(!g_linesVisible) {
-                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                    } else {
-                        ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-                    }
+    ApplyVisibilityState(levelName, true);
                     ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
                         StringFormat("Factor -%d | %s | F=%.2f",
                             logicalStep, DoubleToString(normalizedPrice, GetCachedDigits()), factor));
@@ -3702,15 +3626,16 @@ void ClearFactorLevels(const string objectPrefix)
     string lowLineName = objectPrefix + "Factor_Low";
     string highLabelName = objectPrefix + "Factor_High_Label";
     string lowLabelName = objectPrefix + "Factor_Low_Label";
-    if(ObjectFind(0, highLineName) >= 0) ObjectDelete(0, highLineName);
-    if(ObjectFind(0, lowLineName) >= 0) ObjectDelete(0, lowLineName);
-    if(ObjectFind(0, highLabelName) >= 0) ObjectDelete(0, highLabelName);
-    if(ObjectFind(0, lowLabelName) >= 0) ObjectDelete(0, lowLabelName);
+    if(ObjectFind(0, highLineName) >= 0) { CacheRemoveObject(highLineName); ObjectDelete(0, highLineName); }
+    if(ObjectFind(0, lowLineName) >= 0) { CacheRemoveObject(lowLineName); ObjectDelete(0, lowLineName); }
+    if(ObjectFind(0, highLabelName) >= 0) { CacheRemoveObject(highLabelName); ObjectDelete(0, highLabelName); }
+    if(ObjectFind(0, lowLabelName) >= 0) { CacheRemoveObject(lowLabelName); ObjectDelete(0, lowLabelName); }
     int totalObjects = ObjectsTotal(0, -1, -1);
     string factorPrefix = objectPrefix + "Factor_";
     for(int i = totalObjects - 1; i >= 0; i--) {
         string objName = ObjectName(0, i);
     if(StringFind(objName, factorPrefix) == 0) {
+            CacheRemoveObject(objName);
             ObjectDelete(0, objName);
         }
     }

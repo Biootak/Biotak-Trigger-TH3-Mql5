@@ -882,6 +882,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
     datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
     if(objTime > 0 && objTime < cutoffTime) {
+                    CacheRemoveObject(objName);
                     ObjectDelete(0, objName);
                 }
             }

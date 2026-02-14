@@ -151,6 +151,7 @@ int EmergencyCleanupObjects()
         // Delete if older than cutoff
         if(objTime > 0 && objTime < cutoffTime)
         {
+        CacheRemoveObject(objName);
         if(ObjectDelete(0, objName)) {
                 deletedCount++;
             }
@@ -171,6 +172,9 @@ int EmergencyCleanupObjects()
         
         // Delete all mid-zones (can be recreated)
         phase2Deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
+        
+        // Bulk cache clear needed after ObjectsDeleteAll (cannot track individual names)
+        CacheClear();
         
         // Delete all labels except mode labels
         // GOLD FIX: Cache ObjectsTotal outside loop
@@ -195,6 +199,7 @@ int EmergencyCleanupObjects()
             
             // Delete other labels
             if(ObjectGetInteger(0, objName, OBJPROP_TYPE) == OBJ_LABEL) {
+        CacheRemoveObject(objName);
         if(ObjectDelete(0, objName)) {
                     phase2Deleted++;
                 }
