@@ -175,8 +175,9 @@ int OnInitHandler() {    InitializeGlobalCache();
     g_factorValueOverride = 50.0;
         }
     }
-    // Restore TH3 Frequency override
+    // Restore TH3 Frequency override + index
     string th3FreqGvarName = "Biotak_TH3Freq_" + chartIdStr;
+    string th3FreqIdxGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
     {
         double val = GlobalVariableGet(th3FreqGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
@@ -188,6 +189,19 @@ int OnInitHandler() {    InitializeGlobalCache();
             }
         } else {
             g_th3FreqOverride = 0.0;
+        }
+        // Restore frequency array index
+        double idxVal = GlobalVariableGet(th3FreqIdxGvarName);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            int idx = (int)idxVal;
+            if(idx >= 0 && idx < TH3_FREQUENCY_COUNT) {
+                g_th3FreqIndex = idx;
+            } else {
+                g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
+                GlobalVariableDel(th3FreqIdxGvarName);
+            }
+        } else {
+            g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
         }
     }
     InitializeATRCache();
@@ -1128,23 +1142,41 @@ void AdjustFactorValue(int direction)
 }
 
 //+------------------------------------------------------------------+
-//| HELPER: Adjust TH3 frequency by step (+1 = increase, -1 = decrease)|
+//| HELPER: Cycle TH3 frequency forward through TH3_TEST_FREQUENCIES[]|
 //+------------------------------------------------------------------+
-void AdjustTH3Frequency(int direction)
+void CycleTH3Frequency()
 {
     if(!inpEnableTH3Tool) return;
-    double currentFreq = g_th3FreqOverride;
-    if(currentFreq <= 0) currentFreq = inpTH3BaseStepPercent;
-    double step = (inpTH3FreqAdjustStep > 0) ? inpTH3FreqAdjustStep : DEFAULT_TH3_FREQ_ADJUST_STEP;
-    double newFreq = NormalizeDouble(currentFreq + step * direction, 2);
-    if(newFreq < MIN_TH3_FREQUENCY) newFreq = MIN_TH3_FREQUENCY;
-    if(newFreq > MAX_TH3_FREQUENCY) newFreq = MAX_TH3_FREQUENCY;
-    g_th3FreqOverride = newFreq;
-    GlobalVariableSet("Biotak_TH3Freq_" + GetCachedChartIdStr(), g_th3FreqOverride);
+    if(g_th3FreqIndex < 0 || g_th3FreqIndex >= TH3_FREQUENCY_COUNT)
+        g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
+    g_th3FreqIndex = (g_th3FreqIndex + 1) % TH3_FREQUENCY_COUNT;
+    g_th3FreqOverride = TH3_TEST_FREQUENCIES[g_th3FreqIndex];
+    string chartIdStr = GetCachedChartIdStr();
+    GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
+    GlobalVariableSet("Biotak_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
     UpdateAllTH3Objects();
-    // FIX: Move UpdateTH3FreqLabel AFTER UpdateAllTH3Objects so offset is correct
-    UpdateTH3FreqLabel(newFreq);
+    UpdateTH3FreqLabel(g_th3FreqOverride);
     ThrottledChartRedraw();
+    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 3), "% [#", g_th3FreqIndex, "]");
+}
+
+//+------------------------------------------------------------------+
+//| HELPER: Cycle TH3 frequency backward through TH3_TEST_FREQUENCIES|
+//+------------------------------------------------------------------+
+void DecrementTH3Frequency()
+{
+    if(!inpEnableTH3Tool) return;
+    if(g_th3FreqIndex < 0 || g_th3FreqIndex >= TH3_FREQUENCY_COUNT)
+        g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
+    g_th3FreqIndex = (g_th3FreqIndex - 1 + TH3_FREQUENCY_COUNT) % TH3_FREQUENCY_COUNT;
+    g_th3FreqOverride = TH3_TEST_FREQUENCIES[g_th3FreqIndex];
+    string chartIdStr = GetCachedChartIdStr();
+    GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
+    GlobalVariableSet("Biotak_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
+    UpdateAllTH3Objects();
+    UpdateTH3FreqLabel(g_th3FreqOverride);
+    ThrottledChartRedraw();
+    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 3), "% [#", g_th3FreqIndex, "]");
 }
 
     void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
@@ -1424,16 +1456,17 @@ void AdjustTH3Frequency(int direction)
     // KEY '2' — Increase Factor
     else if(lparam == '2') { AdjustFactorValue(+1); return; }
 
-    // KEY '3' — Decrease TH3 Frequency
-    else if(lparam == '3') { AdjustTH3Frequency(-1); return; }
+    // KEY '3' — Decrease TH3 Frequency (cycle backward through array)
+    else if(lparam == '3') { DecrementTH3Frequency(); return; }
 
-    // KEY '4' — Increase TH3 Frequency
-    else if(lparam == '4') { AdjustTH3Frequency(+1); return; }
+    // KEY '4' — Increase TH3 Frequency (cycle forward through array)
+    else if(lparam == '4') { CycleTH3Frequency(); return; }
 
     if(IsHotkeyPressed(lparam, sparam, inpResetKey))
         {            g_stepModeOverride = -1;
     g_factorValueOverride = 0;
     g_th3FreqOverride = 0;
+    g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
     g_timeframeLocked = false;
     g_lockedPeriod = 0;
     g_triggerLevelsEnabled = inpShowTrigger;

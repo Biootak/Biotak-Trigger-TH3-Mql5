@@ -59,14 +59,25 @@
 #include "Biotak\HistoricalDataFunctions.mqh"
 #include "Biotak\EventHandlers.mqh"
 
-int OnInit() {
-    return OnInitHandler();
-}
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   return OnInitHandler();
+  }
 
-void OnDeinit(const int reason) {
-    OnDeinitHandler(reason);
-}
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   OnDeinitHandler(reason);
+  }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
                 const datetime &time[],
@@ -76,20 +87,32 @@ int OnCalculate(const int rates_total,
                 const double &close[],
                 const long &tick_volume[],
                 const long &real_volume[],
-                const int &spread[]) {
-    return OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
-}
+                const int &spread[])
+  {
+   return OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
+  }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void OnChartEvent(const int id,
                   const long &lparam,
                   const double &dparam,
-                  const string &sparam) {
-    OnChartEventHandler(id, lparam, dparam, sparam);
-}
+                  const string &sparam)
+  {
+   OnChartEventHandler(id, lparam, dparam, sparam);
+  }
 
-void OnTimer() {
-    if(ObjectFind(0, g_stepModeLabelName) >= 0)  ObjectDelete(0, g_stepModeLabelName);
-    if(ObjectFind(0, g_factorLabelName) >= 0)    ObjectDelete(0, g_factorLabelName);
-    Comment("");
-    EventKillTimer();
-}
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   if(ObjectFind(0, g_stepModeLabelName) >= 0)
+      ObjectDelete(0, g_stepModeLabelName);
+   if(ObjectFind(0, g_factorLabelName) >= 0)
+      ObjectDelete(0, g_factorLabelName);
+   Comment("");
+   EventKillTimer();
+  }
+//+------------------------------------------------------------------+

@@ -227,7 +227,7 @@ void UpdateTH3FreqLabel(double freqValue) {
         ObjectCreate(0, g_th3FreqLabelName, OBJ_LABEL, 0, 0, 0);
 
     ObjectSetString(0, g_th3FreqLabelName, OBJPROP_TEXT,
-        "[ TH3 Freq: " + DoubleToString(freqValue, 2) + "% ]");
+        "[ TH3 Freq: " + DoubleToString(freqValue, 3) + "% (#" + IntegerToString(g_th3FreqIndex) + ") ]");
     ApplyModeLabelStyle(g_th3FreqLabelName, inpTH3Color);
 
     if(inpModeLabelDuration > 0)
