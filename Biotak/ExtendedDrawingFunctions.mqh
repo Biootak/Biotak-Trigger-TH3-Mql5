@@ -31,21 +31,36 @@ void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutive
 bool CreateOrUpdateHLine(const string name, double price, 
                           color clr, ENUM_LINE_STYLE style, int width,
                           const string tooltip) {
-        if(ObjectFind(0, name) < 0) {
+    bool objectExists = CacheObjectExists(name);
+    if(!objectExists) objectExists = (ObjectFind(0, name) >= 0);
+    
+    if(!objectExists) {
         ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
-    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-    ObjectSetInteger(0, name, OBJPROP_STYLE, style);
-    ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
-    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
-    ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
-    if(!g_linesVisible) {
-            ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
-    return true;
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        CacheAddObject(name, price, clr, style, width);
+        // FIX: Use unified visibility system instead of raw g_linesVisible check
+        ApplyVisibilityState(name, true);
+        return true;
     } else {
-        ObjectSetDouble(0, name, OBJPROP_PRICE, price);
-    return false;
+        // FIX: Only update price if changed (use cache for comparison)
+        SObjectCacheEntry cachedEntry;
+        bool hasCached = CacheGetObject(name, cachedEntry);
+        double normPrice = NormalizeDouble(price, _Digits);
+        if(!hasCached || MathAbs(hasCached ? cachedEntry.lastPrice - normPrice : 1.0) > GetCachedPoint() * 0.1) {
+            ObjectSetDouble(0, name, OBJPROP_PRICE, normPrice);
+        }
+        if(!hasCached || cachedEntry.lastColor != clr) {
+            ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        }
+        CacheUpdateObject(name, normPrice, clr, style, width);
+        // FIX: Use unified visibility system for existing objects too
+        ApplyVisibilityStateIfUnchangedSkip(name, true);
+        return false;
     }
 }
 

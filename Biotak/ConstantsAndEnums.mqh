@@ -22,9 +22,9 @@
 
 // Array Safety Constants (GOLD FIX v3)
 #define MAX_PREFIX_COUNT 50           // Maximum number of object prefixes (with safety margin)
-#define OBJECT_COUNT_INCREASE_THRESHOLD 100  // Trigger cleanup if objects increased by 100
-#define REDRAW_THROTTLE_SECONDS 1     // Minimum 1 second between redraws (was 10s - too aggressive)
-#define CLEANUP_INTERVAL_SECONDS 300  // 5 minutes between periodic cleanups
+#define OBJECT_COUNT_INCREASE_THRESHOLD 30   // Trigger cleanup if objects increased by 30
+#define REDRAW_THROTTLE_SECONDS 0     // No artificial delay between redraws — immediate UI response
+#define CLEANUP_INTERVAL_SECONDS 60   // 1 minute between periodic cleanups
 
 // Division Safety Constants (GOLD FIX v3)
 #define MIN_SAFE_DIVISIONS 0.001      // Minimum divisions to prevent precision loss

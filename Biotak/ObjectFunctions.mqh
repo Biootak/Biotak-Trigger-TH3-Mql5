@@ -20,9 +20,15 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     }
     double normalizedPrice = NormalizePrice(price);
     // PERF: Use cached frame time and period seconds instead of per-object syscalls
+    // FIX: Invalidate cached period on timeframe change (was never reset)
     datetime currentTime = CacheGetFrameTime();
     static int s_cachedPeriodSec = 0;
-    if(s_cachedPeriodSec == 0) s_cachedPeriodSec = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());
+    static int s_cachedPeriodTF = -1;
+    int currentPeriod = GetCachedPeriod();
+    if(s_cachedPeriodTF != currentPeriod) {
+        s_cachedPeriodSec = PeriodSeconds((ENUM_TIMEFRAMES)currentPeriod);
+        s_cachedPeriodTF = currentPeriod;
+    }
     datetime futureTime = currentTime + s_cachedPeriodSec * ZONE_EXTENSION_MULTIPLIER;
     ENUM_OBJECT objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
     SObjectCacheEntry cachedEntry;
@@ -181,10 +187,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         
         ObjectSetString(0, name, OBJPROP_FONT, safeFontName);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpFontSize);
-    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetInteger(0, name, OBJPROP_ALIGN, ALIGN_RIGHT);
-    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 5);
-    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, 2);
+    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT);
     ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, name, OBJPROP_BACK, false);
     CacheAddObject(name, price, textColor, 0, 0);

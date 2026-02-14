@@ -96,6 +96,10 @@ const double TH3_TEST_FREQUENCIES[] = {
     120.0    // Extended maximum
 };
 
+// ABCD Pattern Constants
+#define ABCD_MIN_DISTANCE_POINTS 10
+#define ABCD_DEBOUNCE_MS 300
+
 // UI Timing (milliseconds)
 const uint DOUBLE_CLICK_THRESHOLD_MS = 300;
 const uint CHART_CHANGE_THROTTLE_MS = 250;
@@ -108,6 +112,32 @@ const double DEFAULT_TH3_FREQ_ADJUST_STEP = 1.0; // Legacy (kept for compatibili
 const double MIN_ZONE_HEIGHT_PERCENT = 0.01;
 const double MAX_ZONE_HEIGHT_PERCENT = 1.0;
 const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125;
+
+//+------------------------------------------------------------------+
+//| FrequencyResult - Result of frequency optimization               |
+//| Defined here (before GlobalVariables.mqh) so it can be used      |
+//| as a global variable for info label display                      |
+//+------------------------------------------------------------------+
+struct FrequencyResult {
+    int       bestIndex;          // Index into TH3_TEST_FREQUENCIES[]
+    double    bestFrequency;      // The optimal frequency percentage
+    double    totalScore;         // Combined score (0..1)
+    double    midpointScore;      // How close Step3 is to a reference 50%
+    double    timeScore;          // Gann price=time alignment score
+    double    harmonicScore;      // Harmonic/phase relationship score
+    double    step3Price;         // Predicted Step3 price at best frequency
+    string    matchLabel;         // Which reference midpoint matched
+    int       matchWaveIndex;     // Which wave the best match belongs to
+    double    errorPips;          // Distance in pips between Step3 and matched midpoint
+    bool      isValid;
+
+    void Reset() {
+        bestIndex = -1; bestFrequency = 0; totalScore = 0;
+        midpointScore = 0; timeScore = 0; harmonicScore = 0;
+        step3Price = 0; matchLabel = ""; matchWaveIndex = -1;
+        errorPips = 0; isValid = false;
+    }
+};
 
 // Multipliers
 const int ZONE_EXTENSION_MULTIPLIER = 100;

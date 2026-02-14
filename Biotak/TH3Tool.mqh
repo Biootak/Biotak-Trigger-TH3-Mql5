@@ -1,11 +1,28 @@
 //+------------------------------------------------------------------+
-//| TH3Tool.mqh - AB=CD Pattern Drawing System                      |
+//| TH3Tool.mqh - AB=CD Pattern Drawing & Interaction System         |
 //+------------------------------------------------------------------+
-#define ABCD_MIN_DISTANCE_POINTS 10
-#define ABCD_DEBOUNCE_MS 300
+#ifndef TH3_TOOL_MQH
+#define TH3_TOOL_MQH
+
+// Object naming constants
+#define TH3_PATTERN_PREFIX      "ABCD_Pattern_"
+#define TH3_TEMP_PREFIX         "ABCD_Temp_"
+#define TH3_TEMP_LINE_PREFIX    "ABCD_Temp_Line_"
+#define TH3_PATTERN_PREFIX_LEN  13
+
+// Drawing constants
+#define TH3_ARROW_CODE          159
+#define TH3_POINT_WIDTH         3
+#define TH3_POINT_ZORDER        10
+#define TH3_TARGET_COUNT        4
+#define TH3_TARGET_LINE_WIDTH   2
+#define TH3_BAR_EXTENSION       100
+#define TH3_SNAP_THRESHOLD_PIPS 5.0
+#define TH3_MIN_BASENAME_LEN    20
+#define TH3_MAX_TARGETS         7
 
 //+------------------------------------------------------------------+
-//| Helper: Create or update a trend line object                     |
+//| Create or update a trend line object                             |
 //+------------------------------------------------------------------+
 void CreateOrUpdateTrendLine(const string name, datetime t1, double p1,
                              datetime t2, double p2, color clr, int width,
@@ -26,32 +43,34 @@ void CreateOrUpdateTrendLine(const string name, datetime t1, double p1,
 }
 
 //+------------------------------------------------------------------+
-//| Set active AB=CD pattern (for info label display)                |
+//| Set active pattern for info label visibility                     |
 //+------------------------------------------------------------------+
 void SetActiveABCDPattern(string patternName)
 {
     if(g_activeABCDPattern == patternName) return;
 
     if(g_activeABCDPattern != "") {
-        string oldInfoLabel = g_activeABCDPattern + "_Info";
-        if(ObjectFind(0, oldInfoLabel) >= 0)
-            ObjectSetInteger(0, oldInfoLabel, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        string oldLabel = g_activeABCDPattern + TH3_SUFFIX_INFO;
+        if(ObjectFind(0, oldLabel) >= 0)
+            ObjectSetInteger(0, oldLabel, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     }
 
     g_activeABCDPattern = patternName;
 
     if(patternName != "") {
-        string newInfoLabel = patternName + "_Info";
-        if(ObjectFind(0, newInfoLabel) >= 0)
-            ObjectSetInteger(0, newInfoLabel, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        string newLabel = patternName + TH3_SUFFIX_INFO;
+        if(ObjectFind(0, newLabel) >= 0) {
+            // Respect indicator hidden state — don't force visible when hidden
+            long vis = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+            ObjectSetInteger(0, newLabel, OBJPROP_TIMEFRAMES, vis);
+        }
     }
 
     ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| Calculate AB=CD Point D                                          |
-//| Rule: AB distance = CD distance (equal price movement)           |
+//| Calculate AB=CD Point D (equal price movement projection)        |
 //+------------------------------------------------------------------+
 bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
                          datetime tC, double pC, datetime &tD, double &pD)
@@ -59,223 +78,305 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
     if(tA <= 0 || tB <= 0 || tC <= 0) return false;
     if(pA <= 0 || pB <= 0 || pC <= 0) return false;
 
-    double AB_Distance = MathAbs(pB - pA);
-    double minDistance = GetCachedPoint() * ABCD_MIN_DISTANCE_POINTS;
-    if(AB_Distance < minDistance) return false;
+    double abDist = MathAbs(pB - pA);
+    if(abDist < GetCachedPoint() * ABCD_MIN_DISTANCE_POINTS) return false;
 
     bool isBullish = (pB > pA);
-    pD = isBullish ? (pC + AB_Distance) : (pC - AB_Distance);
+    pD = isBullish ? (pC + abDist) : (pC - abDist);
+    if(pD <= 0) return false;
 
-    int BC_Bars = iBarShift(_Symbol, _Period, tB) - iBarShift(_Symbol, _Period, tC);
-    if(BC_Bars < 1) BC_Bars = 1;
+    int bcBars = MathAbs(iBarShift(_Symbol, _Period, tB) - iBarShift(_Symbol, _Period, tC));
+    if(bcBars < 1) bcBars = 1;
 
-    int barD = iBarShift(_Symbol, _Period, tC) - BC_Bars;
+    int barD = iBarShift(_Symbol, _Period, tC) - bcBars;
     if(barD < 0) barD = 0;
 
     tD = iTime(_Symbol, 0, barD);
     if(tD <= 0) tD = tC + (tC - tB);
-    if(pD <= 0) return false;
 
     return true;
 }
 
 //+------------------------------------------------------------------+
-//| Draw AB=CD Pattern with TH3-style Steps                          |
-//| User provides A, B, C -> System calculates D                     |
-//| Targets (Step1/3/5/7) start from C (not D)                      |
+//| Cleanup all objects belonging to a pattern                       |
 //+------------------------------------------------------------------+
-void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, double pB,
-                     datetime tC, double pC)
+void DeletePatternObjects(const string baseName)
 {
-    datetime tD;
-    double pD;
-    if(!CalculateABCDPointD(tA, pA, tB, pB, tC, pC, tD, pD)) {
-        string pointNames[4] = {"A", "B", "C", "D"};
-        for(int i = 0; i < 4; i++) {
-            ObjectDelete(0, mainObjName + "_Point_" + pointNames[i]);
-            ObjectDelete(0, mainObjName + "_Label_" + pointNames[i]);
-        }
-        ObjectDelete(0, mainObjName + "_Line_AB");
-        ObjectDelete(0, mainObjName + "_Line_BC");
-        ObjectDelete(0, mainObjName + "_Info");
-        return;
+    string ptNames[3] = {"A", "B", "C"};
+    for(int i = 0; i < 3; i++) {
+        ObjectDelete(0, baseName + TH3_SUFFIX_POINT + ptNames[i]);
+        ObjectDelete(0, baseName + TH3_SUFFIX_LABEL + ptNames[i]);
     }
 
-    double AB_Distance = MathAbs(pB - pA);
-    bool isBullish = (pB > pA);
-    double frequency = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
-    double baseUnit = AB_Distance * (frequency / 100.0);
-    double pipSize = GetCachedPipSize();
+    ObjectDelete(0, baseName + TH3_SUFFIX_LINE_AB);
+    ObjectDelete(0, baseName + TH3_SUFFIX_LINE_BC);
+    ObjectDelete(0, baseName + TH3_SUFFIX_INFO);
 
-    // Create/update points A, B, C
-    string pointNames[4];
-    pointNames[0] = "A";
-    pointNames[1] = "B";
-    pointNames[2] = "C";
-    pointNames[3] = "D";
+    for(int i = 1; i <= TH3_MAX_TARGETS; i++) {
+        string idx = IntegerToString(i);
+        ObjectDelete(0, baseName + TH3_SUFFIX_TARGET + idx);
+        ObjectDelete(0, baseName + "_ZoneUpper_" + idx);
+        ObjectDelete(0, baseName + "_ZoneLower_" + idx);
+    }
+}
 
-    datetime pointTimes[4];
-    pointTimes[0] = tA;
-    pointTimes[1] = tB;
-    pointTimes[2] = tC;
-    pointTimes[3] = tD;
-
-    double pointPrices[4];
-    pointPrices[0] = pA;
-    pointPrices[1] = pB;
-    pointPrices[2] = pC;
-    pointPrices[3] = pD;
+//+------------------------------------------------------------------+
+//| Draw ABCD point markers (A, B, C)                                |
+//+------------------------------------------------------------------+
+void DrawABCDPoints(const string mainObjName, datetime tA, double pA,
+                    datetime tB, double pB, datetime tC, double pC)
+{
+    string names[3]     = {"A", "B", "C"};
+    datetime times[3]   = {tA, tB, tC};
+    double prices[3]    = {pA, pB, pC};
 
     for(int i = 0; i < 3; i++) {
-        string pointName = mainObjName + "_Point_" + pointNames[i];
-        double pointPrice = pointPrices[i];
+        string pointName = mainObjName + TH3_SUFFIX_POINT + names[i];
 
         if(ObjectFind(0, pointName) < 0) {
-            ObjectCreate(0, pointName, OBJ_ARROW, 0, pointTimes[i], pointPrice);
+            ObjectCreate(0, pointName, OBJ_ARROW, 0, times[i], prices[i]);
             ObjectSetInteger(0, pointName, OBJPROP_COLOR, inpABCDPointColor);
-            ObjectSetInteger(0, pointName, OBJPROP_ARROWCODE, 159);
-            ObjectSetInteger(0, pointName, OBJPROP_WIDTH, 3);
+            ObjectSetInteger(0, pointName, OBJPROP_ARROWCODE, TH3_ARROW_CODE);
+            ObjectSetInteger(0, pointName, OBJPROP_WIDTH, TH3_POINT_WIDTH);
             ObjectSetInteger(0, pointName, OBJPROP_SELECTABLE, true);
             ObjectSetInteger(0, pointName, OBJPROP_SELECTED, false);
             ObjectSetInteger(0, pointName, OBJPROP_BACK, false);
-            ObjectSetInteger(0, pointName, OBJPROP_ZORDER, 10);
+            ObjectSetInteger(0, pointName, OBJPROP_ZORDER, TH3_POINT_ZORDER);
             ObjectSetString(0, pointName, OBJPROP_TOOLTIP,
-                            "[PIN] Point " + pointNames[i] + " | Drag to adjust");
+                            "[PIN] Point " + names[i] + " | Drag to adjust");
         } else {
-            ObjectMove(0, pointName, 0, pointTimes[i], pointPrice);
+            ObjectMove(0, pointName, 0, times[i], prices[i]);
         }
 
         if(inpABCDShowLabels) {
-            string labelName = mainObjName + "_Label_" + pointNames[i];
+            // Create text label near the point marker
+            string labelName = mainObjName + TH3_SUFFIX_LABEL + names[i];
+            if(ObjectFind(0, labelName) < 0) {
+                ObjectCreate(0, labelName, OBJ_TEXT, 0, times[i], prices[i]);
+                ObjectSetString(0, labelName, OBJPROP_TEXT, "  " + names[i]);
+                ObjectSetInteger(0, labelName, OBJPROP_COLOR, inpABCDPointColor);
+                ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, inpFontSize + 1);
+                ObjectSetString(0, labelName, OBJPROP_FONT, "Arial Bold");
+                ObjectSetInteger(0, labelName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, labelName, OBJPROP_BACK, false);
+                ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+            } else {
+                ObjectMove(0, labelName, 0, times[i], prices[i]);
+            }
+        } else {
+            // Labels disabled — remove if they exist
+            string labelName = mainObjName + TH3_SUFFIX_LABEL + names[i];
             if(ObjectFind(0, labelName) >= 0)
                 ObjectDelete(0, labelName);
         }
     }
+}
 
-    // Line AB
-    string lineAB = mainObjName + "_Line_AB";
-    CreateOrUpdateTrendLine(lineAB, tA, pA, tB, pB, inpABCDLineColor, inpABCDWidth, STYLE_SOLID, false, false);
+//+------------------------------------------------------------------+
+//| Draw target step levels with zones                               |
+//+------------------------------------------------------------------+
+void DrawABCDTargetLevels(const string mainObjName, double pC, double baseUnit,
+                          bool isBullish, datetime startTime, double pipSize)
+{
+    string targetNames[TH3_TARGET_COUNT]  = {"Step1", "Step3", "Step5", "Step7"};
+    double multipliers[TH3_TARGET_COUNT]  = {1.0, 3.0, 5.0, 7.0};
 
-    // Line BC
-    string lineBC = mainObjName + "_Line_BC";
-    CreateOrUpdateTrendLine(lineBC, tB, pB, tC, pC, clrGray, 1, STYLE_DOT, false, true);
-
-    // Target levels (Step1, Step3, Step5, Step7) from C
-    string targetNames[4] = {"Step1", "Step3", "Step5", "Step7"};
-    color targetColors[4] = {clrNavy, clrNavy, clrNavy, clrNavy};
-    double multipliers[4] = {1.0, 3.0, 5.0, 7.0};
-
-    double targetLevels[4];
-    double targetPips[4];
-    for(int i = 0; i < 4; i++) {
-        targetLevels[i] = isBullish ? (pC + multipliers[i] * baseUnit)
-                                    : (pC - multipliers[i] * baseUnit);
-        targetPips[i] = MathAbs(baseUnit * multipliers[i]) / pipSize;
-    }
-
-    datetime startTime = tC;
     int barShift = iBarShift(_Symbol, _Period, startTime);
-    datetime endTime = iTime(_Symbol, 0, MathMax(0, barShift - 100));
+    datetime endTime = iTime(_Symbol, 0, MathMax(0, barShift - TH3_BAR_EXTENSION));
 
-    double zoneHeightPercent = inpTH3ZoneHeightPercent / 100.0;
-    if(zoneHeightPercent < 0.01) zoneHeightPercent = 0.01;
-    if(zoneHeightPercent > 1.0) zoneHeightPercent = 1.0;
-    double zoneHalfWidth = baseUnit * zoneHeightPercent;
+    double zonePercent = MathMax(0.01, MathMin(1.0, inpTH3ZoneHeightPercent / 100.0));
+    double zoneHalfWidth = baseUnit * zonePercent;
 
-    for(int i = 0; i < 4; i++) {
-        string lineName = mainObjName + "_Target_" + IntegerToString(i + 1);
-        double centerPrice = targetLevels[i];
-        double upperZone = centerPrice + zoneHalfWidth;
-        double lowerZone = centerPrice - zoneHalfWidth;
-        color zoneColor = (inpTH3ZoneColor == clrNONE) ? targetColors[i] : inpTH3ZoneColor;
+    for(int i = 0; i < TH3_TARGET_COUNT; i++) {
+        double center = isBullish ? (pC + multipliers[i] * baseUnit)
+                                  : (pC - multipliers[i] * baseUnit);
+        double targetPips = MathAbs(baseUnit * multipliers[i]) / pipSize;
 
+        string lineName = mainObjName + TH3_SUFFIX_TARGET + IntegerToString(i + 1);
         if(ObjectFind(0, lineName) < 0) {
-            ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, centerPrice, endTime, centerPrice);
-            ObjectSetInteger(0, lineName, OBJPROP_COLOR, targetColors[i]);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, targetColors[i]);
-            ObjectSetInteger(0, lineName, OBJPROP_WIDTH, 2);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELWIDTH, 2);
+            ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, center, endTime, center);
+            ObjectSetInteger(0, lineName, OBJPROP_COLOR, inpABCDLineColor);
+            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, inpABCDLineColor);
+            ObjectSetInteger(0, lineName, OBJPROP_WIDTH, TH3_TARGET_LINE_WIDTH);
+            ObjectSetInteger(0, lineName, OBJPROP_LEVELWIDTH, TH3_TARGET_LINE_WIDTH);
             ObjectSetInteger(0, lineName, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
             ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
             ObjectSetInteger(0, lineName, OBJPROP_LEVELS, 1);
             ObjectSetDouble(0, lineName, OBJPROP_LEVELVALUE, 0, 0.0);
         } else {
-            ObjectMove(0, lineName, 0, startTime, centerPrice);
-            ObjectMove(0, lineName, 1, endTime, centerPrice);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, targetColors[i]);
+            ObjectMove(0, lineName, 0, startTime, center);
+            ObjectMove(0, lineName, 1, endTime, center);
+            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, clrDarkBlue);
         }
 
         if(inpTH3LabelPosition != TH3_LABEL_HIDDEN) {
             double zonePips = (zoneHalfWidth * 2.0) / pipSize;
-            string labelText = StringFormat("%s (%.1f) ±%.1f",
-                                            targetNames[i], targetPips[i], zonePips / 2.0);
+            string labelText = StringFormat("%s (%.1f) +/-%.1f",
+                                            targetNames[i], targetPips, zonePips / 2.0);
             ObjectSetString(0, lineName, OBJPROP_LEVELTEXT, 0, labelText);
         }
 
-        // Zone border lines
-        string zoneUpperName = mainObjName + "_ZoneUpper_" + IntegerToString(i + 1);
-        string zoneLowerName = mainObjName + "_ZoneLower_" + IntegerToString(i + 1);
-
         if(inpTH3ZoneStyle == TH3_ZONE_LINES) {
-            CreateOrUpdateTrendLine(zoneUpperName, startTime, upperZone, endTime, upperZone,
-                                    zoneColor, inpTH3ZoneBorderWidth, inpTH3ZoneBorderStyle, inpABCDExtendCD, true);
-            CreateOrUpdateTrendLine(zoneLowerName, startTime, lowerZone, endTime, lowerZone,
-                                    zoneColor, inpTH3ZoneBorderWidth, inpTH3ZoneBorderStyle, inpABCDExtendCD, true);
+            double upper = center + zoneHalfWidth;
+            double lower = center - zoneHalfWidth;
+            color zoneColor = (inpTH3ZoneColor == clrNONE) ? clrDarkBlue : inpTH3ZoneColor;
+            string idx = IntegerToString(i + 1);
+
+            CreateOrUpdateTrendLine(mainObjName + "_ZoneUpper_" + idx,
+                                    startTime, upper, endTime, upper,
+                                    zoneColor, inpTH3ZoneBorderWidth, inpTH3ZoneBorderStyle,
+                                    inpABCDExtendCD, true);
+            CreateOrUpdateTrendLine(mainObjName + "_ZoneLower_" + idx,
+                                    startTime, lower, endTime, lower,
+                                    zoneColor, inpTH3ZoneBorderWidth, inpTH3ZoneBorderStyle,
+                                    inpABCDExtendCD, true);
         }
     }
-
-    // Info label
-    double pips_AB = AB_Distance / pipSize;
-    double pips_BC = MathAbs(pC - pB) / pipSize;
-    string infoText = StringFormat("AB=CD | AB:%.1f | BC:%.1f | Freq:%.1f%%",
-                                   pips_AB, pips_BC, frequency);
-    string infoLabel = mainObjName + "_Info";
-    bool isActive = (g_activeABCDPattern == mainObjName);
-
-    if(ObjectFind(0, infoLabel) < 0) {
-        ObjectCreate(0, infoLabel, OBJ_LABEL, 0, 0, 0);
-        ObjectSetInteger(0, infoLabel, OBJPROP_CORNER, inpABCDInfoCorner);
-        ObjectSetInteger(0, infoLabel, OBJPROP_XDISTANCE, inpABCDInfoXDistance);
-        ObjectSetInteger(0, infoLabel, OBJPROP_YDISTANCE, inpABCDInfoYDistance);
-        ObjectSetString(0, infoLabel, OBJPROP_TEXT, infoText);
-        ObjectSetInteger(0, infoLabel, OBJPROP_COLOR, inpABCDInfoColor);
-        ObjectSetInteger(0, infoLabel, OBJPROP_FONTSIZE, inpABCDInfoFontSize);
-        ObjectSetString(0, infoLabel, OBJPROP_FONT, "Arial Bold");
-        ObjectSetInteger(0, infoLabel, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, infoLabel, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, infoLabel, OBJPROP_TIMEFRAMES, isActive ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-    } else {
-        ObjectSetString(0, infoLabel, OBJPROP_TEXT, infoText);
-        ObjectSetInteger(0, infoLabel, OBJPROP_CORNER, inpABCDInfoCorner);
-        ObjectSetInteger(0, infoLabel, OBJPROP_XDISTANCE, inpABCDInfoXDistance);
-        ObjectSetInteger(0, infoLabel, OBJPROP_YDISTANCE, inpABCDInfoYDistance);
-        ObjectSetInteger(0, infoLabel, OBJPROP_COLOR, inpABCDInfoColor);
-        ObjectSetInteger(0, infoLabel, OBJPROP_FONTSIZE, inpABCDInfoFontSize);
-        ObjectSetInteger(0, infoLabel, OBJPROP_TIMEFRAMES, isActive ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-    }
-
-    ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| Update All TH3 Objects (when frequency changes)                  |
+//| Compute safe Y position for TH3 info label                       |
+//| Accounts for ATR labels + all possible stacked mode labels       |
+//+------------------------------------------------------------------+
+int GetABCDInfoSafeYDistance()
+{
+    int y = inpABCDInfoYDistance;
+
+    bool topCorner = (inpABCDInfoCorner == CORNER_LEFT_UPPER || inpABCDInfoCorner == CORNER_RIGHT_UPPER);
+    if(!topCorner) return y;
+
+    // ATR/TH label stack currently lives at top-left when label corner is LEFT_TOP.
+    // If TH3 info is also in top-left, push it below that stack.
+    if(inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP && inpABCDInfoCorner == CORNER_LEFT_UPPER) {
+        int stackedTopY = inpLabelsMarginTop + g_modeLabelYOffset + inpSectionGap;
+        if(y < stackedTopY) y = stackedTopY;
+    }
+
+    // Push below ALL stacked mode labels + lock label
+    if(inpModeLabelCorner == inpABCDInfoCorner) {
+        int modeBlockHeight = GetModeLabelBlockHeight();
+        int modeBottomY;
+        if(modeBlockHeight > 0)
+            modeBottomY = inpModeLabelYDistance + g_modeLabelYOffset + modeBlockHeight + 4;
+        else
+            modeBottomY = inpModeLabelYDistance + g_modeLabelYOffset + (inpModeLabelFontSize + 6) + 4;
+
+        // If lock label is visible, add space for it too
+        if(g_timeframeLocked) {
+            modeBottomY += (inpModeLabelFontSize + 6);
+        }
+        if(y < modeBottomY) y = modeBottomY;
+    }
+
+    return y;
+}
+
+//+------------------------------------------------------------------+
+//| Create or update info label for a pattern                        |
+//+------------------------------------------------------------------+
+void DrawABCDInfoLabel(const string mainObjName, double abDist, double pB,
+                       double pC, double frequency, double pipSize)
+{
+    string infoText;
+    if(g_lastFreqResult.isValid) {
+        infoText = StringFormat("AB=CD | Freq:%.1f%% | Score:%.2f | Match:%s | Err:%.1f pip",
+                                frequency, g_lastFreqResult.totalScore,
+                                g_lastFreqResult.matchLabel, g_lastFreqResult.errorPips);
+    } else {
+        double pipsAB = abDist / pipSize;
+        double pipsBC = MathAbs(pC - pB) / pipSize;
+        infoText = StringFormat("AB=CD | AB:%.1f | BC:%.1f | Freq:%.1f%%",
+                                pipsAB, pipsBC, frequency);
+    }
+
+    string infoLabel = mainObjName + TH3_SUFFIX_INFO;
+    bool isActive = (g_activeABCDPattern == mainObjName);
+    // Respect indicator hidden state
+    long visibility = (isActive && !IsIndicatorHidden()) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+
+    if(ObjectFind(0, infoLabel) < 0)
+        ObjectCreate(0, infoLabel, OBJ_LABEL, 0, 0, 0);
+
+    int safeY = GetABCDInfoSafeYDistance();
+
+    ObjectSetInteger(0, infoLabel, OBJPROP_CORNER, inpABCDInfoCorner);
+    ObjectSetInteger(0, infoLabel, OBJPROP_XDISTANCE, inpABCDInfoXDistance);
+    ObjectSetInteger(0, infoLabel, OBJPROP_YDISTANCE, safeY);
+    ObjectSetString(0, infoLabel, OBJPROP_TEXT, infoText);
+    ObjectSetInteger(0, infoLabel, OBJPROP_COLOR, inpABCDInfoColor);
+    ObjectSetInteger(0, infoLabel, OBJPROP_FONTSIZE, inpABCDInfoFontSize);
+    ObjectSetString(0, infoLabel, OBJPROP_FONT, "Arial Bold");
+    ObjectSetInteger(0, infoLabel, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, infoLabel, OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, infoLabel, OBJPROP_TIMEFRAMES, visibility);
+}
+
+//+------------------------------------------------------------------+
+//| Reposition all ABCD info labels (lightweight — Y update only)    |
+//| Call after g_modeLabelYOffset changes to prevent overlap         |
+//+------------------------------------------------------------------+
+void RepositionABCDInfoLabels()
+{
+    if(!inpEnableTH3Tool) return;
+    int safeY = GetABCDInfoSafeYDistance();
+    int totalObjects = ObjectsTotal(0, 0, -1);
+    for(int i = 0; i < totalObjects; i++) {
+        string name = ObjectName(0, i, 0, -1);
+        if(StringFind(name, TH3_PATTERN_PREFIX) == 0 &&
+           StringFind(name, TH3_SUFFIX_INFO) > 0) {
+            ObjectSetInteger(0, name, OBJPROP_YDISTANCE, safeY);
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Draw complete AB=CD pattern with TH3 step targets                |
+//+------------------------------------------------------------------+
+void DrawABCDPattern(string mainObjName, datetime tA, double pA,
+                     datetime tB, double pB, datetime tC, double pC)
+{
+    datetime tD;
+    double pD;
+    if(!CalculateABCDPointD(tA, pA, tB, pB, tC, pC, tD, pD)) {
+        DeletePatternObjects(mainObjName);
+        return;
+    }
+
+    double abDist    = MathAbs(pB - pA);
+    bool isBullish   = (pB > pA);
+    double frequency = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
+    double baseUnit  = abDist * (frequency / 100.0);
+    double pipSize   = GetCachedPipSize();
+
+    DrawABCDPoints(mainObjName, tA, pA, tB, pB, tC, pC);
+
+    CreateOrUpdateTrendLine(mainObjName + TH3_SUFFIX_LINE_AB,
+                            tA, pA, tB, pB, inpABCDLineColor, inpABCDWidth, STYLE_SOLID, false, false);
+    CreateOrUpdateTrendLine(mainObjName + TH3_SUFFIX_LINE_BC,
+                            tB, pB, tC, pC, clrGray, 1, STYLE_DOT, false, true);
+
+    DrawABCDTargetLevels(mainObjName, pC, baseUnit, isBullish, tC, pipSize);
+    DrawABCDInfoLabel(mainObjName, abDist, pB, pC, frequency, pipSize);
+
+    // NOTE: ChartRedraw is caller's responsibility (avoids N+1 redraws in UpdateAllTH3Objects)
+}
+
+//+------------------------------------------------------------------+
+//| Update all existing TH3 patterns (on frequency change)           |
 //+------------------------------------------------------------------+
 void UpdateAllTH3Objects()
 {
     int totalObjects = ObjectsTotal(0, 0, -1);
     string patternNames[];
     int patternCount = 0;
-    // PERF: Pre-allocate with reserve to avoid repeated ArrayResize(+1)
-    int reserveSize = MathMin(totalObjects, 64);
-    ArrayResize(patternNames, reserveSize);
+    ArrayResize(patternNames, MathMin(totalObjects, 64));
 
     for(int i = 0; i < totalObjects; i++) {
         string name = ObjectName(0, i, 0, -1);
-        if(StringFind(name, "ABCD_Pattern_") != 0) continue;
+        if(StringFind(name, TH3_PATTERN_PREFIX) != 0) continue;
 
-        int searchStart = 13;
-        int underscorePos = StringFind(name, "_", searchStart);
-        string baseName = (underscorePos > searchStart)
+        int underscorePos = StringFind(name, "_", TH3_PATTERN_PREFIX_LEN);
+        string baseName = (underscorePos > TH3_PATTERN_PREFIX_LEN)
                           ? StringSubstr(name, 0, underscorePos)
                           : name;
 
@@ -287,23 +388,22 @@ void UpdateAllTH3Objects()
         if(!exists) {
             if(patternCount >= ArraySize(patternNames))
                 ArrayResize(patternNames, patternCount * 2 + 1);
-            patternNames[patternCount] = baseName;
-            patternCount++;
+            patternNames[patternCount++] = baseName;
         }
     }
 
     for(int p = 0; p < patternCount; p++) {
         string baseName = patternNames[p];
-        string lineAB = baseName + "_Line_AB";
-        string lineBC = baseName + "_Line_BC";
+        string lineAB = baseName + TH3_SUFFIX_LINE_AB;
+        string lineBC = baseName + TH3_SUFFIX_LINE_BC;
         if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) continue;
 
         datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
-        double pA   = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
+        double   pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
         datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
-        double pB   = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
+        double   pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
         datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
-        double pC   = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
+        double   pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
 
         if(tA > 0 && tB > 0 && tC > 0 && pA > 0 && pB > 0 && pC > 0)
             DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
@@ -313,275 +413,359 @@ void UpdateAllTH3Objects()
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Create ABCD temporary point marker on chart              |
+//| Create temporary point marker during ABCD drawing                |
 //+------------------------------------------------------------------+
 void CreateABCDTempPoint(const string pointLabel, datetime clickTime, double clickPrice)
 {
-    string objName = "ABCD_Temp_" + pointLabel;
-    ObjectCreate(0, objName, OBJ_TEXT, 0, clickTime, clickPrice);
+    string objName = TH3_TEMP_PREFIX + pointLabel;
+    if(ObjectFind(0, objName) < 0) {
+        ObjectCreate(0, objName, OBJ_TEXT, 0, clickTime, clickPrice);
+    } else {
+        ObjectMove(0, objName, 0, clickTime, clickPrice);
+    }
     ObjectSetString(0, objName, OBJPROP_TEXT, pointLabel);
-    ObjectSetInteger(0, objName, OBJPROP_COLOR, clrYellow);
-    ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 10);
+    ObjectSetInteger(0, objName, OBJPROP_COLOR, clrOrangeRed);
+    ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, inpFontSize + 2);
+    ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Create ABCD temporary trend line between two points      |
+//| Create temporary trend line during ABCD drawing                  |
 //+------------------------------------------------------------------+
-void CreateABCDTempLine(const string lineSuffix, datetime t1, double p1, datetime t2, double p2)
+void CreateABCDTempLine(const string lineSuffix, datetime t1, double p1,
+                        datetime t2, double p2)
 {
-    string objName = "ABCD_Temp_Line_" + lineSuffix;
-    ObjectCreate(0, objName, OBJ_TREND, 0, t1, p1, t2, p2);
-    ObjectSetInteger(0, objName, OBJPROP_COLOR, clrYellow);
-    ObjectSetInteger(0, objName, OBJPROP_STYLE, STYLE_DOT);
+    string objName = TH3_TEMP_LINE_PREFIX + lineSuffix;
+    if(ObjectFind(0, objName) < 0) {
+        ObjectCreate(0, objName, OBJ_TREND, 0, t1, p1, t2, p2);
+    } else {
+        ObjectMove(0, objName, 0, t1, p1);
+        ObjectMove(0, objName, 1, t2, p2);
+    }
+    ObjectSetInteger(0, objName, OBJPROP_COLOR, clrOrangeRed);
+    ObjectSetInteger(0, objName, OBJPROP_STYLE, STYLE_DASH);
+    ObjectSetInteger(0, objName, OBJPROP_WIDTH, 1);
+    ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+    ObjectSetInteger(0, objName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, objName, OBJPROP_RAY_RIGHT, false);
+    ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Cleanup temporary ABCD drawing objects                   |
+//| Cleanup temporary ABCD drawing objects                           |
 //+------------------------------------------------------------------+
 void CleanupABCDTempObjects()
 {
-    ObjectDelete(0, "ABCD_Temp_X");
-    ObjectDelete(0, "ABCD_Temp_A");
-    ObjectDelete(0, "ABCD_Temp_B");
-    ObjectDelete(0, "ABCD_Temp_C");
-    ObjectDelete(0, "ABCD_Temp_Line_XA");
-    ObjectDelete(0, "ABCD_Temp_Line_AB");
-    ObjectDelete(0, "ABCD_Temp_Line_BC");
+    ObjectDelete(0, TH3_TEMP_PREFIX + "X");
+    ObjectDelete(0, TH3_TEMP_PREFIX + "A");
+    ObjectDelete(0, TH3_TEMP_PREFIX + "B");
+    ObjectDelete(0, TH3_TEMP_PREFIX + "C");
+    ObjectDelete(0, TH3_TEMP_LINE_PREFIX + "XA");
+    ObjectDelete(0, TH3_TEMP_LINE_PREFIX + "AB");
+    ObjectDelete(0, TH3_TEMP_LINE_PREFIX + "BC");
+    ObjectDelete(0, TH3_TEMP_LINE_PREFIX + "Preview");
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Cancel AB=CD drawing mode and cleanup                    |
+//| Cancel ABCD drawing mode and cleanup                             |
 //+------------------------------------------------------------------+
 void CancelABCDDrawing()
 {
     g_abcdDrawing = false;
     g_abcdPointCount = 0;
     CleanupABCDTempObjects();
-    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
+    Comment("");
+    // NOTE: Do NOT disable CHART_EVENT_MOUSE_MOVE here.
+    // It is enabled globally at OnInit and other features (custom price drag)
+    // depend on it remaining active.
     ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| Helper: Handle ABCD point placement (X, A, B, C clicks)         |
-//| Returns true when pattern is complete (4th point placed)         |
+//| Handle sequential ABCD point clicks (X -> A -> B -> C)           |
+//| Returns true when pattern is complete (C placed)                 |
 //+------------------------------------------------------------------+
 bool HandleABCDPointPlacement(datetime clickTime, double clickPrice)
 {
-    if(g_abcdPointCount == 0) {
-        g_abcdTimeX = clickTime;
-        g_abcdPriceX = clickPrice;
-        g_abcdPointCount = 1;
-        CreateABCDTempPoint("X", clickTime, clickPrice);
-        ChartRedraw();
-    }
-    else if(g_abcdPointCount == 1) {
-        g_abcdTimeA = clickTime;
-        g_abcdPriceA = clickPrice;
-        g_abcdPointCount = 2;
-        CreateABCDTempPoint("A", clickTime, clickPrice);
-        CreateABCDTempLine("XA", g_abcdTimeX, g_abcdPriceX, g_abcdTimeA, g_abcdPriceA);
-        ChartRedraw();
-    }
-    else if(g_abcdPointCount == 2) {
-        g_abcdTimeB = clickTime;
-        g_abcdPriceB = clickPrice;
-        g_abcdPointCount = 3;
-        CreateABCDTempPoint("B", clickTime, clickPrice);
-        CreateABCDTempLine("AB", g_abcdTimeA, g_abcdPriceA, g_abcdTimeB, g_abcdPriceB);
-        ChartRedraw();
-    }
-    else if(g_abcdPointCount == 3) {
-        g_abcdTimeC = clickTime;
-        g_abcdPriceC = clickPrice;
+    switch(g_abcdPointCount) {
+        case 0:
+            g_abcdTimeX  = clickTime;
+            g_abcdPriceX = clickPrice;
+            g_abcdPointCount = 1;
+            CreateABCDTempPoint("X", clickTime, clickPrice);
+            Comment("TH3: Click to place point A");
+            ChartRedraw();
+            return false;
 
-        string patternName = "ABCD_Pattern_" + IntegerToString((long)GetTickCount());
-        DrawABCDPattern(patternName, g_abcdTimeA, g_abcdPriceA,
-                        g_abcdTimeB, g_abcdPriceB, g_abcdTimeC, g_abcdPriceC);
-        SetActiveABCDPattern(patternName);
-        CancelABCDDrawing();
-        return true;
+        case 1:
+            g_abcdTimeA  = clickTime;
+            g_abcdPriceA = clickPrice;
+            g_abcdPointCount = 2;
+            CreateABCDTempPoint("A", clickTime, clickPrice);
+            CreateABCDTempLine("XA", g_abcdTimeX, g_abcdPriceX, clickTime, clickPrice);
+            Comment("TH3: Click to place point B");
+            ChartRedraw();
+            return false;
+
+        case 2:
+            g_abcdTimeB  = clickTime;
+            g_abcdPriceB = clickPrice;
+            g_abcdPointCount = 3;
+            CreateABCDTempPoint("B", clickTime, clickPrice);
+            CreateABCDTempLine("AB", g_abcdTimeA, g_abcdPriceA, clickTime, clickPrice);
+            Comment("TH3: Click to place point C");
+            ChartRedraw();
+            return false;
+
+        case 3:
+            g_abcdTimeC  = clickTime;
+            g_abcdPriceC = clickPrice;
+            break;
+
+        default:
+            return false;
     }
-    return false;
+
+    // C placed — auto-optimize frequency and draw pattern
+    FrequencyResult freqResult;
+    if(FindOptimalFrequency(g_abcdPriceX, g_abcdTimeX,
+                            g_abcdPriceA, g_abcdTimeA,
+                            g_abcdPriceB, g_abcdTimeB,
+                            g_abcdPriceC, g_abcdTimeC, freqResult)) {
+        ApplyOptimalFrequency(freqResult);
+        UpdateTH3FreqLabel(g_th3FreqOverride);
+        g_lastFreqResult = freqResult;
+    }
+
+    string patternName = TH3_PATTERN_PREFIX + IntegerToString((long)GetTickCount());
+    DrawABCDPattern(patternName, g_abcdTimeA, g_abcdPriceA,
+                    g_abcdTimeB, g_abcdPriceB, g_abcdTimeC, g_abcdPriceC);
+    SetActiveABCDPattern(patternName);
+    CancelABCDDrawing();
+    return true;
 }
 
 //+------------------------------------------------------------------+
-//| Handle AB=CD Mouse Events (3-point click workflow)               |
+//| Snap price to nearest OHLC if within threshold                   |
 //+------------------------------------------------------------------+
-void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam)
+double SnapToOHLC(datetime barTime, double price, double pipSize)
 {
-    // Mouse move events - track button state for click detection
-    if(id == CHARTEVENT_MOUSE_MOVE) {
-        int mouseState = (int)StringToInteger(sparam);
-        bool rightButtonDown = (mouseState & 2) == 2;
-        bool leftButtonDown  = (mouseState & 1) == 1;
+    if(pipSize <= 0) return price;  // Guard against division by zero
+    int barIndex = iBarShift(_Symbol, _Period, barTime);
+    if(barIndex < 0) return price;
 
-        // Right-click cancels drawing
-        if(rightButtonDown && g_abcdDrawing) {
-            CancelABCDDrawing();
-            return;
+    double ohlc[4];
+    ohlc[0] = iHigh(_Symbol, 0, barIndex);
+    ohlc[1] = iLow(_Symbol, 0, barIndex);
+    ohlc[2] = iClose(_Symbol, 0, barIndex);
+    ohlc[3] = iOpen(_Symbol, 0, barIndex);
+
+    double minDist = DBL_MAX;
+    double snapped = price;
+
+    for(int i = 0; i < 4; i++) {
+        double dist = MathAbs(price - ohlc[i]) / pipSize;
+        if(dist < minDist) {
+            minDist = dist;
+            snapped = ohlc[i];
         }
+    }
 
-        static bool s_lastLeftButtonState = false;
-        if(g_abcdDrawing && leftButtonDown && !s_lastLeftButtonState) {
-            s_lastLeftButtonState = true;
+    return (minDist <= TH3_SNAP_THRESHOLD_PIPS) ? snapped : price;
+}
 
-            uint currentTime = GetTickCount();
-            if(currentTime - g_abcdLastClickTime < ABCD_DEBOUNCE_MS) return;
-            g_abcdLastClickTime = currentTime;
+//+------------------------------------------------------------------+
+//| Extract base pattern name from any child object name             |
+//+------------------------------------------------------------------+
+string ExtractPatternBaseName(const string objName)
+{
+    if(StringFind(objName, TH3_PATTERN_PREFIX) != 0) return "";
 
-            int subWindow;
-            datetime clickTime;
-            double clickPrice;
-            if(!ChartXYToTimePrice(0, (int)lparam, (int)dparam, subWindow, clickTime, clickPrice))
-                return;
+    string suffixes[] = {
+        TH3_SUFFIX_LINE_AB, TH3_SUFFIX_LINE_BC, TH3_SUFFIX_TARGET,
+        TH3_SUFFIX_POINT, TH3_SUFFIX_LABEL, TH3_SUFFIX_INFO, TH3_SUFFIX_ZONE
+    };
 
-            HandleABCDPointPlacement(clickTime, clickPrice);
-        }
-        else if(!leftButtonDown && s_lastLeftButtonState) {
-            s_lastLeftButtonState = false;
-        }
+    string baseName = objName;
+    for(int s = 0; s < ArraySize(suffixes); s++) {
+        int pos = StringFind(baseName, suffixes[s]);
+        if(pos > 0) { baseName = StringSubstr(baseName, 0, pos); break; }
+    }
 
+    if(StringFind(baseName, TH3_PATTERN_PREFIX) != 0 || StringLen(baseName) < TH3_MIN_BASENAME_LEN)
+        return "";
+
+    return baseName;
+}
+
+//+------------------------------------------------------------------+
+//| Process click during ABCD drawing mode (debounced)               |
+//+------------------------------------------------------------------+
+bool ProcessABCDClick(long xPixel, long yPixel)
+{
+    uint currentTime = GetTickCount();
+    if(currentTime - g_abcdLastClickTime < ABCD_DEBOUNCE_MS) return false;
+    g_abcdLastClickTime = currentTime;
+
+    int subWindow;
+    datetime clickTime;
+    double clickPrice;
+    if(!ChartXYToTimePrice(0, (int)xPixel, (int)yPixel, subWindow, clickTime, clickPrice))
+        return false;
+
+    return HandleABCDPointPlacement(clickTime, clickPrice);
+}
+
+//+------------------------------------------------------------------+
+//| Handle mouse move events during ABCD drawing                     |
+//+------------------------------------------------------------------+
+void HandleABCDMouseMove(long lparam, double dparam, string sparam)
+{
+    int mouseState = (int)StringToInteger(sparam);
+    bool rightButtonDown = (mouseState & 2) == 2;
+    bool leftButtonDown  = (mouseState & 1) == 1;
+
+    if(rightButtonDown && g_abcdDrawing) {
+        CancelABCDDrawing();
         return;
     }
 
-    // Standard click events
-    if(id == CHARTEVENT_CLICK && g_abcdDrawing) {
-        uint currentTime = GetTickCount();
-        if(currentTime - g_abcdLastClickTime < ABCD_DEBOUNCE_MS) return;
-        g_abcdLastClickTime = currentTime;
+    static bool s_lastLeftButtonState = false;
+    if(g_abcdDrawing && leftButtonDown && !s_lastLeftButtonState) {
+        s_lastLeftButtonState = true;
+        ProcessABCDClick(lparam, (long)dparam);
+    }
+    else if(!leftButtonDown && s_lastLeftButtonState) {
+        s_lastLeftButtonState = false;
+    }
 
+    // Draw rubber-band preview line from last placed point to mouse cursor
+    if(g_abcdDrawing && g_abcdPointCount > 0 && !leftButtonDown) {
         int subWindow;
-        datetime clickTime;
-        double clickPrice;
-        if(!ChartXYToTimePrice(0, (int)lparam, (int)dparam, subWindow, clickTime, clickPrice))
-            return;
-
-        HandleABCDPointPlacement(clickTime, clickPrice);
-    }
-
-    // Object drag - update pattern when dragging A, B, or C
-    if(id == CHARTEVENT_OBJECT_DRAG) {
-        if(StringFind(sparam, "ABCD_Pattern_") != 0 || StringFind(sparam, "_Point_") <= 0)
-            return;
-
-        int pointPos = StringFind(sparam, "_Point_");
-        string baseName  = StringSubstr(sparam, 0, pointPos);
-        string pointName = StringSubstr(sparam, pointPos + 7);
-        if(pointName != "A" && pointName != "B" && pointName != "C") return;
-
-        SetActiveABCDPattern(baseName);
-
-        string draggedPoint = baseName + "_Point_" + pointName;
-        datetime newTime  = (datetime)ObjectGetInteger(0, draggedPoint, OBJPROP_TIME, 0);
-        double newPrice   = ObjectGetDouble(0, draggedPoint, OBJPROP_PRICE, 0);
-
-        // Snap to OHLC if within threshold
-        int barIndex = iBarShift(_Symbol, _Period, newTime);
-        if(barIndex >= 0) {
-            double high  = iHigh(_Symbol, 0, barIndex);
-            double low   = iLow(_Symbol, 0, barIndex);
-            double open  = iOpen(_Symbol, 0, barIndex);
-            double close = iClose(_Symbol, 0, barIndex);
-            double pipSz = GetCachedPipSize();
-            double snapThreshold = 5.0;
-
-            double distToHigh  = MathAbs(newPrice - high)  / pipSz;
-            double distToLow   = MathAbs(newPrice - low)   / pipSz;
-            double distToOpen  = MathAbs(newPrice - open)  / pipSz;
-            double distToClose = MathAbs(newPrice - close) / pipSz;
-            double minDist = MathMin(MathMin(distToHigh, distToLow),
-                                     MathMin(distToOpen, distToClose));
-
-            if(minDist <= snapThreshold) {
-                if(minDist == distToHigh)       newPrice = high;
-                else if(minDist == distToLow)   newPrice = low;
-                else if(minDist == distToClose) newPrice = close;
-                else if(minDist == distToOpen)  newPrice = open;
-                ObjectSetDouble(0, draggedPoint, OBJPROP_PRICE, newPrice);
+        datetime mouseTime;
+        double mousePrice;
+        if(ChartXYToTimePrice(0, (int)lparam, (int)dparam, subWindow, mouseTime, mousePrice)) {
+            datetime lastTime;
+            double lastPrice;
+            switch(g_abcdPointCount) {
+                case 1: lastTime = g_abcdTimeX; lastPrice = g_abcdPriceX; break;
+                case 2: lastTime = g_abcdTimeA; lastPrice = g_abcdPriceA; break;
+                case 3: lastTime = g_abcdTimeB; lastPrice = g_abcdPriceB; break;
+                default: return;
             }
+            CreateABCDTempLine("Preview", lastTime, lastPrice, mouseTime, mousePrice);
+            ChartRedraw();
         }
-
-        // Read current coordinates from lines
-        string lineAB = baseName + "_Line_AB";
-        string lineBC = baseName + "_Line_BC";
-        if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) return;
-
-        datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
-        double pA   = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
-        datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
-        double pB   = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
-        datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
-        double pC   = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
-
-        if(pointName == "A")      { tA = newTime; pA = newPrice; }
-        else if(pointName == "B") { tB = newTime; pB = newPrice; }
-        else if(pointName == "C") { tC = newTime; pC = newPrice; }
-
-        DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
-    }
-
-    // Object delete - cleanup entire pattern when any part is deleted
-    if(id == CHARTEVENT_OBJECT_DELETE) {
-        if(StringFind(sparam, "ABCD_Pattern_") != 0) return;
-
-        string baseName = sparam;
-        string suffixes[7];
-        suffixes[0] = TH3_SUFFIX_LINE_AB;
-        suffixes[1] = TH3_SUFFIX_LINE_BC;
-        suffixes[2] = TH3_SUFFIX_TARGET;
-        suffixes[3] = TH3_SUFFIX_POINT;
-        suffixes[4] = TH3_SUFFIX_LABEL;
-        suffixes[5] = TH3_SUFFIX_INFO;
-        suffixes[6] = TH3_SUFFIX_ZONE;
-
-        for(int s = 0; s < ArraySize(suffixes); s++) {
-            int pos = StringFind(baseName, suffixes[s]);
-            if(pos > 0) { baseName = StringSubstr(baseName, 0, pos); break; }
-        }
-
-        if(StringFind(baseName, "ABCD_Pattern_") != 0 || StringLen(baseName) < 20) return;
-
-        string ptNames[3] = {"A", "B", "C"};
-        for(int i = 0; i < 3; i++) {
-            ObjectDelete(0, baseName + "_Point_" + ptNames[i]);
-            ObjectDelete(0, baseName + "_Label_" + ptNames[i]);
-        }
-
-        ObjectDelete(0, baseName + "_Line_AB");
-        ObjectDelete(0, baseName + "_Line_BC");
-        ObjectDelete(0, baseName + "_Info");
-
-        for(int i = 1; i <= 7; i++) {
-            ObjectDelete(0, baseName + "_Target_" + IntegerToString(i));
-            ObjectDelete(0, baseName + "_ZoneUpper_" + IntegerToString(i));
-            ObjectDelete(0, baseName + "_ZoneLower_" + IntegerToString(i));
-        }
-
-        CleanupABCDTempObjects();
-
-        if(g_activeABCDPattern == baseName)
-            SetActiveABCDPattern("");
-
-        ChartRedraw();
     }
 }
 
 //+------------------------------------------------------------------+
-//| Toggle TH3 Tool (V key)                                          |
+//| Handle point drag — update pattern when A, B, or C are moved     |
+//+------------------------------------------------------------------+
+void HandleABCDObjectDrag(const string sparam)
+{
+    if(StringFind(sparam, TH3_PATTERN_PREFIX) != 0) return;
+    if(StringFind(sparam, TH3_SUFFIX_POINT) <= 0) return;
+
+    int pointPos = StringFind(sparam, TH3_SUFFIX_POINT);
+    string baseName  = StringSubstr(sparam, 0, pointPos);
+    string pointName = StringSubstr(sparam, pointPos + 7);
+
+    if(pointName != "A" && pointName != "B" && pointName != "C") return;
+
+    SetActiveABCDPattern(baseName);
+
+    string draggedObj = baseName + TH3_SUFFIX_POINT + pointName;
+    datetime newTime  = (datetime)ObjectGetInteger(0, draggedObj, OBJPROP_TIME, 0);
+    double newPrice   = ObjectGetDouble(0, draggedObj, OBJPROP_PRICE, 0);
+
+    double pipSize    = GetCachedPipSize();
+    double snapped    = SnapToOHLC(newTime, newPrice, pipSize);
+    if(snapped != newPrice)
+        ObjectSetDouble(0, draggedObj, OBJPROP_PRICE, snapped);
+    newPrice = snapped;
+
+    string lineAB = baseName + TH3_SUFFIX_LINE_AB;
+    string lineBC = baseName + TH3_SUFFIX_LINE_BC;
+    if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) return;
+
+    datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
+    double   pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
+    datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
+    double   pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
+    datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
+    double   pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
+
+    if(pointName == "A")      { tA = newTime; pA = newPrice; }
+    else if(pointName == "B") { tB = newTime; pB = newPrice; }
+    else if(pointName == "C") { tC = newTime; pC = newPrice; }
+
+    DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
+    ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| Handle object deletion — cleanup entire pattern                  |
+//+------------------------------------------------------------------+
+void HandleABCDObjectDelete(const string sparam)
+{
+    string baseName = ExtractPatternBaseName(sparam);
+    if(baseName == "") return;
+
+    DeletePatternObjects(baseName);
+    CleanupABCDTempObjects();
+
+    if(g_activeABCDPattern == baseName)
+        SetActiveABCDPattern("");
+
+    ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| Main ABCD event dispatcher                                       |
+//+------------------------------------------------------------------+
+void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam)
+{
+    if(id == CHARTEVENT_MOUSE_MOVE) {
+        HandleABCDMouseMove(lparam, dparam, sparam);
+        return;
+    }
+
+    if(id == CHARTEVENT_CLICK && g_abcdDrawing) {
+        ProcessABCDClick(lparam, (long)dparam);
+        return;
+    }
+
+    if(id == CHARTEVENT_OBJECT_DRAG) {
+        HandleABCDObjectDrag(sparam);
+        return;
+    }
+
+    if(id == CHARTEVENT_OBJECT_DELETE) {
+        HandleABCDObjectDelete(sparam);
+        return;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Toggle TH3 drawing mode (V key)                                  |
 //+------------------------------------------------------------------+
 void ToggleTH3Tool()
 {
     if(!inpEnableTH3Tool) return;
+    if(inpTH3DrawingMode != TH3_MODE_ABCD) return;
 
-    if(inpTH3DrawingMode == TH3_MODE_ABCD) {
-        if(!g_abcdDrawing) {
-            g_abcdDrawing = true;
-            g_abcdPointCount = 0;
-            g_abcdLastClickTime = 0;
-            ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
-        } else {
-            CancelABCDDrawing();
-        }
+    if(!g_abcdDrawing) {
+        CleanupABCDTempObjects();
+        g_abcdDrawing = true;
+        g_abcdPointCount = 0;
+        g_abcdLastClickTime = 0;
+        ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
+        Comment("TH3: Click to place point X");
+    } else {
+        CancelABCDDrawing();
     }
 }
+
+#endif // TH3_TOOL_MQH

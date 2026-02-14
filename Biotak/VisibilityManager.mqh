@@ -6,11 +6,11 @@
 
 static bool g_linesVisibleCached = true;
 static uint g_linesVisibleCacheTime = 0;
-static const int LINES_VISIBLE_CACHE_TTL_MS = 500;
+static const int LINES_VISIBLE_CACHE_TTL_MS = 100;
 
 static bool g_triggerEnabledCached = true;
 static uint g_triggerEnabledCacheTime = 0;
-static const int TRIGGER_ENABLED_CACHE_TTL_MS = 500;
+static const int TRIGGER_ENABLED_CACHE_TTL_MS = 100;
 
 bool GetCachedLinesVisible()
 {
@@ -98,10 +98,12 @@ static bool g_frameVisibilityNonLines = true;
 static bool g_prevFrameVisibilityLines = true;
 static bool g_prevFrameVisibilityNonLines = true;
 static bool g_visibilityChangedThisFrame = true; // true on first frame to force initial set
+static int g_visibilityFrameCounter = 0;         // Counter for periodic visibility re-sync
 
 // Call once at start of RedrawAllObjects to compute frame visibility
 void CacheRefreshVisibilityState()
 {
+    g_visibilityFrameCounter++;
     bool hidden = IsIndicatorHidden();
     g_frameVisibilityNonLines = !hidden;
     g_frameVisibilityLines = !hidden && GetCachedLinesVisible();
@@ -122,9 +124,10 @@ void ApplyVisibilityState(const string name, const bool isLine)
 
 // PERF: For existing objects, only update visibility if state changed this frame
 // Saves ~800 ObjectSetInteger calls per redraw when visibility is stable
+// FIX: Periodic re-sync every 10 frames to self-heal corrupted visibility states
 void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
 {
-    if(!g_visibilityChangedThisFrame) return;
+    if(!g_visibilityChangedThisFrame && (g_visibilityFrameCounter % 10) != 0) return;
     long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
 }

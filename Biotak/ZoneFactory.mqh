@@ -226,6 +226,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             bool colorChanged = HasColorChanged(cachedEntry.lastColor, request.zoneColor);
 
             if(!priceChanged && !colorChanged) {
+                // FIX: Always apply visibility even when price/color unchanged
+                // This ensures F-key toggle and periodic re-sync work for static zones
+                ApplyVisibilityStateIfUnchangedSkip(request.name, false);
                 result.success = true;
                 return result;
             }

@@ -709,6 +709,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     // PERF: Pre-fetch all ATR values and skip full redraw if nothing changed
     static double s_lastATRPips[8] = {0,0,0,0,0,0,0,0};
     static int s_lastATRPeriod = -1;
+    static int s_lastATROffsetContribution = 0;  // Track last Y offset for early-return path
     double currentATRValues[8];
     double currentATRPips[8];
     bool anyChanged = (s_lastATRPeriod != Period());
@@ -722,6 +723,8 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     }
     if(!anyChanged) {
         // ATR values unchanged - skip expensive object operations
+        // but still update the Y offset so subsequent sections stack correctly
+        g_currentLabelYOffset += s_lastATROffsetContribution;
         TH3_PROF_END(ATRLabels);
         return;
     }
@@ -834,7 +837,11 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     // Update global Y offset so subsequent sections (TH) stack below ATR
     if(renderedCount > 0) {
         int consumedY = (currentYPos - startYPos) + lineHeight;
-        g_currentLabelYOffset += consumedY + sectionGap;
+        int offsetContribution = consumedY + sectionGap;
+        g_currentLabelYOffset += offsetContribution;
+        s_lastATROffsetContribution = offsetContribution;  // Store for early-return path
+    } else {
+        s_lastATROffsetContribution = 0;
     }
     
     ATR_PRINT("=== DisplayATRLabels: Completed ===");
@@ -1273,12 +1280,16 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
 }
     void UpdateLockStatusLabel()
 {
-    // Position: Top-left corner, below all data labels to avoid overlap
-    int xDistance = 5;
-    // FIX: Use g_modeLabelYOffset to stack below ATR/TH labels instead of hardcoded 15
+    // Position: below all data labels AND mode labels, using same corner as mode labels
+    int xDistance = inpModeLabelXDistance;
+    // Base: below ATR labels
     int yDistance = inpLabelsMarginTop + g_modeLabelYOffset;
-    // Add extra gap below mode label area (mode label font is larger)
-    yDistance += (inpModeLabelFontSize + 8);
+    // Add space for entire mode label block (all active rows)
+    int modeBlockHeight = GetModeLabelBlockHeight();
+    if(modeBlockHeight > 0)
+        yDistance += inpModeLabelYDistance + modeBlockHeight + 4;
+    else
+        yDistance += (inpModeLabelFontSize + 8);
     if(g_timeframeLocked)
     {
         // Create or update label showing locked timeframe (no emoji - MT4 doesn't support)
@@ -1293,15 +1304,15 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         }
         
         ObjectSetString(0, g_lockStatusLabelName, OBJPROP_TEXT, lockText);
-    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_COLOR, clrYellow);
+    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_COLOR, clrCrimson);
     ObjectSetString(0, g_lockStatusLabelName, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_FONTSIZE, 8);
-    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_FONTSIZE, inpModeLabelFontSize);
+    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_CORNER, inpModeLabelCorner);
     ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_XDISTANCE, xDistance);
     ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_YDISTANCE, yDistance);
     ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_HIDDEN, false);
+    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_HIDDEN, true);
     ObjectSetString(0, g_lockStatusLabelName, OBJPROP_TOOLTIP, "TF locked to " + PeriodToString(g_lockedPeriod) + " - Press " + inpLockKey + " to unlock");
     }
     else

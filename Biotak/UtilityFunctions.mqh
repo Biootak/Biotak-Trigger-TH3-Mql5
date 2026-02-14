@@ -24,15 +24,14 @@
 //|   14.7: Use configurable throttle interval                      |
 //+------------------------------------------------------------------+
 void ThrottledChartRedraw(bool forceRedraw = false) {
-        if(IsIndicatorHidden()) {
-        return;
-    }
     uint nowMs = GetTickCount();
+    // FIX: Force redraws always execute regardless of hidden state
     if(forceRedraw) {
         ChartRedraw();
     g_lastChartRedrawTime = nowMs;
     return;
     }
+    if(IsIndicatorHidden()) return;
     if(nowMs - g_lastChartRedrawTime > CHART_REDRAW_THROTTLE_MS) {        ChartRedraw();
     g_lastChartRedrawTime = nowMs;
     }}
@@ -133,28 +132,125 @@ string GetComboPresetName(const ENUM_COMBO_PRESET preset) {
 }
 
 //+------------------------------------------------------------------+
-//| Clear all temporary mode labels (call before showing new one)   |
+//| Clear a single temporary label by name and reset its timestamp  |
+//+------------------------------------------------------------------+
+void ClearSingleModeLabel(const string labelName, uint &createTime) {
+    if(ObjectFind(0, labelName) >= 0)
+        ObjectDelete(0, labelName);
+    createTime = 0;
+}
 
 //+------------------------------------------------------------------+
+//| Clear all temporary mode labels (used by OnTimer / reset)       |
+//+------------------------------------------------------------------+
 void ClearAllModeLabels() {
-        if(ObjectFind(0, g_stepModeLabelName) >= 0) {
-        ObjectDelete(0, g_stepModeLabelName);
-    }
-    if(ObjectFind(0, g_factorLabelName) >= 0) {
-        ObjectDelete(0, g_factorLabelName);
-    }
-    if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
-        ObjectDelete(0, g_th3FreqLabelName);
+    ClearSingleModeLabel(g_stepModeLabelName, g_stepModeLabelCreateTime);
+    ClearSingleModeLabel(g_factorLabelName, g_factorLabelCreateTime);
+    ClearSingleModeLabel(g_th3FreqLabelName, g_th3FreqLabelCreateTime);
+    Comment("");
+    g_resetCommentCreateTime = 0;
+}
+
+//+------------------------------------------------------------------+
+//| Check and clear expired labels (called from OnTimer)            |
+//| Returns true if any labels remain (timer should continue)       |
+//+------------------------------------------------------------------+
+bool CheckAndClearExpiredLabels() {
+    uint now = GetTickCount();
+    uint durationMs = (uint)inpModeLabelDuration * 1000;
+    bool anyRemaining = false;
+    bool anyCleared = false;
+
+    // FIX: durationMs==0 means permanent labels — never auto-clear
+    if(durationMs > 0) {
+        if(g_stepModeLabelCreateTime > 0) {
+            if((now - g_stepModeLabelCreateTime) >= durationMs) {
+                ClearSingleModeLabel(g_stepModeLabelName, g_stepModeLabelCreateTime);
+                anyCleared = true;
+            } else {
+                anyRemaining = true;
+            }
+        }
+        if(g_factorLabelCreateTime > 0) {
+            if((now - g_factorLabelCreateTime) >= durationMs) {
+                ClearSingleModeLabel(g_factorLabelName, g_factorLabelCreateTime);
+                anyCleared = true;
+            } else {
+                anyRemaining = true;
+            }
+        }
+        if(g_th3FreqLabelCreateTime > 0) {
+            if((now - g_th3FreqLabelCreateTime) >= durationMs) {
+                ClearSingleModeLabel(g_th3FreqLabelName, g_th3FreqLabelCreateTime);
+                anyCleared = true;
+            } else {
+                anyRemaining = true;
+            }
+        }
+    } else {
+        // Duration is 0 (permanent) — labels live forever, nothing to expire
+        if(g_stepModeLabelCreateTime > 0 || g_factorLabelCreateTime > 0 || g_th3FreqLabelCreateTime > 0)
+            anyRemaining = false; // No timer needed for permanent labels
     }
 
-    Comment("");
+    if(g_resetCommentCreateTime > 0) {
+        if((now - g_resetCommentCreateTime) >= 2000) {
+            Comment("");
+            g_resetCommentCreateTime = 0;
+            anyCleared = true;
+        } else {
+            anyRemaining = true;
+        }
+    }
+
+    // Reposition remaining labels when some are cleared (stack changes)
+    if(anyCleared)
+        RepositionAllOverlayLabels();
+
+    return anyRemaining;
 }
+
+//+------------------------------------------------------------------+
+//| Get Y row offset for a specific label type (stacked vertically) |
+//+------------------------------------------------------------------+
+int GetModeLabelRowOffset(const string labelName) {
+    int rowHeight = inpModeLabelFontSize + 6;
+    // Step mode: row 0 (top)
+    if(labelName == g_stepModeLabelName)  return 0;
+    // Factor: row 1 (below step mode if visible, else row 0)
+    if(labelName == g_factorLabelName) {
+        int row = 0;
+        if(g_stepModeLabelCreateTime > 0) row++;
+        return row * rowHeight;
+    }
+    // TH3 Freq: row 2 (below visible labels)
+    if(labelName == g_th3FreqLabelName) {
+        int row = 0;
+        if(g_stepModeLabelCreateTime > 0) row++;
+        if(g_factorLabelCreateTime > 0) row++;
+        return row * rowHeight;
+    }
+    return 0;
+}
+
+//+------------------------------------------------------------------+
+//| Get total height of ALL active mode labels (for stacking below) |
+//+------------------------------------------------------------------+
+int GetModeLabelBlockHeight() {
+    int activeCount = 0;
+    if(g_stepModeLabelCreateTime > 0) activeCount++;
+    if(g_factorLabelCreateTime > 0) activeCount++;
+    if(g_th3FreqLabelCreateTime > 0) activeCount++;
+    int rowHeight = inpModeLabelFontSize + 6;
+    return activeCount * rowHeight;
+}
+
     void ApplyModeLabelStyle(const string name, const color textColor, const int yOffsetExtra = 0) {
         ObjectSetInteger(0, name, OBJPROP_CORNER, inpModeLabelCorner);
     ObjectSetInteger(0, name, OBJPROP_XDISTANCE, inpModeLabelXDistance);
-    // FIX: Use g_modeLabelYOffset (finalized after label render) instead of live g_currentLabelYOffset
-    // This prevents overlap when mode labels are created before/after label stacking
-    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra + g_modeLabelYOffset);
+    // Compute proper Y position: below ATR labels + stacked row for this label type
+    int rowOffset = GetModeLabelRowOffset(name);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, inpModeLabelYDistance + yOffsetExtra + g_modeLabelYOffset + rowOffset);
     ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpModeLabelFontSize);
@@ -174,15 +270,17 @@ void ClearAllModeLabels() {
         } else {            modeName = modeName + " [Calculator]";
         }
     }
-    ClearAllModeLabels();
+    // Only clear own label, not all labels
+    ClearSingleModeLabel(g_stepModeLabelName, g_stepModeLabelCreateTime);
     if(IsIndicatorHidden()) return;
     if(ObjectFind(0, g_stepModeLabelName) < 0) {
         ObjectCreate(0, g_stepModeLabelName, OBJ_LABEL, 0, 0, 0);
     }
     ObjectSetString(0, g_stepModeLabelName, OBJPROP_TEXT, "[ " + basisName + " | " + modeName + " ]");
+    g_stepModeLabelCreateTime = GetTickCount();
     ApplyModeLabelStyle(g_stepModeLabelName, inpModeLabelColor);
     if(inpModeLabelDuration > 0) {
-        EventSetTimer(inpModeLabelDuration);
+        EventSetTimer(1);  // Check every second for expired labels
     }
 }
 
@@ -192,7 +290,8 @@ void ClearAllModeLabels() {
 //| Shows: "F: 2.50 | Step: 12.5 pips" with auto-hide               |
 //+------------------------------------------------------------------+
 void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) return;
-    ClearAllModeLabels();
+    // Only clear own label, not all labels
+    ClearSingleModeLabel(g_factorLabelName, g_factorLabelCreateTime);
     if(IsIndicatorHidden()) return;
     double stepSize = 0;
     string stepText = "";
@@ -209,9 +308,10 @@ void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) retu
     }
     ObjectSetString(0, g_factorLabelName, OBJPROP_TEXT, 
         "[ F: " + DoubleToString(factorValue, 2) + stepText + " ]");
+    g_factorLabelCreateTime = GetTickCount();
     ApplyModeLabelStyle(g_factorLabelName, inpFactorLevelColor);
     if(inpModeLabelDuration > 0) {
-        EventSetTimer(inpModeLabelDuration);
+        EventSetTimer(1);  // Check every second for expired labels
     }
 }
 
@@ -220,7 +320,8 @@ void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) retu
 //+------------------------------------------------------------------+
 void UpdateTH3FreqLabel(double freqValue) {
     if(!inpShowModeChangeLabel) return;
-    ClearAllModeLabels();
+    // Only clear own label, not all labels
+    ClearSingleModeLabel(g_th3FreqLabelName, g_th3FreqLabelCreateTime);
     if(IsIndicatorHidden()) return;
 
     if(ObjectFind(0, g_th3FreqLabelName) < 0)
@@ -228,10 +329,11 @@ void UpdateTH3FreqLabel(double freqValue) {
 
     ObjectSetString(0, g_th3FreqLabelName, OBJPROP_TEXT,
         "[ TH3 Freq: " + DoubleToString(freqValue, 3) + "% (#" + IntegerToString(g_th3FreqIndex) + ") ]");
+    g_th3FreqLabelCreateTime = GetTickCount();
     ApplyModeLabelStyle(g_th3FreqLabelName, inpTH3Color);
 
     if(inpModeLabelDuration > 0)
-        EventSetTimer(inpModeLabelDuration);
+        EventSetTimer(1);  // Check every second for expired labels
 }
 
 //+------------------------------------------------------------------+
@@ -258,6 +360,26 @@ void UpdateTH3FreqLabel(double freqValue) {
 //| - Better error messages with context                            |
 //| - Consistent error handling                                     |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Unified repositioning for ALL overlay labels                     |
+//| Call after g_modeLabelYOffset changes to keep layout consistent  |
+//+------------------------------------------------------------------+
+void RepositionAllOverlayLabels() {
+    // 1. Reposition existing mode labels in-place
+    if(ObjectFind(0, g_stepModeLabelName) >= 0)
+        ApplyModeLabelStyle(g_stepModeLabelName, (color)ObjectGetInteger(0, g_stepModeLabelName, OBJPROP_COLOR));
+    if(ObjectFind(0, g_factorLabelName) >= 0)
+        ApplyModeLabelStyle(g_factorLabelName, (color)ObjectGetInteger(0, g_factorLabelName, OBJPROP_COLOR));
+    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
+        ApplyModeLabelStyle(g_th3FreqLabelName, (color)ObjectGetInteger(0, g_th3FreqLabelName, OBJPROP_COLOR));
+
+    // 2. Reposition lock status label
+    UpdateLockStatusLabel();
+
+    // 3. Reposition ABCD info labels
+    RepositionABCDInfoLabels();
+}
+
 bool CreateGenericMidZone(const string zoneName, const double prevPrice, const double currentPrice,
                           const double zoneHeight, const color zoneColor, const int transparency)
 {

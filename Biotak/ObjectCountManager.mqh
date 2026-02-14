@@ -11,10 +11,10 @@
 #define MT4_OBJECT_LIMIT 512000         // MQL5 has much higher limit (~512K)
 #endif
     #ifndef CRITICAL_OBJECT_LIMIT
-#define CRITICAL_OBJECT_LIMIT 400000    // Critical threshold (78% of limit)
+#define CRITICAL_OBJECT_LIMIT 50000     // Matches ConstantsAndEnums.mqh
 #endif
     #ifndef MAX_SAFE_OBJECTS
-#define MAX_SAFE_OBJECTS 5000           // Warning threshold
+#define MAX_SAFE_OBJECTS 3000           // Matches ConstantsAndEnums.mqh
 #endif
     #ifndef EMERGENCY_CLEANUP_AGE
 #define EMERGENCY_CLEANUP_AGE 3600      // 1 hour (seconds)
@@ -34,8 +34,8 @@ bool CanCreateObject()
     // OPTIMIZATION: Cache check (update every 5 seconds)
     // ═══════════════════════════════════════════════════════════════
     datetime currentTime = TimeCurrent();
-    if(currentTime - g_lastObjectCountCheck < 5 && g_lastObjectCount > 0) {
-        // Use cached count
+    if(currentTime - g_lastObjectCountCheck < 1 && g_lastObjectCount > 0) {
+        // Use cached count (1s cache)
         if(g_lastObjectCount < MAX_SAFE_OBJECTS) {
         return true; // Fast path
         }
@@ -105,7 +105,7 @@ int EmergencyCleanupObjects()
     // ═══════════════════════════════════════════════════════════════
     // Prevent cleanup spam (minimum 30 seconds between cleanups)
     // ═══════════════════════════════════════════════════════════════
-    if(currentTime - g_lastEmergencyCleanup < 30) {
+    if(currentTime - g_lastEmergencyCleanup < 10) {
         _LOG_GATE_W Print("[W][CLN] EmergencyCleanup: Too soon since last cleanup, skipping");
     return 0;
     }
@@ -221,9 +221,8 @@ int GetCurrentObjectCount()
 {
         datetime currentTime = TimeCurrent();
     
-    // GOLD FIX: Increase cache timeout from 5s to 30s for better performance
-    // ObjectsTotal is expensive - only call when needed
-    if(currentTime - g_lastObjectCountCheck < 30 && g_lastObjectCount > 0) {
+    // Reduced cache timeout to 5s for more responsive object count tracking
+    if(currentTime - g_lastObjectCountCheck < 5 && g_lastObjectCount > 0) {
         return g_lastObjectCount;
     }
     
@@ -237,6 +236,13 @@ int GetCurrentObjectCount()
 //| Cleanup Object Count Manager                                     |
 
 //+------------------------------------------------------------------+
+// FIX: Invalidate cached object count immediately after bulk deletion
+void InvalidateObjectCountCache()
+{
+    g_lastObjectCountCheck = 0;
+    g_lastObjectCount = 0;
+}
+
 void CleanupObjectCountManager()
 {
     g_lastObjectCountCheck = 0;

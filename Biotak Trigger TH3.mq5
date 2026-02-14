@@ -46,6 +46,8 @@
 #include "Biotak\THCalculations.mqh"
 #include "Biotak\ATRCalculations.mqh"
 #include "Biotak\BasePriceManager.mqh"
+#include "Biotak\WaveAnalysis.mqh"
+#include "Biotak\FrequencyOptimizer.mqh"
 #include "Biotak\TH3Tool.mqh"
 
 // Drawing & Rendering
@@ -108,11 +110,12 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   if(ObjectFind(0, g_stepModeLabelName) >= 0)
-      ObjectDelete(0, g_stepModeLabelName);
-   if(ObjectFind(0, g_factorLabelName) >= 0)
-      ObjectDelete(0, g_factorLabelName);
-   Comment("");
-   EventKillTimer();
+  // Check each label independently and only clear expired ones
+  bool anyRemaining = CheckAndClearExpiredLabels();
+  if(!anyRemaining) {
+      EventKillTimer();
+  }
+  // FIX: Only redraw if something actually changed (label was cleared)
+  // CheckAndClearExpiredLabels now handles repositioning internally
   }
 //+------------------------------------------------------------------+

@@ -57,6 +57,12 @@ static string g_stepModeLabelName = "Biotak_StepMode_Label";
 static string g_factorLabelName = "Biotak_Factor_Label";
 static string g_th3FreqLabelName = "Biotak_TH3Freq_Label";
 
+// Independent label expiry timestamps (tick count)
+static uint g_stepModeLabelCreateTime = 0;
+static uint g_factorLabelCreateTime = 0;
+static uint g_th3FreqLabelCreateTime = 0;
+static uint g_resetCommentCreateTime = 0;  // For "[ RESET ]" comment auto-clear
+
 // ChartRedraw Throttling
 static datetime g_lastChartRedrawTime = 0;
 #define CHART_REDRAW_THROTTLE_MS 100
@@ -76,6 +82,9 @@ static datetime g_abcdTimeC = 0;
 static double g_abcdPriceC = 0.0;
 static uint g_abcdLastClickTime = 0;
 static string g_activeABCDPattern = "";
+
+// Frequency Optimizer Result (last auto-find result for info label)
+FrequencyResult g_lastFreqResult;
 
 // TH Storage
 struct TimeframeTH {

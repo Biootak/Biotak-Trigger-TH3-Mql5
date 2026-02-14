@@ -117,7 +117,7 @@ static double g_cachedPipSize = 0.0;
     g_cachedPipSize = (d == 3 || d == 5) ? p * 10.0 : p;
     return g_cachedPipSize;
 }
-    #define HIDDEN_CACHE_TTL_MS 500
+    #define HIDDEN_CACHE_TTL_MS 100
 
     void CleanupPerformanceOptimizations() {
     // Note: Object cache is now managed by ObjectCache.mqh

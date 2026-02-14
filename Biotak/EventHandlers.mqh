@@ -286,10 +286,21 @@ void HideAllTHObjects()
         ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     if(ObjectFind(0, g_factorLabelName) >= 0)
         ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
+        ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     if(ObjectFind(0, g_lockStatusLabelName) >= 0)
         ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0)
         ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    // Also hide TH3 AB=CD pattern objects (they use a different prefix)
+    for(int j = total - 1; j >= 0; j--)
+    {
+        string abcdName = ObjectName(0, j, -1, -1);
+        if(StringLen(abcdName) >= TH3_PATTERN_PREFIX_LEN && StringSubstr(abcdName, 0, TH3_PATTERN_PREFIX_LEN) == TH3_PATTERN_PREFIX)
+        {
+            ObjectSetInteger(0, abcdName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+        }
+    }
     }void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = false)
 {    if (g_waitingForCustomPriceClick || forceDelete) {
         ObjectDelete(0, g_customPriceHorizontalLineName);
@@ -330,6 +341,9 @@ void DeleteAllIndicatorObjects() {
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
     }
+    if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
+        ObjectDelete(0, g_th3FreqLabelName);
+    }
     if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
         ObjectDelete(0, g_lockStatusLabelName);
     }
@@ -342,6 +356,8 @@ void DeleteAllIndicatorObjects() {
     CleanupAllGlobalVariables();
     DeleteAllIndicatorObjects();
     ObjectsDeleteAll(0, "TH3_Structure_");
+    ObjectsDeleteAll(0, TH3_PATTERN_PREFIX);  // Clean up AB=CD pattern objects
+    ObjectsDeleteAll(0, TH3_TEMP_PREFIX);     // Clean up any temp drawing objects
     }
     else if(reason == REASON_PARAMETERS)
     {
@@ -393,6 +409,8 @@ void DeleteAllIndicatorObjects() {
     DeleteAllIndicatorObjects();
     }
     CleanupCustomPriceObjects(false, true);
+    // FIX: Force ChartRedraw after cleanup so deleted objects disappear immediately
+    if(reason != REASON_REMOVE) ChartRedraw();
     Comment("");
     DEBUG_PRINT("Freeing arrays...");
     ArrayFree(g_storedTHs);
@@ -434,7 +452,13 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     #endif
 
-    // PERF: Single-pass deletion with first-char dispatch to avoid 24+ inner loop iterations
+    // FIX: Zone suffixes are checked FIRST and separately from level suffixes.
+    // Previously, zones like "SSLS_Zone_" matched "SSLS_" in LEVEL_SUFFIXES,
+    // causing clearZones=false to be ineffective (zones always deleted).
+    static const string ZONE_SUFFIXES[] = {
+        "SSLS_Zone_", "M_Zone_", "TP_Zone_", "Combo_Zone_", "Factor_Zone_",
+        "MEq_Zone_", "Factor_Harmonic_Zone_", "TH_Level_Zone_"
+    };
     static const string LEVEL_SUFFIXES[] = {
         "SSLS_", "M_", "MLabel_", "MEq_", "MEqLabel_", "TP_", "Combo_",
         "SharedPattern_", "TH_Level_", "S_",
@@ -445,9 +469,6 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         "StructureLevel4_Up_", "StructureLevel4_Down_",
         "StructureLevel5_Up_", "StructureLevel5_Down_",
         "Mid", "Factor_"
-    };
-    static const string ZONE_SUFFIXES[] = {
-        "SSLS_Zone_", "M_Zone_", "TP_Zone_", "Combo_Zone_", "Factor_Zone_"
     };
     // PERF: Pre-compute suffix lengths once (static locals compile to one-time init)
     static int LEVEL_SUFFIX_LENS[];
@@ -475,27 +496,33 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         string tail = StringSubstr(name, prefixLen);
         int tailLen = nameLen - prefixLen;
         bool shouldDelete = false;
+        bool isZoneObject = false;
 
         // PERF: Use first char of tail to skip most suffix comparisons
         ushort firstChar = (tailLen > 0) ? StringGetCharacter(tail, 0) : 0;
-        
-        for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
-            int sl = LEVEL_SUFFIX_LENS[s];
-            if(tailLen < sl) continue;
-            // Quick first-char reject
-            if(StringGetCharacter(LEVEL_SUFFIXES[s], 0) != firstChar) continue;
-            if(StringSubstr(tail, 0, sl) == LEVEL_SUFFIXES[s]) {
-                shouldDelete = true;
+
+        // FIX: Check zone suffixes FIRST (longer, more specific match)
+        // This prevents "SSLS_Zone_" from matching "SSLS_" in level suffixes
+        for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++) {
+            int zl = ZONE_SUFFIX_LENS[z];
+            if(tailLen < zl) continue;
+            if(StringGetCharacter(ZONE_SUFFIXES[z], 0) != firstChar) continue;
+            if(StringSubstr(tail, 0, zl) == ZONE_SUFFIXES[z]) {
+                isZoneObject = true;
                 break;
             }
         }
 
-        if(!shouldDelete && clearZones) {
-            for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++) {
-                int zl = ZONE_SUFFIX_LENS[z];
-                if(tailLen < zl) continue;
-                if(StringGetCharacter(ZONE_SUFFIXES[z], 0) != firstChar) continue;
-                if(StringSubstr(tail, 0, zl) == ZONE_SUFFIXES[z]) {
+        if(isZoneObject) {
+            // Zone object: only delete if clearZones is true
+            if(clearZones) shouldDelete = true;
+        } else {
+            // Non-zone: check level suffixes
+            for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
+                int sl = LEVEL_SUFFIX_LENS[s];
+                if(tailLen < sl) continue;
+                if(StringGetCharacter(LEVEL_SUFFIXES[s], 0) != firstChar) continue;
+                if(StringSubstr(tail, 0, sl) == LEVEL_SUFFIXES[s]) {
                     shouldDelete = true;
                     break;
                 }
@@ -504,6 +531,8 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 
         if(!shouldDelete) continue;
 
+        // FIX: Remove from cache individually instead of clearing entire cache
+        CacheRemoveObject(name);
         if(ObjectDelete(0, name)) totalDeleted++;
         else totalFailed++;
     }
@@ -514,10 +543,9 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     #endif
 
-    // FIX: Clear ObjectCache after deleting objects to prevent stale cache entries.
-    // Without this, rapid mode cycling (E key) causes CacheObjectExists to return true
-    // for deleted zones, making CreateZone skip creation and zones stop rendering.
-    CacheClear();
+    // FIX: Invalidate object count cache so CanCreateObject doesn't block creation after cleanup
+    // Note: Individual cache entries removed during deletion loop above (no CacheClear needed)
+    InvalidateObjectCountCache();
 }
     void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
@@ -836,10 +864,20 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
         datetime cutoffTime = currentTime - 3600;
     int currentPrefixLen = StringLen(objectPrefix);
+    string indicatorPrefix = inpObjectPrefix;
+    int indicatorPrefixLen = StringLen(indicatorPrefix);
     int maxCleanupItems = MathMin(currentObjectCount, 2000);
     for(int i = maxCleanupItems - 1; i >= 0; i--) {
         string objName = ObjectName(0, i, -1, -1);
     if(objName == "") continue;
+    // FIX: Only consider objects that belong to THIS indicator (known prefixes)
+    bool isOurs = false;
+    if(StringLen(objName) >= indicatorPrefixLen && StringSubstr(objName, 0, indicatorPrefixLen) == indicatorPrefix) isOurs = true;
+    if(!isOurs && StringFind(objName, TH3_PATTERN_PREFIX) == 0) isOurs = true;
+    if(!isOurs && StringFind(objName, TH3_TEMP_PREFIX) == 0) isOurs = true;
+    if(!isOurs && StringFind(objName, "TH3_Structure_") == 0) isOurs = true;
+    if(!isOurs) continue; // Skip foreign objects entirely
+    // Keep current-timeframe objects and TH3 structure
     if(StringFind(objName, "TH3_Structure_") >= 0) continue;
     if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
     datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
@@ -901,6 +939,8 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     TH3_PROF_END(Labels);
     // FIX: Snapshot final Y offset so mode/lock/factor labels always appear below all data labels
     g_modeLabelYOffset = g_currentLabelYOffset;
+    // FIX: Reposition ALL overlay labels (mode, lock, ABCD info) to match new layout offset
+    RepositionAllOverlayLabels();
     if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
     g_calculatedOnce = true;
     g_labelsRelayoutNeeded = false;
@@ -1006,7 +1046,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
         customPriceChanged = (MathAbs(currentCustomPrice - s_lastCustomPrice) > EPSILON_PRICE);
     }
-    bool tickThrottled = (nowMs - s_lastTickMs < 100 && s_lastTickMs != 0);
+    bool tickThrottled = (nowMs - s_lastTickMs < 50 && s_lastTickMs != 0);
     if(timeframeChanged) {        InvalidateTimeframeDependentCaches();
     InvalidateATRCache();
         _LOG_GATE_I Print("[I][GEN] Timeframe changed: ", s_lastPeriod, " -> ", currentPeriod);
@@ -1031,6 +1071,8 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     TH3_PROF_START(RedrawCall);
     RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
     TH3_PROF_END(RedrawCall);
+    // FIX: ChartRedraw after RedrawAllObjects — ensures object changes are immediately visible
+    ThrottledChartRedraw();
     if(barsChanged || s_lastBarTime == 0) {
         int totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
@@ -1050,6 +1092,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);
     deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
     _LOG_GATE_I Print("[I][GEN] Emergency cleanup completed. Objects: ", totalObjects, " -> ", ObjectsTotal(0), " (deleted=", deleted, ")");
+    InvalidateObjectCountCache();
     }
         }
     }
@@ -1105,6 +1148,8 @@ void RedrawLabelsOnly() {
     }
     // FIX: Snapshot final offset for mode/lock/factor labels
     g_modeLabelYOffset = g_currentLabelYOffset;
+    // FIX: Reposition ALL overlay labels (mode, lock, ABCD info) to match new layout offset
+    RepositionAllOverlayLabels();
 }
 
 //+------------------------------------------------------------------+
@@ -1149,7 +1194,9 @@ void CycleTH3Frequency()
     if(!inpEnableTH3Tool) return;
     if(g_th3FreqIndex < 0 || g_th3FreqIndex >= TH3_FREQUENCY_COUNT)
         g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
-    g_th3FreqIndex = (g_th3FreqIndex + 1) % TH3_FREQUENCY_COUNT;
+    int newIndex = g_th3FreqIndex + 1;
+    if(newIndex >= TH3_FREQUENCY_COUNT) return;  // Clamp at max — don't wrap
+    g_th3FreqIndex = newIndex;
     g_th3FreqOverride = TH3_TEST_FREQUENCIES[g_th3FreqIndex];
     string chartIdStr = GetCachedChartIdStr();
     GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
@@ -1161,14 +1208,16 @@ void CycleTH3Frequency()
 }
 
 //+------------------------------------------------------------------+
-//| HELPER: Cycle TH3 frequency backward through TH3_TEST_FREQUENCIES|
+//| HELPER: Decrease TH3 frequency (clamp at min, no wrapping)       |
 //+------------------------------------------------------------------+
 void DecrementTH3Frequency()
 {
     if(!inpEnableTH3Tool) return;
     if(g_th3FreqIndex < 0 || g_th3FreqIndex >= TH3_FREQUENCY_COUNT)
         g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
-    g_th3FreqIndex = (g_th3FreqIndex - 1 + TH3_FREQUENCY_COUNT) % TH3_FREQUENCY_COUNT;
+    int newIndex = g_th3FreqIndex - 1;
+    if(newIndex < 0) return;  // Clamp at min — don't wrap
+    g_th3FreqIndex = newIndex;
     g_th3FreqOverride = TH3_TEST_FREQUENCIES[g_th3FreqIndex];
     string chartIdStr = GetCachedChartIdStr();
     GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
@@ -1260,11 +1309,29 @@ void DecrementTH3Frequency()
                         }
                     }
                 }
+    // Also show TH3 AB=CD pattern objects (different prefix)
+    for(int j = total - 1; j >= 0; j--)
+    {
+        string abcdObj = ObjectName(0, j, -1, -1);
+        if(StringLen(abcdObj) >= TH3_PATTERN_PREFIX_LEN && StringSubstr(abcdObj, 0, TH3_PATTERN_PREFIX_LEN) == TH3_PATTERN_PREFIX)
+        {
+            // Info labels: only show if this is the active pattern
+            if(StringFind(abcdObj, TH3_SUFFIX_INFO) >= 0) {
+                string infoBase = StringSubstr(abcdObj, 0, StringFind(abcdObj, TH3_SUFFIX_INFO));
+                ObjectSetInteger(0, abcdObj, OBJPROP_TIMEFRAMES,
+                    (g_activeABCDPattern == infoBase) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+            } else {
+                ObjectSetInteger(0, abcdObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            }
+        }
+    }
     // Restore labels visibility
     if(ObjectFind(0, g_stepModeLabelName) >= 0)
         ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     if(ObjectFind(0, g_factorLabelName) >= 0)
         ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
+        ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     if(ObjectFind(0, g_lockStatusLabelName) >= 0)
         ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     // Restore custom price line if active
@@ -1401,6 +1468,8 @@ void DecrementTH3Frequency()
 
     // Schedule lightweight relayout so TH labels move up/down on next tick (no lag on keydown)
     g_labelsRelayoutNeeded = true;
+    // FIX: Immediate relayout so labels reposition without waiting for next tick
+    RedrawLabelsOnly();
         LOG_I(LOG_CAT_LABELS, "ATR Labels " + (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
     ChartRedraw();
     return;
@@ -1486,6 +1555,13 @@ void DecrementTH3Frequency()
     if(inpEnableTH3Tool) {
                 UpdateAllTH3Objects();
             }
+    // FIX: Cancel any active ABCD drawing to prevent stale prompts
+    if(g_abcdDrawing) {
+        g_abcdDrawing = false;
+        g_abcdPointCount = 0;
+        ObjectsDeleteAll(0, TH3_TEMP_PREFIX);
+        ObjectsDeleteAll(0, TH3_TEMP_LINE_PREFIX);
+    }
     g_customPriceKeyboardOverride = false;
     g_thStartPointType = inpTHStartPointType;
     g_customTHStartPrice = inpCustomTHStartPrice;
@@ -1511,8 +1587,10 @@ void DecrementTH3Frequency()
             }
     UpdateLockStatusLabel();
     Comment("\n\n        [ RESET ]");
+    g_resetCommentCreateTime = GetTickCount();
     LOG_I(LOG_CAT_KEYS, "Reset: All overrides cleared");
-    EventSetTimer(2);
+    ClearAllModeLabels();
+    EventSetTimer(1);  // Check every second for expired labels
     g_forceClearOnNextDraw = true;
     g_calculatedOnce = false;
     g_redrawTHLevelsNeeded = true;
@@ -1575,26 +1653,42 @@ void DecrementTH3Frequency()
             return;        }
     }
 
-    // Chart layout/size changes (Navigator/Terminal toggles, window resize, etc.)
+    // Chart layout/size changes (Navigator/Terminal toggles, window resize, scroll, zoom, etc.)
     // Re-layout labels immediately so they don't "lag" until next tick.
+    // FIX: Also handle scroll/zoom to ensure viewport-culled levels are drawn
     if(id == CHARTEVENT_CHART_CHANGE) {
         if(IsIndicatorHidden()) return;
         static uint s_lastLayoutMs = 0;
         static int s_lastW = -1;
         static int s_lastH = -1;
+        static double s_lastVisibleMin = 0;
+        static double s_lastVisibleMax = 0;
         uint nowMs = GetTickCount();
         if(nowMs - s_lastLayoutMs < CHART_CHANGE_THROTTLE_MS) return; // throttle bursts
 
         int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
         int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-        if(w == s_lastW && h == s_lastH) return;
+        bool sizeChanged = (w != s_lastW || h != s_lastH);
+        
+        // Detect scroll/zoom by checking visible price range change
+        double visibleMin = ChartGetDouble(0, CHART_PRICE_MIN);
+        double visibleMax = ChartGetDouble(0, CHART_PRICE_MAX);
+        bool viewportChanged = (MathAbs(visibleMin - s_lastVisibleMin) > GetCachedPoint() ||
+                                MathAbs(visibleMax - s_lastVisibleMax) > GetCachedPoint());
+        
+        if(!sizeChanged && !viewportChanged) return;
+        
         s_lastW = w;
         s_lastH = h;
-
+        s_lastVisibleMin = visibleMin;
+        s_lastVisibleMax = visibleMax;
         s_lastLayoutMs = nowMs;
 
-        g_labelsRelayoutNeeded = true;
-        RedrawLabelsOnly();
+        if(sizeChanged) g_labelsRelayoutNeeded = true;
+        // FIX: Trigger full level redraw on scroll/zoom so viewport-culled levels appear
+        if(viewportChanged) g_redrawTHLevelsNeeded = true;
+        
+        if(sizeChanged) RedrawLabelsOnly();
         ChartRedraw();
         return;
     }
