@@ -678,10 +678,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         {
             StepCalculationData data;
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
-    double ssValuePrice = data.shortStep;
-    double lsValuePrice = data.longStep;
-    DrawSSLSLevels(objectPrefix, data.midpointPrice, ssValuePrice, lsValuePrice, inpLSFirst,
-                          data.maxLevelsAbove, data.maxLevelsBelow);
+    // PIPELINE: Zone-First Architecture
+    SModeConfig sslsCfg = BuildSSLSConfig(objectPrefix);
+    SPipelineResult sslsResult = ExecuteSSLSPipeline(sslsCfg,
+        data.midpointPrice, data.shortStep, data.longStep, inpLSFirst,
+        data.maxLevelsAbove, data.maxLevelsBelow);
+    if(!sslsResult.success) {
+        _LOG_GATE_E Print("[E][GEN] SS_LS_STEP Pipeline failed: ", sslsResult.errorMessage);
+    }
     break;
         }
         
@@ -690,15 +694,25 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             StepCalculationData data;
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
     double controlValue = data.shortStep;
-    double controlValuePrice = controlValue;
     if(inpMStepBasisType == MSTEP_BASIS_C_BASED) {
-                DrawMLevels(objectPrefix, data.midpointPrice, controlValuePrice,
-                           data.maxLevelsAbove, data.maxLevelsBelow);
+                // PIPELINE: M mode (C-based with C/M distinction)
+                SModeConfig mCfg = BuildMConfig(objectPrefix);
+                SPipelineResult mResult = ExecuteMLevelPipeline(mCfg,
+                    data.midpointPrice, controlValue,
+                    data.maxLevelsAbove, data.maxLevelsBelow);
+                if(!mResult.success) {
+                    _LOG_GATE_E Print("[E][GEN] M_STEP Pipeline failed: ", mResult.errorMessage);
+                }
             } else {
         double mDistance = CalculateMDistance(controlValue);
-    double mDistancePrice = mDistance;
-    DrawMEqualLevels(objectPrefix, data.midpointPrice, mDistancePrice,
-                                data.maxLevelsAbove, data.maxLevelsBelow);
+    // PIPELINE: MEq mode (equal spacing, no step filter)
+    SModeConfig meqCfg = BuildMEqualConfig(objectPrefix);
+    SPipelineResult meqResult = ExecuteUniformPipeline(meqCfg,
+        data.midpointPrice, mDistance,
+        data.maxLevelsAbove, data.maxLevelsBelow);
+    if(!meqResult.success) {
+        _LOG_GATE_E Print("[E][GEN] MEq Pipeline failed: ", meqResult.errorMessage);
+    }
             }
             break;
         }
@@ -709,8 +723,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
     double eValue = CalculateEStep(data.thValue);
     double tpValue = CalculateTPStep(eValue);
-    DrawTHLevelsWithStep(objectPrefix, data.midpointPrice, tpValue, "TP",
-                                data.maxLevelsAbove, data.maxLevelsBelow);
+    // PIPELINE: TP mode (uniform step)
+    SModeConfig tpCfg = BuildTPConfig(objectPrefix);
+    SPipelineResult tpResult = ExecuteUniformPipeline(tpCfg,
+        data.midpointPrice, tpValue,
+        data.maxLevelsAbove, data.maxLevelsBelow);
+    if(!tpResult.success) {
+        _LOG_GATE_E Print("[E][GEN] TP_STEP Pipeline failed: ", tpResult.errorMessage);
+    }
     break;
         }
         
@@ -749,8 +769,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     #endif
     s_lastLoggedComboStep = comboStep;
             }
-    DrawTHLevelsWithStep(objectPrefix, data.midpointPrice, comboStep, "Combo",
-                                data.maxLevelsAbove, data.maxLevelsBelow);
+    // PIPELINE: Combo mode (uniform step)
+    SModeConfig comboCfg = BuildComboConfig(objectPrefix);
+    SPipelineResult comboResult = ExecuteUniformPipeline(comboCfg,
+        data.midpointPrice, comboStep,
+        data.maxLevelsAbove, data.maxLevelsBelow);
+    if(!comboResult.success) {
+        _LOG_GATE_E Print("[E][GEN] COMBO_STEP Pipeline failed: ", comboResult.errorMessage);
+    }
     break;
         }
         
@@ -775,7 +801,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     Print("[D][GEN]    MaxLevels: Above=", data.maxLevelsAbove, ", Below=", data.maxLevelsBelow);
     #endif
     UpdateFactorLabel(factorValue);
-    // PERF: Compute factor step size ONCE — was being computed 2-3 times with identical params
+    // PERF: Compute factor step size ONCE
     double factorStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
     if(factorStepSize <= 0) {
                 _LOG_GATE_E Print("[E][GEN] FACTOR_STEP: Invalid step size calculated");
@@ -806,10 +832,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     Print("[D][GEN]    LargeStep=", DoubleToString(factorStepSize * harmonicRatio, Digits),
                       " (", DoubleToString(factorStepSize * harmonicRatio / pipSizeDbg, 1), " pips)");
     #endif
-    DrawFactorLevelsHarmonicFromCenter(objectPrefix, data.midpointPrice, 
-                                                   g_highestHigh, g_lowestLow,
-                                                   factorValue, factorStepSize, harmonicRatio,
-                                                   data.maxLevelsAbove, data.maxLevelsBelow);
+    // PIPELINE: Factor Harmonic mode
+    SModeConfig harmCfg = BuildFactorHarmonicConfig(objectPrefix);
+    SPipelineResult harmResult = ExecuteHarmonicPipeline(harmCfg,
+        data.midpointPrice, factorStepSize, harmonicRatio,
+        data.maxLevelsAbove, data.maxLevelsBelow);
+    if(!harmResult.success) {
+        _LOG_GATE_E Print("[E][GEN] FACTOR Harmonic Pipeline failed: ", harmResult.errorMessage);
+    }
                 
             } else {
     #ifdef ENABLE_DEBUG_LOGS
@@ -819,10 +849,14 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     Print("[D][GEN]    StepSize=", DoubleToString(factorStepSize, Digits),
                       " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     #endif
-    DrawFactorLevelsFromCenter(objectPrefix, data.midpointPrice, 
-                                          g_highestHigh, g_lowestLow, 
-                                          factorValue, factorStepSize,
-                                          data.maxLevelsAbove, data.maxLevelsBelow);
+    // PIPELINE: Factor Standard mode
+    SModeConfig factorCfg = BuildFactorConfig(objectPrefix);
+    SPipelineResult factorResult = ExecuteUniformPipeline(factorCfg,
+        data.midpointPrice, factorStepSize,
+        data.maxLevelsAbove, data.maxLevelsBelow);
+    if(!factorResult.success) {
+        _LOG_GATE_E Print("[E][GEN] FACTOR Standard Pipeline failed: ", factorResult.errorMessage);
+    }
             }
     DrawFactorBoundaryLines(objectPrefix, g_highestHigh, g_lowestLow, factorValue, factorStepSize);
             _LOG_GATE_I Print("[I][GEN] FACTOR_STEP: Completed successfully");
@@ -832,6 +866,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         case TH_STEP:
         default:
         {
+            // TH mode still uses legacy function (has unique tooltip/label logic)
             DrawTHLevels(objectPrefix, dailyClosePrice);
             _LOG_GATE_I Print("[I][GEN] TH_STEP: Completed successfully");
             break;

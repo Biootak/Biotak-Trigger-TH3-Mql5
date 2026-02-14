@@ -56,6 +56,7 @@
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\UnifiedZoneSystem.mqh"
 #include "Biotak\ZoneTrackingHelpers.mqh"
+#include "Biotak\LevelPipeline.mqh"
 
 #include "Biotak\LabelFunctions.mqh"
 #include "Biotak\AlertFunctions.mqh"

@@ -198,7 +198,8 @@ bool DrawMainLevels(const string prefix) {
     // ZONE SUPPORT: Zone cleanup is already handled by ClearAllLevels before DrawLevelsBasedOnMode.
     // Removed redundant ObjectsDeleteAll(0, prefix + "Zone_", -1, -1) that was causing double deletion.
     
-    if (triggerEnabled || inpShowStructure) {
+    // BASE PLAYER: Always draw levels — all steps are part of the subdivision grid
+    if (true) {
         TH3_PROF_START(THLevelsLoops);
         // Get adaptive level counts based on start point type
         int maxLevelsAbove = 0;
@@ -274,14 +275,13 @@ bool DrawMainLevels(const string prefix) {
                 levelType = 1; structLevel = 1;
             } else if (triggerEnabled) {
                 levelType = 2;
+            } else {
+                // BASE PLAYER: Non-structural steps are trigger subdivisions
+                // With base=N, every step between structural levels forms part of the N-division grid
+                levelType = 2;
             }
             
-            // If this step is not a level at all, skip entirely
-            if(levelType == 0) {
-                priceLevelAbove += (thStepSizePoints * pointValue);
-    stepCountAbove++;
-    continue;
-            }
+            // All steps are part of the Base Player grid — never skip
             
             // If off-screen, skip string building and object creation but count the level
             if(!isAboveVisible) {
@@ -427,12 +427,12 @@ bool DrawMainLevels(const string prefix) {
                 levelType = 1; structLevel = 1;
             } else if (triggerEnabled) {
                 levelType = 2;
+            } else {
+                // BASE PLAYER: Non-structural steps are trigger subdivisions
+                levelType = 2;
             }
-    if(levelType == 0) {
-                priceLevelBelow -= (thStepSizePoints * pointValue);
-    stepCountBelow++;
-    continue;
-            }
+            
+            // All steps are part of the Base Player grid — never skip
             
             if(!isBelowVisible) {
                 levelCountBelow++;
