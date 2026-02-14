@@ -83,6 +83,9 @@ static double g_abcdPriceC = 0.0;
 static uint g_abcdLastClickTime = 0;
 static string g_activeABCDPattern = "";
 
+// Suppression flag: prevents CHARTEVENT_OBJECT_DELETE cascade during programmatic deletions
+static bool g_suppressDeleteEvents = false;
+
 // Frequency Optimizer Result (last auto-find result for info label)
 FrequencyResult g_lastFreqResult;
 

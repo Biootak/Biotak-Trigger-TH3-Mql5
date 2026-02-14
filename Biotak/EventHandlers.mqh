@@ -305,15 +305,7 @@ void HideAllTHObjects()
         ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0)
         ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-    // Also hide TH3 AB=CD pattern objects (they use a different prefix)
-    for(int j = total - 1; j >= 0; j--)
-    {
-        string abcdName = ObjectName(0, j, -1, -1);
-        if(StringLen(abcdName) >= TH3_PATTERN_PREFIX_LEN && StringSubstr(abcdName, 0, TH3_PATTERN_PREFIX_LEN) == TH3_PATTERN_PREFIX)
-        {
-            ObjectSetInteger(0, abcdName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-        }
-    }
+    // NOTE: ABCD pattern objects are NOT hidden by F key — they are independent of TH levels
     }void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = false)
 {    if (g_waitingForCustomPriceClick || forceDelete) {
         ObjectDelete(0, g_customPriceHorizontalLineName);
@@ -546,8 +538,10 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 
         // FIX: Remove from cache individually instead of clearing entire cache
         CacheRemoveObject(name);
+        g_suppressDeleteEvents = true;  // Prevent cascade deletion of ABCD patterns
         if(ObjectDelete(0, name)) totalDeleted++;
         else totalFailed++;
+        g_suppressDeleteEvents = false;
     }
 
     #ifdef ENABLE_DEBUG_LOGS
@@ -890,13 +884,16 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     if(!isOurs && StringFind(objName, TH3_TEMP_PREFIX) == 0) isOurs = true;
     if(!isOurs && StringFind(objName, "TH3_Structure_") == 0) isOurs = true;
     if(!isOurs) continue; // Skip foreign objects entirely
-    // Keep current-timeframe objects and TH3 structure
+    // Keep current-timeframe objects, TH3 structure, and ABCD patterns
     if(StringFind(objName, "TH3_Structure_") >= 0) continue;
+    if(StringFind(objName, TH3_PATTERN_PREFIX) == 0) continue;  // Never age-delete ABCD patterns
     if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
     datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
     if(objTime > 0 && objTime < cutoffTime) {
                     CacheRemoveObject(objName);
+                    g_suppressDeleteEvents = true;
                     ObjectDelete(0, objName);
+                    g_suppressDeleteEvents = false;
                 }
             }
         }
@@ -1210,7 +1207,7 @@ void CycleTH3Frequency()
     if(g_th3FreqIndex < MIN_TH3_FREQ_INDEX || g_th3FreqIndex > MAX_TH3_FREQ_INDEX)
         g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
     int newIndex = g_th3FreqIndex + 1;
-    if(newIndex > MAX_TH3_FREQ_INDEX) return;  // Clamp at 200% — don't wrap
+    if(newIndex > MAX_TH3_FREQ_INDEX) return;  // Clamp at 400% — don't wrap
     g_th3FreqIndex = newIndex;
     g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
     string chartIdStr = GetCachedChartIdStr();
@@ -1267,6 +1264,17 @@ void DecrementTH3Frequency()
     if(isBecomingHidden)
             {
         LOG_I(LOG_CAT_KEYS, "F key: Hiding all objects");
+    // Cancel ABCD drawing mode if active (prevent stale drawing state)
+    if(g_abcdDrawing) {
+        g_abcdDrawing = false;
+        g_abcdPointCount = 0;
+        g_suppressDeleteEvents = true;
+        ObjectsDeleteAll(0, TH3_TEMP_PREFIX);
+        ObjectsDeleteAll(0, TH3_TEMP_LINE_PREFIX);
+        g_suppressDeleteEvents = false;
+        ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
+        Comment("");
+    }
     HideAllTHObjects();
     CleanupCustomPriceObjects(false, true);
     g_redrawTHLevelsNeeded = false;
@@ -1324,22 +1332,7 @@ void DecrementTH3Frequency()
                         }
                     }
                 }
-    // Also show TH3 AB=CD pattern objects (different prefix)
-    for(int j = total - 1; j >= 0; j--)
-    {
-        string abcdObj = ObjectName(0, j, -1, -1);
-        if(StringLen(abcdObj) >= TH3_PATTERN_PREFIX_LEN && StringSubstr(abcdObj, 0, TH3_PATTERN_PREFIX_LEN) == TH3_PATTERN_PREFIX)
-        {
-            // Info labels: only show if this is the active pattern
-            if(StringFind(abcdObj, TH3_SUFFIX_INFO) >= 0) {
-                string infoBase = StringSubstr(abcdObj, 0, StringFind(abcdObj, TH3_SUFFIX_INFO));
-                ObjectSetInteger(0, abcdObj, OBJPROP_TIMEFRAMES,
-                    (g_activeABCDPattern == infoBase) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-            } else {
-                ObjectSetInteger(0, abcdObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            }
-        }
-    }
+    // NOTE: ABCD pattern objects are NOT affected by F key — they remain always visible
     // Restore labels visibility
     if(ObjectFind(0, g_stepModeLabelName) >= 0)
         ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
@@ -1574,8 +1567,10 @@ void DecrementTH3Frequency()
     if(g_abcdDrawing) {
         g_abcdDrawing = false;
         g_abcdPointCount = 0;
+        g_suppressDeleteEvents = true;  // Prevent cascade from temp object cleanup
         ObjectsDeleteAll(0, TH3_TEMP_PREFIX);
         ObjectsDeleteAll(0, TH3_TEMP_LINE_PREFIX);
+        g_suppressDeleteEvents = false;
     }
     g_customPriceKeyboardOverride = false;
     g_thStartPointType = inpTHStartPointType;
@@ -1617,7 +1612,9 @@ void DecrementTH3Frequency()
         {
         bool hadCustomPrice = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
     double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;
+    g_suppressDeleteEvents = true;  // Prevent cascade deletion of ABCD patterns
     ObjectsDeleteAll(0, inpObjectPrefix);
+    g_suppressDeleteEvents = false;
     g_timeframeLocked = !g_timeframeLocked;
     if(g_timeframeLocked)
             {

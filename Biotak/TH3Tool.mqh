@@ -102,6 +102,9 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
 //+------------------------------------------------------------------+
 void DeletePatternObjects(const string baseName)
 {
+    bool wasSuppressed = g_suppressDeleteEvents;
+    g_suppressDeleteEvents = true;  // Prevent cascade: sub-object deletions must not re-trigger HandleABCDObjectDelete
+
     string ptNames[3] = {"A", "B", "C"};
     for(int i = 0; i < 3; i++) {
         ObjectDelete(0, baseName + TH3_SUFFIX_POINT + ptNames[i]);
@@ -118,6 +121,8 @@ void DeletePatternObjects(const string baseName)
         ObjectDelete(0, baseName + "_ZoneUpper_" + idx);
         ObjectDelete(0, baseName + "_ZoneLower_" + idx);
     }
+
+    g_suppressDeleteEvents = wasSuppressed;  // Restore previous state
 }
 
 //+------------------------------------------------------------------+
@@ -186,8 +191,11 @@ void DrawABCDPoints(const string mainObjName, datetime tA, double pA,
         } else {
             // Labels disabled — remove if they exist
             string labelName = mainObjName + TH3_SUFFIX_LABEL + names[i];
-            if(ObjectFind(0, labelName) >= 0)
+            if(ObjectFind(0, labelName) >= 0) {
+                g_suppressDeleteEvents = true;  // Prevent cascade from label cleanup
                 ObjectDelete(0, labelName);
+                g_suppressDeleteEvents = false;
+            }
         }
     }
 }
@@ -774,6 +782,7 @@ void HandleABCDObjectDrag(const string sparam)
 //+------------------------------------------------------------------+
 void HandleABCDObjectDelete(const string sparam)
 {
+    if(g_suppressDeleteEvents) return;  // Skip cascade during programmatic deletions
     string baseName = ExtractPatternBaseName(sparam);
     if(baseName == "") return;
 

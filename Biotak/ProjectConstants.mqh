@@ -17,7 +17,7 @@ const double DEFAULT_FACTOR_FALLBACK = 50.0;
 const int    BINARY_SUBDIVISION_DEPTH = 6;              // 2^6 = 64 subdivisions per 100%
 const double BINARY_SUBDIVISION_STEP  = 1.5625;         // 100.0 / 64 = 1.5625% per index
 const int    MIN_TH3_FREQ_INDEX       = 1;              // 1.5625% (minimum meaningful frequency)
-const int    MAX_TH3_FREQ_INDEX       = 128;            // 200.0% (extended range)
+const int    MAX_TH3_FREQ_INDEX       = 256;            // 400.0% (extended range)
 const int    DEFAULT_TH3_FREQ_INDEX   = 18;             // 28.125% (18 × 1.5625 = 28.125, was index 16 in old array)
 
 //+------------------------------------------------------------------+
