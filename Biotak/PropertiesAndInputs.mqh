@@ -132,7 +132,7 @@ input double inpTH3ZoneHeightPercent = 12.5;
 input ENUM_LINE_STYLE inpTH3ZoneBorderStyle = STYLE_DOT;
 input int inpTH3ZoneBorderWidth = 1;
     input string S11 = "---------- AB=CD ----------";
-input bool inpABCDShowLabels = true;
+input bool inpABCDShowLabels = false;
 input color inpABCDPointColor = clrDarkBlue;
 input double inpABCDLabelOffsetPercent = 20.0;
 input color inpABCDLineColor = clrDarkBlue;

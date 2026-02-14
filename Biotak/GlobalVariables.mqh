@@ -43,7 +43,7 @@ static int g_stepModeOverride = -1;        // -1 = use input, 0-5 = override
 static double g_factorValueOverride = 0;   // 0 = use input, >0 = override
 static int g_factorColorOverride = -1;     // -1 = use input
 static double g_th3FreqOverride = 0;       // 0 = use input, >0 = override
-static int    g_th3FreqIndex = 16;          // Current index into TH3_TEST_FREQUENCIES[] (default: 28.125%)
+static int    g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX; // Binary subdivision index (default: 18 = 28.125%)
 
 // Alert Tracking
 static datetime g_lastAlertTime = 0;
@@ -85,6 +85,11 @@ static string g_activeABCDPattern = "";
 
 // Frequency Optimizer Result (last auto-find result for info label)
 FrequencyResult g_lastFreqResult;
+
+// Frequency History Ring Buffer — last FREQ_HISTORY_SIZE patterns
+FrequencyHistoryEntry g_freqHistory[FREQ_HISTORY_SIZE];
+int g_freqHistoryCount = 0;   // Total entries added (for < FREQ_HISTORY_SIZE check)
+int g_freqHistoryHead  = 0;   // Next write position (wraps around)
 
 // TH Storage
 struct TimeframeTH {

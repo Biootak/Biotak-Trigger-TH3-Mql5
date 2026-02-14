@@ -181,7 +181,8 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         double val = GlobalVariableGet(th3FreqGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-            if(val > 0 && val <= 1000.0) {
+            double maxFreq = GetFrequencyByIndex(MAX_TH3_FREQ_INDEX);
+            if(val > 0 && val <= maxFreq) {
                 g_th3FreqOverride = val;
             } else {
                 GlobalVariableDel(th3FreqGvarName);
@@ -190,11 +191,11 @@ int OnInitHandler() {    InitializeGlobalCache();
         } else {
             g_th3FreqOverride = 0.0;
         }
-        // Restore frequency array index
+        // Restore frequency index
         double idxVal = GlobalVariableGet(th3FreqIdxGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             int idx = (int)idxVal;
-            if(idx >= 0 && idx < TH3_FREQUENCY_COUNT) {
+            if(idx >= MIN_TH3_FREQ_INDEX && idx <= MAX_TH3_FREQ_INDEX) {
                 g_th3FreqIndex = idx;
             } else {
                 g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
@@ -202,6 +203,18 @@ int OnInitHandler() {    InitializeGlobalCache();
             }
         } else {
             g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
+        }
+        // Migration: sync index with saved frequency value (old GM array → new binary subdivision)
+        if(g_th3FreqOverride > 0) {
+            double expectedFreq = GetFrequencyByIndex(g_th3FreqIndex);
+            if(MathAbs(expectedFreq - g_th3FreqOverride) > 0.01) {
+                g_th3FreqIndex = FindNearestFreqIndex(g_th3FreqOverride);
+                g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
+                // Persist corrected values
+                GlobalVariableSet(th3FreqGvarName, g_th3FreqOverride);
+                GlobalVariableSet(th3FreqIdxGvarName, (double)g_th3FreqIndex);
+                Print("[Init] TH3 Freq migrated to binary subdivision: ", DoubleToString(g_th3FreqOverride, 4), "% [#", g_th3FreqIndex, "]");
+            }
         }
     }
     InitializeATRCache();
@@ -1188,45 +1201,46 @@ void AdjustFactorValue(int direction)
 }
 
 //+------------------------------------------------------------------+
-//| HELPER: Cycle TH3 frequency forward through TH3_TEST_FREQUENCIES[]|
+//| HELPER: Cycle TH3 frequency forward (binary subdivision)         |
+//| Each step = 1.5625% (100/64). Index range: 1..128 (200%)         |
 //+------------------------------------------------------------------+
 void CycleTH3Frequency()
 {
     if(!inpEnableTH3Tool) return;
-    if(g_th3FreqIndex < 0 || g_th3FreqIndex >= TH3_FREQUENCY_COUNT)
+    if(g_th3FreqIndex < MIN_TH3_FREQ_INDEX || g_th3FreqIndex > MAX_TH3_FREQ_INDEX)
         g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
     int newIndex = g_th3FreqIndex + 1;
-    if(newIndex >= TH3_FREQUENCY_COUNT) return;  // Clamp at max — don't wrap
+    if(newIndex > MAX_TH3_FREQ_INDEX) return;  // Clamp at 200% — don't wrap
     g_th3FreqIndex = newIndex;
-    g_th3FreqOverride = TH3_TEST_FREQUENCIES[g_th3FreqIndex];
+    g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
     string chartIdStr = GetCachedChartIdStr();
     GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
     GlobalVariableSet("Biotak_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
     UpdateAllTH3Objects();
     UpdateTH3FreqLabel(g_th3FreqOverride);
     ThrottledChartRedraw();
-    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 3), "% [#", g_th3FreqIndex, "]");
+    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 4), "% [#", g_th3FreqIndex, "] depth=", GetBinaryDepthLevel(g_th3FreqIndex));
 }
 
 //+------------------------------------------------------------------+
-//| HELPER: Decrease TH3 frequency (clamp at min, no wrapping)       |
+//| HELPER: Decrease TH3 frequency (binary subdivision, clamp at min)|
 //+------------------------------------------------------------------+
 void DecrementTH3Frequency()
 {
     if(!inpEnableTH3Tool) return;
-    if(g_th3FreqIndex < 0 || g_th3FreqIndex >= TH3_FREQUENCY_COUNT)
+    if(g_th3FreqIndex < MIN_TH3_FREQ_INDEX || g_th3FreqIndex > MAX_TH3_FREQ_INDEX)
         g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
     int newIndex = g_th3FreqIndex - 1;
-    if(newIndex < 0) return;  // Clamp at min — don't wrap
+    if(newIndex < MIN_TH3_FREQ_INDEX) return;  // Clamp at 1.5625% — don't wrap
     g_th3FreqIndex = newIndex;
-    g_th3FreqOverride = TH3_TEST_FREQUENCIES[g_th3FreqIndex];
+    g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
     string chartIdStr = GetCachedChartIdStr();
     GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
     GlobalVariableSet("Biotak_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
     UpdateAllTH3Objects();
     UpdateTH3FreqLabel(g_th3FreqOverride);
     ThrottledChartRedraw();
-    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 3), "% [#", g_th3FreqIndex, "]");
+    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 4), "% [#", g_th3FreqIndex, "] depth=", GetBinaryDepthLevel(g_th3FreqIndex));
 }
 
     void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)

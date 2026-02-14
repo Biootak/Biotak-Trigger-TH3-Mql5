@@ -299,8 +299,18 @@ void DrawABCDInfoLabel(const string mainObjName, double abDist, double pB,
 {
     string infoText;
     if(g_lastFreqResult.isValid) {
-        infoText = StringFormat("AB=CD | Freq:%.1f%% | Score:%.2f | Match:%s | Err:%.1f pip",
-                                frequency, g_lastFreqResult.totalScore,
+        // Confidence stars: ★★★ (≥0.7), ★★ (≥0.4), ★ (<0.4)
+        string stars = (g_lastFreqResult.confidence >= 0.7) ? "***" :
+                       (g_lastFreqResult.confidence >= 0.4) ? "**" : "*";
+        // Pattern type (if detected)
+        string pat = (g_lastFreqResult.patternType != "") ?
+                     (" " + g_lastFreqResult.patternType) : "";
+        // √-score indicator: show if meaningful (> 0.3)
+        string sqrtInd = (g_lastFreqResult.sqrtScore >= 0.3) ?
+                         StringFormat(" V%.0f", g_lastFreqResult.sqrtScore * 100) : "";
+        infoText = StringFormat("Freq:%.1f%% | %s %d/4 | Score:%.2f%s%s | %s | Err:%.1f",
+                                frequency, stars, g_lastFreqResult.matchedSteps,
+                                g_lastFreqResult.totalScore, pat, sqrtInd,
                                 g_lastFreqResult.matchLabel, g_lastFreqResult.errorPips);
     } else {
         double pipsAB = abDist / pipSize;
@@ -738,6 +748,22 @@ void HandleABCDObjectDrag(const string sparam)
     if(pointName == "A")      { tA = newTime; pA = newPrice; }
     else if(pointName == "B") { tB = newTime; pB = newPrice; }
     else if(pointName == "C") { tC = newTime; pC = newPrice; }
+
+    // Re-optimize frequency after drag using stored X point
+    if(g_abcdTimeX > 0 && g_abcdPriceX > 0) {
+        // Update global ABCD state for history push
+        g_abcdPriceA = pA; g_abcdTimeA = tA;
+        g_abcdPriceB = pB; g_abcdTimeB = tB;
+        g_abcdPriceC = pC; g_abcdTimeC = tC;
+
+        FrequencyResult freqResult;
+        if(FindOptimalFrequency(g_abcdPriceX, g_abcdTimeX,
+                                pA, tA, pB, tB, pC, tC, freqResult)) {
+            ApplyOptimalFrequency(freqResult);
+            UpdateTH3FreqLabel(g_th3FreqOverride);
+            g_lastFreqResult = freqResult;
+        }
+    }
 
     DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
     ChartRedraw();

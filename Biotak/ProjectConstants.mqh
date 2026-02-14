@@ -8,93 +8,68 @@ const double MIN_FACTOR_VALUE = 0.01;
 const double MAX_FACTOR_VALUE = 10000.0;
 const double DEFAULT_FACTOR_FALLBACK = 50.0;
 
-// TH3 Frequency Limits
-const double MIN_TH3_FREQUENCY = 0.1;
-const double MAX_TH3_FREQUENCY = 1000.0;
+//+------------------------------------------------------------------+
+//| TH3 Binary Subdivision Frequency System                          |
+//| Theory: Every real number in [0,100] has exact representation    |
+//| as n/2^k × 100%. At depth=6: freq = index × (100/64) = i×1.5625 |
+//| This replaces the old GM-interpolated array (22 incorrect values)|
+//+------------------------------------------------------------------+
+const int    BINARY_SUBDIVISION_DEPTH = 6;              // 2^6 = 64 subdivisions per 100%
+const double BINARY_SUBDIVISION_STEP  = 1.5625;         // 100.0 / 64 = 1.5625% per index
+const int    MIN_TH3_FREQ_INDEX       = 1;              // 1.5625% (minimum meaningful frequency)
+const int    MAX_TH3_FREQ_INDEX       = 128;            // 200.0% (extended range)
+const int    DEFAULT_TH3_FREQ_INDEX   = 18;             // 28.125% (18 × 1.5625 = 28.125, was index 16 in old array)
 
-// TH3 Frequency Array (76 discrete frequencies: base n/32 + geometric means)
-const int TH3_FREQUENCY_COUNT = 76;
-const int DEFAULT_TH3_FREQ_INDEX = 16; // 28.125% (index 16)
-const double TH3_TEST_FREQUENCIES[] = {
-    // Original range: 3.125% to 100% (63 frequencies)
-    3.125,   // 1/32
-    4.419,   // √(3.125 × 6.25)
-    6.25,    // 2/32
-    7.629,   // √(6.25 × 9.375)
-    9.375,   // 3/32
-    10.825,  // √(9.375 × 12.5)
-    12.5,    // 4/32
-    13.975,  // √(12.5 × 15.625)
-    15.625,  // 5/32
-    17.089,  // √(15.625 × 18.75)
-    18.75,   // 6/32
-    20.176,  // √(18.75 × 21.875)
-    21.875,  // 7/32
-    23.242,  // √(21.875 × 25)
-    25.0,    // 8/32 - Quarter 1
-    26.491,  // √(25 × 28.125)
-    28.125,  // 9/32 - DEFAULT (index 16)
-    29.619,  // √(28.125 × 31.25)
-    31.25,   // 10/32
-    32.795,  // √(31.25 × 34.375)
-    34.375,  // 11/32
-    35.951,  // √(34.375 × 37.5)
-    37.5,    // 12/32
-    39.063,  // √(37.5 × 40.625)
-    40.625,  // 13/32
-    42.157,  // √(40.625 × 43.75)
-    43.75,   // 14/32
-    45.234,  // √(43.75 × 46.875)
-    46.875,  // 15/32
-    48.295,  // √(46.875 × 50)
-    50.0,    // 16/32 - MIDPOINT
-    51.705,  // √(50 × 53.125)
-    53.125,  // 17/32
-    54.766,  // √(53.125 × 56.25)
-    56.25,   // 18/32
-    57.843,  // √(56.25 × 59.375)
-    59.375,  // 19/32
-    60.937,  // √(59.375 × 62.5)
-    62.5,    // 20/32
-    64.049,  // √(62.5 × 65.625)
-    65.625,  // 21/32
-    67.187,  // √(65.625 × 68.75)
-    68.75,   // 22/32
-    70.205,  // √(68.75 × 71.875)
-    71.875,  // 23/32
-    73.381,  // √(71.875 × 75)
-    75.0,    // 24/32 - Quarter 3
-    76.509,  // √(75 × 78.125)
-    78.125,  // 25/32
-    79.658,  // √(78.125 × 81.25)
-    81.25,   // 26/32
-    82.795,  // √(81.25 × 84.375)
-    84.375,  // 27/32
-    85.911,  // √(84.375 × 87.5)
-    87.5,    // 28/32
-    89.024,  // √(87.5 × 90.625)
-    90.625,  // 29/32
-    92.157,  // √(90.625 × 93.75)
-    93.75,   // 30/32
-    95.299,  // √(93.75 × 96.875)
-    96.875,  // 31/32
-    98.425,  // √(96.875 × 100)
-    100.0,   // 32/32 - Full range
-    // Extended range: 100% to 120% (13 additional frequencies)
-    101.491, // √(100 × 103.125)
-    103.125, // 33/32
-    105.176, // √(103.125 × 106.25)
-    106.25,  // 34/32
-    107.795, // √(106.25 × 109.375)
-    109.375, // 35/32
-    110.825, // √(109.375 × 112.5)
-    112.5,   // 36/32
-    114.024, // √(112.5 × 115.625)
-    115.625, // 37/32
-    117.176, // √(115.625 × 118.75)
-    118.75,  // 38/32
-    120.0    // Extended maximum
-};
+//+------------------------------------------------------------------+
+//| Get frequency percentage by index — pure runtime calculation      |
+//| No static array needed. freq(i) = i × 1.5625%                    |
+//| Key levels: 16=25% (1/4), 32=50% (1/2), 48=75% (3/4), 64=100%  |
+//+------------------------------------------------------------------+
+double GetFrequencyByIndex(int index) {
+    return index * BINARY_SUBDIVISION_STEP;
+}
+
+//+------------------------------------------------------------------+
+//| Find nearest valid frequency index for a given percentage         |
+//| Used for: migrating old saved values, syncing after manual input  |
+//+------------------------------------------------------------------+
+int FindNearestFreqIndex(double freqPercent) {
+    if(freqPercent <= 0) return MIN_TH3_FREQ_INDEX;
+    int idx = (int)MathRound(freqPercent / BINARY_SUBDIVISION_STEP);
+    if(idx < MIN_TH3_FREQ_INDEX) idx = MIN_TH3_FREQ_INDEX;
+    if(idx > MAX_TH3_FREQ_INDEX) idx = MAX_TH3_FREQ_INDEX;
+    return idx;
+}
+
+//+------------------------------------------------------------------+
+//| Get binary depth level of an index (2-adic valuation)             |
+//| Returns how many times index is divisible by 2:                   |
+//|   v₂(64)=6, v₂(32)=5, v₂(16)=4, v₂(8)=3, v₂(4)=2, v₂(2)=1    |
+//| Higher depth = more fundamental frequency level ("louder note")  |
+//+------------------------------------------------------------------+
+int GetBinaryDepthLevel(int index) {
+    if(index <= 0) return 0;
+    int depth = 0;
+    while((index & 1) == 0) {
+        depth++;
+        index >>= 1;
+    }
+    return depth;
+}
+
+//+------------------------------------------------------------------+
+//| Check if index is a "clean" binary level at given depth           |
+//| depth=0: all indices (64ths)                                     |
+//| depth=1: even indices (32nds) — divisible by 2                   |
+//| depth=2: divisible by 4 (16ths)                                  |
+//| depth=3: divisible by 8 (8ths)                                   |
+//| depth=4: divisible by 16 (quarters)                              |
+//| depth=5: divisible by 32 (halves: 50%, 100%, ...)               |
+//| depth=6: divisible by 64 (wholes: 100%, 200%)                   |
+//+------------------------------------------------------------------+
+bool IsCleanBinaryLevel(int index, int minDepth) {
+    return GetBinaryDepthLevel(index) >= minDepth;
+}
 
 // ABCD Pattern Constants
 #define ABCD_MIN_DISTANCE_POINTS 10
@@ -113,29 +88,63 @@ const double MIN_ZONE_HEIGHT_PERCENT = 0.01;
 const double MAX_ZONE_HEIGHT_PERCENT = 1.0;
 const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125;
 
+// Frequency History — remember past pattern frequencies for coherence scoring
+#define FREQ_HISTORY_SIZE 8    // Ring buffer: last 8 pattern results
+#define MIN_STEP1_PIPS   2.0   // Minimum Step1 distance in pips to be meaningful
+
 //+------------------------------------------------------------------+
 //| FrequencyResult - Result of frequency optimization               |
 //| Defined here (before GlobalVariables.mqh) so it can be used      |
 //| as a global variable for info label display                      |
 //+------------------------------------------------------------------+
 struct FrequencyResult {
-    int       bestIndex;          // Index into TH3_TEST_FREQUENCIES[]
+    int       bestIndex;          // Binary subdivision index (freq = index × 1.5625%)
     double    bestFrequency;      // The optimal frequency percentage
     double    totalScore;         // Combined score (0..1)
-    double    midpointScore;      // How close Step3 is to a reference 50%
+    double    multiStepScore;     // Multi-step resonance score (was midpointScore)
+    double    patternScore;       // Harmonic pattern projection score (Gartley/Bat/etc.)
     double    timeScore;          // Gann price=time alignment score
+    double    sqrtScore;          // Gann square root price harmony score
     double    harmonicScore;      // Harmonic/phase relationship score
-    double    step3Price;         // Predicted Step3 price at best frequency
-    string    matchLabel;         // Which reference midpoint matched
+    double    historyScore;       // Coherence with previous pattern frequencies
+    double    confidence;         // Confidence level (0..1): how consistent components are
+    double    step1Price;         // Step1 = C ± 1×baseUnit
+    double    step3Price;         // Step3 = C ± 3×baseUnit (primary target)
+    double    step5Price;         // Step5 = C ± 5×baseUnit
+    double    step7Price;         // Step7 = C ± 7×baseUnit
+    int       matchedSteps;       // How many steps (0-4) matched reference levels
+    string    matchLabel;         // Which reference midpoint matched Step3
+    string    patternType;        // Detected harmonic pattern type (e.g. "Gartley")
     int       matchWaveIndex;     // Which wave the best match belongs to
     double    errorPips;          // Distance in pips between Step3 and matched midpoint
     bool      isValid;
 
     void Reset() {
         bestIndex = -1; bestFrequency = 0; totalScore = 0;
-        midpointScore = 0; timeScore = 0; harmonicScore = 0;
-        step3Price = 0; matchLabel = ""; matchWaveIndex = -1;
-        errorPips = 0; isValid = false;
+        multiStepScore = 0; patternScore = 0; timeScore = 0;
+        sqrtScore = 0; harmonicScore = 0; historyScore = 0; confidence = 0;
+        step1Price = 0; step3Price = 0; step5Price = 0; step7Price = 0;
+        matchedSteps = 0; matchLabel = ""; patternType = "";
+        matchWaveIndex = -1; errorPips = 0; isValid = false;
+    }
+};
+
+//+------------------------------------------------------------------+
+//| FrequencyHistoryEntry — one entry in the ring buffer              |
+//| Stores result + XABC context for coherence analysis               |
+//+------------------------------------------------------------------+
+struct FrequencyHistoryEntry {
+    FrequencyResult result;     // What the optimizer found
+    double    abDistance;       // |AB| distance for scale comparison
+    double    ratioBC_AB;       // BC/AB ratio for pattern similarity
+    int       freqIndex;        // Best frequency index (binary subdivision)
+    datetime  timestamp;        // When this pattern was recorded
+    bool      isUsed;           // Whether this slot has data
+
+    void Reset() {
+        result.Reset();
+        abDistance = 0; ratioBC_AB = 0; freqIndex = 0;
+        timestamp = 0; isUsed = false;
     }
 };
 
