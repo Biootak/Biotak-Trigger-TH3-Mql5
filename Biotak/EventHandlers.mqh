@@ -1135,7 +1135,9 @@ void RunIncrementalObjectCleanup()
     bool historicalRefreshDue = (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized);
     int currentServerMinute = TimeMinute(CacheGetFrameTime());
     bool basePriceBoundary = (currentServerMinute == 0 || currentServerMinute == 30);
-    bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || customPriceLineExists || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
+    // PERF: Existence of custom-price line alone is not a redraw trigger.
+    // Redraw is needed only on actual state change (drag/input/update flags).
+    bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
     if(!hasPendingWork) {
         if(nowMs - s_lastRedrawAttemptMs < 35) return;
         s_lastRedrawAttemptMs = nowMs;
@@ -1195,7 +1197,7 @@ void RunIncrementalObjectCleanup()
     g_redrawTHLevelsNeeded = true;
     }
     // PERF: Use tracked bool instead of ObjectFind MT5 syscall (~0.5ms saved per frame)
-    bool canSkipByState = (!force_redraw && !g_labelsRelayoutNeeded && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && g_initialized);
+    bool canSkipByState = (!force_redraw && !g_labelsRelayoutNeeded && !basePriceChanged && !g_redrawTHLevelsNeeded && g_initialized);
     if(canSkipByState) {
         // Existing second-level gate (may be zero by config)
         if(currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS) return;
@@ -1326,10 +1328,6 @@ void RunIncrementalObjectCleanup()
     #endif
     bool skipZones = g_customPriceLineDragging;
     TH3_PROF_START(Levels);
-    // PERF: Skip ClearAllLevels when only viewport changed (scroll/zoom)
-    // Pipeline uses CreateOrUpdateHLine which updates objects in-place
-    // Safety: if forceClear is pending, always do full clear regardless of viewport flag
-    bool canSkipClear = g_viewportOnlyRedraw && !g_forceClearOnNextDraw && !force_redraw;
 
     // PERF: Topology signature guard — clear only when structure-defining inputs changed.
     // Keeps level updates in-place for normal price movement redraws.
@@ -1344,7 +1342,7 @@ void RunIncrementalObjectCleanup()
                       DoubleToString(inpHarmonicRatio, 3) + "|" +
                       IntegerToString((int)inpMStepBasisType);
     bool levelTopologyChanged = (levelSig != s_lastLevelSig);
-    bool shouldClearLevels = (!canSkipClear) && (g_forceClearOnNextDraw || levelTopologyChanged);
+    bool shouldClearLevels = g_forceClearOnNextDraw || levelTopologyChanged;
 
     if(shouldClearLevels) {
         TH3_PROF_START(LevelsClear);
@@ -1357,7 +1355,6 @@ void RunIncrementalObjectCleanup()
     s_lastLevelSig = levelSig;
     TH3_PROF_END(Levels);
     g_redrawTHLevelsNeeded = false;
-    g_viewportOnlyRedraw = false;
     }
     else if (!inpShowTHLevels && g_redrawTHLevelsNeeded)
     {        ClearAllLevels(objectPrefix);
@@ -2042,11 +2039,9 @@ void DecrementTH3Frequency()
         s_lastLayoutMs = nowMs;
 
         if(sizeChanged) g_labelsRelayoutNeeded = true;
-        // PERF: Viewport-only scroll/zoom — skip ClearAllLevels, just re-render with viewport culling
-        if(viewportChanged) {
-            g_redrawTHLevelsNeeded = true;
-            g_viewportOnlyRedraw = true;
-        }
+        // PERF: Scroll/zoom does NOT trigger level redraw.
+        // Zones and lines are horizontal-price objects — MT5 repositions them natively.
+        // Only window resize needs label relayout.
         
         if(sizeChanged) RedrawLabelsOnly();
         ThrottledChartRedraw();

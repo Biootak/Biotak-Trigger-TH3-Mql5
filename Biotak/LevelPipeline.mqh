@@ -696,8 +696,6 @@ void RenderZones(
             continue;
         }
         
-        if(!zones[i].inViewport) continue;
-        
         if(zones[i].renderTop <= zones[i].renderBottom) continue;
         
         if(config.zoneStyle == ZONE_STYLE_LINES) {
@@ -745,8 +743,6 @@ void RenderTriggerLines(
                 continue;
             }
         }
-        
-        if(!lines[i].inViewport) continue;
         
         // Use the unified create-or-update pattern
         bool isNew = CreateOrUpdateHLine(lines[i].name, lines[i].price,
