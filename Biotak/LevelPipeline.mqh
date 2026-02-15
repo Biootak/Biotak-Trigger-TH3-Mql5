@@ -34,7 +34,6 @@
 struct SCalculatedLevel {
     double price;           // Level price
     int    logicalStep;     // Original step number (1, 2, 3, ...)
-    bool   included;        // true = passes filter (structure/trigger/baseMultiplier)
     bool   isMidpoint;      // true = this is the center/anchor level (step 0)
     int    direction;       // +1 = above midpoint, -1 = below, 0 = midpoint
 };
@@ -45,7 +44,6 @@ struct SCalculatedLevel {
 struct SLevelClassified {
     double price;
     int    logicalStep;
-    bool   included;
     bool   isMidpoint;
     int    direction;
     
@@ -57,34 +55,29 @@ struct SLevelClassified {
     ENUM_LINE_STYLE levelStyle;
     int    levelWidth;
     color  zoneColor;       // Color for zone touching this level
-    string tooltip;         // Pre-built tooltip text
 };
 
 //+------------------------------------------------------------------+
 //| STAGE 3 OUTPUT: Zone definition (PRIMARY ENTITY)                 |
 //|                                                                  |
-//| A zone is defined by TWO adjacent included levels.               |
-//| The zone occupies the space between them.                        |
+//| Each zone is centered ON a level price.                          |
+//| renderTop/renderBottom define actual visual extent.              |
 //+------------------------------------------------------------------+
 struct SZoneDefinition {
     string name;            // Object name for this zone
-    double upperBoundary;   // Upper level price
-    double lowerBoundary;   // Lower level price
-    double midPrice;        // Midpoint of zone
-    double height;          // Zone visual height (based on heightPercent)
-    double renderTop;       // Actual render top (midPrice + height/2)
-    double renderBottom;    // Actual render bottom (midPrice - height/2)
-    int    upperStep;       // Logical step of upper boundary
-    int    lowerStep;       // Logical step of lower boundary
-    int    direction;       // +1 = above midpoint, -1 = below
+    double midPrice;        // Center price (= level price)
+    double renderTop;       // Visual top (midPrice + zoneHeight)
+    double renderBottom;    // Visual bottom (midPrice - zoneHeight)
+    int    logicalStep;     // Step number of the level this zone sits on
+    int    direction;       // +1 = above midpoint, -1 = below, 0 = midpoint
     int    zoneIndex;       // Sequential zone index in this direction
-    bool   isStructure;     // Zone between structure levels
-    bool   isTrigger;       // Zone between trigger levels
-    color  zoneColor;       // Determined by dominant boundary
+    bool   isStructure;     // Structural level zone
+    bool   isTrigger;       // Trigger subdivision zone
+    color  zoneColor;       // Zone color
     int    transparency;
     ENUM_ZONE_STYLE style;
     bool   filled;
-    bool   inViewport;      // false = skip render, but geometry is valid
+    bool   inViewport;      // false = skip render, geometry is valid
 };
 
 //+------------------------------------------------------------------+
@@ -102,8 +95,6 @@ struct STriggerLine {
     ENUM_LINE_STYLE lineStyle;
     int    lineWidth;
     string tooltip;
-    int    zoneAboveIdx;    // Index of zone above this line (-1 = none)
-    int    zoneBelowIdx;    // Index of zone below this line (-1 = none)
     bool   inViewport;      // false = skip render
     bool   isMidpoint;
     bool   setBack;         // OBJPROP_BACK value (mode-specific)
@@ -126,7 +117,6 @@ struct SModeConfig {
     color  fallbackColor2;
     ENUM_LINE_STYLE fallbackStyle2;
     int    fallbackWidth2;
-    bool   hasAlternatingFallback; // true for SSLS mode
     
     // Midpoint styling
     color  midpointColor;
@@ -144,7 +134,6 @@ struct SModeConfig {
     bool   useObjPropBack;  // Set OBJPROP_BACK on lines (Factor modes)
     int    zOrder;          // OBJPROP_ZORDER value (Factor = 1, others = 0)
     bool   hideLineWhenTriggerOnly; // Factor: hide lines when trigger enabled
-    bool   useSimpleZones;  // MEq: use CreateSimpleZone instead of SmartFallback
     bool   useStepFilter;   // false for MEq (draws every step)
     
     // Price boundaries
@@ -159,8 +148,6 @@ struct SModeConfig {
 struct SPipelineResult {
     int    zoneCount;
     int    lineCount;
-    int    zonesRendered;
-    int    linesRendered;
     bool   success;
     string errorMessage;
 };
@@ -173,8 +160,8 @@ struct SPipelineResult {
 //| For SSLS, use CalculateLevelsAlternating.                       |
 //| For Harmonic, use CalculateLevelsHarmonic.                      |
 //|                                                                  |
-//| KEY PRINCIPLE: ALL levels are calculated, even filtered ones.    |
-//| Filtering is marked via `included` flag, NOT by skipping.       |
+//| KEY PRINCIPLE: ALL levels are calculated. Every step is always  |
+//| included — there is no filtering/skipping.                      |
 //+------------------------------------------------------------------+
 int CalculateLevelsUniform(
     const double midpointPrice,
@@ -182,9 +169,6 @@ int CalculateLevelsUniform(
     const int maxLevelsAbove,
     const int maxLevelsBelow,
     const bool useStepFilter,
-    const bool triggerEnabled,
-    const bool structureEnabled,
-    const int baseMultiplier,
     const bool boundByHistorical,
     const double maxPrice,
     const double minPrice,
@@ -197,15 +181,14 @@ int CalculateLevelsUniform(
     if(safeMaxAbove < 1) safeMaxAbove = 1;
     if(safeMaxBelow < 1) safeMaxBelow = 1;
     
-    // Worst case: all steps included + midpoint
+    // Worst case: all steps + midpoint
     int maxTotal = (safeMaxAbove + safeMaxBelow) * 2 + 1;
     ArrayResize(levels, maxTotal);
     int count = 0;
     
-    // Midpoint (always included, always first)
+    // Midpoint (always first)
     levels[count].price = midpointPrice;
     levels[count].logicalStep = 0;
-    levels[count].included = true;
     levels[count].isMidpoint = true;
     levels[count].direction = 0;
     count++;
@@ -223,19 +206,13 @@ int CalculateLevelsUniform(
         // Price boundary check
         if(boundByHistorical && maxPrice > 0 && price > maxPrice) break;
         
-        // BASE PLAYER: All steps are always included.
-        // Base Player = base multiplier defines N equal divisions between structural levels.
-        // Every step contributes to the subdivision grid.
-        bool included = true;
-        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
-        levels[count].included = included;
         levels[count].isMidpoint = false;
         levels[count].direction = 1;
         count++;
         
-        if(included) drawnAbove++;
+        drawnAbove++;
         logicalStep++;
     }
     
@@ -253,17 +230,13 @@ int CalculateLevelsUniform(
         if(boundByHistorical && minPrice > 0 && price < minPrice) break;
         if(price <= 0) break;
         
-        // BASE PLAYER: All steps always included (same as above direction)
-        bool included = true;
-        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
-        levels[count].included = included;
         levels[count].isMidpoint = false;
         levels[count].direction = -1;
         count++;
         
-        if(included) drawnBelow++;
+        drawnBelow++;
         logicalStep++;
     }
     
@@ -280,9 +253,6 @@ int CalculateLevelsAlternating(
     const double step2,        // Second step size
     const int maxLevelsAbove,
     const int maxLevelsBelow,
-    const bool triggerEnabled,
-    const bool structureEnabled,
-    const int baseMultiplier,
     const bool boundByHistorical,
     const double maxPrice,
     const double minPrice,
@@ -306,7 +276,6 @@ int CalculateLevelsAlternating(
     // Midpoint
     levels[count].price = midpointPrice;
     levels[count].logicalStep = 0;
-    levels[count].included = true;
     levels[count].isMidpoint = true;
     levels[count].direction = 0;
     count++;
@@ -327,17 +296,13 @@ int CalculateLevelsAlternating(
         
         if(boundByHistorical && maxPrice > 0 && price > maxPrice) break;
         
-        // BASE PLAYER: All steps always included
-        bool included = true;
-        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
-        levels[count].included = included;
         levels[count].isMidpoint = false;
         levels[count].direction = 1;
         count++;
         
-        if(included) drawnAbove++;
+        drawnAbove++;
     }
     
     // Below
@@ -357,17 +322,13 @@ int CalculateLevelsAlternating(
         if(boundByHistorical && minPrice > 0 && price < minPrice) break;
         if(price <= 0) break;
         
-        // BASE PLAYER: All steps always included
-        bool included = true;
-        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
-        levels[count].included = included;
         levels[count].isMidpoint = false;
         levels[count].direction = -1;
         count++;
         
-        if(included) drawnBelow++;
+        drawnBelow++;
     }
     
     ArrayResize(levels, count);
@@ -383,9 +344,6 @@ int CalculateLevelsHarmonic(
     const double harmonicRatio,
     const int maxLevelsAbove,
     const int maxLevelsBelow,
-    const bool triggerEnabled,
-    const bool structureEnabled,
-    const int baseMultiplier,
     SCalculatedLevel &levels[])
 {
     if(centerPrice <= 0 || baseStepSize <= 0 || harmonicRatio <= 0) return 0;
@@ -401,7 +359,6 @@ int CalculateLevelsHarmonic(
     // Center
     levels[count].price = centerPrice;
     levels[count].logicalStep = 0;
-    levels[count].included = true;
     levels[count].isMidpoint = true;
     levels[count].direction = 0;
     count++;
@@ -419,17 +376,13 @@ int CalculateLevelsHarmonic(
         cumAbove += step;
         double price = centerPrice + cumAbove;
         
-        // BASE PLAYER: All steps always included
-        bool included = true;
-        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
-        levels[count].included = included;
         levels[count].isMidpoint = false;
         levels[count].direction = 1;
         count++;
         
-        if(included) drawnAbove++;
+        drawnAbove++;
         logicalStep++;
     }
     
@@ -448,17 +401,13 @@ int CalculateLevelsHarmonic(
         
         if(price <= 0) break;
         
-        // BASE PLAYER: All steps always included
-        bool included = true;
-        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
-        levels[count].included = included;
         levels[count].isMidpoint = false;
         levels[count].direction = -1;
         count++;
         
-        if(included) drawnBelow++;
+        drawnBelow++;
         logicalStep++;
     }
     
@@ -471,7 +420,6 @@ int CalculateLevelsHarmonic(
 //|                                                                  |
 //| Assigns color/style/width based on structure/trigger priority.   |
 //| Uses GetPathForLevelOptimized for consistency.                   |
-//| Only classifies INCLUDED levels (others stay default).           |
 //+------------------------------------------------------------------+
 int ClassifyLevels(
     const SCalculatedLevel &rawLevels[],
@@ -488,7 +436,6 @@ int ClassifyLevels(
         // Copy base data
         classified[i].price = rawLevels[i].price;
         classified[i].logicalStep = rawLevels[i].logicalStep;
-        classified[i].included = rawLevels[i].included;
         classified[i].isMidpoint = rawLevels[i].isMidpoint;
         classified[i].direction = rawLevels[i].direction;
         
@@ -500,9 +447,6 @@ int ClassifyLevels(
         classified[i].levelStyle = config.fallbackStyle;
         classified[i].levelWidth = config.fallbackWidth;
         classified[i].zoneColor = clrNONE;
-        classified[i].tooltip = "";
-        
-        if(!rawLevels[i].included && !rawLevels[i].isMidpoint) continue;
         
         int step = rawLevels[i].logicalStep;
         
@@ -518,8 +462,6 @@ int ClassifyLevels(
                 classified[i].levelStyle = config.midpointStyle;
                 classified[i].levelWidth = config.midpointWidth;
             }
-            classified[i].tooltip = "Midpoint (Start) - " + 
-                DoubleToString(rawLevels[i].price, GetCachedDigits());
             continue;
         }
         
@@ -562,11 +504,6 @@ int ClassifyLevels(
         if(classified[i].zoneColor == clrNONE) {
             classified[i].zoneColor = classified[i].levelColor;
         }
-        
-        // Default tooltip
-        string dirStr = (rawLevels[i].direction > 0) ? "+" : "-";
-        classified[i].tooltip = "Level " + dirStr + IntegerToString(step) + 
-            " (" + DoubleToString(rawLevels[i].price, GetCachedDigits()) + ")";
     }
     
     return rawCount;
@@ -590,10 +527,10 @@ int ClassifyLevelsAlternating(
     // Start with standard classification
     int result = ClassifyLevels(rawLevels, rawCount, config, triggerEnabled, baseMultiplier, classified);
     
-    // Override fallback colors for non-structure, non-trigger levels
+    // Override colors for non-structure levels with SS/LS alternating pattern
     for(int i = 0; i < result; i++) {
-        if(classified[i].isMidpoint || !classified[i].included) continue;
-        if(classified[i].isStructure || classified[i].isTrigger) continue;
+        if(classified[i].isMidpoint) continue;
+        if(classified[i].isStructure) continue;
         
         // SSLS alternating: determine if this step is SS or LS
         bool isSS = ((classified[i].logicalStep % 2 == 0) == lsFirst);
@@ -606,11 +543,6 @@ int ClassifyLevelsAlternating(
             classified[i].levelStyle = config.fallbackStyle2;
             classified[i].levelWidth = config.fallbackWidth2;
         }
-        
-        // Update tooltip
-        string typeStr = isSS ? "SS " : "LS ";
-        classified[i].tooltip = typeStr + IntegerToString(classified[i].logicalStep) + 
-            " (" + DoubleToString(classified[i].price, GetCachedDigits()) + ")";
     }
     
     return result;
@@ -630,8 +562,8 @@ int ClassifyLevelsMMode(
     int result = ClassifyLevels(rawLevels, rawCount, config, triggerEnabled, baseMultiplier, classified);
     
     for(int i = 0; i < result; i++) {
-        if(classified[i].isMidpoint || !classified[i].included) continue;
-        if(classified[i].isStructure || classified[i].isTrigger) continue;
+        if(classified[i].isMidpoint) continue;
+        if(classified[i].isStructure) continue;
         
         // M mode: every 3rd step is M level, others are C levels
         bool isM = (classified[i].logicalStep % 3 == 0);
@@ -644,44 +576,49 @@ int ClassifyLevelsMMode(
             classified[i].levelStyle = inpCLevelStyle;
             classified[i].levelWidth = inpCLevelWidth;
         }
-        
-        classified[i].tooltip = (isM ? "M " : "C ") + IntegerToString(classified[i].logicalStep) + 
-            " (" + DoubleToString(classified[i].price, GetCachedDigits()) + ")";
     }
     
     return result;
 }
 
 //+------------------------------------------------------------------+
-//| STAGE 3: Build zones from classified levels (ZONE-FIRST)         |
+//| STAGE 3+4 (MERGED): Build zones AND derive midpoint lines        |
 //|                                                                  |
-//| KEY ALGORITHM:                                                   |
-//| 1. Collect all INCLUDED levels sorted by direction               |
-//| 2. For each direction (above/below), pair consecutive levels     |
-//| 3. Each pair defines one zone                                    |
-//| 4. Zone color = color of the level that forms the boundary       |
-//|    farther from midpoint (the "outer" boundary)                  |
+//| Single pass over classified levels produces both zones and lines.|
+//| Zone = centered ON each level price.                             |
+//| Line = midpoint between consecutive zones (between-zone marker). |
 //|                                                                  |
-//| VIEWPORT INDEPENDENCE:                                           |
-//| Viewport is checked here but only sets `inViewport` flag.        |
-//| Zone GEOMETRY is always correct regardless of viewport.          |
+//| This eliminates the duplicate 2-pass iteration that existed      |
+//| when BuildZones and DeriveTriggerLines were separate functions.  |
+//|                                                                  |
+//| With base multiplier N per structural interval:                  |
+//|   Zones: N+1 (2 structure + N-1 trigger)                        |
+//|   Lines: N (midpoint markers between zones)                     |
+//|                                                                  |
+//| EDGE CASE: If midpoint has no neighbors (aboveCount=0 AND       |
+//| belowCount=0), we use a fallback zone height based on the       |
+//| symbol's point value to prevent silent invisible midpoint.       |
 //+------------------------------------------------------------------+
-int BuildZones(
+void BuildZonesAndLines(
     const SLevelClassified &classified[],
     const int classifiedCount,
     const SModeConfig &config,
     const double vpTop,
     const double vpBottom,
-    SZoneDefinition &zones[])
+    SZoneDefinition &zones[],
+    int &zoneCount,
+    STriggerLine &lines[],
+    int &lineCount)
 {
-    if(!config.zonesEnabled) return 0;
+    zoneCount = 0;
+    lineCount = 0;
     
-    // Separate included levels by direction
-    // Above: sorted by step ascending (closest to midpoint first)
-    // Below: sorted by step ascending (closest to midpoint first)
+    // Separate levels by direction
     SLevelClassified aboveLevels[];
     SLevelClassified belowLevels[];
     SLevelClassified midLevel;
+    midLevel.price = 0;
+    midLevel.isMidpoint = false;
     bool hasMid = false;
     
     int aboveCount = 0, belowCount = 0;
@@ -689,7 +626,6 @@ int BuildZones(
     // First pass: count
     for(int i = 0; i < classifiedCount; i++) {
         if(classified[i].isMidpoint) { hasMid = true; continue; }
-        if(!classified[i].included) continue;
         if(classified[i].direction > 0) aboveCount++;
         else if(classified[i].direction < 0) belowCount++;
     }
@@ -701,170 +637,161 @@ int BuildZones(
     int ai = 0, bi = 0;
     for(int i = 0; i < classifiedCount; i++) {
         if(classified[i].isMidpoint) { midLevel = classified[i]; continue; }
-        if(!classified[i].included) continue;
         if(classified[i].direction > 0 && ai < aboveCount) { aboveLevels[ai] = classified[i]; ai++; }
         else if(classified[i].direction < 0 && bi < belowCount) { belowLevels[bi] = classified[i]; bi++; }
     }
     
-    // Sort by logicalStep ascending (they should already be, but ensure)
-    // Above: step 3, 6, 9, ... → zone between (mid,3), (3,6), (6,9)
-    // Below: step 3, 6, 9, ... → zone between (mid,3), (3,6), (6,9) 
+    // Pre-allocate output arrays (max possible sizes)
+    int maxZones = (hasMid ? 1 : 0) + aboveCount + belowCount;
+    int maxLines = aboveCount + belowCount;
+    if(config.zonesEnabled) ArrayResize(zones, maxZones);
+    ArrayResize(lines, maxLines);
     
-    int maxZones = aboveCount + belowCount;
-    ArrayResize(zones, maxZones);
-    int zoneIdx = 0;
+    int zIdx = 0, lIdx = 0;
     
-    // Build zones ABOVE midpoint
+    // --- MIDPOINT ZONE (step 0) ---
+    if(hasMid && config.zonesEnabled) {
+        double neighborDist = 0;
+        if(aboveCount > 0) {
+            neighborDist = aboveLevels[0].price - midLevel.price;
+        } else if(belowCount > 0) {
+            neighborDist = midLevel.price - belowLevels[0].price;
+        }
+        // Edge case fix: no neighbors → use 100 points as fallback height
+        if(neighborDist <= 0) {
+            neighborDist = GetCachedPoint() * 100;
+        }
+        double zoneHeight = neighborDist * config.zoneHeightPercent * 0.5;
+        
+        zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Center_0";
+        zones[zIdx].midPrice = midLevel.price;
+        zones[zIdx].renderTop = NormalizeDouble(midLevel.price + zoneHeight, GetCachedDigits());
+        zones[zIdx].renderBottom = NormalizeDouble(midLevel.price - zoneHeight, GetCachedDigits());
+        zones[zIdx].logicalStep = 0;
+        zones[zIdx].direction = 0;
+        zones[zIdx].zoneIndex = 0;
+        zones[zIdx].isStructure = true;
+        zones[zIdx].isTrigger = false;
+        zones[zIdx].zoneColor = config.zoneDefaultColor;
+        zones[zIdx].transparency = config.zoneTransparency;
+        zones[zIdx].style = config.zoneStyle;
+        zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
+        zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                                   zones[zIdx].renderBottom <= vpTop);
+        zIdx++;
+    }
+    
+    // --- ABOVE DIRECTION: zones on levels + lines between them ---
     double prevPrice = hasMid ? midLevel.price : 0;
     for(int i = 0; i < aboveCount && prevPrice > 0; i++) {
         double currentPrice = aboveLevels[i].price;
         if(currentPrice <= prevPrice) { prevPrice = currentPrice; continue; }
         
         double stepSize = currentPrice - prevPrice;
-        double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
-        double mid = (prevPrice + currentPrice) / 2.0;
         
-        zones[zoneIdx].name = config.objectPrefix + config.modeName + "_Zone_Above_" + 
-                              IntegerToString(aboveLevels[i].logicalStep);
-        zones[zoneIdx].upperBoundary = currentPrice;
-        zones[zoneIdx].lowerBoundary = prevPrice;
-        zones[zoneIdx].midPrice = mid;
-        zones[zoneIdx].height = zoneHeight * 2;
-        zones[zoneIdx].renderTop = NormalizeDouble(mid + zoneHeight, GetCachedDigits());
-        zones[zoneIdx].renderBottom = NormalizeDouble(mid - zoneHeight, GetCachedDigits());
-        zones[zoneIdx].upperStep = aboveLevels[i].logicalStep;
-        zones[zoneIdx].lowerStep = (i == 0) ? 0 : aboveLevels[i-1].logicalStep;
-        zones[zoneIdx].direction = 1;
-        zones[zoneIdx].zoneIndex = i;
-        zones[zoneIdx].isStructure = aboveLevels[i].isStructure;
-        zones[zoneIdx].isTrigger = aboveLevels[i].isTrigger;
-        zones[zoneIdx].zoneColor = (aboveLevels[i].zoneColor != clrNONE) ? 
-                                    aboveLevels[i].zoneColor : config.zoneDefaultColor;
-        zones[zoneIdx].transparency = config.zoneTransparency;
-        zones[zoneIdx].style = config.zoneStyle;
-        zones[zoneIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-        zones[zoneIdx].inViewport = (zones[zoneIdx].renderTop >= vpBottom && 
-                                     zones[zoneIdx].renderBottom <= vpTop);
-        zoneIdx++;
+        // Line at midpoint between prev and current
+        double lineMidPrice = (prevPrice + currentPrice) / 2.0;
+        lines[lIdx].name = config.objectPrefix + config.modeName + "_Above_" + 
+                           IntegerToString(aboveLevels[i].logicalStep);
+        lines[lIdx].price = lineMidPrice;
+        lines[lIdx].logicalStep = aboveLevels[i].logicalStep;
+        lines[lIdx].direction = 1;
+        lines[lIdx].lineColor = aboveLevels[i].levelColor;
+        lines[lIdx].lineStyle = aboveLevels[i].levelStyle;
+        lines[lIdx].lineWidth = aboveLevels[i].levelWidth;
+        lines[lIdx].tooltip = "Midpoint +" + IntegerToString(aboveLevels[i].logicalStep) + 
+            " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
+        lines[lIdx].isMidpoint = false;
+        lines[lIdx].setBack = config.useObjPropBack;
+        lines[lIdx].zOrder = config.zOrder;
+        lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
+        lIdx++;
+        
+        // Zone centered on this level
+        if(config.zonesEnabled) {
+            double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
+            
+            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Above_" + 
+                               IntegerToString(aboveLevels[i].logicalStep);
+            zones[zIdx].midPrice = currentPrice;
+            zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, GetCachedDigits());
+            zones[zIdx].renderBottom = NormalizeDouble(currentPrice - zoneHeight, GetCachedDigits());
+            zones[zIdx].logicalStep = aboveLevels[i].logicalStep;
+            zones[zIdx].direction = 1;
+            zones[zIdx].zoneIndex = i;
+            zones[zIdx].isStructure = aboveLevels[i].isStructure;
+            zones[zIdx].isTrigger = aboveLevels[i].isTrigger;
+            zones[zIdx].zoneColor = (aboveLevels[i].zoneColor != clrNONE) ? 
+                                     aboveLevels[i].zoneColor : config.zoneDefaultColor;
+            zones[zIdx].transparency = config.zoneTransparency;
+            zones[zIdx].style = config.zoneStyle;
+            zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
+            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                                      zones[zIdx].renderBottom <= vpTop);
+            zIdx++;
+        }
         
         prevPrice = currentPrice;
     }
     
-    // Build zones BELOW midpoint
+    // --- BELOW DIRECTION: zones on levels + lines between them ---
     prevPrice = hasMid ? midLevel.price : 0;
     for(int i = 0; i < belowCount && prevPrice > 0; i++) {
         double currentPrice = belowLevels[i].price;
         if(currentPrice >= prevPrice || currentPrice <= 0) { prevPrice = currentPrice; continue; }
         
         double stepSize = prevPrice - currentPrice;
-        double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
-        double mid = (prevPrice + currentPrice) / 2.0;
         
-        zones[zoneIdx].name = config.objectPrefix + config.modeName + "_Zone_Below_" + 
-                              IntegerToString(belowLevels[i].logicalStep);
-        zones[zoneIdx].upperBoundary = prevPrice;
-        zones[zoneIdx].lowerBoundary = currentPrice;
-        zones[zoneIdx].midPrice = mid;
-        zones[zoneIdx].height = zoneHeight * 2;
-        zones[zoneIdx].renderTop = NormalizeDouble(mid + zoneHeight, GetCachedDigits());
-        zones[zoneIdx].renderBottom = NormalizeDouble(mid - zoneHeight, GetCachedDigits());
-        zones[zoneIdx].upperStep = (i == 0) ? 0 : belowLevels[i-1].logicalStep;
-        zones[zoneIdx].lowerStep = belowLevels[i].logicalStep;
-        zones[zoneIdx].direction = -1;
-        zones[zoneIdx].zoneIndex = i;
-        zones[zoneIdx].isStructure = belowLevels[i].isStructure;
-        zones[zoneIdx].isTrigger = belowLevels[i].isTrigger;
-        zones[zoneIdx].zoneColor = (belowLevels[i].zoneColor != clrNONE) ? 
-                                    belowLevels[i].zoneColor : config.zoneDefaultColor;
-        zones[zoneIdx].transparency = config.zoneTransparency;
-        zones[zoneIdx].style = config.zoneStyle;
-        zones[zoneIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-        zones[zoneIdx].inViewport = (zones[zoneIdx].renderTop >= vpBottom && 
-                                     zones[zoneIdx].renderBottom <= vpTop);
-        zoneIdx++;
+        // Line at midpoint between prev and current
+        double lineMidPrice = (prevPrice + currentPrice) / 2.0;
+        lines[lIdx].name = config.objectPrefix + config.modeName + "_Below_" + 
+                           IntegerToString(belowLevels[i].logicalStep);
+        lines[lIdx].price = lineMidPrice;
+        lines[lIdx].logicalStep = belowLevels[i].logicalStep;
+        lines[lIdx].direction = -1;
+        lines[lIdx].lineColor = belowLevels[i].levelColor;
+        lines[lIdx].lineStyle = belowLevels[i].levelStyle;
+        lines[lIdx].lineWidth = belowLevels[i].levelWidth;
+        lines[lIdx].tooltip = "Midpoint -" + IntegerToString(belowLevels[i].logicalStep) + 
+            " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
+        lines[lIdx].isMidpoint = false;
+        lines[lIdx].setBack = config.useObjPropBack;
+        lines[lIdx].zOrder = config.zOrder;
+        lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
+        lIdx++;
+        
+        // Zone centered on this level
+        if(config.zonesEnabled) {
+            double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
+            
+            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Below_" + 
+                               IntegerToString(belowLevels[i].logicalStep);
+            zones[zIdx].midPrice = currentPrice;
+            zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, GetCachedDigits());
+            zones[zIdx].renderBottom = NormalizeDouble(currentPrice - zoneHeight, GetCachedDigits());
+            zones[zIdx].logicalStep = belowLevels[i].logicalStep;
+            zones[zIdx].direction = -1;
+            zones[zIdx].zoneIndex = i;
+            zones[zIdx].isStructure = belowLevels[i].isStructure;
+            zones[zIdx].isTrigger = belowLevels[i].isTrigger;
+            zones[zIdx].zoneColor = (belowLevels[i].zoneColor != clrNONE) ? 
+                                     belowLevels[i].zoneColor : config.zoneDefaultColor;
+            zones[zIdx].transparency = config.zoneTransparency;
+            zones[zIdx].style = config.zoneStyle;
+            zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
+            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                                      zones[zIdx].renderBottom <= vpTop);
+            zIdx++;
+        }
         
         prevPrice = currentPrice;
     }
     
-    ArrayResize(zones, zoneIdx);
-    return zoneIdx;
-}
-
-//+------------------------------------------------------------------+
-//| STAGE 4: Derive trigger lines from zone boundaries               |
-//|                                                                  |
-//| Each line sits at a zone boundary. Adjacent zones share the      |
-//| boundary — the line appears once with the dominant zone's style. |
-//|                                                                  |
-//| PRINCIPLE: Line = edge of zone. No zone = no line.               |
-//| Exception: midpoint line is always drawn.                        |
-//+------------------------------------------------------------------+
-int DeriveTriggerLines(
-    const SLevelClassified &classified[],
-    const int classifiedCount,
-    const SZoneDefinition &zones[],
-    const int zoneCount,
-    const SModeConfig &config,
-    const double vpTop,
-    const double vpBottom,
-    STriggerLine &lines[])
-{
-    // Lines come from classified levels that are included
-    // Each included level is a zone boundary
-    
-    // Count included levels
-    int includedCount = 0;
-    for(int i = 0; i < classifiedCount; i++) {
-        if(classified[i].included) includedCount++;
-    }
-    
-    ArrayResize(lines, includedCount);
-    int lineIdx = 0;
-    
-    for(int i = 0; i < classifiedCount; i++) {
-        if(!classified[i].included) continue;
-        
-        string suffix;
-        if(classified[i].isMidpoint) {
-            suffix = config.modeName + "_Midpoint_0";
-        } else if(classified[i].direction > 0) {
-            suffix = config.modeName + "_Above_" + IntegerToString(classified[i].logicalStep);
-        } else {
-            suffix = config.modeName + "_Below_" + IntegerToString(classified[i].logicalStep);
-        }
-        
-        lines[lineIdx].name = config.objectPrefix + suffix;
-        lines[lineIdx].price = classified[i].price;
-        lines[lineIdx].logicalStep = classified[i].logicalStep;
-        lines[lineIdx].direction = classified[i].direction;
-        lines[lineIdx].lineColor = classified[i].levelColor;
-        lines[lineIdx].lineStyle = classified[i].levelStyle;
-        lines[lineIdx].lineWidth = classified[i].levelWidth;
-        lines[lineIdx].tooltip = classified[i].tooltip;
-        lines[lineIdx].isMidpoint = classified[i].isMidpoint;
-        lines[lineIdx].setBack = config.useObjPropBack;
-        lines[lineIdx].zOrder = config.zOrder;
-        
-        // Find adjacent zones
-        lines[lineIdx].zoneAboveIdx = -1;
-        lines[lineIdx].zoneBelowIdx = -1;
-        for(int z = 0; z < zoneCount; z++) {
-            if(MathAbs(zones[z].lowerBoundary - classified[i].price) < GetCachedPoint() * 0.5) {
-                lines[lineIdx].zoneAboveIdx = z;
-            }
-            if(MathAbs(zones[z].upperBoundary - classified[i].price) < GetCachedPoint() * 0.5) {
-                lines[lineIdx].zoneBelowIdx = z;
-            }
-        }
-        
-        // Viewport check
-        lines[lineIdx].inViewport = (classified[i].price >= vpBottom && classified[i].price <= vpTop);
-        
-        lineIdx++;
-    }
-    
-    ArrayResize(lines, lineIdx);
-    return lineIdx;
+    // Trim output arrays
+    if(config.zonesEnabled) ArrayResize(zones, zIdx);
+    ArrayResize(lines, lIdx);
+    zoneCount = zIdx;
+    lineCount = lIdx;
 }
 
 //+------------------------------------------------------------------+
@@ -873,16 +800,25 @@ int DeriveTriggerLines(
 //| Creates/updates MT5 rectangle objects for each zone.             |
 //| Handles all zone styles: Lines, Filled Box, Empty Box, Hidden.   |
 //+------------------------------------------------------------------+
-int RenderZones(
+void RenderZones(
     const SZoneDefinition &zones[],
     const int zoneCount,
     const SModeConfig &config)
 {
-    int rendered = 0;
+    bool triggerEnabled = IsTriggerLevelsEnabled();
     
     for(int i = 0; i < zoneCount; i++) {
         if(config.zoneStyle == ZONE_STYLE_HIDDEN) {
             // Hidden: delete existing zone objects
+            if(ObjectFind(0, zones[i].name) >= 0) {
+                CacheRemoveObject(zones[i].name);
+                ObjectDelete(0, zones[i].name);
+            }
+            continue;
+        }
+        
+        // Skip trigger zones when triggers are disabled
+        if(zones[i].isTrigger && !triggerEnabled) {
             if(ObjectFind(0, zones[i].name) >= 0) {
                 CacheRemoveObject(zones[i].name);
                 ObjectDelete(0, zones[i].name);
@@ -895,12 +831,9 @@ int RenderZones(
         if(zones[i].renderTop <= zones[i].renderBottom) continue;
         
         if(config.zoneStyle == ZONE_STYLE_LINES) {
-            // Lines style: two horizontal lines for zone boundaries
-            if(CreateFactorMidZone_LinesStyle(zones[i].name, 
-                                               zones[i].renderTop, zones[i].renderBottom,
-                                               zones[i].zoneColor, zones[i].transparency)) {
-                rendered++;
-            }
+            CreateFactorMidZone_LinesStyle(zones[i].name, 
+                                           zones[i].renderTop, zones[i].renderBottom,
+                                           zones[i].zoneColor, zones[i].transparency);
         } else {
             // Box style (filled or empty)
             SZoneCreationRequest request;
@@ -913,12 +846,9 @@ int RenderZones(
             request.startTime = 0;
             request.endTime = 0;
             
-            SZoneCreationResult result = CreateZone(request);
-            if(result.success) rendered++;
+            CreateZone(request);
         }
     }
-    
-    return rendered;
 }
 
 //+------------------------------------------------------------------+
@@ -927,17 +857,17 @@ int RenderZones(
 //| Creates/updates MT5 horizontal line objects.                     |
 //| Uses CreateOrUpdateHLine for consistency.                        |
 //+------------------------------------------------------------------+
-int RenderTriggerLines(
+void RenderTriggerLines(
     const STriggerLine &lines[],
     const int lineCount,
     const SModeConfig &config)
 {
-    int rendered = 0;
+    bool triggerEnabled = IsTriggerLevelsEnabled();
     
     for(int i = 0; i < lineCount; i++) {
         // Factor mode: hide lines when trigger-only enabled
         if(config.hideLineWhenTriggerOnly && !lines[i].isMidpoint) {
-            bool shouldShow = !IsTriggerLevelsEnabled();
+            bool shouldShow = !triggerEnabled;
             if(!shouldShow) {
                 if(ObjectFind(0, lines[i].name) >= 0) {
                     ObjectSetInteger(0, lines[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
@@ -962,11 +892,7 @@ int RenderTriggerLines(
                 ObjectSetInteger(0, lines[i].name, OBJPROP_ZORDER, config.zOrder);
             }
         }
-        
-        rendered++;
     }
-    
-    return rendered;
 }
 
 //+------------------------------------------------------------------+
@@ -977,23 +903,27 @@ int RenderTriggerLines(
 //+------------------------------------------------------------------+
 void CleanupSurplusPipeline(
     const SModeConfig &config,
-    const SZoneDefinition &zones[],
-    const int zoneCount,
-    const STriggerLine &lines[],
-    const int lineCount,
     const int maxLogicalStep)
 {
     if(g_customPriceLineDragging) return;
     
-    // Cleanup surplus zones
+    // Cleanup surplus zones (above, below, and center)
     if(config.zonesEnabled) {
         CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Above_", maxLogicalStep + 1);
         CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Below_", maxLogicalStep + 1);
+        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Center_", 1); // Only index 0 exists
     }
     
     // Cleanup surplus lines (above and below direction)
     CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1);
     CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1);
+    
+    // Legacy cleanup: remove old midpoint line (step 0 now gets a zone, not a line)
+    string midpointName = config.objectPrefix + config.modeName + "_Midpoint_0";
+    if(ObjectFind(0, midpointName) >= 0) {
+        CacheRemoveObject(midpointName);
+        ObjectDelete(0, midpointName);
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -1017,9 +947,7 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
     cfg.useObjPropBack = false;
     cfg.zOrder = 0;
     cfg.hideLineWhenTriggerOnly = false;
-    cfg.useSimpleZones = false;
     cfg.useStepFilter = true;
-    cfg.hasAlternatingFallback = false;
     
     // Defaults for fallback colors (overridden per mode)
     cfg.fallbackColor = inpCLevelColor;
@@ -1044,7 +972,6 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
 SModeConfig BuildSSLSConfig(const string objectPrefix)
 {
     SModeConfig cfg = BuildModeConfig(objectPrefix, "SSLS");
-    cfg.hasAlternatingFallback = true;
     cfg.fallbackColor = inpSSLevelColor;
     cfg.fallbackStyle = inpSSLevelStyle;
     cfg.fallbackWidth = inpSSLevelWidth;
@@ -1070,7 +997,6 @@ SModeConfig BuildMEqualConfig(const string objectPrefix)
 {
     SModeConfig cfg = BuildModeConfig(objectPrefix, "MEq");
     cfg.useStepFilter = false;
-    cfg.useSimpleZones = true;
     cfg.midpointColor = inpMLevelColor;
     cfg.midpointStyle = inpMLevelStyle;
     cfg.midpointWidth = inpMLevelWidth;
@@ -1119,12 +1045,28 @@ SModeConfig BuildFactorHarmonicConfig(const string objectPrefix)
     return cfg;
 }
 
+SModeConfig BuildTHConfig(const string objectPrefix)
+{
+    // Keep legacy-compatible TH family naming for cleanup/prefix matching
+    SModeConfig cfg = BuildModeConfig(objectPrefix, "TH_Level");
+
+    // TH mode: non-structure levels use C-level styling as fallback when triggers off
+    // When triggers are on, ClassifyLevels applies inpTriggerColor directly
+    cfg.fallbackColor = inpCLevelColor;
+    cfg.fallbackStyle = inpCLevelStyle;
+    cfg.fallbackWidth = inpCLevelWidth;
+    cfg.midpointColor = inpTriggerColor;
+    cfg.midpointStyle = inpTriggerStyle;
+    cfg.midpointWidth = inpTriggerWidth;
+    return cfg;
+}
+
 //+------------------------------------------------------------------+
 //| UNIFIED PIPELINE EXECUTOR                                        |
 //|                                                                  |
-//| Runs all 5 stages in order:                                      |
-//|   1. Calculate → 2. Classify → 3. BuildZones → 4. DeriveTriggers |
-//|   5a. RenderZones (FIRST) → 5b. RenderLines → 5c. Cleanup       |
+//| Runs stages in order:                                            |
+//|   1. Calculate → 2. Classify → 3+4. BuildZonesAndLines           |
+//|   5a. RenderZones → 5b. RenderLines → 5c. Cleanup                |
 //|                                                                  |
 //| This replaces ALL individual Draw*Levels functions.              |
 //+------------------------------------------------------------------+
@@ -1140,8 +1082,6 @@ SPipelineResult ExecuteUniformPipeline(
     SPipelineResult result;
     result.zoneCount = 0;
     result.lineCount = 0;
-    result.zonesRendered = 0;
-    result.linesRendered = 0;
     result.success = false;
     result.errorMessage = "";
     
@@ -1151,7 +1091,6 @@ SPipelineResult ExecuteUniformPipeline(
     }
     
     bool triggerEnabled = IsTriggerLevelsEnabled();
-    bool structureEnabled = inpShowStructure;
     int baseMultiplier = GetValidatedBaseMultiplier();
     
     // Viewport
@@ -1163,7 +1102,6 @@ SPipelineResult ExecuteUniformPipeline(
     int rawCount = CalculateLevelsUniform(midpointPrice, stepSize,
                                            maxLevelsAbove, maxLevelsBelow,
                                            config.useStepFilter,
-                                           triggerEnabled, structureEnabled, baseMultiplier,
                                            config.boundByHistorical, config.maxPrice, config.minPrice,
                                            rawLevels);
     if(rawCount == 0) {
@@ -1176,27 +1114,22 @@ SPipelineResult ExecuteUniformPipeline(
     int classifiedCount = ClassifyLevels(rawLevels, rawCount, config, 
                                           triggerEnabled, baseMultiplier, classified);
     
-    // Stage 3: Build zones (FIRST — primary entity)
+    // Stage 3+4: Build zones and lines (merged — single pass)
     SZoneDefinition zones[];
-    result.zoneCount = BuildZones(classified, classifiedCount, config, vpTop, vpBottom, zones);
-    
-    // Stage 4: Derive trigger lines (from zone boundaries)
     STriggerLine lines[];
-    result.lineCount = DeriveTriggerLines(classified, classifiedCount, zones, result.zoneCount,
-                                           config, vpTop, vpBottom, lines);
+    BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
+                       zones, result.zoneCount, lines, result.lineCount);
     
-    // Stage 5a: Render ZONES first
-    result.zonesRendered = RenderZones(zones, result.zoneCount, config);
+    // Stage 5: Render and cleanup
+    RenderZones(zones, result.zoneCount, config);
+    RenderTriggerLines(lines, result.lineCount, config);
     
-    // Stage 5b: Render LINES second (derived from zones)
-    result.linesRendered = RenderTriggerLines(lines, result.lineCount, config);
-    
-    // Stage 5c: Cleanup surplus
+    // Cleanup surplus
     int maxStep = 0;
     for(int i = 0; i < rawCount; i++) {
         if(rawLevels[i].logicalStep > maxStep) maxStep = rawLevels[i].logicalStep;
     }
-    CleanupSurplusPipeline(config, zones, result.zoneCount, lines, result.lineCount, maxStep);
+    CleanupSurplusPipeline(config, maxStep);
     
     result.success = true;
     return result;
@@ -1215,8 +1148,6 @@ SPipelineResult ExecuteSSLSPipeline(
     SPipelineResult result;
     result.zoneCount = 0;
     result.lineCount = 0;
-    result.zonesRendered = 0;
-    result.linesRendered = 0;
     result.success = false;
     result.errorMessage = "";
     
@@ -1226,7 +1157,6 @@ SPipelineResult ExecuteSSLSPipeline(
     }
     
     bool triggerEnabled = IsTriggerLevelsEnabled();
-    bool structureEnabled = inpShowStructure;
     int baseMultiplier = GetValidatedBaseMultiplier();
     double vpTop, vpBottom;
     GetViewportBounds(vpTop, vpBottom);
@@ -1239,7 +1169,6 @@ SPipelineResult ExecuteSSLSPipeline(
     SCalculatedLevel rawLevels[];
     int rawCount = CalculateLevelsAlternating(midpointPrice, step1, step2,
                                                maxLevelsAbove, maxLevelsBelow,
-                                               triggerEnabled, structureEnabled, baseMultiplier,
                                                config.boundByHistorical, config.maxPrice, config.minPrice,
                                                rawLevels);
     if(rawCount == 0) { result.errorMessage = "No levels calculated"; return result; }
@@ -1250,24 +1179,21 @@ SPipelineResult ExecuteSSLSPipeline(
                                                      triggerEnabled, baseMultiplier, lsFirst,
                                                      classified);
     
-    // Stage 3
+    // Stage 3+4: Merged zones and lines
     SZoneDefinition zones[];
-    result.zoneCount = BuildZones(classified, classifiedCount, config, vpTop, vpBottom, zones);
-    
-    // Stage 4
     STriggerLine lines[];
-    result.lineCount = DeriveTriggerLines(classified, classifiedCount, zones, result.zoneCount,
-                                           config, vpTop, vpBottom, lines);
+    BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
+                       zones, result.zoneCount, lines, result.lineCount);
     
-    // Stage 5
-    result.zonesRendered = RenderZones(zones, result.zoneCount, config);
-    result.linesRendered = RenderTriggerLines(lines, result.lineCount, config);
+    // Stage 5: Render
+    RenderZones(zones, result.zoneCount, config);
+    RenderTriggerLines(lines, result.lineCount, config);
     
     int maxStep = 0;
     for(int i = 0; i < rawCount; i++) {
         if(rawLevels[i].logicalStep > maxStep) maxStep = rawLevels[i].logicalStep;
     }
-    CleanupSurplusPipeline(config, zones, result.zoneCount, lines, result.lineCount, maxStep);
+    CleanupSurplusPipeline(config, maxStep);
     
     result.success = true;
     return result;
@@ -1284,8 +1210,6 @@ SPipelineResult ExecuteMLevelPipeline(
     SPipelineResult result;
     result.zoneCount = 0;
     result.lineCount = 0;
-    result.zonesRendered = 0;
-    result.linesRendered = 0;
     result.success = false;
     result.errorMessage = "";
     
@@ -1295,7 +1219,6 @@ SPipelineResult ExecuteMLevelPipeline(
     }
     
     bool triggerEnabled = IsTriggerLevelsEnabled();
-    bool structureEnabled = inpShowStructure;
     int baseMultiplier = GetValidatedBaseMultiplier();
     double vpTop, vpBottom;
     GetViewportBounds(vpTop, vpBottom);
@@ -1305,7 +1228,6 @@ SPipelineResult ExecuteMLevelPipeline(
     int rawCount = CalculateLevelsUniform(midpointPrice, controlDistance,
                                            maxLevelsAbove, maxLevelsBelow,
                                            config.useStepFilter,
-                                           triggerEnabled, structureEnabled, baseMultiplier,
                                            config.boundByHistorical, config.maxPrice, config.minPrice,
                                            rawLevels);
     if(rawCount == 0) { result.errorMessage = "No levels calculated"; return result; }
@@ -1315,22 +1237,20 @@ SPipelineResult ExecuteMLevelPipeline(
     int classifiedCount = ClassifyLevelsMMode(rawLevels, rawCount, config,
                                               triggerEnabled, baseMultiplier, classified);
     
-    // Stage 3-5
+    // Stage 3+4: Merged zones and lines
     SZoneDefinition zones[];
-    result.zoneCount = BuildZones(classified, classifiedCount, config, vpTop, vpBottom, zones);
-    
     STriggerLine lines[];
-    result.lineCount = DeriveTriggerLines(classified, classifiedCount, zones, result.zoneCount,
-                                           config, vpTop, vpBottom, lines);
+    BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
+                       zones, result.zoneCount, lines, result.lineCount);
     
-    result.zonesRendered = RenderZones(zones, result.zoneCount, config);
-    result.linesRendered = RenderTriggerLines(lines, result.lineCount, config);
+    RenderZones(zones, result.zoneCount, config);
+    RenderTriggerLines(lines, result.lineCount, config);
     
     int maxStep = 0;
     for(int i = 0; i < rawCount; i++) {
         if(rawLevels[i].logicalStep > maxStep) maxStep = rawLevels[i].logicalStep;
     }
-    CleanupSurplusPipeline(config, zones, result.zoneCount, lines, result.lineCount, maxStep);
+    CleanupSurplusPipeline(config, maxStep);
     
     result.success = true;
     return result;
@@ -1348,8 +1268,6 @@ SPipelineResult ExecuteHarmonicPipeline(
     SPipelineResult result;
     result.zoneCount = 0;
     result.lineCount = 0;
-    result.zonesRendered = 0;
-    result.linesRendered = 0;
     result.success = false;
     result.errorMessage = "";
     
@@ -1359,7 +1277,6 @@ SPipelineResult ExecuteHarmonicPipeline(
     }
     
     bool triggerEnabled = IsTriggerLevelsEnabled();
-    bool structureEnabled = inpShowStructure;
     int baseMultiplier = GetValidatedBaseMultiplier();
     double vpTop, vpBottom;
     GetViewportBounds(vpTop, vpBottom);
@@ -1368,7 +1285,6 @@ SPipelineResult ExecuteHarmonicPipeline(
     SCalculatedLevel rawLevels[];
     int rawCount = CalculateLevelsHarmonic(centerPrice, baseStepSize, harmonicRatio,
                                             maxLevelsAbove, maxLevelsBelow,
-                                            triggerEnabled, structureEnabled, baseMultiplier,
                                             rawLevels);
     if(rawCount == 0) { result.errorMessage = "No levels calculated"; return result; }
     
@@ -1377,22 +1293,20 @@ SPipelineResult ExecuteHarmonicPipeline(
     int classifiedCount = ClassifyLevels(rawLevels, rawCount, config,
                                           triggerEnabled, baseMultiplier, classified);
     
-    // Stages 3-5
+    // Stages 3+4+5: Merged zones and lines, then render
     SZoneDefinition zones[];
-    result.zoneCount = BuildZones(classified, classifiedCount, config, vpTop, vpBottom, zones);
-    
     STriggerLine lines[];
-    result.lineCount = DeriveTriggerLines(classified, classifiedCount, zones, result.zoneCount,
-                                           config, vpTop, vpBottom, lines);
+    BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
+                       zones, result.zoneCount, lines, result.lineCount);
     
-    result.zonesRendered = RenderZones(zones, result.zoneCount, config);
-    result.linesRendered = RenderTriggerLines(lines, result.lineCount, config);
+    RenderZones(zones, result.zoneCount, config);
+    RenderTriggerLines(lines, result.lineCount, config);
     
     int maxStep = 0;
     for(int i = 0; i < rawCount; i++) {
         if(rawLevels[i].logicalStep > maxStep) maxStep = rawLevels[i].logicalStep;
     }
-    CleanupSurplusPipeline(config, zones, result.zoneCount, lines, result.lineCount, maxStep);
+    CleanupSurplusPipeline(config, maxStep);
     
     result.success = true;
     return result;
@@ -1409,6 +1323,7 @@ struct SModeSuffixEntry {
     string levelAbove;      // e.g., "SSLS_Above_"
     string levelBelow;      // e.g., "SSLS_Below_"
     string midpoint;        // e.g., "SSLS_Midpoint_"
+    string zoneCenter;      // e.g., "SSLS_Zone_Center_" — zone on midpoint/anchor level
 };
 
 // All registered mode suffixes — used by ClearAllLevels and DeleteAllIndicatorObjects
@@ -1422,48 +1337,56 @@ void GetAllModeSuffixes(SModeSuffixEntry &entries[], int &count)
     entries[0].levelAbove = "SSLS_Above_";
     entries[0].levelBelow = "SSLS_Below_";
     entries[0].midpoint = "SSLS_Midpoint_";
+    entries[0].zoneCenter = "SSLS_Zone_Center_";
     
     // M (Control-based)
     entries[1].zoneSuffix = "M_Zone_";
     entries[1].levelAbove = "M_Above_";
     entries[1].levelBelow = "M_Below_";
     entries[1].midpoint = "M_Midpoint_";
+    entries[1].zoneCenter = "M_Zone_Center_";
     
     // MEq (Equal spacing)
     entries[2].zoneSuffix = "MEq_Zone_";
     entries[2].levelAbove = "MEq_Above_";
     entries[2].levelBelow = "MEq_Below_";
     entries[2].midpoint = "MEq_Midpoint_";
+    entries[2].zoneCenter = "MEq_Zone_Center_";
     
     // TP
     entries[3].zoneSuffix = "TP_Zone_";
     entries[3].levelAbove = "TP_Above_";
     entries[3].levelBelow = "TP_Below_";
     entries[3].midpoint = "TP_Midpoint_";
+    entries[3].zoneCenter = "TP_Zone_Center_";
     
     // Combo
     entries[4].zoneSuffix = "Combo_Zone_";
     entries[4].levelAbove = "Combo_Above_";
     entries[4].levelBelow = "Combo_Below_";
     entries[4].midpoint = "Combo_Midpoint_";
+    entries[4].zoneCenter = "Combo_Zone_Center_";
     
     // Factor (Standard)
     entries[5].zoneSuffix = "Factor_Zone_";
     entries[5].levelAbove = "Factor_Above_";
     entries[5].levelBelow = "Factor_Below_";
-    entries[5].midpoint = "Factor_Center";
+    entries[5].midpoint = "Factor_Center_";
+    entries[5].zoneCenter = "Factor_Zone_Center_";
     
     // Factor (Harmonic)
     entries[6].zoneSuffix = "Factor_Harmonic_Zone_";
     entries[6].levelAbove = "Factor_Harmonic_Above_";
     entries[6].levelBelow = "Factor_Harmonic_Below_";
-    entries[6].midpoint = "Factor_Harmonic_Center";
+    entries[6].midpoint = "Factor_Harmonic_Center_";
+    entries[6].zoneCenter = "Factor_Harmonic_Zone_Center_";
     
     // TH (Traditional)
     entries[7].zoneSuffix = "TH_Level_Zone_";
     entries[7].levelAbove = "TH_Level_Above_";
     entries[7].levelBelow = "TH_Level_Below_";
     entries[7].midpoint = "TH_Level_Midpoint_";
+    entries[7].zoneCenter = "TH_Level_Zone_Center_";
 }
 
 // Get all zone suffixes as a flat array (for ClearAllLevels compatibility)
@@ -1473,11 +1396,15 @@ void GetAllZoneSuffixes(string &suffixes[], int &count)
     int entryCount = 0;
     GetAllModeSuffixes(entries, entryCount);
     
-    count = entryCount;
+    // Each mode has 2 zone suffix families: zoneSuffix (Above/Below) + zoneCenter
+    count = entryCount * 2;
     ArrayResize(suffixes, count);
-    for(int i = 0; i < count; i++) {
-        suffixes[i] = entries[i].zoneSuffix;
+    int idx = 0;
+    for(int i = 0; i < entryCount; i++) {
+        suffixes[idx++] = entries[i].zoneSuffix;
+        suffixes[idx++] = entries[i].zoneCenter;
     }
+    count = idx;
 }
 
 // Get all level suffixes as a flat array (for ClearAllLevels compatibility)

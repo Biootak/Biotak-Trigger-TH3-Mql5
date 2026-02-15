@@ -90,16 +90,6 @@ SUnifiedZoneConfig GetUnifiedZoneConfig()
     return cachedConfig;
 }
 
-// Simple zone for modes without structure/trigger separation
-bool CreateSimpleZone(const string zoneName,
-                      const double prevPrice,
-                      const double currentPrice,
-                      const color levelColor)
-{
-    SUnifiedZoneConfig config = GetUnifiedZoneConfig();
-    return CreateUnifiedZone(zoneName, prevPrice, currentPrice, config, levelColor);
-}
-
 // Zone with smart fallback for all modes
 bool CreateZoneWithSmartFallback(const string zoneName,
                                  const double currentPrice,
@@ -178,25 +168,5 @@ bool CreateZoneWithSmartFallback(const string zoneName,
     return CreateUnifiedZone(zoneName, effectivePrevPrice, currentPrice, config, levelColor);
 }
 
-// Batch create zones
-struct SZonePair {
-    string name;
-    double prevPrice;
-    double currentPrice;
-    color levelColor;
-};
-
-int CreateZonesBatch(const SZonePair &zones[], const SUnifiedZoneConfig &config)
-{
-    int count = ArraySize(zones);
-    int successCount = 0;
-    for(int i = 0; i < count; i++) {
-        if(CreateUnifiedZone(zones[i].name, zones[i].prevPrice, zones[i].currentPrice,
-                            config, zones[i].levelColor)) {
-            successCount++;
-        }
-    }
-    return successCount;
-}
 
 #endif // UNIFIED_ZONE_SYSTEM_MQH

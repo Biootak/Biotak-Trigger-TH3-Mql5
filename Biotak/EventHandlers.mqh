@@ -332,12 +332,46 @@ void HideAllTHObjects()
 //| Delete all indicator objects (DRY helper for OnDeinit)           |
 //+------------------------------------------------------------------+
 void DeleteAllIndicatorObjects() {
+    // Primary cleanup: all indicator-owned objects by prefix
     ObjectsDeleteAll(0, inpObjectPrefix);
-    ObjectsDeleteAll(0, inpObjectPrefix + "SSLS_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "M_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "TP_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Combo_Zone_", -1, -1);
-    ObjectsDeleteAll(0, inpObjectPrefix + "Factor_Zone_", -1, -1);
+
+    // Registry-based fallback cleanup for any stragglers across mode families
+    // (keeps cleanup logic aligned with LevelPipeline suffix source-of-truth)
+    SModeSuffixEntry entries[];
+    int entryCount = 0;
+    GetAllModeSuffixes(entries, entryCount);
+    for(int i = 0; i < entryCount; i++) {
+        ObjectsDeleteAll(0, inpObjectPrefix + entries[i].zoneSuffix, -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + entries[i].zoneCenter, -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + entries[i].levelAbove, -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + entries[i].levelBelow, -1, -1);
+        ObjectsDeleteAll(0, inpObjectPrefix + entries[i].midpoint, -1, -1);
+    }
+}
+
+void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
+{
+    if(StringLen(indicatorPrefix) == 0) return;
+
+    int total = ObjectsTotal(0, -1, -1);
+    int prefixLen = StringLen(indicatorPrefix);
+    int deleted = 0;
+
+    for(int i = total - 1; i >= 0; i--) {
+        string objName = ObjectName(0, i, -1, -1);
+        if(objName == "") continue;
+        if(StringLen(objName) < prefixLen) continue;
+        if(StringSubstr(objName, 0, prefixLen) != indicatorPrefix) continue;
+
+        CacheRemoveObject(objName);
+        g_suppressDeleteEvents = true;
+        if(ObjectDelete(0, objName)) deleted++;
+        g_suppressDeleteEvents = false;
+    }
+
+    _LOG_GATE_I Print("[I][GEN] Emergency cleanup (indicator-scoped) deleted=", deleted,
+                      " | before=", total, " | after=", ObjectsTotal(0, -1, -1));
+    InvalidateObjectCountCache();
 }
 
     void OnDeinitHandler(const int reason) {
@@ -464,26 +498,41 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     // FIX: Zone suffixes are checked FIRST and separately from level suffixes.
     // Previously, zones like "SSLS_Zone_" matched "SSLS_" in LEVEL_SUFFIXES,
     // causing clearZones=false to be ineffective (zones always deleted).
-    static const string ZONE_SUFFIXES[] = {
-        "SSLS_Zone_", "M_Zone_", "TP_Zone_", "Combo_Zone_", "Factor_Zone_",
-        "MEq_Zone_", "Factor_Harmonic_Zone_", "TH_Level_Zone_"
-    };
-    static const string LEVEL_SUFFIXES[] = {
-        "SSLS_", "M_", "MLabel_", "MEq_", "MEqLabel_", "TP_", "Combo_",
-        "SharedPattern_", "TH_Level_", "S_",
-        "TriggerTH_Up_", "TriggerTH_Down_",
-        "StructureLevel1_Up_", "StructureLevel1_Down_",
-        "StructureLevel2_Up_", "StructureLevel2_Down_",
-        "StructureLevel3_Up_", "StructureLevel3_Down_",
-        "StructureLevel4_Up_", "StructureLevel4_Down_",
-        "StructureLevel5_Up_", "StructureLevel5_Down_",
-        "Mid", "Factor_"
-    };
-    // PERF: Pre-compute suffix lengths once (static locals compile to one-time init)
+    // Pull suffix families from centralized LevelPipeline registry
+    static string ZONE_SUFFIXES[];
+    static string LEVEL_SUFFIXES[];
     static int LEVEL_SUFFIX_LENS[];
     static int ZONE_SUFFIX_LENS[];
     static bool s_suffixLensInit = false;
     if(!s_suffixLensInit) {
+        int zoneCount = 0;
+        int levelCount = 0;
+        GetAllZoneSuffixes(ZONE_SUFFIXES, zoneCount);
+        GetAllLevelSuffixes(LEVEL_SUFFIXES, levelCount);
+
+        // Backward compatibility for legacy TH/manual object names
+        int oldLevelCount = ArraySize(LEVEL_SUFFIXES);
+        ArrayResize(LEVEL_SUFFIXES, oldLevelCount + 18);
+        int k = oldLevelCount;
+        LEVEL_SUFFIXES[k++] = "MLabel_";
+        LEVEL_SUFFIXES[k++] = "MEqLabel_";
+        LEVEL_SUFFIXES[k++] = "SharedPattern_";
+        LEVEL_SUFFIXES[k++] = "TH_Level_";
+        LEVEL_SUFFIXES[k++] = "S_";
+        LEVEL_SUFFIXES[k++] = "TriggerTH_Up_";
+        LEVEL_SUFFIXES[k++] = "TriggerTH_Down_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel1_Up_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel1_Down_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel2_Up_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel2_Down_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel3_Up_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel3_Down_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel4_Up_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel4_Down_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel5_Up_";
+        LEVEL_SUFFIXES[k++] = "StructureLevel5_Down_";
+        LEVEL_SUFFIXES[k++] = "Mid";
+
         ArrayResize(LEVEL_SUFFIX_LENS, ArraySize(LEVEL_SUFFIXES));
         for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++)
             LEVEL_SUFFIX_LENS[s] = StringLen(LEVEL_SUFFIXES[s]);
@@ -662,6 +711,63 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     s_lastScalingFactor = currentScalingFactor;
     return true;
 }
+
+enum ECacheInvalidationFlags {
+    CACHE_INV_NONE = 0,
+    CACHE_INV_TIMEFRAME = 1,
+    CACHE_INV_NEW_BAR = 2,
+    CACHE_INV_CUSTOM_PRICE = 4
+};
+
+void ApplyCacheInvalidation(const int invalidationFlags,
+                            const int previousPeriod,
+                            const int currentPeriod,
+                            const double previousCustomPrice,
+                            const double currentCustomPrice)
+{
+    if((invalidationFlags & CACHE_INV_TIMEFRAME) != 0) {
+        InvalidateTimeframeDependentCaches();
+        InvalidateATRCache();
+        _LOG_GATE_I Print("[I][GEN] Timeframe changed: ", previousPeriod, " -> ", currentPeriod);
+    }
+
+    if((invalidationFlags & CACHE_INV_NEW_BAR) != 0) {
+        InvalidateFactorCache();
+    }
+
+    if((invalidationFlags & CACHE_INV_CUSTOM_PRICE) != 0) {
+        InvalidateTHCache();
+        _LOG_GATE_I Print("[I][GEN] Custom price changed: ", DoubleToString(previousCustomPrice, Digits),
+                          " -> ", DoubleToString(currentCustomPrice, Digits));
+    }
+}
+
+void LogRedrawDecision(const bool isNewBar,
+                       const bool timeframeChanged,
+                       const bool customPriceChanged,
+                       const bool gRedrawNeeded,
+                       const bool forceClear,
+                       const bool significantPriceChange,
+                       const bool tickThrottled)
+{
+    #ifdef ENABLE_DEBUG_LOGS
+    static datetime s_lastRedrawDecisionLog = 0;
+    datetime now = TimeCurrent();
+    if(now - s_lastRedrawDecisionLog < 5) return;
+
+    if(isNewBar || timeframeChanged || customPriceChanged || gRedrawNeeded || forceClear || significantPriceChange) {
+        Print("[D][GEN] Redraw decision | newBar=", isNewBar,
+              " tfChanged=", timeframeChanged,
+              " customChanged=", customPriceChanged,
+              " redrawFlag=", gRedrawNeeded,
+              " forceClear=", forceClear,
+              " sigPrice=", significantPriceChange,
+              " throttled=", tickThrottled);
+        s_lastRedrawDecisionLog = now;
+    }
+    #endif
+}
+
     void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
 {
         static ENUM_STEP_CALCULATION_MODE s_lastDrawnMode = (ENUM_STEP_CALCULATION_MODE)-1;
@@ -866,8 +972,22 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         case TH_STEP:
         default:
         {
-            // TH mode still uses legacy function (has unique tooltip/label logic)
-            DrawTHLevels(objectPrefix, dailyClosePrice);
+            StepCalculationData data;
+            if(!CalculateCommonStepData(dailyClosePrice, data)) {
+                _LOG_GATE_E Print("[E][GEN] TH_STEP: Failed to calculate common step data");
+                return;
+            }
+
+            // Unified path first (pipeline), with safe fallback to legacy renderer.
+            SModeConfig thCfg = BuildTHConfig(objectPrefix);
+            SPipelineResult thResult = ExecuteUniformPipeline(thCfg,
+                data.midpointPrice, data.thValue,
+                data.maxLevelsAbove, data.maxLevelsBelow);
+
+            if(!thResult.success) {
+                _LOG_GATE_W Print("[W][GEN] TH_STEP pipeline failed, falling back to legacy DrawTHLevels: ", thResult.errorMessage);
+                DrawTHLevels(objectPrefix, dailyClosePrice);
+            }
             _LOG_GATE_I Print("[I][GEN] TH_STEP: Completed successfully");
             break;
         }
@@ -1066,8 +1186,12 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     #endif
     bool skipZones = g_customPriceLineDragging;
     TH3_PROF_START(Levels);
+    TH3_PROF_START(LevelsClear);
     ClearAllLevels(objectPrefix, !skipZones);
+    TH3_PROF_END(LevelsClear);
+    TH3_PROF_START(LevelsDrawByMode);
     DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
+    TH3_PROF_END(LevelsDrawByMode);
     TH3_PROF_END(Levels);
     g_redrawTHLevelsNeeded = false;
     }
@@ -1110,14 +1234,12 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
         customPriceChanged = (MathAbs(currentCustomPrice - s_lastCustomPrice) > EPSILON_PRICE);
     }
     bool tickThrottled = (nowMs - s_lastTickMs < 50 && s_lastTickMs != 0);
-    if(timeframeChanged) {        InvalidateTimeframeDependentCaches();
-    InvalidateATRCache();
-        _LOG_GATE_I Print("[I][GEN] Timeframe changed: ", s_lastPeriod, " -> ", currentPeriod);
-    }
-    if(barsChanged) {        InvalidateFactorCache();
-    }
-    if(customPriceChanged) {        InvalidateTHCache();
-        _LOG_GATE_I Print("[I][GEN] Custom price changed: ", DoubleToString(s_lastCustomPrice, Digits));
+    int invalidationFlags = CACHE_INV_NONE;
+    if(timeframeChanged) invalidationFlags |= CACHE_INV_TIMEFRAME;
+    if(barsChanged) invalidationFlags |= CACHE_INV_NEW_BAR;
+    if(customPriceChanged) invalidationFlags |= CACHE_INV_CUSTOM_PRICE;
+    if(invalidationFlags != CACHE_INV_NONE) {
+        ApplyCacheInvalidation(invalidationFlags, s_lastPeriod, currentPeriod, s_lastCustomPrice, currentCustomPrice);
     }
     if(rates_total > 0)
     {
@@ -1126,6 +1248,9 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
            !timeframeChanged && !customPriceChanged) {
         return rates_total;
         }
+    LogRedrawDecision(isNewBar, timeframeChanged, customPriceChanged,
+                      g_redrawTHLevelsNeeded, g_forceClearOnNextDraw,
+                      significantPriceChange, tickThrottled);
     s_lastTickMs = nowMs;
     s_lastPrice = currentPrice;
     s_lastBarTime = currentBarTime;
@@ -1149,13 +1274,9 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
             else if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
                 Print("[E][GEN] [CRIT] CRITICAL: ", totalObjects, " objects approaching MT4 limit (64000)!");
-    Print("[D][GEN] [CLEAN] EMERGENCY: Using ObjectsDeleteAll for cleanup...");
+    Print("[D][GEN] [CLEAN] EMERGENCY: Using indicator-scoped cleanup...");
     #endif
-    int deleted = 0;
-    deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);
-    deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
-    _LOG_GATE_I Print("[I][GEN] Emergency cleanup completed. Objects: ", totalObjects, " -> ", ObjectsTotal(0), " (deleted=", deleted, ")");
-    InvalidateObjectCountCache();
+    EmergencyCleanupIndicatorObjects(inpObjectPrefix);
     }
         }
     }

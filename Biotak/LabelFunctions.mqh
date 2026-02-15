@@ -276,12 +276,17 @@ bool DrawMainLevels(const string prefix) {
             } else if (triggerEnabled) {
                 levelType = 2;
             } else {
-                // BASE PLAYER: Non-structural steps are trigger subdivisions
-                // With base=N, every step between structural levels forms part of the N-division grid
-                levelType = 2;
+                // Trigger subdivisions hidden when triggers disabled
+                levelType = 0;
             }
             
-            // All steps are part of the Base Player grid — never skip
+            // Skip trigger subdivisions when triggers disabled
+            if(levelType == 0) {
+                levelCountAbove++;
+                priceLevelAbove += (thStepSizePoints * pointValue);
+                stepCountAbove++;
+                continue;
+            }
             
             // If off-screen, skip string building and object creation but count the level
             if(!isAboveVisible) {
@@ -428,11 +433,17 @@ bool DrawMainLevels(const string prefix) {
             } else if (triggerEnabled) {
                 levelType = 2;
             } else {
-                // BASE PLAYER: Non-structural steps are trigger subdivisions
-                levelType = 2;
+                // Non-structural steps are trigger subdivisions — skip when triggers disabled
+                levelType = 0;
             }
             
-            // All steps are part of the Base Player grid — never skip
+            // Skip trigger subdivisions when triggers disabled
+            if(levelType == 0) {
+                levelCountBelow++;
+                priceLevelBelow -= (thStepSizePoints * pointValue);
+                stepCountBelow++;
+                continue;
+            }
             
             if(!isBelowVisible) {
                 levelCountBelow++;
