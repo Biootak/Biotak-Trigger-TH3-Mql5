@@ -8,6 +8,14 @@ int OnInitHandler() {    InitializeGlobalCache();
     bool shouldBeHidden = RestoreBoolGlobalVar(gvar_name, false);
     DEBUG_PRINTF("OnInit: shouldBeHidden=", shouldBeHidden);
     string chartIdStr = GetCachedChartIdStr();
+    datetime initNow = TimeCurrent();
+    string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + chartIdStr;
+    bool recentTimeframeSwitch = false;
+    if(GlobalVariableCheck(tfSwitchStampGvar)) {
+        datetime lastTFSwitch = (datetime)GlobalVariableGet(tfSwitchStampGvar);
+        if(initNow > 0 && lastTFSwitch > 0 && (initNow - lastTFSwitch) <= 20)
+            recentTimeframeSwitch = true;
+    }
     g_triggerLevelsEnabled = RestoreBoolGlobalVar("Biotak_TriggerLevels_" + chartIdStr, inpShowTrigger);
     g_linesVisible = RestoreBoolGlobalVar("Biotak_LinesVisible_" + chartIdStr, inpShowLines);
     g_atrLabelsVisible = RestoreBoolGlobalVar("Biotak_ATRLabels_" + chartIdStr, inpShowATRLabels);
@@ -66,8 +74,14 @@ int OnInitHandler() {    InitializeGlobalCache();
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
     ChartSetInteger(0, CHART_SHOW_GRID, false);
     CheckArraySizes();
-    if(!UpdateHistoricalValues()) {Print("OnInit: UpdateHistoricalValues failed. Error: ", GetLastError()); return INIT_FAILED;}
-    g_initialized=true;
+    bool deferHeavyInit = recentTimeframeSwitch;
+    if(!deferHeavyInit) {
+        if(!UpdateHistoricalValues()) {Print("OnInit: UpdateHistoricalValues failed. Error: ", GetLastError()); return INIT_FAILED;}
+        g_initialized=true;
+    } else {
+        // PERF: Defer historical snapshot during rapid TF switches; first redraw will refresh.
+        g_initialized=false;
+    }
     g_calculatedOnce=false;
     
     // Initialize ATR Adaptive Scaling system
@@ -130,7 +144,20 @@ int OnInitHandler() {    InitializeGlobalCache();
     }
     
     g_redrawTHLevelsNeeded = true;
-    InitializeBasePriceSystem();
+    string baseInitStampGvar = "Biotak_BaseInit_" + chartIdStr;
+    bool shouldInitBasePrice = true;
+    if(deferHeavyInit && GlobalVariableCheck(baseInitStampGvar)) {
+        datetime lastBaseInit = (datetime)GlobalVariableGet(baseInitStampGvar);
+        if(initNow > 0 && lastBaseInit > 0 && (initNow - lastBaseInit) <= 120)
+            shouldInitBasePrice = false;
+    }
+    if(shouldInitBasePrice) {
+        InitializeBasePriceSystem();
+        if(initNow > 0) GlobalVariableSet(baseInitStampGvar, (double)initNow);
+    } else {
+        // PERF: Lazy init in redraw path when needed.
+        g_systemInitialized = false;
+    }
     string lockFlagName = "Biotak_LockTF_" + chartIdStr;
     {
         double val = GlobalVariableGet(lockFlagName);
@@ -222,7 +249,22 @@ int OnInitHandler() {    InitializeGlobalCache();
         }
     }
     InitializeATRCache();
-    WarmupATRMultiTFCache();
+    // PERF: Timeframe-switch debounce for ATR warmup.
+    // On rapid TF changes, repeated warmup adds noticeable init latency.
+    // Keep logic intact by skipping only short-interval repeats (or hidden startup);
+    // ATR values are still calculated on-demand during normal drawing.
+    if(inpShowATRLabels && !shouldBeHidden) {
+        datetime nowWarmup = TimeCurrent();
+        string warmupGvar = "Biotak_ATRWarmup_" + chartIdStr;
+        datetime lastWarmup = 0;
+        if(GlobalVariableCheck(warmupGvar)) {
+            lastWarmup = (datetime)GlobalVariableGet(warmupGvar);
+        }
+        if(lastWarmup <= 0 || nowWarmup <= 0 || (nowWarmup - lastWarmup) > 90) {
+            WarmupATRMultiTFCache();
+            if(nowWarmup > 0) GlobalVariableSet(warmupGvar, (double)nowWarmup);
+        }
+    }
     UpdateLockStatusLabel();
     PrintBuildInfo();
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
@@ -330,9 +372,13 @@ void HideAllTHObjects()
 //+------------------------------------------------------------------+
 //| Delete all indicator objects (DRY helper for OnDeinit)           |
 //+------------------------------------------------------------------+
-void DeleteAllIndicatorObjects() {
+void DeleteAllIndicatorObjects(bool deepCleanup = false) {
     // Primary cleanup: all indicator-owned objects by prefix
     ObjectsDeleteAll(0, inpObjectPrefix);
+
+    // PERF: Deep suffix-by-suffix cleanup is expensive and mainly needed on full remove.
+    // For timeframe/parameter deinit cycles, primary prefix cleanup is sufficient and much faster.
+    if(!deepCleanup) return;
 
     // Registry-based fallback cleanup for any stragglers across mode families
     // (keeps cleanup logic aligned with LevelPipeline suffix source-of-truth)
@@ -375,6 +421,11 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
 
     void OnDeinitHandler(const int reason) {
         DEBUG_PRINT("Starting cleanup");
+    if(reason == REASON_CHARTCHANGE || reason == REASON_PARAMETERS) {
+        string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
+        datetime nowSwitch = TimeCurrent();
+        if(nowSwitch > 0) GlobalVariableSet(tfSwitchStampGvar, (double)nowSwitch);
+    }
     ReleaseATRHandle();
     EventKillTimer();
     // PERF: ObjectDelete is safe to call on non-existent objects (returns false, no error)
@@ -388,7 +439,7 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
     {
         DEBUG_PRINT("Indicator removed - cleaning all GlobalVariables");
     CleanupAllGlobalVariables();
-    DeleteAllIndicatorObjects();
+    DeleteAllIndicatorObjects(true);
     ObjectsDeleteAll(0, "TH3_Structure_");
     ObjectsDeleteAll(0, TH3_PATTERN_PREFIX);  // Clean up AB=CD pattern objects
     ObjectsDeleteAll(0, TH3_TEMP_PREFIX);     // Clean up any temp drawing objects
@@ -435,12 +486,12 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
     GlobalVariableSet(th3UpdateFlag, 1.0);
     GlobalVariableTemp(th3UpdateFlag);
     DEBUG_PRINT("OnDeinit (REASON_PARAMETERS) - reset overrides");
-    DeleteAllIndicatorObjects();
+    DeleteAllIndicatorObjects(false);
     }
     else
     {
         DEBUG_PRINTF("OnDeinit (reason=", reason);
-    DeleteAllIndicatorObjects();
+    DeleteAllIndicatorObjects(false);
     }
     CleanupCustomPriceObjects(false, true);
     // FIX: Force ChartRedraw after cleanup so deleted objects disappear immediately
@@ -983,11 +1034,37 @@ void LogRedrawDecision(const bool isNewBar,
     }
     void RedrawAllObjects(bool force_redraw=false)
 {
+        // PERF: Soft millisecond guard for burst calls (independent from second-based gate)
+        // Keeps UI responsive while coalescing redundant back-to-back redraw requests.
+        static uint s_lastRedrawAttemptMs = 0;
+        static uint s_lastForcedRedrawMs = 0;
+        uint nowMs = GetTickCount();
+
+        // PERF: Coalesce event-burst forced redraws (very small window, keeps behavior intact)
+        // Prevents multiple full redraws from adjacent key/mouse/chart events in the same burst.
+        if(force_redraw) {
+            if(s_lastForcedRedrawMs != 0 && nowMs - s_lastForcedRedrawMs < 20) return;
+            s_lastForcedRedrawMs = nowMs;
+        }
+
         // PERF: Refresh cached frame time once — eliminates ~2000+ TimeCurrent() syscalls in cache ops
         CacheRefreshFrameTime();
         // PERF: Cache visibility state once per frame — skips ~800 ObjectSetInteger calls when unchanged
         CacheRefreshVisibilityState();
         datetime currentTime = TimeGMT();
+    // PERF: Idle fast-path — when no work is pending, skip expensive UpdateBasePrice/ATR path.
+    // Keep historical refresh and 30-min base-price boundary updates as hard conditions.
+    bool customPriceLineExists = g_customPriceLineCreated;
+    bool historicalRefreshDue = (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized);
+    int currentServerMinute = TimeMinute(CacheGetFrameTime());
+    bool basePriceBoundary = (currentServerMinute == 0 || currentServerMinute == 30);
+    bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || customPriceLineExists || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
+    if(!hasPendingWork) {
+        if(nowMs - s_lastRedrawAttemptMs < 35) return;
+        s_lastRedrawAttemptMs = nowMs;
+        return;
+    }
+
     string s_cachedSymbol = GetCachedSymbol();
     int s_cachedDigits = GetCachedDigits();
     double s_cachedPoint = GetCachedPoint();
@@ -995,6 +1072,15 @@ void LogRedrawDecision(const bool isNewBar,
     CacheTickPrices();
     g_currentPrice = GetCachedBid();
     if(g_currentPrice <= 0) return;
+
+    // PERF: Controlled lazy base-price init (for deferred TF-switch startup path)
+    if(!g_systemInitialized) {
+        static uint s_lastBaseInitAttemptMs = 0;
+        if(s_lastBaseInitAttemptMs == 0 || nowMs - s_lastBaseInitAttemptMs > 3000) {
+            s_lastBaseInitAttemptMs = nowMs;
+            InitializeBasePriceSystem();
+        }
+    }
 
     TH3_PROF_START(BasePrice);
     UpdateBasePrice();
@@ -1013,8 +1099,14 @@ void LogRedrawDecision(const bool isNewBar,
     g_redrawTHLevelsNeeded = true;
     }
     // PERF: Use tracked bool instead of ObjectFind MT5 syscall (~0.5ms saved per frame)
-    bool customPriceLineExists = g_customPriceLineCreated;
-    if(!force_redraw && !g_labelsRelayoutNeeded && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
+    bool canSkipByState = (!force_redraw && !g_labelsRelayoutNeeded && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && g_initialized);
+    if(canSkipByState) {
+        // Existing second-level gate (may be zero by config)
+        if(currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS) return;
+        // Additional soft guard for immediate burst calls when second-level throttle is disabled
+        if(nowMs - s_lastRedrawAttemptMs < 35) return;
+    }
+    s_lastRedrawAttemptMs = nowMs;
     g_lastCalculation = currentTime;
     // PERF: Cache objectPrefix - only rebuild when timeframe actually changes
     static string s_cachedObjectPrefix = "";

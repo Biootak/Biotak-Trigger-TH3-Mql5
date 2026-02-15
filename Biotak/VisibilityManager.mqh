@@ -43,6 +43,12 @@ void SetObjectVisibility(const string name, const bool visible)
 
 void SetAllTHObjectsVisibility(const bool visible)
 {
+    static bool s_lastAllTHVisible = true;
+    static bool s_allTHInit = false;
+    if(s_allTHInit && s_lastAllTHVisible == visible) return;
+    s_allTHInit = true;
+    s_lastAllTHVisible = visible;
+
     // PERF: Iterate object cache instead of scanning ALL chart objects via ObjectsTotal
     // Only touches our own objects — O(CACHE_HASH_BUCKETS) instead of O(total_chart_objects)
     long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
@@ -55,6 +61,12 @@ void SetAllTHObjectsVisibility(const bool visible)
 
 void SetAllLineObjectsVisibility(const bool visible)
 {
+    static bool s_lastAllLineVisible = true;
+    static bool s_allLineInit = false;
+    if(s_allLineInit && s_lastAllLineVisible == visible) return;
+    s_allLineInit = true;
+    s_lastAllLineVisible = visible;
+
     // PERF: Iterate object cache instead of scanning ALL chart objects via ObjectsTotal
     // Only touches our own line objects — O(CACHE_HASH_BUCKETS) instead of O(total_chart_objects)
     long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;

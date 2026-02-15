@@ -692,22 +692,23 @@ string ExtractTimeBlock(const string &entry)
     bool UpdateBasePrice()
 {
         datetime currentTime = TimeCurrent();
-    int currentMinute = TimeMinute(currentTime);
+        MqlDateTime nowDt;
+        TimeToStruct(currentTime, nowDt);
+        int currentMinute = nowDt.min;
     if(currentMinute != 0 && currentMinute != 30)
     {
         return false;
     }
-    int totalMinutes = TimeMinute(currentTime) + TimeHour(currentTime) * 60;
+        int totalMinutes = nowDt.min + nowDt.hour * 60;
     int blockNumber = totalMinutes / BLOCK_MINUTES;
     int blockStartMinutes = blockNumber * BLOCK_MINUTES;
     int blockStartHour = blockStartMinutes / 60;
     int blockStartMinute = blockStartMinutes % 60;
-    MqlDateTime dt;
-    TimeToStruct(currentTime, dt);
-    dt.hour = blockStartHour;
-    dt.min = blockStartMinute;
-    dt.sec = 0;
-    datetime currentBlockStart = StructToTime(dt);
+        MqlDateTime blockDt = nowDt;
+        blockDt.hour = blockStartHour;
+        blockDt.min = blockStartMinute;
+        blockDt.sec = 0;
+        datetime currentBlockStart = StructToTime(blockDt);
     datetime previousBlockStart = currentBlockStart - BLOCK_MINUTES * 60;
     datetime previousBlockStartGMT = ConvertServerToGMT(previousBlockStart);
     string blockTimeStr = TimeToString(previousBlockStartGMT, TIME_MINUTES);
@@ -720,21 +721,20 @@ string ExtractTimeBlock(const string &entry)
         }
     return false;
     }
-    TimeToStruct(currentTime, dt);
-    int currentDayOfYear = dt.day_of_year + 1;
-    if(currentDayOfYear != g_lastHistoryDay || dt.year != g_lastHistoryYear)
+    int currentDayOfYear = nowDt.day_of_year + 1;
+    if(currentDayOfYear != g_lastHistoryDay || nowDt.year != g_lastHistoryYear)
     {
         _LOG_GATE_D Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
         _LOG_GATE_D Print("[D][DATA] ║  [NEW] NEW DAY DETECTED - RESETTING BASE PRICE HISTORY           ║");
         _LOG_GATE_D Print("[D][DATA] ╠═══════════════════════════════════════════════════════════════╣");
         _LOG_GATE_D Print("[D][DATA] ║  Old Date: ", g_lastHistoryYear, "/", g_lastHistoryDay);
-        _LOG_GATE_D Print("[D][DATA] ║  New Date: ", dt.year, "/", currentDayOfYear);
+        _LOG_GATE_D Print("[D][DATA] ║  New Date: ", nowDt.year, "/", currentDayOfYear);
         _LOG_GATE_D Print("[D][DATA] ║  Action: Clearing all history and resetting base price");
         _LOG_GATE_D Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     ResizeHistory(0);
     g_historyCount = 0;
     g_lastHistoryDay = currentDayOfYear;
-    g_lastHistoryYear = dt.year;
+    g_lastHistoryYear = nowDt.year;
     g_basePriceCached = EMPTY_VALUE;
     g_referenceM1Power = 0.0;
     }

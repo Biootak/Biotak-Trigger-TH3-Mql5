@@ -270,8 +270,6 @@ int GetModeLabelBlockHeight() {
         } else {            modeName = modeName + " [Calculator]";
         }
     }
-    // Only clear own label, not all labels
-    ClearSingleModeLabel(g_stepModeLabelName, g_stepModeLabelCreateTime);
     if(IsIndicatorHidden()) return;
     if(ObjectFind(0, g_stepModeLabelName) < 0) {
         ObjectCreate(0, g_stepModeLabelName, OBJ_LABEL, 0, 0, 0);
@@ -290,8 +288,6 @@ int GetModeLabelBlockHeight() {
 //| Shows: "F: 2.50 | Step: 12.5 pips" with auto-hide               |
 //+------------------------------------------------------------------+
 void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) return;
-    // Only clear own label, not all labels
-    ClearSingleModeLabel(g_factorLabelName, g_factorLabelCreateTime);
     if(IsIndicatorHidden()) return;
     double stepSize = 0;
     string stepText = "";
@@ -320,8 +316,6 @@ void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) retu
 //+------------------------------------------------------------------+
 void UpdateTH3FreqLabel(double freqValue) {
     if(!inpShowModeChangeLabel) return;
-    // Only clear own label, not all labels
-    ClearSingleModeLabel(g_th3FreqLabelName, g_th3FreqLabelCreateTime);
     if(IsIndicatorHidden()) return;
 
     if(ObjectFind(0, g_th3FreqLabelName) < 0)
