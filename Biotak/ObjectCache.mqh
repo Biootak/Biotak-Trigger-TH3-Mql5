@@ -15,7 +15,7 @@ struct SObjectCacheEntry {
 };
 
 // Hash-based cache configuration
-#define CACHE_HASH_BUCKETS 512   // Power of 2 for fast modulo
+#define CACHE_HASH_BUCKETS 2048  // Power of 2 for fast modulo (was 512 — increased to fit ~1200 objects)
 #define CACHE_MAX_PROBE 8        // Maximum linear probing attempts
 
 // Hash bucket structure
@@ -49,8 +49,8 @@ datetime CacheGetFrameTime() {
     return g_cacheFrameTime;
 }
 
-// Maximum cache size (80% load factor of 512 buckets)
-#define MAX_CACHE_SIZE 400
+// Maximum cache size (80% load factor of 2048 buckets)
+#define MAX_CACHE_SIZE 1600
 
 int HashObjectName(const string name) {
         uint hash = 5381;

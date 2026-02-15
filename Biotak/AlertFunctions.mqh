@@ -47,10 +47,17 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     // PERF: Cache prefix substring + step strings outside conditionals
     string prefixUp = prefix + "TriggerTH_Up_";
     string prefixDown = prefix + "TriggerTH_Down_";
+    // PERF: Track consecutive misses — if both Up and Down don't exist for
+    // 2 consecutive steps, all higher steps won't exist either (levels are sequential).
+    // This turns worst-case 512 hash lookups into ~2× actual_level_count.
+    int consecutiveMisses = 0;
     for(int step = 1; step <= maxLevels; step++) {
         string stepStr = IntegerToString(step);
         string nameAbove = prefixUp + stepStr;
+        bool foundAbove = false;
+        bool foundBelow = false;
     if(CacheObjectExists(nameAbove)) {
+        foundAbove = true;
         double lvl = ObjectGetDouble(0, nameAbove, OBJPROP_PRICE, 0);
     if(lvl != EMPTY_VALUE && currentPrice >= lvl) {
         string key = "TriggerTH_Up_" + stepStr;
@@ -60,6 +67,7 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
                 }
         string nameBelow = prefixDown + stepStr;
     if(CacheObjectExists(nameBelow)) {
+        foundBelow = true;
         double lvl = ObjectGetDouble(0, nameBelow, OBJPROP_PRICE, 0);
     if(lvl != EMPTY_VALUE && currentPrice <= lvl) {
         string key = "TriggerTH_Down_" + stepStr;
@@ -67,6 +75,14 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
                             TriggerAlert("Price reached TH Down " + stepStr + ": " + DoubleToString(lvl, Digits));
                     }
                 }
+        // PERF: Early exit — levels are sequential, so if neither Up nor Down exists
+        // for 2 consecutive steps, no higher levels exist
+        if(!foundAbove && !foundBelow) {
+            consecutiveMisses++;
+            if(consecutiveMisses >= 2) break;
+        } else {
+            consecutiveMisses = 0;
+        }
         }
     }
 }

@@ -43,30 +43,26 @@ void SetObjectVisibility(const string name, const bool visible)
 
 void SetAllTHObjectsVisibility(const bool visible)
 {
-    string prefix = inpObjectPrefix;
-    int prefixLen = StringLen(prefix);
-    int total = ObjectsTotal(0, -1, -1);
+    // PERF: Iterate object cache instead of scanning ALL chart objects via ObjectsTotal
+    // Only touches our own objects — O(CACHE_HASH_BUCKETS) instead of O(total_chart_objects)
     long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    for(int i = 0; i < total; i++) {
-        string objName = ObjectName(0, i, -1, -1);
-        if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == prefix) {
-            ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, timeframes);
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        if(g_objectCacheHash[i].occupied) {
+            ObjectSetInteger(0, g_objectCacheHash[i].name, OBJPROP_TIMEFRAMES, timeframes);
         }
     }
 }
 
 void SetAllLineObjectsVisibility(const bool visible)
 {
-    string prefix = inpObjectPrefix;
-    int prefixLen = StringLen(prefix);
-    int total = ObjectsTotal(0, -1, -1);
+    // PERF: Iterate object cache instead of scanning ALL chart objects via ObjectsTotal
+    // Only touches our own line objects — O(CACHE_HASH_BUCKETS) instead of O(total_chart_objects)
     long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    for(int i = 0; i < total; i++) {
-        string objName = ObjectName(0, i, -1, -1);
-        if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == prefix) {
-            ENUM_OBJECT objType = (ENUM_OBJECT)ObjectGetInteger(0, objName, OBJPROP_TYPE);
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        if(g_objectCacheHash[i].occupied) {
+            ENUM_OBJECT objType = (ENUM_OBJECT)ObjectGetInteger(0, g_objectCacheHash[i].name, OBJPROP_TYPE);
             if(objType == OBJ_HLINE || objType == OBJ_TREND) {
-                ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, timeframes);
+                ObjectSetInteger(0, g_objectCacheHash[i].name, OBJPROP_TIMEFRAMES, timeframes);
             }
         }
     }

@@ -13,6 +13,7 @@ static bool g_labelsRelayoutNeeded = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
 bool g_redrawTHLevelsNeeded = true;
 bool g_forceClearOnNextDraw = false;
+bool g_viewportOnlyRedraw = false;  // PERF: When true, skip ClearAllLevels on next redraw (scroll/zoom only)
 int g_currentLabelYOffset = 0;  // Cumulative Y offset for stacking top label sections (ATR)
 int g_currentLabelYOffsetBottom = 0;  // Cumulative Y offset for stacking bottom label sections (TH)
 int g_modeLabelYOffset = 0;  // Final Y offset after all labels rendered — used by mode/lock/factor labels to avoid overlap

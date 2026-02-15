@@ -13,7 +13,7 @@
 
 // Global cached values - initialized once per chart
 static string g_cachedSymbol = "";           // Cached Symbol() - never changes
-// NOTE: g_cachedPeriod is now managed by CalculationCache.mqh
+static int g_cachedPeriodValue = 0;          // Cached Period() - reset on TF change via OnInit
 static int g_cachedDigits = -1;              // Cached Digits - never changes per symbol
 static double g_cachedPoint = 0.0;           // Cached Point - never changes per symbol
 static long g_cachedChartId = 0;             // Cached ChartID() - never changes
@@ -26,7 +26,7 @@ static bool g_globalCacheInitialized = false;
 //+------------------------------------------------------------------+
 void InitializeGlobalCache() {
     g_cachedSymbol = Symbol();
-    // NOTE: g_cachedPeriod is managed by CalculationCache.mqh
+    g_cachedPeriodValue = Period();  // Reset on every OnInit (handles TF switch)
     g_cachedDigits = Digits;
     g_cachedPoint = Point;
     g_cachedChartId = ChartID();
@@ -53,9 +53,8 @@ string GetCachedSymbol() {
 //| NOTE: Period cache is now managed by CalculationCache.mqh        |
 //+------------------------------------------------------------------+
 int GetCachedPeriod() {
-    static int s_cachedPeriod = 0;
-    if(s_cachedPeriod == 0) s_cachedPeriod = Period();
-    return s_cachedPeriod;
+    if(g_cachedPeriodValue <= 0) g_cachedPeriodValue = Period();
+    return g_cachedPeriodValue;
 }
 
 //+------------------------------------------------------------------+
@@ -118,6 +117,21 @@ static double g_cachedPipSize = 0.0;
     return g_cachedPipSize;
 }
     #define HIDDEN_CACHE_TTL_MS 100
+
+//+------------------------------------------------------------------+
+//| Cached ChartGetInteger(CHART_WIDTH_IN_PIXELS) — per-frame cache  |
+//| Avoids 3 separate IPC calls per redraw cycle                     |
+//+------------------------------------------------------------------+
+static int g_cachedChartWidth = 0;
+static uint g_cachedChartWidthTime = 0;
+int GetCachedChartWidth() {
+    uint now = GetTickCount();
+    if(now - g_cachedChartWidthTime > HIDDEN_CACHE_TTL_MS || g_cachedChartWidth <= 0) {
+        g_cachedChartWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+        g_cachedChartWidthTime = now;
+    }
+    return g_cachedChartWidth;
+}
 
     void CleanupPerformanceOptimizations() {
     // Note: Object cache is now managed by ObjectCache.mqh

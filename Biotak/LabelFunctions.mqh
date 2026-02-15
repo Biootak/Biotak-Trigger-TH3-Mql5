@@ -176,12 +176,12 @@ bool DrawMainLevels(const string prefix) {
     double pointValue = s_cachedPointValue;
     if(inpShowMidpointLine) {
         string lineNameMid=prefix+"Mid";
-    string tooltipMid=StringFormat("Trigger TH Midpoint Level (%s)",DoubleToString(midpointPrice,digits));
+    string tooltipMid = "Trigger TH Midpoint Level (" + DoubleToString(midpointPrice,digits) + ")";
     double pipsToMid = CalculatePipsDistance(midpointPrice, g_currentPrice);
     tooltipMid = FormatTooltipWithDistanceFast(tooltipMid, pipsToMid);
     CreateTHLineObject(lineNameMid,midpointPrice,inpTriggerColor,inpTriggerStyle,inpTriggerWidth,tooltipMid, inpTHLineObjectType, false);
     string cachedTFForMid = GetFractalTimeframeForCurrent();
-    string midLevelInfo = StringFormat("%s Mid", GetShortTimeframeName(cachedTFForMid));
+    string midLevelInfo = GetShortTimeframeName(cachedTFForMid) + " Mid";
     if(inpShowPipDistanceLabels) CreatePipDistanceLabel(prefix+"Mid_PipsLabel", midpointPrice, pipsToMid, inpTriggerLabelColor, midLevelInfo);
     }
     // OPTIMIZATION: Cache IsTriggerLevelsEnabled() result BEFORE the loops
@@ -306,36 +306,36 @@ bool DrawMainLevels(const string prefix) {
                 switch(structLevel) {
                     case 5: {
     lineNameAbove = prefix + "StructureLevel5_Up_" + IntegerToString(stepCountAbove / intervals[4]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[4]);
+    tooltipAbove = "[" + overlapTFs + "] " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[4]) + " | Price: " + DoubleToString(priceLevelAbove, digits) + " | " + basisLabel + ": " + DoubleToString(quintupleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoAbove = overlapTFs + " " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[4]);
     lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
     break;
                     }
                     case 4: {
                         lineNameAbove = prefix + "StructureLevel4_Up_" + IntegerToString(stepCountAbove / intervals[3]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[3], DoubleToString(priceLevelAbove, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[3]);
+    tooltipAbove = "[" + overlapTFs + "] " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[3]) + " | Price: " + DoubleToString(priceLevelAbove, digits) + " | " + basisLabel + ": " + DoubleToString(quadrupleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoAbove = overlapTFs + " " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[3]);
     lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
     break;
                     }
                     case 3: {
                         lineNameAbove = prefix + "StructureLevel3_Up_" + IntegerToString(stepCountAbove / intervals[2]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[2], DoubleToString(priceLevelAbove, digits), basisLabel, tripleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[2]);
+    tooltipAbove = "[" + overlapTFs + "] " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[2]) + " | Price: " + DoubleToString(priceLevelAbove, digits) + " | " + basisLabel + ": " + DoubleToString(tripleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoAbove = overlapTFs + " " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[2]);
     lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
     break;
                     }
                     case 2: {
                         lineNameAbove = prefix + "StructureLevel2_Up_" + IntegerToString(stepCountAbove / intervals[1]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[1], DoubleToString(priceLevelAbove, digits), basisLabel, doubleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[1]);
+    tooltipAbove = "[" + overlapTFs + "] " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[1]) + " | Price: " + DoubleToString(priceLevelAbove, digits) + " | " + basisLabel + ": " + DoubleToString(doubleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoAbove = overlapTFs + " " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[1]);
     lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
     break;
                     }
                     default: { // case 1
                         lineNameAbove = prefix + "StructureLevel1_Up_" + IntegerToString(stepCountAbove / intervals[0]);
-    tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | %s: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[0], DoubleToString(priceLevelAbove, digits), basisLabel, structureTFTHStepSizePoints * pointsPerPip);
-    levelInfoAbove = StringFormat("%s %s +%d", overlapTFs, overlapLevels, stepCountAbove / intervals[0]);
+    tooltipAbove = "[" + overlapTFs + "] " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[0]) + " | Price: " + DoubleToString(priceLevelAbove, digits) + " | " + basisLabel + ": " + DoubleToString(structureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoAbove = overlapTFs + " " + overlapLevels + " +" + IntegerToString(stepCountAbove / intervals[0]);
     lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
     break;
                     }
@@ -343,11 +343,8 @@ bool DrawMainLevels(const string prefix) {
             } else {
                 // Trigger level
                 lineNameAbove = prefix + "TriggerTH_Up_" + IntegerToString(stepCountAbove);
-    tooltipAbove = StringFormat("[%s] +%d | Price: %s | L: %.1f, S: %.1f pips",
-                    shortCurrentTFCached, stepCountAbove, DoubleToString(priceLevelAbove, digits),
-                    cachedLongStep * thStepSizePoints * pointsPerPip,
-                    cachedShortStep * thStepSizePoints * pointsPerPip);
-    levelInfoAbove = StringFormat("%s +%d", shortCurrentTFCached, stepCountAbove);
+    tooltipAbove = "[" + shortCurrentTFCached + "] +" + IntegerToString(stepCountAbove) + " | Price: " + DoubleToString(priceLevelAbove, digits) + " | L: " + DoubleToString(cachedLongStep * thStepSizePoints * pointsPerPip, 1) + ", S: " + DoubleToString(cachedShortStep * thStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoAbove = shortCurrentTFCached + " +" + IntegerToString(stepCountAbove);
     lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
             }
     double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
@@ -463,47 +460,44 @@ bool DrawMainLevels(const string prefix) {
                 switch(structLevel) {
                     case 5: {
                         lineNameBelow = prefix + "StructureLevel5_Down_" + IntegerToString(stepCountBelow / intervals[4]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, digits), basisLabel, quintupleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4]);
+    tooltipBelow = "[" + overlapTFsBelow + "] " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[4]) + " | Price: " + DoubleToString(priceLevelBelow, digits) + " | " + basisLabel + ": " + DoubleToString(quintupleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoBelow = overlapTFsBelow + " " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[4]);
     lineColor = inpStructureL5Color; lineStyle = inpStructureL5Style; lineWidth = inpStructureL5Width;
     break;
                     }
                     case 4: {
                         lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, digits), basisLabel, quadrupleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
+    tooltipBelow = "[" + overlapTFsBelow + "] " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[3]) + " | Price: " + DoubleToString(priceLevelBelow, digits) + " | " + basisLabel + ": " + DoubleToString(quadrupleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoBelow = overlapTFsBelow + " " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[3]);
     lineColor = inpStructureL4Color; lineStyle = inpStructureL4Style; lineWidth = inpStructureL4Width;
     break;
                     }
                     case 3: {
                         lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, digits), basisLabel, tripleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
+    tooltipBelow = "[" + overlapTFsBelow + "] " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[2]) + " | Price: " + DoubleToString(priceLevelBelow, digits) + " | " + basisLabel + ": " + DoubleToString(tripleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoBelow = overlapTFsBelow + " " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[2]);
     lineColor = inpStructureL3Color; lineStyle = inpStructureL3Style; lineWidth = inpStructureL3Width;
     break;
                     }
                     case 2: {
                         lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, digits), basisLabel, doubleStructureTFTHStepSizePoints * pointsPerPip);
-    levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
+    tooltipBelow = "[" + overlapTFsBelow + "] " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[1]) + " | Price: " + DoubleToString(priceLevelBelow, digits) + " | " + basisLabel + ": " + DoubleToString(doubleStructureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoBelow = overlapTFsBelow + " " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[1]);
     lineColor = inpStructureL2Color; lineStyle = inpStructureL2Style; lineWidth = inpStructureL2Width;
     break;
                     }
                     default: {
                         lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
-    tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | %s: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, digits), basisLabel, structureTFTHStepSizePoints * pointsPerPip);
-    levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
+    tooltipBelow = "[" + overlapTFsBelow + "] " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[0]) + " | Price: " + DoubleToString(priceLevelBelow, digits) + " | " + basisLabel + ": " + DoubleToString(structureTFTHStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoBelow = overlapTFsBelow + " " + overlapLevelsBelow + " -" + IntegerToString(stepCountBelow / intervals[0]);
     lineColor = inpStructureL1Color; lineStyle = inpStructureL1Style; lineWidth = inpStructureL1Width;
     break;
                     }
                 }
             } else {
                 lineNameBelow = prefix + "TriggerTH_Down_" + IntegerToString(stepCountBelow);
-    tooltipBelow = StringFormat("[%s] -%d | Price: %s | L: %.1f, S: %.1f pips",
-                    shortCurrentTFCached, stepCountBelow, DoubleToString(priceLevelBelow, digits),
-                    cachedLongStep * thStepSizePoints * pointsPerPip,
-                    cachedShortStep * thStepSizePoints * pointsPerPip);
-    levelInfoBelow = StringFormat("%s -%d", shortCurrentTFCached, stepCountBelow);
+    tooltipBelow = "[" + shortCurrentTFCached + "] -" + IntegerToString(stepCountBelow) + " | Price: " + DoubleToString(priceLevelBelow, digits) + " | L: " + DoubleToString(cachedLongStep * thStepSizePoints * pointsPerPip, 1) + ", S: " + DoubleToString(cachedShortStep * thStepSizePoints * pointsPerPip, 1) + " pips";
+    levelInfoBelow = shortCurrentTFCached + " -" + IntegerToString(stepCountBelow);
     lineColor = inpTriggerColor; lineStyle = inpTriggerStyle; lineWidth = inpTriggerWidth;
             }
     double pipsToLevelBelow = CalculatePipsDistance(priceLevelBelow, g_currentPrice);
@@ -590,9 +584,9 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
         ObjectDelete(0, targetsObjName);
     }
     
-    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
-    string mainText = StringFormat("%s: %.1f", timeframeName, atrPips);
-    string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
+    string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
+    string mainText = timeframeName + ": " + DoubleToString(atrPips, 1);
+    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
 
     // PERF: Check if objects already exist with correct text - skip redundant ObjectSet calls
     bool mainExists = (ObjectFind(0, mainObjName) >= 0);
@@ -790,27 +784,27 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     
     // Create "ATR:" title label
     string titleObjName = uniquePrefix + "ATR_Title";
+    bool atrTitleCreated = false;
     if(ObjectFind(0, titleObjName) < 0) {
         ObjectCreate(0, titleObjName, OBJ_LABEL, 0, 0, 0);
+        atrTitleCreated = true;
     }
-    ObjectSetString(0, titleObjName, OBJPROP_TEXT, "ATR:");
-    ObjectSetInteger(0, titleObjName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetString(0, titleObjName, OBJPROP_FONT, inpFontName);
-    ObjectSetInteger(0, titleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ENUM_BASE_CORNER corner = CORNER_LEFT_UPPER;
-    ObjectSetInteger(0, titleObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, titleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    // PERF: Static properties only set on creation — saves ~9 ObjectSet* calls per refresh
+    if(atrTitleCreated) {
+        ObjectSetString(0, titleObjName, OBJPROP_TEXT, "ATR:");
+        ObjectSetInteger(0, titleObjName, OBJPROP_COLOR, clrDarkBlue);
+        ObjectSetString(0, titleObjName, OBJPROP_FONT, inpFontName);
+        ObjectSetInteger(0, titleObjName, OBJPROP_FONTSIZE, inpFontSize);
+        ObjectSetInteger(0, titleObjName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, titleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+        ObjectSetInteger(0, titleObjName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, titleObjName, OBJPROP_HIDDEN, false);
+        ObjectSetInteger(0, titleObjName, OBJPROP_BACK, false);
+    }
+    // Dynamic properties: position + visibility (may change each refresh)
     ObjectSetInteger(0, titleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
-    int titleY = titleYPos;
-    ObjectSetInteger(0, titleObjName, OBJPROP_YDISTANCE, titleY);
-    ObjectSetInteger(0, titleObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, titleObjName, OBJPROP_HIDDEN, false);
-    ObjectSetInteger(0, titleObjName, OBJPROP_BACK, false);
-    if(IsIndicatorHidden()) {
-        ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ObjectSetInteger(0, titleObjName, OBJPROP_YDISTANCE, titleYPos);
+    ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     
     int titleWidth = (int)CalculateTextWidth("ATR:");
     int labelStartX = GetLabelStartX(startXPos, titleWidth, horizontalPadding, isVerticalLayout);
@@ -818,7 +812,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     int currentYPos = startYPos;
     int yStep = rowSpacing;
     int xStep = horizontalPadding;
-    int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
+    int maxWidth = GetCachedChartWidth() - startXPos * 2;
     int lineHeight = GetLabelLineHeight(inpShowATRTargets, rowSpacing);
     
     int renderedCount = 0;
@@ -845,10 +839,10 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     
     // Calculate label width for horizontal wrapping
         string mainText = inpShowTimeframeInLabels ?
-            StringFormat("%s: %.1f", timeframeName, atrPips) :
-            StringFormat("%.1f", atrPips);
-        string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
-        string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+            timeframeName + ": " + DoubleToString(atrPips, 1) :
+            DoubleToString(atrPips, 1);
+        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+        string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowATRTargets);
     
     if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
@@ -891,25 +885,15 @@ void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
     bool shouldShow = (visible && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
-    string titleObjName = uniquePrefix + "ATR_Title";
-    if(ObjectFind(0, titleObjName) >= 0) {
-        ObjectSetInteger(0, titleObjName, OBJPROP_TIMEFRAMES, tf);
-    }
+    // PERF: ObjectSetInteger is a no-op on non-existent objects — skip ObjectFind guards
+    ObjectSetInteger(0, uniquePrefix + "ATR_Title", OBJPROP_TIMEFRAMES, tf);
 
+    long targetsTF = (shouldShow && inpShowATRTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(allTimeframes); i++) {
         string tfName = allTimeframes[i];
-        string mainObj = uniquePrefix + "ATR_" + tfName;
-        string stepsObj = uniquePrefix + "ATR_Steps_" + tfName;
-        string targetsObj = uniquePrefix + "ATR_Targets_" + tfName;
-
-        if(ObjectFind(0, mainObj) >= 0)  ObjectSetInteger(0, mainObj, OBJPROP_TIMEFRAMES, tf);
-        if(ObjectFind(0, stepsObj) >= 0) ObjectSetInteger(0, stepsObj, OBJPROP_TIMEFRAMES, tf);
-
-        // Targets obey inpShowATRTargets even when visible
-        if(ObjectFind(0, targetsObj) >= 0) {
-            if(shouldShow && inpShowATRTargets) ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            else                                ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+        ObjectSetInteger(0, uniquePrefix + "ATR_" + tfName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, uniquePrefix + "ATR_Steps_" + tfName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, uniquePrefix + "ATR_Targets_" + tfName, OBJPROP_TIMEFRAMES, targetsTF);
     }
 }
 
@@ -920,42 +904,29 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     bool shouldShow = ((mode != 0) && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
-    string titleObj = objectPrefix + "TH_Title";
-    if(ObjectFind(0, titleObj) >= 0) {
-        ObjectSetInteger(0, titleObj, OBJPROP_TIMEFRAMES, tf);
-    }
+    // PERF: ObjectSetInteger is a no-op on non-existent objects — skip ObjectFind guards
+    ObjectSetInteger(0, objectPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
 
     bool showFractal = (mode == 1 || mode == 3);
     bool showStandard = (mode == 2 || mode == 3);
 
-    // Fractal + Standard timeframes
+    // Fractal timeframes
+    long fractalTF = (shouldShow && showFractal) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    long fractalTargetsTF = (shouldShow && showFractal && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
-        string mainObj = objectPrefix + "TH_" + timeframeName;
-        string stepsObj = objectPrefix + "TH_Steps_" + timeframeName;
-        string targetsObj = objectPrefix + "TH_Targets_" + timeframeName;
-
-        long tfThis = (shouldShow && showFractal) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-        if(ObjectFind(0, mainObj) >= 0)  ObjectSetInteger(0, mainObj, OBJPROP_TIMEFRAMES, tfThis);
-        if(ObjectFind(0, stepsObj) >= 0) ObjectSetInteger(0, stepsObj, OBJPROP_TIMEFRAMES, tfThis);
-        if(ObjectFind(0, targetsObj) >= 0) {
-            if(shouldShow && showFractal && inpShowTHTargets) ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            else                                              ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+        ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
+        ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
+        ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTargetsTF);
     }
+    // Standard timeframes
+    long standardTF = (shouldShow && showStandard) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    long standardTargetsTF = (shouldShow && showStandard && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
-        string mainObj = objectPrefix + "TH_" + timeframeName;
-        string stepsObj = objectPrefix + "TH_Steps_" + timeframeName;
-        string targetsObj = objectPrefix + "TH_Targets_" + timeframeName;
-
-        long tfThis = (shouldShow && showStandard) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-        if(ObjectFind(0, mainObj) >= 0)  ObjectSetInteger(0, mainObj, OBJPROP_TIMEFRAMES, tfThis);
-        if(ObjectFind(0, stepsObj) >= 0) ObjectSetInteger(0, stepsObj, OBJPROP_TIMEFRAMES, tfThis);
-        if(ObjectFind(0, targetsObj) >= 0) {
-            if(shouldShow && showStandard && inpShowTHTargets) ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-            else                                               ObjectSetInteger(0, targetsObj, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+        ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
+        ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
+        ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, standardTargetsTF);
     }
 }
     bool CreateTHLabel(const string objectPrefix, const string timeframeName, const double thValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
@@ -995,14 +966,14 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     // PERF: Only rebuild text strings + set text/color when TH value or color changed
     //       ObjectGetString is cheaper than StringFormat + ObjectSetString
     bool textChanged = mainCreated || stepsCreated;
-    string mainText = StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips);
+    string mainText = GetBaseTimeframeName(timeframeName) + ": " + DoubleToString(thValuePips, 1);
     if(!textChanged) {
         string prevMain = ObjectGetString(0, mainObjName, OBJPROP_TEXT);
         textChanged = (prevMain != mainText);
     }
     bool colorChanged = mainCreated || ((color)ObjectGetInteger(0, mainObjName, OBJPROP_COLOR) != textColor);
-    string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
-    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+    string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
     if(inpShowTHTargets && (textChanged || targetsCreated)) {
         ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
     if(colorChanged) ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
@@ -1112,35 +1083,35 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int startYPos = isVerticalLayout ? (titleYPos + singleLineHeight) : titleYPos;
     int sectionGap = inpSectionGap;
     string thTitleObjName = objectPrefix + "TH_Title";
+    bool thTitleCreated = false;
     if(ObjectFind(0, thTitleObjName) < 0) {
         ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+        thTitleCreated = true;
     }
-    ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ENUM_BASE_CORNER corner = CORNER_LEFT_LOWER;
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, corner);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    // PERF: Static properties only set on creation
+    if(thTitleCreated) {
+        ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
+        ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_BACK, false);
+    }
+    // Dynamic properties: position + visibility
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     int thTitleY = titleYPos + titleAdjustment;
-    
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, thTitleY);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_BACK, false);
-    if(IsIndicatorHidden()) {
-        ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     int titleWidth = (int)CalculateTextWidth("TH:");
     int labelStartX = GetLabelStartX(startXPos, titleWidth, horizontalPadding, isVerticalLayout);
     int currentXPos = labelStartX;
     int currentYPos = startYPos;
     int yStep = rowSpacing;
     int xStep = horizontalPadding;
-    int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
+    int maxWidth = GetCachedChartWidth() - startXPos * 2;
     int lineHeight = GetLabelLineHeight(inpShowTHTargets, rowSpacing);
     // PERF: Pre-allocate to known fractal count instead of zero-then-grow
     int fractalCount = ArraySize(FRACTAL_TIMEFRAMES);
@@ -1162,10 +1133,10 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         double target5x = MathFloor(thValuePips * 5.0);
         double target15x = MathFloor(thValuePips * 15.0);
         string mainText = inpShowTimeframeInLabels ?
-            StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips) :
-            StringFormat("%.1f", thValuePips);
-        string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
-        string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+            GetBaseTimeframeName(timeframeName) + ": " + DoubleToString(thValuePips, 1) :
+            DoubleToString(thValuePips, 1);
+        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+        string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowTHTargets);
     if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
             if(!CreateTHLabel(objectPrefix, timeframeName, thPoints, currentXPos, currentYPos, FRACTAL_COLORS[i], xStep, yStep)) continue;
@@ -1207,28 +1178,30 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int currentYPos = startYPos;
     int yStep = rowSpacing;
     int xStep = horizontalPadding;
-    int maxWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - startXPos * 2;
+    int maxWidth = GetCachedChartWidth() - startXPos * 2;
     int lineHeight = GetLabelLineHeight(inpShowTHTargets, rowSpacing);
     string thTitleObjName = objectPrefix + "TH_Title";
+    bool thTitleCreated = false;
     if(ObjectFind(0, thTitleObjName) < 0) {
         ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
+        thTitleCreated = true;
     }
-    ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
-    ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    // PERF: Static properties only set on creation
+    if(thTitleCreated) {
+        ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, "TH:");
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
+        ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
+        ObjectSetInteger(0, thTitleObjName, OBJPROP_BACK, false);
+    }
+    // Dynamic properties: position + visibility
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + titleAdjustment);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_BACK, false);
-    if(IsIndicatorHidden()) {
-        ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else {
-        ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    }
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
     double percentage = CalculateStandardPercentage(STANDARD_MINUTES[i]);
@@ -1245,10 +1218,10 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         double target5x = MathFloor(thValuePips * 5.0);
         double target15x = MathFloor(thValuePips * 15.0);
         string mainText = inpShowTimeframeInLabels ?
-            StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips) :
-            StringFormat("%.1f", thValuePips);
-        string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
-        string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+            GetBaseTimeframeName(timeframeName) + ": " + DoubleToString(thValuePips, 1) :
+            DoubleToString(thValuePips, 1);
+        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+        string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowTHTargets);
     if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
             if(!CreateTHLabel(objectPrefix, timeframeName, thPoints, currentXPos, currentYPos, STANDARD_COLORS[0], xStep, yStep)) continue;
@@ -1289,8 +1262,12 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     double CalculateTextWidth(string text) {
         double averageCharWidth=inpFontSize*0.7;
     double plusFactor=StringFind(text,"+")>=0?inpFontSize*0.3:0;
-    double numberFactor=StringLen(text)-StringReplace(text,"0123456789","")>0?inpFontSize*0.2:0;
-    return StringLen(text)*averageCharWidth+plusFactor+numberFactor;
+    // PERF: Detect digits via char scan instead of destructive StringReplace
+    bool hasDigit=false;
+    int len=StringLen(text);
+    for(int c=0;c<len;c++){ushort ch=StringGetCharacter(text,c);if(ch>='0'&&ch<='9'){hasDigit=true;break;}}
+    double numberFactor=hasDigit?inpFontSize*0.2:0;
+    return len*averageCharWidth+plusFactor+numberFactor;
 }
     int GetLabelLineHeight(const bool showTargets, const int rowSpacing) {
         int lines = showTargets ? 3 : 2;

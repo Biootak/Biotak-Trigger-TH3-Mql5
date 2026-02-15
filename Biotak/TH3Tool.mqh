@@ -49,24 +49,20 @@ void SetActiveABCDPattern(string patternName)
 {
     if(g_activeABCDPattern == patternName) return;
 
+    // PERF: ObjectSetInteger is a no-op on non-existent objects — skip ObjectFind guards
     if(g_activeABCDPattern != "") {
-        string oldLabel = g_activeABCDPattern + TH3_SUFFIX_INFO;
-        if(ObjectFind(0, oldLabel) >= 0)
-            ObjectSetInteger(0, oldLabel, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        ObjectSetInteger(0, g_activeABCDPattern + TH3_SUFFIX_INFO, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
     }
 
     g_activeABCDPattern = patternName;
 
     if(patternName != "") {
-        string newLabel = patternName + TH3_SUFFIX_INFO;
-        if(ObjectFind(0, newLabel) >= 0) {
-            // Respect indicator hidden state — don't force visible when hidden
-            long vis = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-            ObjectSetInteger(0, newLabel, OBJPROP_TIMEFRAMES, vis);
-        }
+        // Respect indicator hidden state — don't force visible when hidden
+        long vis = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+        ObjectSetInteger(0, patternName + TH3_SUFFIX_INFO, OBJPROP_TIMEFRAMES, vis);
     }
 
-    ChartRedraw();
+    ThrottledChartRedraw();
 }
 
 //+------------------------------------------------------------------+
@@ -461,7 +457,7 @@ void UpdateAllTH3Objects()
             DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
     }
 
-    ChartRedraw(0);
+    ThrottledChartRedraw();
 }
 
 //+------------------------------------------------------------------+
@@ -549,7 +545,7 @@ void CancelABCDDrawing()
     // NOTE: Do NOT disable CHART_EVENT_MOUSE_MOVE here.
     // It is enabled globally at OnInit and other features (custom price drag)
     // depend on it remaining active.
-    ChartRedraw();
+    ThrottledChartRedraw();
 }
 
 //+------------------------------------------------------------------+
@@ -565,7 +561,7 @@ bool HandleABCDPointPlacement(datetime clickTime, double clickPrice)
             g_abcdPointCount = 1;
             CreateABCDTempPoint("X", clickTime, clickPrice);
             Comment("TH3: Click to place point A");
-            ChartRedraw();
+            ThrottledChartRedraw();
             return false;
 
         case 1:
@@ -575,7 +571,7 @@ bool HandleABCDPointPlacement(datetime clickTime, double clickPrice)
             CreateABCDTempPoint("A", clickTime, clickPrice);
             CreateABCDTempLine("XA", g_abcdTimeX, g_abcdPriceX, clickTime, clickPrice);
             Comment("TH3: Click to place point B");
-            ChartRedraw();
+            ThrottledChartRedraw();
             return false;
 
         case 2:
@@ -585,7 +581,7 @@ bool HandleABCDPointPlacement(datetime clickTime, double clickPrice)
             CreateABCDTempPoint("B", clickTime, clickPrice);
             CreateABCDTempLine("AB", g_abcdTimeA, g_abcdPriceA, clickTime, clickPrice);
             Comment("TH3: Click to place point C");
-            ChartRedraw();
+            ThrottledChartRedraw();
             return false;
 
         case 3:
@@ -725,7 +721,7 @@ void HandleABCDMouseMove(long lparam, double dparam, string sparam)
                 default: return;
             }
             CreateABCDTempLine("Preview", lastTime, lastPrice, mouseTime, mousePrice);
-            ChartRedraw();
+            ThrottledChartRedraw();
         }
     }
 }
@@ -788,7 +784,7 @@ void HandleABCDObjectDrag(const string sparam)
     }
 
     DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC);
-    ChartRedraw();
+    ThrottledChartRedraw();
 }
 
 //+------------------------------------------------------------------+
@@ -806,7 +802,7 @@ void HandleABCDObjectDelete(const string sparam)
     if(g_activeABCDPattern == baseName)
         SetActiveABCDPattern("");
 
-    ChartRedraw();
+    ThrottledChartRedraw();
 }
 
 //+------------------------------------------------------------------+

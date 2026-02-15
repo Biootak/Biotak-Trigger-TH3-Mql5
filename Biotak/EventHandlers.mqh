@@ -287,27 +287,26 @@ void HideAllTHObjects()
     int hiddenCount = 0;
     string cachedPrefix = inpObjectPrefix;
     int prefixLen = StringLen(cachedPrefix);
-    // PERF: Pre-compute long constant for visibility outside loop
+    // PERF: Pre-compute constants outside loop
     long noPeriodsVal = OBJ_NO_PERIODS;
+    ushort prefixFirstChar = StringGetCharacter(cachedPrefix, 0);
     for(int i = total - 1; i >= 0; i--)
     {
         string objName = ObjectName(0, i, -1, -1);
-    // PERF: Use StringLen + StringSubstr instead of StringFind for prefix check
+    // PERF: Quick first-char rejection before expensive string comparison
+    if(StringGetCharacter(objName, 0) != prefixFirstChar) continue;
     if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix)
         {
         ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, noPeriodsVal);
         hiddenCount++;
         }    }
-    // PERF: Batch special label hide with single constant
-    if(ObjectFind(0, g_stepModeLabelName) >= 0)
-        ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-    if(ObjectFind(0, g_factorLabelName) >= 0)
-        ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
-        ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-    if(ObjectFind(0, g_lockStatusLabelName) >= 0)
-        ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-    if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0)
+    // PERF: Batch special label hide — use ObjectDelete which is no-op if not found,
+    // avoiding separate ObjectFind syscalls
+    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+    if(g_customPriceLineCreated)
         ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     // NOTE: ABCD pattern objects are NOT hidden by F key — they are independent of TH levels
     }void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = false)
@@ -378,21 +377,13 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
         DEBUG_PRINT("Starting cleanup");
     ReleaseATRHandle();
     EventKillTimer();
-    if(ObjectFind(0, g_stepModeLabelName) >= 0) {
-        ObjectDelete(0, g_stepModeLabelName);
-    }
-    if(ObjectFind(0, g_factorLabelName) >= 0) {
-        ObjectDelete(0, g_factorLabelName);
-    }
-    if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
-        ObjectDelete(0, g_th3FreqLabelName);
-    }
-    if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
-        ObjectDelete(0, g_lockStatusLabelName);
-    }
-    if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0) {
-        ObjectDelete(0, g_customPriceHorizontalLineName);
-    }
+    // PERF: ObjectDelete is safe to call on non-existent objects (returns false, no error)
+    // Eliminates 5× ObjectFind syscalls
+    ObjectDelete(0, g_stepModeLabelName);
+    ObjectDelete(0, g_factorLabelName);
+    ObjectDelete(0, g_th3FreqLabelName);
+    ObjectDelete(0, g_lockStatusLabelName);
+    ObjectDelete(0, g_customPriceHorizontalLineName);
     if(reason == REASON_REMOVE)
     {
         DEBUG_PRINT("Indicator removed - cleaning all GlobalVariables");
@@ -562,18 +553,26 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     #endif
 
-    // PERF: Invalidate matching cache entries — O(CACHE_HASH_BUCKETS) cache scan
-    // instead of per-object CacheRemoveObject calls during deletion loop
-    int prefixLen = StringLen(objectPrefix);
-    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
-        if(g_objectCacheHash[i].occupied &&
-           StringLen(g_objectCacheHash[i].name) >= prefixLen &&
-           StringSubstr(g_objectCacheHash[i].name, 0, prefixLen) == objectPrefix) {
-            g_objectCacheHash[i].name = "";
-            g_objectCacheHash[i].occupied = false;
-            g_objectCacheHash[i].deleted = true;
-            g_objectCacheHash[i].lastAccess = 0;
-            g_objectCacheSize--;
+    // PERF: Invalidate matching cache entries
+    // Early exit if cache is empty — avoids scanning 2048 buckets for nothing
+    if(g_objectCacheSize > 0) {
+        int prefixLen = StringLen(objectPrefix);
+        int invalidated = 0;
+        for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+            if(!g_objectCacheHash[i].occupied) continue;
+            // PERF: Quick first-char check before expensive string ops
+            if(StringGetCharacter(g_objectCacheHash[i].name, 0) != StringGetCharacter(objectPrefix, 0)) continue;
+            if(StringLen(g_objectCacheHash[i].name) >= prefixLen &&
+               StringSubstr(g_objectCacheHash[i].name, 0, prefixLen) == objectPrefix) {
+                g_objectCacheHash[i].name = "";
+                g_objectCacheHash[i].occupied = false;
+                g_objectCacheHash[i].deleted = true;
+                g_objectCacheHash[i].lastAccess = 0;
+                g_objectCacheSize--;
+                invalidated++;
+                // PERF: If we've invalidated all cached entries, stop early
+                if(g_objectCacheSize == 0) break;
+            }
         }
     }
 
@@ -756,11 +755,14 @@ void LogRedrawDecision(const bool isNewBar,
         {
             StepCalculationData data;
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
-    // PIPELINE: Zone-First Architecture
+    // Step order: lsFirst determines which step comes first
+    double sslsSteps[2];
+    sslsSteps[0] = inpLSFirst ? data.longStep : data.shortStep;
+    sslsSteps[1] = inpLSFirst ? data.shortStep : data.longStep;
     SModeConfig sslsCfg = BuildSSLSConfig(objectPrefix);
-    SPipelineResult sslsResult = ExecuteSSLSPipeline(sslsCfg,
-        data.midpointPrice, data.shortStep, data.longStep, inpLSFirst,
-        data.maxLevelsAbove, data.maxLevelsBelow);
+    SPipelineResult sslsResult = ExecutePipeline(sslsCfg,
+        data.midpointPrice, sslsSteps, 2, LEVEL_STEP_CUMULATIVE, CLASSIFY_ALTERNATING,
+        inpLSFirst, data.maxLevelsAbove, data.maxLevelsBelow);
     if(!sslsResult.success) {
         _LOG_GATE_E Print("[E][GEN] SS_LS_STEP Pipeline failed: ", sslsResult.errorMessage);
     }
@@ -773,21 +775,25 @@ void LogRedrawDecision(const bool isNewBar,
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
     double controlValue = data.shortStep;
     if(inpMStepBasisType == MSTEP_BASIS_C_BASED) {
-                // PIPELINE: M mode (C-based with C/M distinction)
+                // M mode (C-based with C/M distinction)
+                double mSteps[1];
+                mSteps[0] = controlValue;
                 SModeConfig mCfg = BuildMConfig(objectPrefix);
-                SPipelineResult mResult = ExecuteMLevelPipeline(mCfg,
-                    data.midpointPrice, controlValue,
-                    data.maxLevelsAbove, data.maxLevelsBelow);
+                SPipelineResult mResult = ExecutePipeline(mCfg,
+                    data.midpointPrice, mSteps, 1, LEVEL_STEP_UNIFORM, CLASSIFY_MMODE,
+                    false, data.maxLevelsAbove, data.maxLevelsBelow);
                 if(!mResult.success) {
                     _LOG_GATE_E Print("[E][GEN] M_STEP Pipeline failed: ", mResult.errorMessage);
                 }
             } else {
         double mDistance = CalculateMDistance(controlValue);
-    // PIPELINE: MEq mode (equal spacing, no step filter)
+    double meqSteps[1];
+    meqSteps[0] = mDistance;
+    // MEq mode (equal spacing, no step filter)
     SModeConfig meqCfg = BuildMEqualConfig(objectPrefix);
-    SPipelineResult meqResult = ExecuteUniformPipeline(meqCfg,
-        data.midpointPrice, mDistance,
-        data.maxLevelsAbove, data.maxLevelsBelow);
+    SPipelineResult meqResult = ExecutePipeline(meqCfg,
+        data.midpointPrice, meqSteps, 1, LEVEL_STEP_UNIFORM, CLASSIFY_STANDARD,
+        false, data.maxLevelsAbove, data.maxLevelsBelow);
     if(!meqResult.success) {
         _LOG_GATE_E Print("[E][GEN] MEq Pipeline failed: ", meqResult.errorMessage);
     }
@@ -801,11 +807,12 @@ void LogRedrawDecision(const bool isNewBar,
     if(!CalculateCommonStepData(dailyClosePrice, data)) return;
     double eValue = CalculateEStep(data.thValue);
     double tpValue = CalculateTPStep(eValue);
-    // PIPELINE: TP mode (uniform step)
+    double tpSteps[1];
+    tpSteps[0] = tpValue;
     SModeConfig tpCfg = BuildTPConfig(objectPrefix);
-    SPipelineResult tpResult = ExecuteUniformPipeline(tpCfg,
-        data.midpointPrice, tpValue,
-        data.maxLevelsAbove, data.maxLevelsBelow);
+    SPipelineResult tpResult = ExecutePipeline(tpCfg,
+        data.midpointPrice, tpSteps, 1, LEVEL_STEP_UNIFORM, CLASSIFY_STANDARD,
+        false, data.maxLevelsAbove, data.maxLevelsBelow);
     if(!tpResult.success) {
         _LOG_GATE_E Print("[E][GEN] TP_STEP Pipeline failed: ", tpResult.errorMessage);
     }
@@ -847,11 +854,12 @@ void LogRedrawDecision(const bool isNewBar,
     #endif
     s_lastLoggedComboStep = comboStep;
             }
-    // PIPELINE: Combo mode (uniform step)
+    double comboSteps[1];
+    comboSteps[0] = comboStep;
     SModeConfig comboCfg = BuildComboConfig(objectPrefix);
-    SPipelineResult comboResult = ExecuteUniformPipeline(comboCfg,
-        data.midpointPrice, comboStep,
-        data.maxLevelsAbove, data.maxLevelsBelow);
+    SPipelineResult comboResult = ExecutePipeline(comboCfg,
+        data.midpointPrice, comboSteps, 1, LEVEL_STEP_UNIFORM, CLASSIFY_STANDARD,
+        false, data.maxLevelsAbove, data.maxLevelsBelow);
     if(!comboResult.success) {
         _LOG_GATE_E Print("[E][GEN] COMBO_STEP Pipeline failed: ", comboResult.errorMessage);
     }
@@ -910,11 +918,14 @@ void LogRedrawDecision(const bool isNewBar,
     Print("[D][GEN]    LargeStep=", DoubleToString(factorStepSize * harmonicRatio, Digits),
                       " (", DoubleToString(factorStepSize * harmonicRatio / pipSizeDbg, 1), " pips)");
     #endif
-    // PIPELINE: Factor Harmonic mode
+    // Factor Harmonic mode
+    double harmSteps[2];
+    harmSteps[0] = factorStepSize;
+    harmSteps[1] = factorStepSize * harmonicRatio;
     SModeConfig harmCfg = BuildFactorHarmonicConfig(objectPrefix);
-    SPipelineResult harmResult = ExecuteHarmonicPipeline(harmCfg,
-        data.midpointPrice, factorStepSize, harmonicRatio,
-        data.maxLevelsAbove, data.maxLevelsBelow);
+    SPipelineResult harmResult = ExecutePipeline(harmCfg,
+        data.midpointPrice, harmSteps, 2, LEVEL_STEP_CUMULATIVE, CLASSIFY_STANDARD,
+        false, data.maxLevelsAbove, data.maxLevelsBelow);
     if(!harmResult.success) {
         _LOG_GATE_E Print("[E][GEN] FACTOR Harmonic Pipeline failed: ", harmResult.errorMessage);
     }
@@ -927,11 +938,13 @@ void LogRedrawDecision(const bool isNewBar,
     Print("[D][GEN]    StepSize=", DoubleToString(factorStepSize, Digits),
                       " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     #endif
-    // PIPELINE: Factor Standard mode
+    // Factor Standard mode
+    double factorSteps[1];
+    factorSteps[0] = factorStepSize;
     SModeConfig factorCfg = BuildFactorConfig(objectPrefix);
-    SPipelineResult factorResult = ExecuteUniformPipeline(factorCfg,
-        data.midpointPrice, factorStepSize,
-        data.maxLevelsAbove, data.maxLevelsBelow);
+    SPipelineResult factorResult = ExecutePipeline(factorCfg,
+        data.midpointPrice, factorSteps, 1, LEVEL_STEP_UNIFORM, CLASSIFY_STANDARD,
+        false, data.maxLevelsAbove, data.maxLevelsBelow);
     if(!factorResult.success) {
         _LOG_GATE_E Print("[E][GEN] FACTOR Standard Pipeline failed: ", factorResult.errorMessage);
     }
@@ -951,10 +964,12 @@ void LogRedrawDecision(const bool isNewBar,
             }
 
             // Unified path first (pipeline), with safe fallback to legacy renderer.
+            double thSteps[1];
+            thSteps[0] = data.thValue;
             SModeConfig thCfg = BuildTHConfig(objectPrefix);
-            SPipelineResult thResult = ExecuteUniformPipeline(thCfg,
-                data.midpointPrice, data.thValue,
-                data.maxLevelsAbove, data.maxLevelsBelow);
+            SPipelineResult thResult = ExecutePipeline(thCfg,
+                data.midpointPrice, thSteps, 1, LEVEL_STEP_UNIFORM, CLASSIFY_STANDARD,
+                false, data.maxLevelsAbove, data.maxLevelsBelow);
 
             if(!thResult.success) {
                 _LOG_GATE_W Print("[W][GEN] TH_STEP pipeline failed, falling back to legacy DrawTHLevels: ", thResult.errorMessage);
@@ -997,7 +1012,8 @@ void LogRedrawDecision(const bool isNewBar,
         s_lastDrawnBasePrice = thBasePrice;
     g_redrawTHLevelsNeeded = true;
     }
-    bool customPriceLineExists = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
+    // PERF: Use tracked bool instead of ObjectFind MT5 syscall (~0.5ms saved per frame)
+    bool customPriceLineExists = g_customPriceLineCreated;
     if(!force_redraw && !g_labelsRelayoutNeeded && !customPriceLineExists && !basePriceChanged && !g_redrawTHLevelsNeeded && currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS && g_initialized) return;
     g_lastCalculation = currentTime;
     // PERF: Cache objectPrefix - only rebuild when timeframe actually changes
@@ -1018,9 +1034,16 @@ void LogRedrawDecision(const bool isNewBar,
     string indicatorPrefix = inpObjectPrefix;
     int indicatorPrefixLen = StringLen(indicatorPrefix);
     int maxCleanupItems = MathMin(currentObjectCount, 2000);
+    // PERF: Pre-compute first characters of all known prefixes for fast rejection
+    ushort indicatorFirstChar = StringGetCharacter(indicatorPrefix, 0);
+    ushort abcdFirstChar = 'A';     // "ABCD_Pattern_" and "ABCD_Temp_" both start with 'A'
+    ushort structFirstChar = 'T';   // "TH3_Structure_" starts with 'T'
     for(int i = maxCleanupItems - 1; i >= 0; i--) {
         string objName = ObjectName(0, i, -1, -1);
     if(objName == "") continue;
+    // PERF: Quick first-char rejection — skip objects that can't be ours
+    ushort firstChar = StringGetCharacter(objName, 0);
+    if(firstChar != indicatorFirstChar && firstChar != abcdFirstChar && firstChar != structFirstChar) continue;
     // FIX: Only consider objects that belong to THIS indicator (known prefixes)
     bool isOurs = false;
     if(StringLen(objName) >= indicatorPrefixLen && StringSubstr(objName, 0, indicatorPrefixLen) == indicatorPrefix) isOurs = true;
@@ -1029,8 +1052,9 @@ void LogRedrawDecision(const bool isNewBar,
     if(!isOurs && StringFind(objName, "TH3_Structure_") == 0) isOurs = true;
     if(!isOurs) continue; // Skip foreign objects entirely
     // Keep current-timeframe objects, TH3 structure, and ABCD patterns
-    if(StringFind(objName, "TH3_Structure_") >= 0) continue;
-    if(StringFind(objName, TH3_PATTERN_PREFIX) == 0) continue;  // Never age-delete ABCD patterns
+    // PERF: Combine structure + pattern checks — both start with known prefixes
+    if(firstChar == 'A') continue; // ABCD_Pattern_ and ABCD_Temp_ — never age-delete
+    if(StringFind(objName, "TH3_Structure_") == 0) continue;
     if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
     datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
     if(objTime > 0 && objTime < cutoffTime) {
@@ -1158,14 +1182,21 @@ void LogRedrawDecision(const bool isNewBar,
     #endif
     bool skipZones = g_customPriceLineDragging;
     TH3_PROF_START(Levels);
-    TH3_PROF_START(LevelsClear);
-    ClearAllLevels(objectPrefix, !skipZones);
-    TH3_PROF_END(LevelsClear);
+    // PERF: Skip ClearAllLevels when only viewport changed (scroll/zoom)
+    // Pipeline uses CreateOrUpdateHLine which updates objects in-place
+    // Safety: if forceClear is pending, always do full clear regardless of viewport flag
+    bool canSkipClear = g_viewportOnlyRedraw && !g_forceClearOnNextDraw && !force_redraw;
+    if(!canSkipClear) {
+        TH3_PROF_START(LevelsClear);
+        ClearAllLevels(objectPrefix, !skipZones);
+        TH3_PROF_END(LevelsClear);
+    }
     TH3_PROF_START(LevelsDrawByMode);
     DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
     TH3_PROF_END(LevelsDrawByMode);
     TH3_PROF_END(Levels);
     g_redrawTHLevelsNeeded = false;
+    g_viewportOnlyRedraw = false;
     }
     else if (!inpShowTHLevels && g_redrawTHLevelsNeeded)
     {        ClearAllLevels(objectPrefix);
@@ -1234,7 +1265,8 @@ void LogRedrawDecision(const bool isNewBar,
     // FIX: ChartRedraw after RedrawAllObjects — ensures object changes are immediately visible
     ThrottledChartRedraw();
     if(barsChanged || s_lastBarTime == 0) {
-        int totalObjects = ObjectsTotal(0, -1, -1);
+        // PERF: Use cached object count (5s TTL) instead of raw ObjectsTotal syscall
+        int totalObjects = GetCurrentObjectCount();
     if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
         #ifdef ENABLE_DEBUG_LOGS
                 if(s_cpuWarningCount % 10 == 0) {                    Print("[WARN] Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
@@ -1431,9 +1463,13 @@ void DecrementTH3Frequency()
     int total = ObjectsTotal(0, -1, -1);
     string cachedPrefixF = inpObjectPrefix;
     int prefixLenF = StringLen(cachedPrefixF);
+    // PERF: Pre-compute first char for fast rejection of foreign objects
+    ushort prefixFirstCharF = StringGetCharacter(cachedPrefixF, 0);
     for(int i = total - 1; i >= 0; i--)
                 {
         string objName = ObjectName(0, i, -1, -1);
+    // PERF: Quick first-char rejection
+    if(StringGetCharacter(objName, 0) != prefixFirstCharF) continue;
     if(StringLen(objName) >= prefixLenF && StringSubstr(objName, 0, prefixLenF) == cachedPrefixF)
                     {
         // Keep ATR objects hidden if ATR labels are disabled (A key / Inputs)
@@ -1478,17 +1514,14 @@ void DecrementTH3Frequency()
                     }
                 }
     // NOTE: ABCD pattern objects are NOT affected by F key — they remain always visible
-    // Restore labels visibility
-    if(ObjectFind(0, g_stepModeLabelName) >= 0)
-        ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    if(ObjectFind(0, g_factorLabelName) >= 0)
-        ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
-        ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
-    if(ObjectFind(0, g_lockStatusLabelName) >= 0)
-        ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    // PERF: Restore labels visibility — ObjectSetInteger is no-op if object doesn't exist,
+    // so skip the ObjectFind check
+    ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
     // Restore custom price line if active
-    if(g_customPriceKeyboardOverride && ObjectFind(0, g_customPriceHorizontalLineName) >= 0)
+    if(g_customPriceKeyboardOverride && g_customPriceLineCreated)
         ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
 
     // Defer recalculation to next OnCalculate tick
@@ -1512,9 +1545,13 @@ void DecrementTH3Frequency()
     int total = ObjectsTotal(0, -1, -1);
     string cachedPrefixL = inpObjectPrefix;
     int prefixLenL = StringLen(cachedPrefixL);
+    // PERF: Pre-compute first char for fast rejection
+    ushort prefixFirstCharL = StringGetCharacter(cachedPrefixL, 0);
     for(int i = 0; i < total; i++)
             {
         string objName = ObjectName(0, i, -1, -1);
+    // PERF: Quick first-char rejection
+    if(StringGetCharacter(objName, 0) != prefixFirstCharL) continue;
     if(StringLen(objName) >= prefixLenL && StringSubstr(objName, 0, prefixLenL) == cachedPrefixL)
                 {
         int objType = (int)ObjectGetInteger(0, objName, OBJPROP_TYPE);
@@ -1623,7 +1660,7 @@ void DecrementTH3Frequency()
     // FIX: Immediate relayout so labels reposition without waiting for next tick
     RedrawLabelsOnly();
         LOG_I(LOG_CAT_LABELS, "ATR Labels " + (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
-    ChartRedraw();
+    ThrottledChartRedraw();
     return;
         }
 
@@ -1646,7 +1683,7 @@ void DecrementTH3Frequency()
     g_labelsRelayoutNeeded = true;
     RedrawLabelsOnly();
         LOG_IP1(LOG_CAT_LABELS, "TH Labels mode=", IntegerToString(g_thLabelsMode) + " (0=OFF,1=FRACTAL,2=STANDARD,3=BOTH)");
-    ChartRedraw();
+    ThrottledChartRedraw();
     return;
         }
     if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
@@ -1841,11 +1878,14 @@ void DecrementTH3Frequency()
         s_lastLayoutMs = nowMs;
 
         if(sizeChanged) g_labelsRelayoutNeeded = true;
-        // FIX: Trigger full level redraw on scroll/zoom so viewport-culled levels appear
-        if(viewportChanged) g_redrawTHLevelsNeeded = true;
+        // PERF: Viewport-only scroll/zoom — skip ClearAllLevels, just re-render with viewport culling
+        if(viewportChanged) {
+            g_redrawTHLevelsNeeded = true;
+            g_viewportOnlyRedraw = true;
+        }
         
         if(sizeChanged) RedrawLabelsOnly();
-        ChartRedraw();
+        ThrottledChartRedraw();
         return;
     }
     if(id == CHARTEVENT_CLICK && g_waitingForCustomPriceClick)

@@ -362,6 +362,25 @@ void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
     int copiedClose = CopyClose(_Symbol, tf, 0, copyCount, closeArr);
     
     if(copiedHigh < copyCount || copiedLow < copyCount || copiedClose < copyCount) {
+        // PERF: Retry with smaller window (1× period + 2) before expensive per-bar fallback
+        int retryCopyCount = MathMin(maxPeriod + 2, barsAvailable);
+        if(retryCopyCount > 10 && retryCopyCount < copyCount) {
+            copiedHigh  = CopyHigh(_Symbol, tf, 0, retryCopyCount, highArr);
+            copiedLow   = CopyLow(_Symbol, tf, 0, retryCopyCount, lowArr);
+            copiedClose = CopyClose(_Symbol, tf, 0, retryCopyCount, closeArr);
+            if(copiedHigh >= retryCopyCount && copiedLow >= retryCopyCount && copiedClose >= retryCopyCount) {
+                _LOG_GATE_D Print("[D][ATR] Retry with smaller copyCount=", retryCopyCount, " succeeded for TF=", tf);
+                copyCount = retryCopyCount;
+                // Fall through to normal batch processing below
+            } else {
+                copiedHigh = -1; // Force fallback path
+            }
+        } else {
+            copiedHigh = -1; // Force fallback path
+        }
+    }
+    
+    if(copiedHigh < 0 || copiedHigh < copyCount || copiedLow < copyCount || copiedClose < copyCount) {
         _LOG_GATE_E Print("[E][ATR] CalculateATRBatchWilders: CopyXxx failed for TF=", tf);
         // Fallback: per-bar CalculateTrueRange with Wilder's (only for current TF)
         if(tf == _Period || tf == PERIOD_CURRENT) {

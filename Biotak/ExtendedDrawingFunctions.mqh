@@ -997,37 +997,40 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     return 0;
     }
     if(inpComboOp1 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp1 <= OP_MAX_ALL) {
+        // PERF: Pre-allocate max capacity (4) to avoid 4x incremental ArrayResize(+1)
         double componentValues[];
-    ArrayResize(componentValues, 0);
+    ArrayResize(componentValues, 4);
+    int componentCount = 0;
     if(inpComboComp1 != COMP_IGNORE) {
         double val1 = GetStepSizeFromComponent(basePrice, inpComboComp1);
     if(val1 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-    componentValues[ArraySize(componentValues) - 1] = val1;
+                componentValues[componentCount] = val1;
+    componentCount++;
             }
         }
     if(inpComboComp2 != COMP_IGNORE) {
         double val2 = GetStepSizeFromComponent(basePrice, inpComboComp2);
     if(val2 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-    componentValues[ArraySize(componentValues) - 1] = val2;
+                componentValues[componentCount] = val2;
+    componentCount++;
             }
         }
     if(inpComboComp3 != COMP_IGNORE) {
         double val3 = GetStepSizeFromComponent(basePrice, inpComboComp3);
     if(val3 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-    componentValues[ArraySize(componentValues) - 1] = val3;
+                componentValues[componentCount] = val3;
+    componentCount++;
             }
         }
     if(inpComboComp4 != COMP_IGNORE) {
         double val4 = GetStepSizeFromComponent(basePrice, inpComboComp4);
     if(val4 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-    componentValues[ArraySize(componentValues) - 1] = val4;
+                componentValues[componentCount] = val4;
+    componentCount++;
             }
         }
-    int componentCount = ArraySize(componentValues);
+    // Trim to actual count for N-ary functions that use ArraySize
+    ArrayResize(componentValues, componentCount);
     if(componentCount == 0) {
             _LOG_GATE_E Print("[E][DRAW] N-ARY Mode: No valid components found");
     Alert("[WARN] ADVANCED MODE ERROR (N-ary Operator)\n\nAll components are set to IGNORE!\nPlease select at least one component.");
