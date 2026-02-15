@@ -1748,18 +1748,7 @@ int GetValidatedBaseMultiplier() {
     return 3;    }
     return baseMultiplier;
 }
-    bool ShouldDrawStepOptimized(const int step, const bool triggerEnabled, const int baseMultiplier) {
-        // BASE PLAYER: All steps are always included.
-    // Base multiplier defines structural intervals (L1 = every base steps).
-    // Steps between structural levels are trigger subdivisions.
-    // With base=4: steps 4,8,12 = structural, steps 1,2,3,5,6,7 = trigger subdivisions
-    // This ensures exactly (base) equal zones between each pair of structural levels.
-    return true;
-}
-    bool ShouldDrawStep(const int step) {
-        // BASE PLAYER: All steps always visible
-    return true;
-}
+
 
 //+------------------------------------------------------------------+
 //| Cache for structure intervals to avoid repeated MathPow() calls |

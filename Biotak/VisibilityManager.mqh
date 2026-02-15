@@ -8,9 +8,7 @@ static bool g_linesVisibleCached = true;
 static uint g_linesVisibleCacheTime = 0;
 static const int LINES_VISIBLE_CACHE_TTL_MS = 100;
 
-static bool g_triggerEnabledCached = true;
-static uint g_triggerEnabledCacheTime = 0;
-static const int TRIGGER_ENABLED_CACHE_TTL_MS = 100;
+
 
 bool GetCachedLinesVisible()
 {
@@ -30,28 +28,11 @@ void UpdateLinesVisibleCache(bool visible)
 
 void InvalidateLinesVisibleCache() { g_linesVisibleCacheTime = 0; }
 
-bool GetCachedTriggerEnabled()
-{
-    uint now = GetTickCount();
-    if((int)(now - g_triggerEnabledCacheTime) > TRIGGER_ENABLED_CACHE_TTL_MS) {
-        g_triggerEnabledCached = g_triggerLevelsEnabled;
-        g_triggerEnabledCacheTime = now;
-    }
-    return g_triggerEnabledCached;
-}
 
-void UpdateTriggerEnabledCache(bool enabled)
-{
-    g_triggerEnabledCached = enabled;
-    g_triggerEnabledCacheTime = GetTickCount();
-}
-
-void InvalidateTriggerEnabledCache() { g_triggerEnabledCacheTime = 0; }
 
 void InvalidateAllVisibilityCaches()
 {
     InvalidateLinesVisibleCache();
-    InvalidateTriggerEnabledCache();
 }
 
 void SetObjectVisibility(const string name, const bool visible)

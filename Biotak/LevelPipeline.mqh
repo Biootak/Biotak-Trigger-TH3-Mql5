@@ -527,10 +527,10 @@ int ClassifyLevelsAlternating(
     // Start with standard classification
     int result = ClassifyLevels(rawLevels, rawCount, config, triggerEnabled, baseMultiplier, classified);
     
-    // Override colors for non-structure levels with SS/LS alternating pattern
+    // Override colors for non-structure, non-trigger levels with SS/LS alternating pattern
     for(int i = 0; i < result; i++) {
         if(classified[i].isMidpoint) continue;
-        if(classified[i].isStructure) continue;
+        if(classified[i].isStructure || classified[i].isTrigger) continue;
         
         // SSLS alternating: determine if this step is SS or LS
         bool isSS = ((classified[i].logicalStep % 2 == 0) == lsFirst);
@@ -563,7 +563,7 @@ int ClassifyLevelsMMode(
     
     for(int i = 0; i < result; i++) {
         if(classified[i].isMidpoint) continue;
-        if(classified[i].isStructure) continue;
+        if(classified[i].isStructure || classified[i].isTrigger) continue;
         
         // M mode: every 3rd step is M level, others are C levels
         bool isM = (classified[i].logicalStep % 3 == 0);

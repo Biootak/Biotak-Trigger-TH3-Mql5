@@ -1481,7 +1481,7 @@ void DecrementTH3Frequency()
         }
         // Keep trigger objects hidden if triggers are disabled
         bool isTriggerObject = (StringFind(objName, "TriggerTH_Up_") >= 0 || 
-                                               StringFind(objName, "TriggerTH_Down_") >= 0);
+                                StringFind(objName, "TriggerTH_Down_") >= 0);
     if(isTriggerObject && !g_triggerLevelsEnabled)
                         {
             ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
@@ -1616,8 +1616,7 @@ void DecrementTH3Frequency()
         }
     if(IsHotkeyPressed(lparam, sparam, inpTriggerLevelsKey))
         {            g_triggerLevelsEnabled = !g_triggerLevelsEnabled;
-    // FIX: Immediately update cache to prevent stale state during subsequent redraws
-    UpdateTriggerEnabledCache(g_triggerLevelsEnabled);
+
     string triggerGvarName = "Biotak_TriggerLevels_" + GetCachedChartIdStr();
     GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled);
     if(g_triggerLevelsEnabled) {
