@@ -67,14 +67,27 @@ bool CreateOrUpdateHLine(const string name, double price,
 
 //+------------------------------------------------------------------+
 //| HELPER: Get common viewport bounds for level drawing             |
-
+//| PERF: Cached per-frame via g_cacheFrameTime — eliminates ~8      |
+//|       redundant ChartGetDouble syscalls across 4 pipelines       |
 //+------------------------------------------------------------------+
 void GetViewportBounds(double &vpTop, double &vpBottom) {
-        double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    static double s_vpTop = 0;
+    static double s_vpBottom = 0;
+    static datetime s_vpFrameTime = 0;
+    datetime frameTime = CacheGetFrameTime();
+    if(frameTime == s_vpFrameTime && s_vpTop > 0) {
+        vpTop = s_vpTop;
+        vpBottom = s_vpBottom;
+        return;
+    }
+    double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
     double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
     double vpRange = (vpChartMax - vpChartMin) * 0.5;
     vpTop = vpChartMax + vpRange;
     vpBottom = vpChartMin - vpRange;
+    s_vpTop = vpTop;
+    s_vpBottom = vpBottom;
+    s_vpFrameTime = frameTime;
 }
 
 //+------------------------------------------------------------------+

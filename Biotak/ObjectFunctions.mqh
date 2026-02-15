@@ -154,9 +154,9 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         }
     string labelText;
     if(StringLen(levelInfo) > 0) {
-            labelText = StringFormat("%s | %.1f", levelInfo, pips);
+            labelText = levelInfo + " | " + DoubleToString(pips, 1);
         } else {
-            labelText = StringFormat("%.1f pips", pips);
+            labelText = DoubleToString(pips, 1) + " pips";
         }
         
         ObjectSetString(0, name, OBJPROP_TEXT, labelText);
@@ -196,9 +196,9 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     } else {
         string labelText;
     if(StringLen(levelInfo) > 0) {
-            labelText = StringFormat("%s | %.1f", levelInfo, pips);
+            labelText = levelInfo + " | " + DoubleToString(pips, 1);
         } else {
-            labelText = StringFormat("%.1f pips", pips);
+            labelText = DoubleToString(pips, 1) + " pips";
         }
         
         // PERF: Always update text (pip distance changes per tick)

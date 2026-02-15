@@ -4,7 +4,7 @@
 bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 0) {
     if(!inpAlertOnce) return true;
     datetime barTime = currentBarTime;
-    if(barTime <= 0) barTime = iTime(_Symbol, Period(), 0);
+    if(barTime <= 0) barTime = iTime(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0);
     if(barTime > g_lastAlertTime || g_lastAlertLevel != levelName) {
         g_lastAlertTime = barTime;
     g_lastAlertLevel = levelName;
@@ -20,7 +20,11 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
 }
     void CheckAlerts(const string objectPrefix, double currentPrice) {
         if(objectPrefix == "" || currentPrice <= 0) return;
-    datetime currentBarTime = inpAlertOnce ? iTime(_Symbol, Period(), 0) : 0;
+    // PERF: Skip alert loop when price hasn't changed since last check
+    static double s_lastAlertPrice = 0;
+    if(MathAbs(currentPrice - s_lastAlertPrice) < GetCachedPoint() * 0.5) return;
+    s_lastAlertPrice = currentPrice;
+    datetime currentBarTime = inpAlertOnce ? iTime(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0) : 0;
 
     // High/Low alerts (skip in Custom Price mode)
     if(inpEnableHighLowAlerts && g_thStartPointType != TH_START_POINT_CUSTOM_PRICE) {

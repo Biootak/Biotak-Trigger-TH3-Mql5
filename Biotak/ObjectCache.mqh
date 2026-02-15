@@ -32,6 +32,10 @@ static SObjectCacheSlot g_objectCacheHash[CACHE_HASH_BUCKETS];
     static bool g_objectCacheHashInitialized = false;
     static int g_objectCacheSize = 0;
 
+// PERF: O(1) LRU eviction tracking — avoids O(512) full scan on eviction
+static int g_lruMinIdx = -1;
+static datetime g_lruMinTime = 0;
+
 // PERF: Cached TimeCurrent() - refreshed once per redraw frame via CacheRefreshFrameTime()
 // Eliminates ~2000+ TimeCurrent() syscalls per redraw cycle
 static datetime g_cacheFrameTime = 0;
@@ -67,6 +71,8 @@ int HashObjectName(const string name) {
     
     g_objectCacheHashInitialized = true;
     g_objectCacheSize = 0;
+    g_lruMinIdx = -1;
+    g_lruMinTime = 0;
     _LOG_GATE_I Print("[I][SYNC] Object Cache Hash Initialized (", CACHE_HASH_BUCKETS, " buckets)");
     }
     int CacheFindIndex(const string name) {
@@ -133,6 +139,12 @@ int HashObjectName(const string name) {
     g_objectCacheHash[insertIdx].deleted = false;
     g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
     g_objectCacheSize++;
+    // PERF: Track LRU minimum for O(1) eviction
+    datetime insertTime = g_objectCacheHash[insertIdx].lastAccess;
+    if(g_lruMinIdx < 0 || insertTime < g_lruMinTime) {
+        g_lruMinIdx = insertIdx;
+        g_lruMinTime = insertTime;
+    }
     return;
         }
     }
@@ -147,7 +159,23 @@ int HashObjectName(const string name) {
     void EvictLRUEntry() {
         if(g_objectCacheSize == 0) return;
     
-    // Find LRU entry
+    // PERF: O(1) fast path — use tracked LRU minimum if valid
+    if(g_lruMinIdx >= 0 && g_lruMinIdx < CACHE_HASH_BUCKETS &&
+       g_objectCacheHash[g_lruMinIdx].occupied) {
+        int lruIdx = g_lruMinIdx;
+        _LOG_GATE_D Print("[D][SYNC] [DEL] Evicting LRU cache entry (O(1)): '", g_objectCacheHash[lruIdx].name, "'");
+        g_objectCacheHash[lruIdx].name = "";
+        g_objectCacheHash[lruIdx].occupied = false;
+        g_objectCacheHash[lruIdx].deleted = true;  // Tombstone
+        g_objectCacheHash[lruIdx].lastAccess = 0;
+        g_objectCacheSize--;
+        // Invalidate tracked minimum — will be lazily refreshed
+        g_lruMinIdx = -1;
+        g_lruMinTime = 0;
+        return;
+    }
+    
+    // Fallback: Full scan to find LRU entry
     int lruIdx = -1;
     datetime oldestAccess = CacheGetFrameTime() + 86400;  // Start with future time
     
@@ -165,6 +193,9 @@ int HashObjectName(const string name) {
     g_objectCacheHash[lruIdx].deleted = true;  // Tombstone
         g_objectCacheHash[lruIdx].lastAccess = 0;
     g_objectCacheSize--;
+    // Invalidate tracked minimum
+    g_lruMinIdx = -1;
+    g_lruMinTime = 0;
     }
 }
     void CacheRemoveObject(const string name) {
@@ -183,6 +214,8 @@ int HashObjectName(const string name) {
     }
     void CacheClear() {
     if(!g_objectCacheHashInitialized) return;
+    // PERF: Early exit when cache is already empty
+    if(g_objectCacheSize == 0) return;
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
         g_objectCacheHash[i].name = "";
     g_objectCacheHash[i].occupied = false;
@@ -191,6 +224,9 @@ int HashObjectName(const string name) {
     }
     
     g_objectCacheSize = 0;
+    // Reset LRU tracking
+    g_lruMinIdx = -1;
+    g_lruMinTime = 0;
     _LOG_GATE_I Print("[I][SYNC] Object cache cleared");
     }
     bool CacheObjectExists(const string name) {

@@ -730,7 +730,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     TH3_PROF_START(ATRLabels);
     
     // Naming is timeframe-specific; update in-place to avoid expensive object churn
-    string currentTFStr = IntegerToString(Period());
+    string currentTFStr = IntegerToString(GetCachedPeriod());
     string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
     
     // Standard MT5 timeframes with minutes for CalculateHybridATR
@@ -743,7 +743,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     static int s_lastATROffsetContribution = 0;  // Track last Y offset for early-return path
     double currentATRValues[8];
     double currentATRPips[8];
-    bool anyChanged = (s_lastATRPeriod != Period());
+    bool anyChanged = (s_lastATRPeriod != GetCachedPeriod());
     for(int i = 0; i < 8; i++) {
         double atrVal = GetATRForTimeframe(tfMinutes[i]);
         currentATRValues[i] = atrVal;
@@ -761,7 +761,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     }
     // Update stored values
     for(int i = 0; i < 8; i++) s_lastATRPips[i] = currentATRPips[i];
-    s_lastATRPeriod = Period();
+    s_lastATRPeriod = GetCachedPeriod();
 
     // Original color scheme per timeframe
     color colors[] = {
@@ -883,7 +883,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
 // Fast ATR labels hide/show without deletion (O(1) object operations)
 void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
     // Match DisplayATRLabels naming
-    string currentTFStr = IntegerToString(Period());
+    string currentTFStr = IntegerToString(GetCachedPeriod());
     string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
     string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
 

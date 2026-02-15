@@ -29,6 +29,21 @@ struct SZoneCreationResult {
     int errorCode;
 };
 
+// PERF: Per-frame cached chart background color — eliminates ~50 ChartGetInteger
+//       syscalls per redraw frame (one per zone object)
+static color g_cachedBgColor = clrBlack;
+static datetime g_cachedBgColorFrameTime = 0;
+
+color GetCachedChartBgColor() {
+    datetime frameTime = CacheGetFrameTime();
+    if(frameTime == g_cachedBgColorFrameTime && g_cachedBgColorFrameTime != 0) {
+        return g_cachedBgColor;
+    }
+    g_cachedBgColor = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
+    g_cachedBgColorFrameTime = frameTime;
+    return g_cachedBgColor;
+}
+
 // Compute visually reliable zone color for chart objects.
 // MT5 chart objects may ignore ARGB alpha, so we blend with chart background.
 color GetZoneRenderColor(const color sourceColor, const int transparency)
@@ -39,7 +54,7 @@ color GetZoneRenderColor(const color sourceColor, const int transparency)
 
     if(tVis <= 0) return sourceColor;
 
-    color bg = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
+    color bg = GetCachedChartBgColor();
     if(tVis >= 100) return bg;
 
     int fr = ((int)sourceColor) & 0xFF;

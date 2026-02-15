@@ -122,7 +122,7 @@ int GetEffectiveTimeframe() {
     if(g_timeframeLocked && g_lockedPeriod > 0) {
         return g_lockedPeriod;
     }
-    return Period();
+    return GetCachedPeriod();
 }
 
 //+------------------------------------------------------------------+
@@ -131,7 +131,7 @@ int GetEffectiveTimeframe() {
 //+------------------------------------------------------------------+
 int GetEffectiveBars() {
         int tf = GetEffectiveTimeframe();
-    if(tf == Period()) {
+    if(tf == GetCachedPeriod()) {
         return Bars(_Symbol, _Period);
     }
     return iBars(_Symbol, (ENUM_TIMEFRAMES)tf);
@@ -158,7 +158,7 @@ double CalculateTrueRange(const int barIndex) {
     
     // Use iHigh/iLow/iClose/iOpen for timeframe-aware access
     
-    if(tf == Period()) {
+    if(tf == GetCachedPeriod()) {
         // Current chart timeframe - use iHigh/iLow/iOpen/iClose (MQL5 compatible)
         // Validate array bounds before access
         int currentBars = Bars(_Symbol, _Period);
@@ -911,7 +911,7 @@ void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targ
 //| AUDIT FIX: Added validation for Period()                         |
 //+------------------------------------------------------------------+
 int GetCurrentTimeframeMinutes() {
-        int period = Period();
+        int period = GetCachedPeriod();
     
     // AUDIT FIX: Validate period
     if(period <= 0) {

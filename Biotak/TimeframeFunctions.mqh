@@ -2,7 +2,7 @@
 #define TIMEFRAME_FUNCTIONS_MQH
 
 string GetCurrentTimeframe() {
-        int timeframe = (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period();
+        int timeframe = (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : GetCachedPeriod();
     switch(timeframe) {
         case PERIOD_M1:  return "M1";   case PERIOD_M2:  return "M2";
     case PERIOD_M3:  return "M3";   case PERIOD_M4:  return "M4";

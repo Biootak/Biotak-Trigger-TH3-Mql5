@@ -405,7 +405,7 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
     else if(reason == REASON_PARAMETERS)
     {
         // Clear all ATR and TH labels to apply new settings
-        string currentTFStr = IntegerToString(Period());
+        string currentTFStr = IntegerToString(GetCachedPeriod());
         string uniquePrefix = inpObjectPrefix + "TF" + currentTFStr + "_";
         string tfLabels[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
         
