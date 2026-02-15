@@ -112,12 +112,9 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-  // Check each label independently and only clear expired ones
-  bool anyRemaining = CheckAndClearExpiredLabels();
-  if(!anyRemaining) {
-      EventKillTimer();
-  }
-  // FIX: Only redraw if something actually changed (label was cleared)
-  // CheckAndClearExpiredLabels now handles repositioning internally
+  // Periodic housekeeping runs here (kept lightweight by internal throttles)
+  RunIncrementalObjectCleanup();
+  // Keep label expiry logic; no timer kill because cleanup also depends on timer cadence
+  CheckAndClearExpiredLabels();
   }
 //+------------------------------------------------------------------+

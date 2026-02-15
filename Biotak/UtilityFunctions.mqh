@@ -151,6 +151,82 @@ void ClearAllModeLabels() {
     g_resetCommentCreateTime = 0;
 }
 
+double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
+{
+    int digits = GetCachedDigits();
+    if(digits <= 0) digits = Digits;
+
+    double basePrice = g_dailyClosePriceForTH;
+    if(basePrice <= 0 || basePrice == EMPTY_VALUE) {
+        if(g_currentPrice > 0) basePrice = g_currentPrice;
+        else if(g_highestHigh > 0 && g_lowestLow > 0) basePrice = (g_highestHigh + g_lowestLow) * 0.5;
+    }
+    if(basePrice <= 0) return 0.0;
+
+    double timeframePercentage = GetTimeframeTH();
+    double thValue = CalculateTH(basePrice, digits, timeframePercentage);
+    if(thValue <= 0) return 0.0;
+    thValue = GetAdaptedStepSize(thValue);
+
+    switch(mode)
+    {
+        case TH_STEP:
+            return thValue;
+
+        case FACTOR_STEP:
+        {
+            double factorValue = g_factorValueOverride;
+            if(factorValue <= 0) {
+                if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0)
+                    factorValue = inpFactorValue;
+                else
+                    factorValue = GetDefaultFactorValue(basePrice);
+            }
+            return CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
+        }
+
+        case SS_LS_STEP:
+        case M_STEP:
+        {
+            double structureValue = 0, patternValue = 0, triggerValue = 0;
+            CalculateFractalValues(thValue, structureValue, patternValue, triggerValue);
+            double shortStep = structureValue * 1.5;
+            if(mode == M_STEP && inpMStepBasisType == MSTEP_BASIS_M_EQUAL)
+                return CalculateMDistance(shortStep);
+            return shortStep;
+        }
+
+        case TP_STEP:
+        {
+            double eValue = CalculateEStep(thValue);
+            return CalculateTPStep(eValue);
+        }
+
+        case COMBO_STEP:
+            return CalculateComboStepSize(basePrice);
+
+        default:
+            return thValue;
+    }
+}
+
+string BuildUnifiedModeLabelText()
+{
+    ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
+    string modeName = GetStepModeName(currentMode);
+
+    double pipSize = GetCachedPipSize();
+    if(IsZero(pipSize, EPSILON_PRICE) || pipSize <= 0)
+        return "[ " + modeName + " ]";
+
+    double stepPrice = GetCurrentModePrimaryStepPrice(currentMode);
+    if(stepPrice <= 0)
+        return "[ " + modeName + " ]";
+
+    double stepPips = stepPrice / pipSize;
+    return "[ " + modeName + " | Step: " + DoubleToString(stepPips, 1) + " pips ]";
+}
+
 //+------------------------------------------------------------------+
 //| Check and clear expired labels (called from OnTimer)            |
 //| Returns true if any labels remain (timer should continue)       |
@@ -259,22 +335,15 @@ int GetModeLabelBlockHeight() {
     ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
     void UpdateStepModeLabel() {    if(!inpShowModeChangeLabel) return;
-    ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
-    string modeName = GetStepModeName(currentMode);
-    string basisName = "TH";
-    if(currentMode == COMBO_STEP) {
-        ENUM_COMBO_MODE currentComboMode = inpComboMode;
-    if(currentComboMode == COMBO_MODE_PRESET) {            ENUM_COMBO_PRESET currentPreset = inpComboPreset;
-    string presetName = GetComboPresetName(currentPreset);
-    modeName = modeName + " [" + presetName + "]";
-        } else {            modeName = modeName + " [Calculator]";
-        }
-    }
     if(IsIndicatorHidden()) return;
+        // Keep only one mode label on chart (mode + step). Remove old secondary labels.
+        ClearSingleModeLabel(g_factorLabelName, g_factorLabelCreateTime);
+        ClearSingleModeLabel(g_th3FreqLabelName, g_th3FreqLabelCreateTime);
+
     if(ObjectFind(0, g_stepModeLabelName) < 0) {
         ObjectCreate(0, g_stepModeLabelName, OBJ_LABEL, 0, 0, 0);
     }
-    ObjectSetString(0, g_stepModeLabelName, OBJPROP_TEXT, "[ " + basisName + " | " + modeName + " ]");
+        ObjectSetString(0, g_stepModeLabelName, OBJPROP_TEXT, BuildUnifiedModeLabelText());
     g_stepModeLabelCreateTime = GetTickCount();
     ApplyModeLabelStyle(g_stepModeLabelName, inpModeLabelColor);
     if(inpModeLabelDuration > 0) {
@@ -288,46 +357,18 @@ int GetModeLabelBlockHeight() {
 //| Shows: "F: 2.50 | Step: 12.5 pips" with auto-hide               |
 //+------------------------------------------------------------------+
 void UpdateFactorLabel(double factorValue) {    if(!inpShowModeChangeLabel) return;
-    if(IsIndicatorHidden()) return;
-    double stepSize = 0;
-    string stepText = "";
-    if(g_highestHigh > 0 && g_lowestLow > 0 && g_highestHigh > g_lowestLow) {
-        stepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
-    if(stepSize > 0) {
-        double pipSize = GetCachedPipSize();
-    double stepPips = stepSize / pipSize;
-    stepText = " | Step: " + DoubleToString(stepPips, 1) + " pips";
-        }
-    }
-    if(ObjectFind(0, g_factorLabelName) < 0) {
-        ObjectCreate(0, g_factorLabelName, OBJ_LABEL, 0, 0, 0);
-    }
-    ObjectSetString(0, g_factorLabelName, OBJPROP_TEXT, 
-        "[ F: " + DoubleToString(factorValue, 2) + stepText + " ]");
-    g_factorLabelCreateTime = GetTickCount();
-    ApplyModeLabelStyle(g_factorLabelName, inpFactorLevelColor);
-    if(inpModeLabelDuration > 0) {
-        EventSetTimer(1);  // Check every second for expired labels
-    }
+    // Unified label policy: only StepMode label is shown.
+    // Keep this function as a compatibility hook and refresh the main mode label.
+    ClearSingleModeLabel(g_factorLabelName, g_factorLabelCreateTime);
+    UpdateStepModeLabel();
 }
 
 //+------------------------------------------------------------------+
 //| Update TH3 Frequency label on chart                             |
 //+------------------------------------------------------------------+
 void UpdateTH3FreqLabel(double freqValue) {
-    if(!inpShowModeChangeLabel) return;
-    if(IsIndicatorHidden()) return;
-
-    if(ObjectFind(0, g_th3FreqLabelName) < 0)
-        ObjectCreate(0, g_th3FreqLabelName, OBJ_LABEL, 0, 0, 0);
-
-    ObjectSetString(0, g_th3FreqLabelName, OBJPROP_TEXT,
-        "[ TH3 Freq: " + DoubleToString(freqValue, 3) + "% (#" + IntegerToString(g_th3FreqIndex) + ") ]");
-    g_th3FreqLabelCreateTime = GetTickCount();
-    ApplyModeLabelStyle(g_th3FreqLabelName, inpTH3Color);
-
-    if(inpModeLabelDuration > 0)
-        EventSetTimer(1);  // Check every second for expired labels
+    // Unified label policy: hide legacy TH3 frequency label to avoid clutter.
+    ClearSingleModeLabel(g_th3FreqLabelName, g_th3FreqLabelCreateTime);
 }
 
 //+------------------------------------------------------------------+

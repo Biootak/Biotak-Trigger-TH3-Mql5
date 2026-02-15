@@ -73,6 +73,8 @@ int OnInitHandler() {    InitializeGlobalCache();
     ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
     ChartSetInteger(0, CHART_SHOW_GRID, false);
+    // Keep a lightweight 1s timer for periodic housekeeping (label expiry + object cleanup)
+    EventSetTimer(1);
     CheckArraySizes();
     bool deferHeavyInit = recentTimeframeSwitch;
     if(!deferHeavyInit) {
@@ -790,6 +792,75 @@ void LogRedrawDecision(const bool isNewBar,
     #endif
 }
 
+//+------------------------------------------------------------------+
+//| Periodic cleanup outside redraw path (timer-driven)              |
+//+------------------------------------------------------------------+
+void RunIncrementalObjectCleanup()
+{
+    datetime currentTime = TimeGMT();
+    if(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS) return;
+
+    TH3_PROF_START(ObjectCleanup);
+    int currentObjectCount = ObjectsTotal(0, -1, -1);
+
+    // Keep existing safety heuristic: cleanup only on object growth bursts
+    if(currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
+        datetime cutoffTime = currentTime - 3600;
+        string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+        int currentPrefixLen = StringLen(objectPrefix);
+        string indicatorPrefix = inpObjectPrefix;
+        int indicatorPrefixLen = StringLen(indicatorPrefix);
+
+        // Incremental batch cursor persists across timer invocations
+        static int s_cleanupCursor = -1;
+        int maxCleanupItems = MathMin(currentObjectCount, 300);
+        if(s_cleanupCursor < 0 || s_cleanupCursor >= currentObjectCount) {
+            s_cleanupCursor = currentObjectCount - 1;
+        }
+
+        ushort indicatorFirstChar = StringGetCharacter(indicatorPrefix, 0);
+        ushort abcdFirstChar = 'A';   // ABCD_Pattern_ / ABCD_Temp_
+        ushort structFirstChar = 'T'; // TH3_Structure_
+
+        int processed = 0;
+        int i = s_cleanupCursor;
+        for(; i >= 0 && processed < maxCleanupItems; i--, processed++) {
+            string objName = ObjectName(0, i, -1, -1);
+            if(objName == "") continue;
+
+            ushort firstChar = StringGetCharacter(objName, 0);
+            if(firstChar != indicatorFirstChar && firstChar != abcdFirstChar && firstChar != structFirstChar) continue;
+
+            bool isOurs = false;
+            if(StringLen(objName) >= indicatorPrefixLen && StringSubstr(objName, 0, indicatorPrefixLen) == indicatorPrefix) isOurs = true;
+            if(!isOurs && StringFind(objName, TH3_PATTERN_PREFIX) == 0) isOurs = true;
+            if(!isOurs && StringFind(objName, TH3_TEMP_PREFIX) == 0) isOurs = true;
+            if(!isOurs && StringFind(objName, "TH3_Structure_") == 0) isOurs = true;
+            if(!isOurs) continue;
+
+            // Keep current timeframe + TH3 families; only prune stale indicator leftovers
+            if(firstChar == 'A') continue;
+            if(StringFind(objName, "TH3_Structure_") == 0) continue;
+            if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
+
+            datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
+            if(objTime > 0 && objTime < cutoffTime) {
+                CacheRemoveObject(objName);
+                g_suppressDeleteEvents = true;
+                ObjectDelete(0, objName);
+                g_suppressDeleteEvents = false;
+            }
+        }
+
+        if(i < 0) s_cleanupCursor = currentObjectCount - 1;
+        else s_cleanupCursor = i;
+    }
+
+    g_objectCountLast = currentObjectCount;
+    g_lastObjectCleanup = currentTime;
+    TH3_PROF_END(ObjectCleanup);
+}
+
     void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
 {
         static ENUM_STEP_CALCULATION_MODE s_lastDrawnMode = (ENUM_STEP_CALCULATION_MODE)-1;
@@ -937,7 +1008,9 @@ void LogRedrawDecision(const bool isNewBar,
                   " (", (g_thStartPointType == TH_START_POINT_CUSTOM_PRICE ? "Custom" : "Midpoint"), ")");
     Print("[D][GEN]    MaxLevels: Above=", data.maxLevelsAbove, ", Below=", data.maxLevelsBelow);
     #endif
-    UpdateFactorLabel(factorValue);
+    // IMPORTANT: Do not refresh factor label on every redraw.
+    // The label is intended as a temporary change notification and is updated
+    // explicitly on user actions (e.g., key-based factor adjustments).
     // PERF: Compute factor step size ONCE
     double factorStepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
     if(factorStepSize <= 0) {
@@ -1082,10 +1155,29 @@ void LogRedrawDecision(const bool isNewBar,
         }
     }
 
-    TH3_PROF_START(BasePrice);
-    UpdateBasePrice();
+    // PERF: Gate base-price updates to 30-min boundaries instead of checking every redraw.
+    static datetime s_nextBasePriceCheckServer = 0;
+    datetime nowServerTs = CacheGetFrameTime();
+    bool shouldCheckBasePrice = (s_nextBasePriceCheckServer <= 0 || nowServerTs >= s_nextBasePriceCheckServer);
+    if(shouldCheckBasePrice) {
+        TH3_PROF_START(BasePrice);
+        UpdateBasePrice();
+        TH3_PROF_END(BasePrice);
+
+        MqlDateTime nextCheckDt;
+        TimeToStruct(nowServerTs, nextCheckDt);
+        if(nextCheckDt.min < 30) {
+            nextCheckDt.min = 30;
+        } else {
+            nextCheckDt.hour++;
+            nextCheckDt.min = 0;
+        }
+        nextCheckDt.sec = 0;
+        // +1 second prevents repeat runs at the exact boundary timestamp.
+        s_nextBasePriceCheckServer = StructToTime(nextCheckDt) + 1;
+    }
+
     double thBasePrice = GetBasePriceForTH();
-    TH3_PROF_END(BasePrice);
     if(thBasePrice <= 0 || thBasePrice == EMPTY_VALUE) {        thBasePrice = g_dailyClosePriceForTH;
     }
     
@@ -1117,50 +1209,6 @@ void LogRedrawDecision(const bool isNewBar,
         s_cachedObjectPrefix = inpObjectPrefix + "_" + currentTFStr + "_";
     }
     string objectPrefix = s_cachedObjectPrefix;
-    if(currentTime - g_lastObjectCleanup > CLEANUP_INTERVAL_SECONDS) {
-        TH3_PROF_START(ObjectCleanup);
-        int currentObjectCount = ObjectsTotal(0, -1, -1);
-    if(currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
-        datetime cutoffTime = currentTime - 3600;
-    int currentPrefixLen = StringLen(objectPrefix);
-    string indicatorPrefix = inpObjectPrefix;
-    int indicatorPrefixLen = StringLen(indicatorPrefix);
-    int maxCleanupItems = MathMin(currentObjectCount, 2000);
-    // PERF: Pre-compute first characters of all known prefixes for fast rejection
-    ushort indicatorFirstChar = StringGetCharacter(indicatorPrefix, 0);
-    ushort abcdFirstChar = 'A';     // "ABCD_Pattern_" and "ABCD_Temp_" both start with 'A'
-    ushort structFirstChar = 'T';   // "TH3_Structure_" starts with 'T'
-    for(int i = maxCleanupItems - 1; i >= 0; i--) {
-        string objName = ObjectName(0, i, -1, -1);
-    if(objName == "") continue;
-    // PERF: Quick first-char rejection — skip objects that can't be ours
-    ushort firstChar = StringGetCharacter(objName, 0);
-    if(firstChar != indicatorFirstChar && firstChar != abcdFirstChar && firstChar != structFirstChar) continue;
-    // FIX: Only consider objects that belong to THIS indicator (known prefixes)
-    bool isOurs = false;
-    if(StringLen(objName) >= indicatorPrefixLen && StringSubstr(objName, 0, indicatorPrefixLen) == indicatorPrefix) isOurs = true;
-    if(!isOurs && StringFind(objName, TH3_PATTERN_PREFIX) == 0) isOurs = true;
-    if(!isOurs && StringFind(objName, TH3_TEMP_PREFIX) == 0) isOurs = true;
-    if(!isOurs && StringFind(objName, "TH3_Structure_") == 0) isOurs = true;
-    if(!isOurs) continue; // Skip foreign objects entirely
-    // Keep current-timeframe objects, TH3 structure, and ABCD patterns
-    // PERF: Combine structure + pattern checks — both start with known prefixes
-    if(firstChar == 'A') continue; // ABCD_Pattern_ and ABCD_Temp_ — never age-delete
-    if(StringFind(objName, "TH3_Structure_") == 0) continue;
-    if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
-    datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
-    if(objTime > 0 && objTime < cutoffTime) {
-                    CacheRemoveObject(objName);
-                    g_suppressDeleteEvents = true;
-                    ObjectDelete(0, objName);
-                    g_suppressDeleteEvents = false;
-                }
-            }
-        }
-        g_objectCountLast = currentObjectCount;
-    g_lastObjectCleanup = currentTime;
-    TH3_PROF_END(ObjectCleanup);
-    }
     static string s_lastPrefix = "";
     if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {        ClearAllLevels(s_lastPrefix);
     InvalidateTimeframeDependentCaches();
@@ -1278,7 +1326,23 @@ void LogRedrawDecision(const bool isNewBar,
     // Pipeline uses CreateOrUpdateHLine which updates objects in-place
     // Safety: if forceClear is pending, always do full clear regardless of viewport flag
     bool canSkipClear = g_viewportOnlyRedraw && !g_forceClearOnNextDraw && !force_redraw;
-    if(!canSkipClear) {
+
+    // PERF: Topology signature guard — clear only when structure-defining inputs changed.
+    // Keeps level updates in-place for normal price movement redraws.
+    static string s_lastLevelSig = "";
+    ENUM_STEP_CALCULATION_MODE modeNow = GetCurrentStepMode();
+    string levelSig = objectPrefix + "|" +
+                      IntegerToString((int)modeNow) + "|" +
+                      IntegerToString(inpMaxLevels) + "|" +
+                      IntegerToString((int)g_thStartPointType) + "|" +
+                      IntegerToString(inpLSFirst ? 1 : 0) + "|" +
+                      IntegerToString(inpEnableHarmonicPattern ? 1 : 0) + "|" +
+                      DoubleToString(inpHarmonicRatio, 3) + "|" +
+                      IntegerToString((int)inpMStepBasisType);
+    bool levelTopologyChanged = (levelSig != s_lastLevelSig);
+    bool shouldClearLevels = (!canSkipClear) && (g_forceClearOnNextDraw || levelTopologyChanged);
+
+    if(shouldClearLevels) {
         TH3_PROF_START(LevelsClear);
         ClearAllLevels(objectPrefix, !skipZones);
         TH3_PROF_END(LevelsClear);
@@ -1286,6 +1350,7 @@ void LogRedrawDecision(const bool isNewBar,
     TH3_PROF_START(LevelsDrawByMode);
     DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
     TH3_PROF_END(LevelsDrawByMode);
+    s_lastLevelSig = levelSig;
     TH3_PROF_END(Levels);
     g_redrawTHLevelsNeeded = false;
     g_viewportOnlyRedraw = false;

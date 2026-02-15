@@ -21,6 +21,93 @@
 #define TH3_MIN_BASENAME_LEN    20
 #define TH3_MAX_TARGETS         7
 
+// Registry state for fast TH3 bulk updates (avoids chart-wide scans)
+static string g_th3PatternRegistry[];
+static int    g_th3PatternRegistryCount = 0;
+
+int FindTH3PatternRegistryIndex(const string baseName)
+{
+    for(int i = 0; i < g_th3PatternRegistryCount; i++) {
+        if(g_th3PatternRegistry[i] == baseName) return i;
+    }
+    return -1;
+}
+
+void RegisterTH3Pattern(const string baseName)
+{
+    if(baseName == "") return;
+    if(FindTH3PatternRegistryIndex(baseName) >= 0) return;
+
+    int newCount = g_th3PatternRegistryCount + 1;
+    ArrayResize(g_th3PatternRegistry, newCount, 16);
+    g_th3PatternRegistry[g_th3PatternRegistryCount] = baseName;
+    g_th3PatternRegistryCount = newCount;
+}
+
+void UnregisterTH3Pattern(const string baseName)
+{
+    int idx = FindTH3PatternRegistryIndex(baseName);
+    if(idx < 0) return;
+
+    for(int i = idx; i < g_th3PatternRegistryCount - 1; i++) {
+        g_th3PatternRegistry[i] = g_th3PatternRegistry[i + 1];
+    }
+
+    g_th3PatternRegistryCount--;
+    if(g_th3PatternRegistryCount <= 0) {
+        g_th3PatternRegistryCount = 0;
+        ArrayResize(g_th3PatternRegistry, 0);
+    } else {
+        ArrayResize(g_th3PatternRegistry, g_th3PatternRegistryCount);
+    }
+}
+
+void RebuildTH3RegistryFromChart()
+{
+    g_th3PatternRegistryCount = 0;
+    ArrayResize(g_th3PatternRegistry, 0);
+
+    int totalObjects = ObjectsTotal(0, 0, -1);
+    for(int i = 0; i < totalObjects; i++) {
+        string name = ObjectName(0, i, 0, -1);
+        if(StringFind(name, TH3_PATTERN_PREFIX) != 0) continue;
+
+        string baseName = ExtractPatternBaseName(name);
+        if(baseName == "") {
+            int underscorePos = StringFind(name, "_", TH3_PATTERN_PREFIX_LEN);
+            baseName = (underscorePos > TH3_PATTERN_PREFIX_LEN)
+                       ? StringSubstr(name, 0, underscorePos)
+                       : name;
+        }
+        RegisterTH3Pattern(baseName);
+    }
+}
+
+void BuildPatternNamesFromRegistry(string &patternNames[], int &patternCount)
+{
+    patternCount = 0;
+    ArrayResize(patternNames, g_th3PatternRegistryCount);
+
+    for(int i = 0; i < g_th3PatternRegistryCount; i++) {
+        string baseName = g_th3PatternRegistry[i];
+        if(baseName == "") continue;
+
+        string lineAB = baseName + TH3_SUFFIX_LINE_AB;
+        string lineBC = baseName + TH3_SUFFIX_LINE_BC;
+        if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) {
+            UnregisterTH3Pattern(baseName);
+            i--; // array compacted, stay on same index
+            continue;
+        }
+
+        patternNames[patternCount++] = baseName;
+    }
+
+    if(patternCount < ArraySize(patternNames)) {
+        ArrayResize(patternNames, patternCount);
+    }
+}
+
 //+------------------------------------------------------------------+
 //| Create or update a trend line object                             |
 //+------------------------------------------------------------------+
@@ -117,6 +204,8 @@ void DeletePatternObjects(const string baseName)
         ObjectDelete(0, baseName + "_ZoneUpper_" + idx);
         ObjectDelete(0, baseName + "_ZoneLower_" + idx);
     }
+
+    UnregisterTH3Pattern(baseName);
 
     g_suppressDeleteEvents = wasSuppressed;  // Restore previous state
 }
@@ -405,6 +494,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA,
 
     DrawABCDTargetLevels(mainObjName, pC, baseUnit, isBullish, tC, pipSize);
     DrawABCDInfoLabel(mainObjName, abDist, pB, pC, frequency, pipSize);
+    RegisterTH3Pattern(mainObjName);
 
     // NOTE: ChartRedraw is caller's responsibility (avoids N+1 redraws in UpdateAllTH3Objects)
 }
@@ -414,30 +504,16 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA,
 //+------------------------------------------------------------------+
 void UpdateAllTH3Objects()
 {
-    int totalObjects = ObjectsTotal(0, 0, -1);
     string patternNames[];
     int patternCount = 0;
-    ArrayResize(patternNames, MathMin(totalObjects, 64));
 
-    for(int i = 0; i < totalObjects; i++) {
-        string name = ObjectName(0, i, 0, -1);
-        if(StringFind(name, TH3_PATTERN_PREFIX) != 0) continue;
+    // Fast path: registry-first lookup (near O(pattern-count), no chart-wide scan)
+    BuildPatternNamesFromRegistry(patternNames, patternCount);
 
-        int underscorePos = StringFind(name, "_", TH3_PATTERN_PREFIX_LEN);
-        string baseName = (underscorePos > TH3_PATTERN_PREFIX_LEN)
-                          ? StringSubstr(name, 0, underscorePos)
-                          : name;
-
-        bool exists = false;
-        for(int j = 0; j < patternCount; j++) {
-            if(patternNames[j] == baseName) { exists = true; break; }
-        }
-
-        if(!exists) {
-            if(patternCount >= ArraySize(patternNames))
-                ArrayResize(patternNames, patternCount * 2 + 1);
-            patternNames[patternCount++] = baseName;
-        }
+    // Fallback: self-heal registry from chart objects if empty or out-of-sync
+    if(patternCount == 0) {
+        RebuildTH3RegistryFromChart();
+        BuildPatternNamesFromRegistry(patternNames, patternCount);
     }
 
     for(int p = 0; p < patternCount; p++) {

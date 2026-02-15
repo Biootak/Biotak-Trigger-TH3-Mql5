@@ -731,22 +731,50 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     string timeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
     int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
 
-    // PERF: Pre-fetch all ATR values and skip full redraw if nothing changed
+    // PERF: Decouple heavy ATR fetch from layout updates.
+    // Recompute ATR values on timeframe change or short cadence; reuse cached values otherwise.
     static double s_lastATRPips[8] = {0,0,0,0,0,0,0,0};
+    static double s_cachedATRValues[8] = {0,0,0,0,0,0,0,0};
     static int s_lastATRPeriod = -1;
     static int s_lastATROffsetContribution = 0;  // Track last Y offset for early-return path
+    static uint s_lastATRFetchMs = 0;
+    static string s_lastATRLayoutSig = "";
+
+    uint nowMs = GetTickCount();
+    bool periodChanged = (s_lastATRPeriod != GetCachedPeriod());
+    bool refreshATRValues = periodChanged || s_lastATRFetchMs == 0 || (nowMs - s_lastATRFetchMs >= 1500);
+
     double currentATRValues[8];
     double currentATRPips[8];
-    bool anyChanged = (s_lastATRPeriod != GetCachedPeriod());
+    bool anyChanged = periodChanged;
     for(int i = 0; i < 8; i++) {
-        double atrVal = GetATRForTimeframe(tfMinutes[i]);
+        double atrVal = refreshATRValues ? GetATRForTimeframe(tfMinutes[i]) : s_cachedATRValues[i];
         currentATRValues[i] = atrVal;
         double pips = (atrVal > 0 && !IsZero(pipSize, EPSILON_PRICE))
                       ? NormalizeDouble(atrVal / pipSize, 1) : 0.0;
         currentATRPips[i] = pips;
         if(!anyChanged && MathAbs(pips - s_lastATRPips[i]) > 0.05) anyChanged = true;
     }
-    if(!anyChanged) {
+
+    if(refreshATRValues) {
+        for(int i = 0; i < 8; i++) {
+            s_cachedATRValues[i] = currentATRValues[i];
+        }
+        s_lastATRFetchMs = nowMs;
+    }
+
+    string layoutSig = IntegerToString((int)inpLabelArrangement) + "|" +
+                      IntegerToString(inpLabelsMarginLeft) + "|" +
+                      IntegerToString(inpLabelsMarginTop) + "|" +
+                      IntegerToString(inpFontSize) + "|" +
+                      IntegerToString(inpLabelRowGap) + "|" +
+                      IntegerToString(inpLabelColumnGap) + "|" +
+                      IntegerToString(inpSectionGap) + "|" +
+                      IntegerToString(inpShowATRTargets ? 1 : 0) + "|" +
+                      IntegerToString(GetCachedChartWidth());
+    bool layoutChanged = (layoutSig != s_lastATRLayoutSig);
+
+    if(!anyChanged && !layoutChanged) {
         // ATR values unchanged - skip expensive object operations
         // but still update the Y offset so subsequent sections stack correctly
         g_currentLabelYOffset += s_lastATROffsetContribution;
@@ -756,6 +784,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     // Update stored values
     for(int i = 0; i < 8; i++) s_lastATRPips[i] = currentATRPips[i];
     s_lastATRPeriod = GetCachedPeriod();
+    s_lastATRLayoutSig = layoutSig;
 
     // Original color scheme per timeframe
     color colors[] = {
