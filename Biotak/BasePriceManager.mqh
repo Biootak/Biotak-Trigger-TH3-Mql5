@@ -503,9 +503,18 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     int searchLimit = MathMin(totalM1Bars, 1000);
     int lastBarIdx = -1;
     datetime lastBarTime = 0;
-    for(int i = 0; i < searchLimit; i++)
+    // PERF: Batch fetch M1 bar times — 1 CopyTime() replaces ~1000 iTime() syscalls
+    datetime batchBarTimes[];
+    int copied = CopyTime(_Symbol, PERIOD_M1, 0, searchLimit, batchBarTimes);
+    if(copied <= 0)
     {
-        datetime barTime = iTime(_Symbol, PERIOD_M1, i);
+        _LOG_GATE_D Print("[D][DATA] [BasePriceManager] FindLastM1CandleInBlock() - CopyTime failed");
+        return -1;
+    }
+    ArraySetAsSeries(batchBarTimes, true);
+    for(int i = 0; i < copied; i++)
+    {
+        datetime barTime = batchBarTimes[i];
     if(barTime >= blockStart && barTime < blockEnd)
         {
         if(lastBarIdx == -1 || barTime > lastBarTime)

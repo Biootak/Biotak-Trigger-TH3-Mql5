@@ -1929,6 +1929,8 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
 void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice, 
                               const double lowPrice, const double factor, const double stepSize)
 {
+    // PERF: Static change detection — skip redundant ObjectSet + StringFormat when inputs unchanged
+    static double s_prevHigh = 0, s_prevLow = 0, s_prevFactor = 0, s_prevStep = 0;
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
         CacheRemoveObject(objectPrefix + "Factor_High");
         ObjectDelete(0, objectPrefix + "Factor_High");
@@ -1938,67 +1940,102 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
         ObjectDelete(0, objectPrefix + "Factor_High_Label");
         CacheRemoveObject(objectPrefix + "Factor_Low_Label");
         ObjectDelete(0, objectPrefix + "Factor_Low_Label");
+        // Reset cached state so next non-custom call triggers full update
+        s_prevHigh = 0; s_prevLow = 0; s_prevFactor = 0; s_prevStep = 0;
         return;
     }
+    bool paramsChanged = HasPriceChanged(s_prevHigh, highPrice) ||
+                         HasPriceChanged(s_prevLow, lowPrice) ||
+                         HasPriceChanged(s_prevFactor, factor) ||
+                         HasPriceChanged(s_prevStep, stepSize);
     double pipSize = (GetCachedDigits() <= 3) ? 0.01 : 0.0001;
     double rangePips = (highPrice - lowPrice) / pipSize;
     double stepPips = stepSize / pipSize;
     string highLineName = objectPrefix + "Factor_High";
+    bool highLineCreated = false;
     if(ObjectFind(0, highLineName) < 0) {
         ObjectCreate(0, highLineName, OBJ_HLINE, 0, 0, highPrice);
+        highLineCreated = true;
     }
-    ObjectSetDouble(0, highLineName, OBJPROP_PRICE, highPrice);
-    ObjectSetInteger(0, highLineName, OBJPROP_COLOR, inpHighColor);
-    ObjectSetInteger(0, highLineName, OBJPROP_STYLE, inpHighStyle);
-    ObjectSetInteger(0, highLineName, OBJPROP_WIDTH, inpHighWidth);
-    ObjectSetInteger(0, highLineName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
-    ObjectSetString(0, highLineName, OBJPROP_TOOLTIP,
-        StringFormat("Historical HIGH | %s | Range: %.0f pips",
-            DoubleToString(highPrice, GetCachedDigits()), rangePips));
+    if(paramsChanged || highLineCreated) {
+        ObjectSetDouble(0, highLineName, OBJPROP_PRICE, highPrice);
+        ObjectSetInteger(0, highLineName, OBJPROP_COLOR, inpHighColor);
+        ObjectSetInteger(0, highLineName, OBJPROP_STYLE, inpHighStyle);
+        ObjectSetInteger(0, highLineName, OBJPROP_WIDTH, inpHighWidth);
+        ObjectSetInteger(0, highLineName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
+        ObjectSetString(0, highLineName, OBJPROP_TOOLTIP,
+            StringFormat("Historical HIGH | %s | Range: %.0f pips",
+                DoubleToString(highPrice, GetCachedDigits()), rangePips));
+    }
     ApplyVisibilityState(highLineName, true);
     string lowLineName = objectPrefix + "Factor_Low";
+    bool lowLineCreated = false;
     if(ObjectFind(0, lowLineName) < 0) {
         ObjectCreate(0, lowLineName, OBJ_HLINE, 0, 0, lowPrice);
+        lowLineCreated = true;
     }
-    ObjectSetDouble(0, lowLineName, OBJPROP_PRICE, lowPrice);
-    ObjectSetInteger(0, lowLineName, OBJPROP_COLOR, inpLowColor);
-    ObjectSetInteger(0, lowLineName, OBJPROP_STYLE, inpLowStyle);
-    ObjectSetInteger(0, lowLineName, OBJPROP_WIDTH, inpLowWidth);
-    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
-    ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP,
-        StringFormat("Historical LOW | %s | Range: %.0f pips",
-            DoubleToString(lowPrice, GetCachedDigits()), rangePips));
+    if(paramsChanged || lowLineCreated) {
+        ObjectSetDouble(0, lowLineName, OBJPROP_PRICE, lowPrice);
+        ObjectSetInteger(0, lowLineName, OBJPROP_COLOR, inpLowColor);
+        ObjectSetInteger(0, lowLineName, OBJPROP_STYLE, inpLowStyle);
+        ObjectSetInteger(0, lowLineName, OBJPROP_WIDTH, inpLowWidth);
+        ObjectSetInteger(0, lowLineName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
+        ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP,
+            StringFormat("Historical LOW | %s | Range: %.0f pips",
+                DoubleToString(lowPrice, GetCachedDigits()), rangePips));
+    }
     ApplyVisibilityState(lowLineName, true);
+    // PERF: Cache frame time — avoids 4 TimeCurrent() syscalls per boundary redraw
+    datetime frameTime = CacheGetFrameTime();
     string highLabelName = objectPrefix + "Factor_High_Label";
+    bool highLabelCreated = false;
     if(ObjectFind(0, highLabelName) < 0) {
-        ObjectCreate(0, highLabelName, OBJ_TEXT, 0, TimeCurrent(), highPrice);
+        ObjectCreate(0, highLabelName, OBJ_TEXT, 0, frameTime, highPrice);
+        highLabelCreated = true;
     }
-    ObjectSetDouble(0, highLabelName, OBJPROP_PRICE, highPrice);
-    ObjectSetInteger(0, highLabelName, OBJPROP_TIME, TimeCurrent());
-    ObjectSetInteger(0, highLabelName, OBJPROP_COLOR, inpHighColor);
-    ObjectSetInteger(0, highLabelName, OBJPROP_FONTSIZE, 8);
-    ObjectSetInteger(0, highLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
-    ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
-    ObjectSetString(0, highLabelName, OBJPROP_TEXT,
-        StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips",
-            DoubleToString(highPrice, GetCachedDigits()), rangePips, factor, stepPips));
-    ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
+    if(paramsChanged || highLabelCreated) {
+        ObjectSetDouble(0, highLabelName, OBJPROP_PRICE, highPrice);
+        ObjectSetInteger(0, highLabelName, OBJPROP_TIME, frameTime);
+        ObjectSetInteger(0, highLabelName, OBJPROP_COLOR, inpHighColor);
+        ObjectSetInteger(0, highLabelName, OBJPROP_FONTSIZE, 8);
+        ObjectSetInteger(0, highLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+        ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
+        ObjectSetString(0, highLabelName, OBJPROP_TEXT,
+            StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips",
+                DoubleToString(highPrice, GetCachedDigits()), rangePips, factor, stepPips));
+        ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
+    } else {
+        // Only update time anchor (scrolling moves the label)
+        ObjectSetInteger(0, highLabelName, OBJPROP_TIME, frameTime);
+    }
     ApplyVisibilityState(highLabelName, false);
     string lowLabelName = objectPrefix + "Factor_Low_Label";
+    bool lowLabelCreated = false;
     if(ObjectFind(0, lowLabelName) < 0) {
-        ObjectCreate(0, lowLabelName, OBJ_TEXT, 0, TimeCurrent(), lowPrice);
+        ObjectCreate(0, lowLabelName, OBJ_TEXT, 0, frameTime, lowPrice);
+        lowLabelCreated = true;
     }
-    ObjectSetDouble(0, lowLabelName, OBJPROP_PRICE, lowPrice);
-    ObjectSetInteger(0, lowLabelName, OBJPROP_TIME, TimeCurrent());
-    ObjectSetInteger(0, lowLabelName, OBJPROP_COLOR, inpLowColor);
-    ObjectSetInteger(0, lowLabelName, OBJPROP_FONTSIZE, 8);
-    ObjectSetInteger(0, lowLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
-    ObjectSetString(0, lowLabelName, OBJPROP_TEXT,
-        StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips",
-            DoubleToString(lowPrice, GetCachedDigits()), rangePips, factor, stepPips));
-    ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
+    if(paramsChanged || lowLabelCreated) {
+        ObjectSetDouble(0, lowLabelName, OBJPROP_PRICE, lowPrice);
+        ObjectSetInteger(0, lowLabelName, OBJPROP_TIME, frameTime);
+        ObjectSetInteger(0, lowLabelName, OBJPROP_COLOR, inpLowColor);
+        ObjectSetInteger(0, lowLabelName, OBJPROP_FONTSIZE, 8);
+        ObjectSetInteger(0, lowLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+        ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
+        ObjectSetString(0, lowLabelName, OBJPROP_TEXT,
+            StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips",
+                DoubleToString(lowPrice, GetCachedDigits()), rangePips, factor, stepPips));
+        ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
+    } else {
+        // Only update time anchor (scrolling moves the label)
+        ObjectSetInteger(0, lowLabelName, OBJPROP_TIME, frameTime);
+    }
     ApplyVisibilityState(lowLabelName, false);
+    // PERF: Update cached state after successful render
+    s_prevHigh = highPrice;
+    s_prevLow = lowPrice;
+    s_prevFactor = factor;
+    s_prevStep = stepSize;
 }

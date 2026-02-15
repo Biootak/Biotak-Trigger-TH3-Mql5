@@ -182,7 +182,7 @@ bool DrawMainLevels(const string prefix) {
     CreateTHLineObject(lineNameMid,midpointPrice,inpTriggerColor,inpTriggerStyle,inpTriggerWidth,tooltipMid, inpTHLineObjectType, false);
     string cachedTFForMid = GetFractalTimeframeForCurrent();
     string midLevelInfo = StringFormat("%s Mid", GetShortTimeframeName(cachedTFForMid));
-    if(inpShowPipDistanceLabels) CreatePipDistanceLabel(prefix+"Mid_PipsLabel", midpointPrice, pipsToMid, inpTriggerColor, midLevelInfo);
+    if(inpShowPipDistanceLabels) CreatePipDistanceLabel(prefix+"Mid_PipsLabel", midpointPrice, pipsToMid, inpTriggerLabelColor, midLevelInfo);
     }
     // OPTIMIZATION: Cache IsTriggerLevelsEnabled() result BEFORE the loops
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -353,7 +353,10 @@ bool DrawMainLevels(const string prefix) {
     double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
     tooltipAbove = FormatTooltipWithDistanceFast(tooltipAbove, pipsToLevelAbove);
     CreateTHLineObject(lineNameAbove, priceLevelAbove, lineColor, lineStyle, lineWidth, tooltipAbove, inpTHLineObjectType, false);
-    if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, lineColor, levelInfoAbove);
+    if(inpShowPipDistanceLabels) {
+        color labelColorAbove = (levelType == 2) ? inpTriggerLabelColor : lineColor;
+        CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, labelColorAbove, levelInfoAbove);
+    }
             
             // -----------------------------------------------------------
             // ZONE SUPPORT: Create zone between levels
@@ -506,7 +509,10 @@ bool DrawMainLevels(const string prefix) {
     double pipsToLevelBelow = CalculatePipsDistance(priceLevelBelow, g_currentPrice);
     tooltipBelow = FormatTooltipWithDistanceFast(tooltipBelow, pipsToLevelBelow);
     CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
-    if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
+    if(inpShowPipDistanceLabels) {
+        color labelColorBelow = (levelType == 2) ? inpTriggerLabelColor : lineColor;
+        CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, labelColorBelow, levelInfoBelow);
+    }
             
             // -----------------------------------------------------------
             // ZONE SUPPORT: Create zone between levels
@@ -986,18 +992,30 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         if (!ObjectCreate(0, targetsObjName, OBJ_LABEL, 0, 0, 0)) return false;
     targetsCreated = true;
     }
-    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+    // PERF: Only rebuild text strings + set text/color when TH value or color changed
+    //       ObjectGetString is cheaper than StringFormat + ObjectSetString
+    bool textChanged = mainCreated || stepsCreated;
     string mainText = StringFormat("%s: %.1f", GetBaseTimeframeName(timeframeName), thValuePips);
+    if(!textChanged) {
+        string prevMain = ObjectGetString(0, mainObjName, OBJPROP_TEXT);
+        textChanged = (prevMain != mainText);
+    }
+    bool colorChanged = mainCreated || ((color)ObjectGetInteger(0, mainObjName, OBJPROP_COLOR) != textColor);
     string stepsText = StringFormat("(%.1f - %.1f)", shortStepPips, longStepPips);
-    if(inpShowTHTargets) {
+    string targetsText = StringFormat("%.0f - %.0f - %.0f", target3x, target5x, target15x);
+    if(inpShowTHTargets && (textChanged || targetsCreated)) {
         ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
-    ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
+    if(colorChanged) ObjectSetInteger(0, targetsObjName, OBJPROP_COLOR, textColor);
     if(targetsCreated) SetLabelFont(targetsObjName);
     }
-    ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
-    ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
-    ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
-    ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
+    if(textChanged) {
+        ObjectSetString(0, mainObjName, OBJPROP_TEXT, mainText);
+        ObjectSetString(0, stepsObjName, OBJPROP_TEXT, stepsText);
+    }
+    if(colorChanged) {
+        ObjectSetInteger(0, mainObjName, OBJPROP_COLOR, textColor);
+        ObjectSetInteger(0, stepsObjName, OBJPROP_COLOR, textColor);
+    }
     if(mainCreated) SetLabelFont(mainObjName);
     if(stepsCreated) SetLabelFont(stepsObjName);
     // PERF: Static properties only on creation - corner, anchor, selectable, hidden never change

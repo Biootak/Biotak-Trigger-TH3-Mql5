@@ -34,8 +34,8 @@ bool CanCreateObject()
     // OPTIMIZATION: Cache check (update every 5 seconds)
     // ═══════════════════════════════════════════════════════════════
     datetime currentTime = TimeCurrent();
-    if(currentTime - g_lastObjectCountCheck < 1 && g_lastObjectCount > 0) {
-        // Use cached count (1s cache)
+    if(currentTime - g_lastObjectCountCheck < 2 && g_lastObjectCount > 0) {
+        // Use cached count (2s cache)
         if(g_lastObjectCount < MAX_SAFE_OBJECTS) {
         return true; // Fast path
         }

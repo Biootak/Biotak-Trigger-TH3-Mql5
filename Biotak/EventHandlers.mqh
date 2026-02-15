@@ -483,8 +483,6 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
 //+------------------------------------------------------------------+
 void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 {
-    int totalDeleted = 0;
-    int totalFailed = 0;
     if(StringLen(objectPrefix) == 0) return;
 
     #ifdef ENABLE_DEBUG_LOGS
@@ -495,116 +493,90 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     #endif
 
-    // FIX: Zone suffixes are checked FIRST and separately from level suffixes.
-    // Previously, zones like "SSLS_Zone_" matched "SSLS_" in LEVEL_SUFFIXES,
-    // causing clearZones=false to be ineffective (zones always deleted).
-    // Pull suffix families from centralized LevelPipeline registry
+    // PERF: Use ObjectsDeleteAll with prefix+suffix for native bulk deletion.
+    // Replaces O(TotalChartObjects × Suffixes) per-object scan with O(Suffixes) bulk calls.
+    // Each ObjectsDeleteAll is a single native call that matches by prefix internally.
     static string ZONE_SUFFIXES[];
     static string LEVEL_SUFFIXES[];
-    static int LEVEL_SUFFIX_LENS[];
-    static int ZONE_SUFFIX_LENS[];
-    static bool s_suffixLensInit = false;
-    if(!s_suffixLensInit) {
+    static string LEGACY_SUFFIXES[];
+    static bool s_suffixInit = false;
+    if(!s_suffixInit) {
         int zoneCount = 0;
         int levelCount = 0;
         GetAllZoneSuffixes(ZONE_SUFFIXES, zoneCount);
         GetAllLevelSuffixes(LEVEL_SUFFIXES, levelCount);
 
-        // Backward compatibility for legacy TH/manual object names
-        int oldLevelCount = ArraySize(LEVEL_SUFFIXES);
-        ArrayResize(LEVEL_SUFFIXES, oldLevelCount + 18);
-        int k = oldLevelCount;
-        LEVEL_SUFFIXES[k++] = "MLabel_";
-        LEVEL_SUFFIXES[k++] = "MEqLabel_";
-        LEVEL_SUFFIXES[k++] = "SharedPattern_";
-        LEVEL_SUFFIXES[k++] = "TH_Level_";
-        LEVEL_SUFFIXES[k++] = "S_";
-        LEVEL_SUFFIXES[k++] = "TriggerTH_Up_";
-        LEVEL_SUFFIXES[k++] = "TriggerTH_Down_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel1_Up_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel1_Down_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel2_Up_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel2_Down_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel3_Up_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel3_Down_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel4_Up_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel4_Down_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel5_Up_";
-        LEVEL_SUFFIXES[k++] = "StructureLevel5_Down_";
-        LEVEL_SUFFIXES[k++] = "Mid";
-
-        ArrayResize(LEVEL_SUFFIX_LENS, ArraySize(LEVEL_SUFFIXES));
-        for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++)
-            LEVEL_SUFFIX_LENS[s] = StringLen(LEVEL_SUFFIXES[s]);
-        ArrayResize(ZONE_SUFFIX_LENS, ArraySize(ZONE_SUFFIXES));
-        for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++)
-            ZONE_SUFFIX_LENS[z] = StringLen(ZONE_SUFFIXES[z]);
-        s_suffixLensInit = true;
+        // Legacy suffixes for backward compatibility
+        ArrayResize(LEGACY_SUFFIXES, 18);
+        int k = 0;
+        LEGACY_SUFFIXES[k++] = "MLabel_";
+        LEGACY_SUFFIXES[k++] = "MEqLabel_";
+        LEGACY_SUFFIXES[k++] = "SharedPattern_";
+        LEGACY_SUFFIXES[k++] = "TH_Level_";
+        LEGACY_SUFFIXES[k++] = "S_";
+        LEGACY_SUFFIXES[k++] = "TriggerTH_Up_";
+        LEGACY_SUFFIXES[k++] = "TriggerTH_Down_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel1_Up_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel1_Down_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel2_Up_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel2_Down_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel3_Up_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel3_Down_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel4_Up_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel4_Down_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel5_Up_";
+        LEGACY_SUFFIXES[k++] = "StructureLevel5_Down_";
+        LEGACY_SUFFIXES[k++] = "Mid";
+        s_suffixInit = true;
     }
 
-    int total = ObjectsTotal(0, -1, -1);
-    int prefixLen = StringLen(objectPrefix);
-    for(int i = total - 1; i >= 0; i--) {
-        string name = ObjectName(0, i, -1, -1);
-        if(name == "") continue;
-        int nameLen = StringLen(name);
-        if(nameLen < prefixLen) continue;
-        if(StringSubstr(name, 0, prefixLen) != objectPrefix) continue;
+    g_suppressDeleteEvents = true;
+    int totalDeleted = 0;
 
-        string tail = StringSubstr(name, prefixLen);
-        int tailLen = nameLen - prefixLen;
-        bool shouldDelete = false;
-        bool isZoneObject = false;
-
-        // PERF: Use first char of tail to skip most suffix comparisons
-        ushort firstChar = (tailLen > 0) ? StringGetCharacter(tail, 0) : 0;
-
-        // FIX: Check zone suffixes FIRST (longer, more specific match)
-        // This prevents "SSLS_Zone_" from matching "SSLS_" in level suffixes
+    // Delete zone objects (only if clearZones is true)
+    if(clearZones) {
         for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++) {
-            int zl = ZONE_SUFFIX_LENS[z];
-            if(tailLen < zl) continue;
-            if(StringGetCharacter(ZONE_SUFFIXES[z], 0) != firstChar) continue;
-            if(StringSubstr(tail, 0, zl) == ZONE_SUFFIXES[z]) {
-                isZoneObject = true;
-                break;
-            }
+            totalDeleted += ObjectsDeleteAll(0, objectPrefix + ZONE_SUFFIXES[z]);
         }
-
-        if(isZoneObject) {
-            // Zone object: only delete if clearZones is true
-            if(clearZones) shouldDelete = true;
-        } else {
-            // Non-zone: check level suffixes
-            for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
-                int sl = LEVEL_SUFFIX_LENS[s];
-                if(tailLen < sl) continue;
-                if(StringGetCharacter(LEVEL_SUFFIXES[s], 0) != firstChar) continue;
-                if(StringSubstr(tail, 0, sl) == LEVEL_SUFFIXES[s]) {
-                    shouldDelete = true;
-                    break;
-                }
-            }
-        }
-
-        if(!shouldDelete) continue;
-
-        // FIX: Remove from cache individually instead of clearing entire cache
-        CacheRemoveObject(name);
-        g_suppressDeleteEvents = true;  // Prevent cascade deletion of ABCD patterns
-        if(ObjectDelete(0, name)) totalDeleted++;
-        else totalFailed++;
-        g_suppressDeleteEvents = false;
     }
+
+    // Delete level objects (pipeline suffixes — all specific, no zone overlap)
+    for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
+        totalDeleted += ObjectsDeleteAll(0, objectPrefix + LEVEL_SUFFIXES[s]);
+    }
+
+    // Delete legacy objects
+    // Note: When clearZones=false, skip "TH_Level_" suffix as it would also
+    // match "TH_Level_Zone_*" zone objects. Pipeline suffixes
+    // (TH_Level_Above_/Below_/Midpoint_) already cover TH level objects.
+    for(int l = 0; l < ArraySize(LEGACY_SUFFIXES); l++) {
+        if(!clearZones && LEGACY_SUFFIXES[l] == "TH_Level_") continue;
+        totalDeleted += ObjectsDeleteAll(0, objectPrefix + LEGACY_SUFFIXES[l]);
+    }
+
+    g_suppressDeleteEvents = false;
 
     #ifdef ENABLE_DEBUG_LOGS
-    if(totalDeleted > 0 || totalFailed > 0) {
-        Print("[E][GEN] ClearAllLevels: Deleted=", totalDeleted, ", Failed=", totalFailed);
+    if(totalDeleted > 0) {
+        Print("[D][GEN] ClearAllLevels PERF: Deleted ", totalDeleted, " objects via bulk delete");
     }
     #endif
 
-    // FIX: Invalidate object count cache so CanCreateObject doesn't block creation after cleanup
-    // Note: Individual cache entries removed during deletion loop above (no CacheClear needed)
+    // PERF: Invalidate matching cache entries — O(CACHE_HASH_BUCKETS) cache scan
+    // instead of per-object CacheRemoveObject calls during deletion loop
+    int prefixLen = StringLen(objectPrefix);
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        if(g_objectCacheHash[i].occupied &&
+           StringLen(g_objectCacheHash[i].name) >= prefixLen &&
+           StringSubstr(g_objectCacheHash[i].name, 0, prefixLen) == objectPrefix) {
+            g_objectCacheHash[i].name = "";
+            g_objectCacheHash[i].occupied = false;
+            g_objectCacheHash[i].deleted = true;
+            g_objectCacheHash[i].lastAccess = 0;
+            g_objectCacheSize--;
+        }
+    }
+
     InvalidateObjectCountCache();
 }
     void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)

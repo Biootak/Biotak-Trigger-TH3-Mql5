@@ -241,8 +241,8 @@ int HashObjectName(const string name) {
     for(int i = 0; i < totalObjects; i++) {
         string objName = ObjectName(0, i, -1, -1);
         
-        // Only cache objects with "TH" prefix (indicator objects)
-        if(StringFind(objName, "TH") == 0) {
+        // PERF: Character comparison instead of StringFind for prefix check
+        if(StringLen(objName) >= 2 && StringGetCharacter(objName, 0) == 'T' && StringGetCharacter(objName, 1) == 'H') {
             // Get object properties
             double price = ObjectGetDouble(0, objName, OBJPROP_PRICE);
     color clr = (color)ObjectGetInteger(0, objName, OBJPROP_COLOR);

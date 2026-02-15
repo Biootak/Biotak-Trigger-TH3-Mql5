@@ -127,9 +127,9 @@ double ScoreMultiStepResonance(double pA, double pB, double pC, double frequency
 
     // Greedy assignment: each step gets its best unused midpoint
     // Sort by quality (best match first) to avoid suboptimal assignments
+    // PERF: Fixed-size array avoids per-call dynamic allocation
     // Track which midpoints have been claimed
-    bool midpointUsed[];
-    ArrayResize(midpointUsed, analysis.midpointCount);
+    bool midpointUsed[MAX_REFERENCE_MIDPOINTS];
     ArrayInitialize(midpointUsed, false);
 
     // First pass: compute all step-midpoint scores

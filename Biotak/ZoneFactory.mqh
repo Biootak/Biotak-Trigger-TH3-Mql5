@@ -29,6 +29,34 @@ struct SZoneCreationResult {
     int errorCode;
 };
 
+// Compute visually reliable zone color for chart objects.
+// MT5 chart objects may ignore ARGB alpha, so we blend with chart background.
+color GetZoneRenderColor(const color sourceColor, const int transparency)
+{
+    int t = (int)MathMax(0, MathMin(100, transparency));
+    // Stronger visual fade (same concept as trigger transparency mapping)
+    int tVis = 100 - ((100 - t) * (100 - t)) / 100;
+
+    if(tVis <= 0) return sourceColor;
+
+    color bg = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
+    if(tVis >= 100) return bg;
+
+    int fr = ((int)sourceColor) & 0xFF;
+    int fg = (((int)sourceColor) >> 8) & 0xFF;
+    int fb = (((int)sourceColor) >> 16) & 0xFF;
+
+    int br = ((int)bg) & 0xFF;
+    int bgc = (((int)bg) >> 8) & 0xFF;
+    int bb = (((int)bg) >> 16) & 0xFF;
+
+    int outR = (fr * (100 - tVis) + br * tVis) / 100;
+    int outG = (fg * (100 - tVis) + bgc * tVis) / 100;
+    int outB = (fb * (100 - tVis) + bb * tVis) / 100;
+
+    return (color)(outR | (outG << 8) | (outB << 16));
+}
+
 // Adaptive extension multiplier based on timeframe
 int CalculateAdaptiveExtensionMultiplier(int periodSeconds)
 {
@@ -176,13 +204,8 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         return result;
     }
 
-    // Calculate color with transparency
-    long finalColor = (long)request.zoneColor;
-    if(clampedTransparency > 0) {
-        uchar alpha = (uchar)MathMax(MIN_ALPHA_VALUE, MathMin(MAX_ALPHA_VALUE,
-                       (100 - clampedTransparency) * 255 / 100));
-        finalColor = (long)ColorToARGB(request.zoneColor, alpha);
-    }
+    // Calculate effective zone color (filled rectangle zones only)
+    long finalColor = (long)GetZoneRenderColor(request.zoneColor, clampedTransparency);
 
     // Create or update object
     bool objectExists = CacheObjectExists(request.name);
@@ -224,8 +247,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         if(hasCached) {
             bool priceChanged = HasPriceChanged(cachedEntry.lastPrice, request.topPrice);
             bool colorChanged = HasColorChanged(cachedEntry.lastColor, request.zoneColor);
+            bool renderColorChanged = ((color)ObjectGetInteger(0, request.name, OBJPROP_COLOR) != (color)finalColor);
 
-            if(!priceChanged && !colorChanged) {
+            if(!priceChanged && !colorChanged && !renderColorChanged) {
                 // FIX: Always apply visibility even when price/color unchanged
                 // This ensures F-key toggle and periodic re-sync work for static zones
                 ApplyVisibilityStateIfUnchangedSkip(request.name, false);
@@ -239,7 +263,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
                 ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
                 ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
             }
-            if(colorChanged) {
+            if(colorChanged || renderColorChanged) {
                 ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColor);
             }
         }

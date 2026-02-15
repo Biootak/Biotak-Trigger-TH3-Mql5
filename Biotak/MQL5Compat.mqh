@@ -162,10 +162,16 @@ bool g_atrHandleCacheInitialized = false;
     g_atrHandleCache[slot].tf = timeframe;
     g_atrHandleCache[slot].period = atr_period;
     }
-    double buffer[];
-    ArraySetAsSeries(buffer, true);
-    if(CopyBuffer(handle, 0, shift, 1, buffer) <= 0) return 0.0;
-    return buffer[0];
+    // PERF: Pre-allocated static buffer avoids per-call dynamic array allocation
+    static double s_atrBuffer[];
+    static bool s_atrBufInit = false;
+    if(!s_atrBufInit) {
+        ArrayResize(s_atrBuffer, 1);
+        ArraySetAsSeries(s_atrBuffer, true);
+        s_atrBufInit = true;
+    }
+    if(CopyBuffer(handle, 0, shift, 1, s_atrBuffer) <= 0) return 0.0;
+    return s_atrBuffer[0];
 }
     void ReleaseATRHandle() {
     for(int i = 0; i < g_atrHandleCacheCount; i++) {

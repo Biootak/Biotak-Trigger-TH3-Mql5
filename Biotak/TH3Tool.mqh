@@ -332,20 +332,34 @@ void DrawABCDInfoLabel(const string mainObjName, double abDist, double pB,
     // Respect indicator hidden state
     long visibility = (isActive && !IsIndicatorHidden()) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
-    if(ObjectFind(0, infoLabel) < 0)
+    bool labelCreated = false;
+    if(ObjectFind(0, infoLabel) < 0) {
         ObjectCreate(0, infoLabel, OBJ_LABEL, 0, 0, 0);
+        labelCreated = true;
+    }
 
     int safeY = GetABCDInfoSafeYDistance();
 
-    ObjectSetInteger(0, infoLabel, OBJPROP_CORNER, inpABCDInfoCorner);
-    ObjectSetInteger(0, infoLabel, OBJPROP_XDISTANCE, inpABCDInfoXDistance);
-    ObjectSetInteger(0, infoLabel, OBJPROP_YDISTANCE, safeY);
-    ObjectSetString(0, infoLabel, OBJPROP_TEXT, infoText);
-    ObjectSetInteger(0, infoLabel, OBJPROP_COLOR, inpABCDInfoColor);
-    ObjectSetInteger(0, infoLabel, OBJPROP_FONTSIZE, inpABCDInfoFontSize);
-    ObjectSetString(0, infoLabel, OBJPROP_FONT, "Arial Bold");
-    ObjectSetInteger(0, infoLabel, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, infoLabel, OBJPROP_HIDDEN, true);
+    // PERF: Only set static properties on creation; only set text/position when changed
+    if(labelCreated) {
+        ObjectSetInteger(0, infoLabel, OBJPROP_CORNER, inpABCDInfoCorner);
+        ObjectSetInteger(0, infoLabel, OBJPROP_COLOR, inpABCDInfoColor);
+        ObjectSetInteger(0, infoLabel, OBJPROP_FONTSIZE, inpABCDInfoFontSize);
+        ObjectSetString(0, infoLabel, OBJPROP_FONT, "Arial Bold");
+        ObjectSetInteger(0, infoLabel, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, infoLabel, OBJPROP_HIDDEN, true);
+    }
+    // Text and Y-position may change per call; only set if different
+    string prevText = ObjectGetString(0, infoLabel, OBJPROP_TEXT);
+    if(prevText != infoText)
+        ObjectSetString(0, infoLabel, OBJPROP_TEXT, infoText);
+    int prevY = (int)ObjectGetInteger(0, infoLabel, OBJPROP_YDISTANCE);
+    if(prevY != safeY)
+        ObjectSetInteger(0, infoLabel, OBJPROP_YDISTANCE, safeY);
+    int prevX = (int)ObjectGetInteger(0, infoLabel, OBJPROP_XDISTANCE);
+    if(prevX != inpABCDInfoXDistance)
+        ObjectSetInteger(0, infoLabel, OBJPROP_XDISTANCE, inpABCDInfoXDistance);
+    // Visibility always checked (active pattern may switch)
     ObjectSetInteger(0, infoLabel, OBJPROP_TIMEFRAMES, visibility);
 }
 

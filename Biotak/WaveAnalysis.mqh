@@ -190,7 +190,6 @@ void AddReferenceMidpoint(WaveAnalysisResult &result, double price, int waveIdx,
     int idx = result.midpointCount;
     if(idx >= MAX_REFERENCE_MIDPOINTS) return;
 
-    ArrayResize(result.midpoints, idx + 1);
     result.midpoints[idx].price     = price;
     result.midpoints[idx].waveIndex = waveIdx;
     result.midpoints[idx].label     = lbl;
@@ -203,6 +202,8 @@ void AddReferenceMidpoint(WaveAnalysisResult &result, double price, int waveIdx,
 //| = up to 24 midpoints                                             |
 //+------------------------------------------------------------------+
 void CollectReferenceMidpoints(WaveAnalysisResult &result) {
+    // PERF: Pre-allocate to max capacity — avoids up to 42 incremental ArrayResize calls
+    ArrayResize(result.midpoints, MAX_REFERENCE_MIDPOINTS);
     // Wave names for labels
     string waveNames[6];
     waveNames[0] = "XA"; waveNames[1] = "AB"; waveNames[2] = "BC";

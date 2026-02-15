@@ -1051,7 +1051,7 @@ SModeConfig BuildTHConfig(const string objectPrefix)
     SModeConfig cfg = BuildModeConfig(objectPrefix, "TH_Level");
 
     // TH mode: non-structure levels use C-level styling as fallback when triggers off
-    // When triggers are on, ClassifyLevels applies inpTriggerColor directly
+    // When triggers are on, ClassifyLevels applies trigger render color directly
     cfg.fallbackColor = inpCLevelColor;
     cfg.fallbackStyle = inpCLevelStyle;
     cfg.fallbackWidth = inpCLevelWidth;

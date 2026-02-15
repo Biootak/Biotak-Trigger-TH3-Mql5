@@ -172,6 +172,7 @@ bool ValidateHotkeysUniqueAndSafe() {
     // Transparency
     if(!ValidateTransparency(inpTH3ZoneTransparency, "TH3ZoneTransparency")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidateTransparency(inpMidZoneTransparency, "MidZoneTransparency")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateTransparency(inpTriggerTransparency, "TriggerTransparency")) return INIT_PARAMETERS_INCORRECT;
 
     // Zone Heights
     if(!ValidateRange(inpTH3ZoneHeightPercent, 1.0, 100.0, "TH3ZoneHeight")) return INIT_PARAMETERS_INCORRECT;
