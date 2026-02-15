@@ -797,6 +797,10 @@ void LogRedrawDecision(const bool isNewBar,
 //+------------------------------------------------------------------+
 void RunIncrementalObjectCleanup()
 {
+    // PERF: Never run periodic cleanup during active custom-price drag.
+    // Keep drag path smooth; cleanup is deferred until drag ends.
+    if(g_customPriceLineDragging) return;
+
     datetime currentTime = TimeGMT();
     if(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS) return;
 
@@ -1792,7 +1796,10 @@ void DecrementTH3Frequency()
     }
     g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    // During custom-price drag, defer heavy redraw to mouse-release path.
+    // This prevents transient visibility/state conflicts while object is still being dragged.
+    if(!g_customPriceLineDragging)
+        RedrawAllObjects(true);
     ThrottledChartRedraw();
     return;
         }

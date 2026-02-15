@@ -547,7 +547,7 @@ void BuildZonesAndLines(
         zones[zIdx].style = config.zoneStyle;
         zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
         zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                                   zones[zIdx].renderBottom <= vpTop);
+                       zones[zIdx].renderBottom <= vpTop);
         zIdx++;
     }
     
@@ -775,7 +775,15 @@ void CleanupSurplusPipeline(
     const SModeConfig &config,
     const int maxLogicalStep)
 {
-    if(g_customPriceLineDragging) return;
+    // During custom-price drag, do lightweight throttled cleanup instead of skipping entirely.
+    // Skipping caused stale previous-step objects to accumulate and clutter the chart.
+    if(g_customPriceLineDragging) {
+        static uint s_lastDragCleanupMs = 0;
+        uint nowMs = GetTickCount();
+        if(s_lastDragCleanupMs != 0 && (nowMs - s_lastDragCleanupMs) < 250)
+            return;
+        s_lastDragCleanupMs = nowMs;
+    }
     
     // Cleanup surplus zones (above, below, and center)
     if(config.zonesEnabled) {
@@ -891,7 +899,9 @@ SModeConfig BuildFactorConfig(const string objectPrefix)
     SModeConfig cfg = BuildModeConfig(objectPrefix, "Factor");
     cfg.useObjPropBack = true;
     cfg.zOrder = 1;
-    cfg.hideLineWhenTriggerOnly = true;
+    // Keep factor lines visible regardless of Trigger toggle state.
+    // Trigger key should not unexpectedly blank factor lines.
+    cfg.hideLineWhenTriggerOnly = false;
     cfg.fallbackColor = inpFactorLevelColor;
     cfg.fallbackStyle = inpFactorLevelStyle;
     cfg.fallbackWidth = inpFactorLevelWidth;
@@ -905,7 +915,8 @@ SModeConfig BuildFactorHarmonicConfig(const string objectPrefix)
 {
     SModeConfig cfg = BuildModeConfig(objectPrefix, "Factor_Harmonic");
     cfg.useObjPropBack = true;
-    cfg.hideLineWhenTriggerOnly = true;
+    // Keep factor-harmonic lines visible regardless of Trigger toggle state.
+    cfg.hideLineWhenTriggerOnly = false;
     cfg.fallbackColor = inpFactorLevelColor;
     cfg.fallbackStyle = inpFactorLevelStyle;
     cfg.fallbackWidth = inpFactorLevelWidth;
