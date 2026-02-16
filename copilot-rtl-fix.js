@@ -20,6 +20,13 @@
     maxMutationsPerWindow: 500,
     mutationBurstWindowMs: 500,
     maxHealsPerMinute: 24,
+    scopeSelectors: [
+      '.interactive-item-container',
+      'div[role="log"]',
+      '.chat',
+      '[data-testid*="chat"]',
+      '[class*="chat-view"]'
+    ],
     watchHints: [
       'interactive-item-container',
       'monaco-list-row',
@@ -42,7 +49,47 @@
         }
       },
       mixedText: {
-        selectors: ['p', 'li', 'span', 'h1', 'h2', 'h3'],
+        selectors: [
+          'p',
+          'li',
+          'span',
+          'div',
+          'a',
+          'label',
+          'button',
+          'blockquote',
+          'td',
+          'th',
+          'h1',
+          'h2',
+          'h3',
+          'h4',
+          'h5',
+          'h6'
+        ],
+        declarations: {
+          'unicode-bidi': 'plaintext',
+          'text-align': 'start'
+        }
+      },
+      explicitRTL: {
+        selectors: ['[dir="rtl"]', '[data-dir="rtl"]', '[data-direction="rtl"]'],
+        declarations: {
+          direction: 'rtl',
+          'text-align': 'right',
+          'unicode-bidi': 'isolate'
+        }
+      },
+      explicitLTR: {
+        selectors: ['[dir="ltr"]', '[data-dir="ltr"]', '[data-direction="ltr"]'],
+        declarations: {
+          direction: 'ltr',
+          'text-align': 'left',
+          'unicode-bidi': 'isolate'
+        }
+      },
+      autoDirection: {
+        selectors: ['[dir="auto"]', 'bdi'],
         declarations: {
           'unicode-bidi': 'plaintext',
           'text-align': 'start'
@@ -52,12 +99,11 @@
         selectors: ['span[class*="token"]', 'code:not(pre code)'],
         declarations: {
           direction: 'ltr',
-          display: 'inline-block',
           'unicode-bidi': 'isolate'
         }
       },
       blockCodeSafety: {
-        selectors: ['pre', '.monaco-editor', '.code-block-container', '.rendered-markdown code'],
+        selectors: ['pre', '.monaco-editor', '.code-block-container', '.rendered-markdown pre code'],
         declarations: {
           direction: 'ltr',
           'text-align': 'left',
@@ -87,8 +133,17 @@
         'code-block-container',
         'rendered-markdown'
       ],
+      scopeSelectors: [
+        '.interactive-item-container',
+        'div[role="log"]',
+        '[data-testid*="chat"]'
+      ],
       rules: {
         containers: DEFAULT_CONFIG.rules.containers,
+        mixedText: DEFAULT_CONFIG.rules.mixedText,
+        explicitRTL: DEFAULT_CONFIG.rules.explicitRTL,
+        explicitLTR: DEFAULT_CONFIG.rules.explicitLTR,
+        autoDirection: DEFAULT_CONFIG.rules.autoDirection,
         inlineCodeSafety: DEFAULT_CONFIG.rules.inlineCodeSafety,
         blockCodeSafety: DEFAULT_CONFIG.rules.blockCodeSafety,
         iconSafety: DEFAULT_CONFIG.rules.iconSafety
@@ -99,6 +154,14 @@
       observerDebounceMs: 50,
       maxMutationsPerWindow: 900,
       maxHealsPerMinute: 40,
+      scopeSelectors: [
+        '.interactive-item-container',
+        'div[role="log"]',
+        '.chat',
+        '[data-testid*="chat"]',
+        '[class*="chat"]',
+        '[class*="interactive"]'
+      ],
       watchHints: [
         ...DEFAULT_CONFIG.watchHints,
         'chat',
@@ -122,6 +185,7 @@
     'maxMutationsPerWindow',
     'mutationBurstWindowMs',
     'maxHealsPerMinute',
+    'scopeSelectors',
     'watchHints',
     'rules'
   ]);
@@ -152,8 +216,129 @@
     error(msg, ...rest) { console.error(`❌ ${state.config.logPrefix}: ${msg}`, ...rest); }
   };
 
+  const BIDI_CONTROLS = Object.freeze({
+    LRI: '\u2066',
+    RLI: '\u2067',
+    FSI: '\u2068',
+    PDI: '\u2069'
+  });
+
   function deepClone(value) {
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function normalizeDir(value, fallback = 'auto') {
+    const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (raw === 'rtl' || raw === 'ltr' || raw === 'auto') return raw;
+    return fallback;
+  }
+
+  function toSafeText(value) {
+    return value == null ? '' : String(value);
+  }
+
+  function toUnicodeIsolate(text, dir = 'auto') {
+    const safeDir = normalizeDir(dir, 'auto');
+    const content = toSafeText(text);
+    if (!content) return content;
+
+    if (safeDir === 'rtl') return `${BIDI_CONTROLS.RLI}${content}${BIDI_CONTROLS.PDI}`;
+    if (safeDir === 'ltr') return `${BIDI_CONTROLS.LRI}${content}${BIDI_CONTROLS.PDI}`;
+    return `${BIDI_CONTROLS.FSI}${content}${BIDI_CONTROLS.PDI}`;
+  }
+
+  function isElementNode(node) {
+    return Boolean(node && node.nodeType === 1);
+  }
+
+  function resolveDocumentRef(documentRef) {
+    if (documentRef && typeof documentRef.createElement === 'function') {
+      return documentRef;
+    }
+    return document;
+  }
+
+  function createBidiNode(text, {
+    dir = 'auto',
+    tagName = 'span',
+    className = '',
+    documentRef = document
+  } = {}) {
+    const safeDir = normalizeDir(dir, 'auto');
+    const safeTag = (typeof tagName === 'string' && tagName.trim()) ? tagName.trim().toLowerCase() : 'span';
+    const docRef = resolveDocumentRef(documentRef);
+    const el = docRef.createElement(safeTag === 'bdi' ? 'bdi' : safeTag);
+
+    if (el.tagName !== 'BDI') {
+      el.setAttribute('dir', safeDir);
+    }
+
+    if (typeof className === 'string' && className.trim()) {
+      el.className = className.trim();
+    }
+
+    el.textContent = toSafeText(text);
+    return el;
+  }
+
+  function appendBidiText(target, text, options = {}) {
+    if (!isElementNode(target)) {
+      return { ok: false, message: 'Target must be a DOM Element.' };
+    }
+
+    const node = createBidiNode(text, {
+      ...options,
+      documentRef: target.ownerDocument || document
+    });
+    target.appendChild(node);
+    return { ok: true, node };
+  }
+
+  function sanitizeStringArray(value, fallback = []) {
+    if (!Array.isArray(value)) return deepClone(fallback);
+    const cleaned = value
+      .filter((item) => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return cleaned.length ? Array.from(new Set(cleaned)) : deepClone(fallback);
+  }
+
+  function sanitizeDeclarations(value, fallback = {}) {
+    const base = (fallback && typeof fallback === 'object') ? { ...fallback } : {};
+    if (!value || typeof value !== 'object') return base;
+
+    for (const [key, val] of Object.entries(value)) {
+      if (!key || typeof key !== 'string') continue;
+      if (typeof val !== 'string' && typeof val !== 'number') continue;
+      base[key] = String(val).trim();
+    }
+
+    return base;
+  }
+
+  function normalizeRule(rule, fallbackRule) {
+    const fallback = fallbackRule || { selectors: [], declarations: {} };
+    const selectors = sanitizeStringArray(rule && rule.selectors, fallback.selectors || []);
+    const declarations = sanitizeDeclarations(rule && rule.declarations, fallback.declarations || {});
+    return { selectors, declarations };
+  }
+
+  function mergeRules(baseRules, overrideRules) {
+    const base = (baseRules && typeof baseRules === 'object') ? baseRules : {};
+    const overrides = (overrideRules && typeof overrideRules === 'object') ? overrideRules : {};
+    const keys = Array.from(new Set([...Object.keys(base), ...Object.keys(overrides)]));
+    const merged = {};
+
+    for (const key of keys) {
+      const fallbackRule = normalizeRule(base[key], { selectors: [], declarations: {} });
+      merged[key] = normalizeRule(overrides[key], fallbackRule);
+    }
+
+    return merged;
+  }
+
+  function getStorageKey() {
+    return DEFAULT_CONFIG.storageKey;
   }
 
   function getPresetConfig(name) {
@@ -164,6 +349,7 @@
     };
 
     merged.rules = deepClone((PRESET_OVERRIDES[preset] && PRESET_OVERRIDES[preset].rules) || DEFAULT_CONFIG.rules);
+    merged.scopeSelectors = deepClone((PRESET_OVERRIDES[preset] && PRESET_OVERRIDES[preset].scopeSelectors) || DEFAULT_CONFIG.scopeSelectors);
     merged.watchHints = deepClone((PRESET_OVERRIDES[preset] && PRESET_OVERRIDES[preset].watchHints) || DEFAULT_CONFIG.watchHints);
     return merged;
   }
@@ -188,7 +374,7 @@
     if (!state.config.persistConfig || !canUseStorage()) return false;
     try {
       const payload = pickPersistableConfig(state.config);
-      global.localStorage.setItem(state.config.storageKey, JSON.stringify(payload));
+      global.localStorage.setItem(getStorageKey(), JSON.stringify(payload));
       return true;
     } catch (err) {
       logger.warn('Failed to save config to localStorage.', err);
@@ -199,7 +385,7 @@
   function loadSavedConfig() {
     if (!canUseStorage()) return null;
     try {
-      const raw = global.localStorage.getItem(DEFAULT_CONFIG.storageKey);
+      const raw = global.localStorage.getItem(getStorageKey());
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return null;
@@ -213,7 +399,7 @@
   function clearSavedConfig() {
     if (!canUseStorage()) return false;
     try {
-      global.localStorage.removeItem(state.config.storageKey);
+      global.localStorage.removeItem(getStorageKey());
       return true;
     } catch (err) {
       logger.warn('Failed to clear saved config.', err);
@@ -223,11 +409,14 @@
 
   function buildConfigFromSaved(saved) {
     const base = getPresetConfig(saved && typeof saved.preset === 'string' ? saved.preset : DEFAULT_CONFIG.preset);
+    const normalizedRules = mergeRules(base.rules, saved && saved.rules);
     return {
       ...base,
       ...saved,
-      rules: { ...base.rules, ...((saved && saved.rules) || {}) },
-      watchHints: Array.isArray(saved && saved.watchHints) ? deepClone(saved.watchHints) : deepClone(base.watchHints)
+      storageKey: DEFAULT_CONFIG.storageKey,
+      rules: normalizedRules,
+      scopeSelectors: sanitizeStringArray(saved && saved.scopeSelectors, base.scopeSelectors),
+      watchHints: sanitizeStringArray(saved && saved.watchHints, base.watchHints)
     };
   }
 
@@ -238,19 +427,60 @@
     return `${selectors.join(',\n')} {\n${body}\n}`;
   }
 
+  function getScopedSelectors(ruleName, selectors) {
+    const cleanSelectors = sanitizeStringArray(selectors, []);
+    if (!cleanSelectors.length) return [];
+    if (ruleName === 'containers') return cleanSelectors;
+
+    const scopes = sanitizeStringArray(state.config.scopeSelectors, []);
+    if (!scopes.length) return cleanSelectors;
+
+    const scoped = [];
+    for (const scope of scopes) {
+      for (const selector of cleanSelectors) {
+        scoped.push(`${scope} ${selector}`);
+      }
+    }
+
+    return Array.from(new Set(scoped));
+  }
+
   function buildStyleText(rules) {
-    const css = Object.values(rules).map(rule => toCssRule(rule.selectors, rule.declarations)).join('\n\n');
+    const normalizedRules = Object.entries(rules)
+      .map(([ruleName, rule]) => {
+        const fallbackRule = (DEFAULT_CONFIG.rules && DEFAULT_CONFIG.rules[ruleName]) || { selectors: [], declarations: {} };
+        const normalized = normalizeRule(rule, fallbackRule);
+        const scopedSelectors = getScopedSelectors(ruleName, normalized.selectors);
+        return {
+          selectors: scopedSelectors,
+          declarations: normalized.declarations
+        };
+      })
+      .filter((rule) => (
+        Array.isArray(rule.selectors)
+        && rule.selectors.length > 0
+        && rule.declarations
+        && Object.keys(rule.declarations).length > 0
+      ));
+
+    const css = normalizedRules.map(rule => toCssRule(rule.selectors, rule.declarations)).join('\n\n');
 
     if (!state.config.enableBidiFallback) return css;
 
+    const fallbackSelectors = Array.from(new Set(
+      (rules.mixedText && Array.isArray(rules.mixedText.selectors)
+        ? getScopedSelectors('mixedText', rules.mixedText.selectors)
+        : ['p', 'li', 'span', 'h1', 'h2', 'h3'])
+    ));
+
+    if (!fallbackSelectors.length) return css;
+
     const fallback = [
       '@supports not (unicode-bidi: plaintext) {',
-      '  p,',
-      '  li,',
-      '  span,',
-      '  h1,',
-      '  h2,',
-      '  h3 {',
+      ...fallbackSelectors.map((selector, index) => (
+        `  ${selector}${index < fallbackSelectors.length - 1 ? ',' : ''}`
+      )),
+      '  {',
       '    unicode-bidi: isolate !important;',
       '  }',
       '}'
@@ -514,28 +744,39 @@
   }
 
   function ensureStylesEverywhere() {
-    ensureMainStyle({ force: false });
+    let changes = 0;
+
+    if (ensureMainStyle({ force: false })) changes += 1;
 
     if (state.config.supportsShadowDom) {
       forEachElementWithShadowRoot(document, (root) => {
-        ensureStyleInRoot(root, { force: false, styleId: shadowStyleId() });
+        if (ensureStyleInRoot(root, { force: false, styleId: shadowStyleId() })) changes += 1;
       });
     }
 
     if (state.config.supportsIframes) {
       forEachAccessibleIframe(document, (_, frameDoc) => {
-        ensureStyleInRoot(frameDoc, { force: false, styleId: iframeStyleId() });
+        if (ensureStyleInRoot(frameDoc, { force: false, styleId: iframeStyleId() })) changes += 1;
       });
     }
+
+    return changes;
+  }
+
+  function hasCoverageGap() {
+    const coverage = getCoverageSnapshot();
+    if (!coverage.hasMainStyle) return true;
+    if (state.config.supportsShadowDom && coverage.shadowRootsDetected !== coverage.shadowRootsStyled) return true;
+    if (state.config.supportsIframes && coverage.iframesAccessible !== coverage.iframesStyled) return true;
+    return false;
   }
 
   function processMutations(mutations, source) {
     const burst = isMutationBurst(mutations);
     discoverTargetsFromMutations(mutations);
 
-    const styleMissing = !getMainStyleEl();
-    if (styleMissing) {
-      scheduleHeal(`${source}:style-missing`);
+    if (hasCoverageGap()) {
+      scheduleHeal(`${source}:coverage-gap`);
       return;
     }
 
@@ -562,13 +803,15 @@
       }
 
       const hadMainStyle = Boolean(getMainStyleEl());
-      ensureStylesEverywhere();
-      const changed = ensureMainStyle({ force: false });
+      const changes = ensureStylesEverywhere();
+      const changed = Boolean(changes);
       const hasMainStyleNow = Boolean(getMainStyleEl());
-      const healed = (!hadMainStyle && hasMainStyleNow) || changed;
+      const coverageGap = hasCoverageGap();
+      const healed = (!hadMainStyle && hasMainStyleNow) || changed || coverageGap;
 
-      if (healed || !hasMainStyleNow) {
+      if (healed || !hasMainStyleNow || coverageGap) {
         ensureMainStyle({ force: true });
+        ensureStylesEverywhere();
         state.healCount += 1;
         markHeal();
         logger.info(`Self-heal executed (${reason}). count=${state.healCount}`);
@@ -672,27 +915,46 @@
   }
 
   function update(partialConfig = {}) {
-    const nextPreset = typeof partialConfig.preset === 'string' ? partialConfig.preset : state.config.preset;
+    const hasPresetOverride = typeof partialConfig.preset === 'string';
+    const nextPreset = hasPresetOverride ? partialConfig.preset : state.config.preset;
     const presetBase = getPresetConfig(nextPreset);
 
+    const baseConfig = hasPresetOverride
+      ? {
+        ...presetBase,
+        persistConfig: state.config.persistConfig,
+        storageKey: DEFAULT_CONFIG.storageKey,
+        log: state.config.log,
+        logPrefix: state.config.logPrefix
+      }
+      : { ...state.config };
+
+    const mergedRules = mergeRules(baseConfig.rules, partialConfig.rules);
+
     state.config = {
-      ...presetBase,
-      ...state.config,
+      ...baseConfig,
       ...partialConfig,
-      rules: {
-        ...presetBase.rules,
-        ...state.config.rules,
-        ...(partialConfig.rules || {})
-      },
-      watchHints: Array.isArray(partialConfig.watchHints)
-        ? deepClone(partialConfig.watchHints)
-        : deepClone(state.config.watchHints || presetBase.watchHints)
+      storageKey: DEFAULT_CONFIG.storageKey,
+      rules: mergedRules,
+      scopeSelectors: sanitizeStringArray(
+        partialConfig.scopeSelectors,
+        hasPresetOverride ? presetBase.scopeSelectors : baseConfig.scopeSelectors
+      ),
+      watchHints: sanitizeStringArray(
+        partialConfig.watchHints,
+        hasPresetOverride ? presetBase.watchHints : baseConfig.watchHints
+      )
     };
 
     if (state.config.persistConfig) saveConfig();
 
     if (state.applied) apply({ force: true });
-    if (!state.config.autoHeal) stopObserver();
+    if (state.config.autoHeal) {
+      stopObserver();
+      if (state.applied) startObserver();
+    } else {
+      stopObserver();
+    }
     return { ok: true };
   }
 
@@ -705,13 +967,20 @@
       ...state.config,
       ...presetConfig,
       persistConfig: state.config.persistConfig,
-      storageKey: state.config.storageKey,
+      storageKey: DEFAULT_CONFIG.storageKey,
       log: state.config.log,
       logPrefix: state.config.logPrefix
     };
 
     if (state.config.persistConfig) saveConfig();
     if (applyNow && state.applied) apply({ force: true });
+
+    if (state.config.autoHeal) {
+      stopObserver();
+      if (state.applied) startObserver();
+    } else {
+      stopObserver();
+    }
 
     logger.info(`Preset switched to "${presetName}".`);
     return { ok: true, preset: presetName };
@@ -769,6 +1038,58 @@
       ok: issues.length === 0,
       checks,
       coverage,
+      issues
+    };
+  }
+
+  function runSelfCheck() {
+    const health = healthCheck();
+    const requiredRules = [
+      'containers',
+      'mixedText',
+      'explicitRTL',
+      'explicitLTR',
+      'autoDirection',
+      'inlineCodeSafety',
+      'blockCodeSafety',
+      'iconSafety'
+    ];
+
+    const missingRules = requiredRules.filter((ruleName) => !state.config.rules || !state.config.rules[ruleName]);
+    const scopeSelectors = sanitizeStringArray(state.config.scopeSelectors, []);
+    const watchHints = sanitizeStringArray(state.config.watchHints, []);
+
+    const sample = 'نمونه Test 123';
+    const isolateSamples = {
+      rtl: toUnicodeIsolate(sample, 'rtl'),
+      ltr: toUnicodeIsolate(sample, 'ltr'),
+      auto: toUnicodeIsolate(sample, 'auto')
+    };
+
+    const isolateCheck = {
+      rtlWrapped: isolateSamples.rtl.startsWith(BIDI_CONTROLS.RLI) && isolateSamples.rtl.endsWith(BIDI_CONTROLS.PDI),
+      ltrWrapped: isolateSamples.ltr.startsWith(BIDI_CONTROLS.LRI) && isolateSamples.ltr.endsWith(BIDI_CONTROLS.PDI),
+      autoWrapped: isolateSamples.auto.startsWith(BIDI_CONTROLS.FSI) && isolateSamples.auto.endsWith(BIDI_CONTROLS.PDI)
+    };
+
+    const issues = [...health.issues];
+    if (missingRules.length) issues.push(`Missing required rules: ${missingRules.join(', ')}`);
+    if (!scopeSelectors.length) issues.push('scopeSelectors is empty; styles may apply too broadly.');
+    if (!watchHints.length) issues.push('watchHints is empty; mutation filtering may become noisy.');
+    if (!isolateCheck.rtlWrapped || !isolateCheck.ltrWrapped || !isolateCheck.autoWrapped) {
+      issues.push('Unicode isolate wrappers failed sanity check.');
+    }
+
+    return {
+      ok: issues.length === 0,
+      preset: state.config.preset,
+      health,
+      checks: {
+        missingRules,
+        scopeSelectorCount: scopeSelectors.length,
+        watchHintCount: watchHints.length,
+        isolateCheck
+      },
       issues
     };
   }
@@ -836,7 +1157,11 @@
     restoreConfig,
     clearSavedConfig,
     healthCheck,
+    runSelfCheck,
     status,
+    toUnicodeIsolate,
+    createBidiNode,
+    appendBidiText,
     uninstall
   });
 

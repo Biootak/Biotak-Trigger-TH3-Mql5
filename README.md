@@ -83,6 +83,81 @@ Watch mode behavior:
 
 ---
 
+## Copilot RTL/LTR Helper (Browser-only)
+
+File: `copilot-rtl-fix.js`
+
+This helper is independent from MT5 compilation and is intended for browser/webview injection scenarios.
+
+### Current behavior
+
+- Supports mixed-language text (English/Persian in both orders) with `unicode-bidi: plaintext` strategy.
+- Honors explicit direction markers (`dir="rtl"`, `dir="ltr"`, `dir="auto"`, `bdi`).
+- Keeps code blocks LTR while preserving safer inline behavior.
+- Applies styles in scoped chat-like roots (not the entire page by default).
+- Auto-heal monitors DOM, shadow roots, and accessible iframes.
+
+### 2026 best-practice strategy
+
+- Prefer semantic direction with HTML `dir` over forced CSS whenever possible.
+- Use tight wrapping for opposite-direction inline phrases.
+- For unknown runtime direction, use `dir="auto"` or `bdi`.
+- For plain-text-only channels, use isolate controls (`LRI/RLI/FSI ... PDI`) instead of legacy embedding controls.
+- Keep technical tokens (`code`, URL-like strings, part numbers) isolated from surrounding RTL text.
+
+### Helper APIs (added)
+
+- `CopilotRTLFix.toUnicodeIsolate(text, dir)`
+	- Returns plain text wrapped by Unicode isolates.
+	- `dir` values: `"rtl" | "ltr" | "auto"`.
+- `CopilotRTLFix.createBidiNode(text, options)`
+	- Creates a DOM element (`span` by default) with safe bidi settings.
+	- Options: `dir`, `tagName`, `className`, `documentRef`.
+- `CopilotRTLFix.appendBidiText(target, text, options)`
+	- Appends a safe bidi node into a target element.
+	- Returns `{ ok, node | message }`.
+- `CopilotRTLFix.runSelfCheck()`
+	- Runs a comprehensive runtime sanity audit.
+	- Reports health, missing rules, isolate wrapper checks, and potential risk signals.
+
+Suggested usage model:
+
+- If you can render markup: use `createBidiNode` / `appendBidiText`.
+- If you must emit plain text only: use `toUnicodeIsolate`.
+
+### Limitations
+
+- Cross-origin iframes cannot be styled due to browser security policy.
+- Closed shadow roots are not accessible by design.
+- This script does not run inside MetaTrader terminal runtime.
+
+### Quick manual verification
+
+After injecting the script, verify these render correctly:
+
+- `English فارسی`
+- `فارسی English`
+- `ABC 123 فارسی`
+- `سلام \`inline code\` دنیا`
+- A markdown/code block inside Persian paragraph
+
+Extra edge-case matrix:
+
+- `EN then FA`: `Version 3.05 نسخه`
+- `FA then EN`: `نسخه Version 3.05`
+- `RTL + number + punctuation`: `قیمت (USD 120)!`
+- `URL in RTL`: `لینک: https://example.com/a/b?x=1&y=2`
+- `Part number in RTL`: `شماره قطعه: AB-120C`
+- `Unknown user input`: append text via `appendBidiText(..., { dir: "auto" })`
+
+Health utilities:
+
+- `CopilotRTLFix.healthCheck()`
+- `CopilotRTLFix.runSelfCheck()`
+- `CopilotRTLFix.status()`
+
+---
+
 ## File Structure
 
 ```
