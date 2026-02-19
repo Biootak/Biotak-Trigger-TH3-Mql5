@@ -712,7 +712,8 @@ bool HandleABCDPointPlacement(datetime clickTime, double clickPrice)
         g_lastFreqResult = freqResult;
     }
 
-    string patternName = TH3_PATTERN_PREFIX + IntegerToString((long)GetTickCount());
+    static int s_patternSeq = 0;
+    string patternName = TH3_PATTERN_PREFIX + IntegerToString((long)GetTickCount()) + "_" + IntegerToString(s_patternSeq++);
     DrawABCDPattern(patternName, g_abcdTimeA, g_abcdPriceA,
                     g_abcdTimeB, g_abcdPriceB, g_abcdTimeC, g_abcdPriceC);
     SetActiveABCDPattern(patternName);

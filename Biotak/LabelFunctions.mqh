@@ -576,6 +576,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     double atrPips = NormalizeDouble((atrValuePoints * point) / pipSize, 1);
     double shortStepPips = NormalizeDouble(atrPips * SS_MULTIPLIER, 1);
     double longStepPips = NormalizeDouble(atrPips * LS_MULTIPLIER, 1);
+    double midStepPips = NormalizeDouble((shortStepPips + longStepPips) / 2.0, 1);
     double target3x = MathFloor(atrPips * 3.0);
     double target5x = MathFloor(atrPips * 5.0);
     double target15x = MathFloor(atrPips * 15.0);
@@ -588,7 +589,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     
     string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
     string mainText = timeframeName + ": " + DoubleToString(atrPips, 1);
-    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
 
     // PERF: Check if objects already exist with correct text - skip redundant ObjectSet calls
     bool mainExists = (ObjectFind(0, mainObjName) >= 0);
@@ -864,6 +865,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     double atrPips = NormalizeDouble(atrValue / pipSize, 1);
     double shortStepPips = NormalizeDouble(atrPips * SS_MULTIPLIER, 1);
     double longStepPips = NormalizeDouble(atrPips * LS_MULTIPLIER, 1);
+    double midStepPips = NormalizeDouble((shortStepPips + longStepPips) / 2.0, 1);
     double target3x = MathFloor(atrPips * 3.0);
     double target5x = MathFloor(atrPips * 5.0);
     double target15x = MathFloor(atrPips * 15.0);
@@ -875,7 +877,7 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
         string mainText = inpShowTimeframeInLabels ?
             timeframeName + ": " + DoubleToString(atrPips, 1) :
             DoubleToString(atrPips, 1);
-        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
         string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowATRTargets);
     
@@ -960,6 +962,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     double thValuePips = NormalizeDouble((thValuePoints * point) / pipSize, 1);
     double shortStepPips = NormalizeDouble(thValuePips * SS_MULTIPLIER, 1);
     double longStepPips = NormalizeDouble(thValuePips * LS_MULTIPLIER, 1);
+    double midStepPips = NormalizeDouble((shortStepPips + longStepPips) / 2.0, 1);
     double target3x = MathFloor(thValuePips * 3.0);
     double target5x = MathFloor(thValuePips * 5.0);
     double target15x = MathFloor(thValuePips * 15.0);
@@ -993,7 +996,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         textChanged = (prevMain != mainText);
     }
     bool colorChanged = mainCreated || ((color)ObjectGetInteger(0, mainObjName, OBJPROP_COLOR) != textColor);
-    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
     string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
     if(inpShowTHTargets && (textChanged || targetsCreated)) {
         ObjectSetString(0, targetsObjName, OBJPROP_TEXT, targetsText);
@@ -1174,13 +1177,14 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         double thValuePips = IsZero(cachedPipSz, EPSILON_PRICE) ? 0.0 : NormalizeDouble((thPoints * GetCachedPoint()) / cachedPipSz, 1);
         double shortStepPips = NormalizeDouble(thValuePips * SS_MULTIPLIER, 1);
         double longStepPips = NormalizeDouble(thValuePips * LS_MULTIPLIER, 1);
+        double midStepPips = NormalizeDouble((shortStepPips + longStepPips) / 2.0, 1);
         double target3x = MathFloor(thValuePips * 3.0);
         double target5x = MathFloor(thValuePips * 5.0);
         double target15x = MathFloor(thValuePips * 15.0);
         string mainText = inpShowTimeframeInLabels ?
             GetBaseTimeframeName(timeframeName) + ": " + DoubleToString(thValuePips, 1) :
             DoubleToString(thValuePips, 1);
-        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
         string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowTHTargets);
     if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
@@ -1281,13 +1285,14 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         double thValuePips = IsZero(stdPipSz, EPSILON_PRICE) ? 0.0 : NormalizeDouble((thPoints * GetCachedPoint()) / stdPipSz, 1);
         double shortStepPips = NormalizeDouble(thValuePips * SS_MULTIPLIER, 1);
         double longStepPips = NormalizeDouble(thValuePips * LS_MULTIPLIER, 1);
+        double midStepPips = NormalizeDouble((shortStepPips + longStepPips) / 2.0, 1);
         double target3x = MathFloor(thValuePips * 3.0);
         double target5x = MathFloor(thValuePips * 5.0);
         double target15x = MathFloor(thValuePips * 15.0);
         string mainText = inpShowTimeframeInLabels ?
             GetBaseTimeframeName(timeframeName) + ": " + DoubleToString(thValuePips, 1) :
             DoubleToString(thValuePips, 1);
-        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+        string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
         string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowTHTargets);
     if(inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL) {
