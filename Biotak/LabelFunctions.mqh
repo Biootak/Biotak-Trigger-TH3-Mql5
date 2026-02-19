@@ -138,8 +138,8 @@ bool DrawMainLevels(const string prefix) {
         
         basisLabel = "TH";
         // TH trigger tooltip multipliers
-        cachedLongStepVal = timeframePercentage * 2.0;
-        cachedShortStepVal = timeframePercentage * 1.5;
+        cachedLongStepVal = timeframePercentage * LS_MULTIPLIER;
+        cachedShortStepVal = timeframePercentage * SS_MULTIPLIER;
     
     // Validate step sizes to prevent infinite loops
     if(thStepSizePoints <= 0 || thStepSizePoints < s_cachedPointValue) {
@@ -572,8 +572,8 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     double pipSize = GetCachedPipSize();
     if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE)) return false;
     double atrPips = NormalizeDouble((atrValuePoints * point) / pipSize, 1);
-    double shortStepPips = NormalizeDouble(atrPips * 1.5, 1);
-    double longStepPips = NormalizeDouble(atrPips * 2.0, 1);
+    double shortStepPips = NormalizeDouble(atrPips * SS_MULTIPLIER, 1);
+    double longStepPips = NormalizeDouble(atrPips * LS_MULTIPLIER, 1);
     double target3x = MathFloor(atrPips * 3.0);
     double target5x = MathFloor(atrPips * 5.0);
     double target15x = MathFloor(atrPips * 15.0);
@@ -857,8 +857,8 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
         }
     double atrPoints = atrValue / point;
     double atrPips = NormalizeDouble(atrValue / pipSize, 1);
-    double shortStepPips = NormalizeDouble(atrPips * 1.5, 1);
-    double longStepPips = NormalizeDouble(atrPips * 2.0, 1);
+    double shortStepPips = NormalizeDouble(atrPips * SS_MULTIPLIER, 1);
+    double longStepPips = NormalizeDouble(atrPips * LS_MULTIPLIER, 1);
     double target3x = MathFloor(atrPips * 3.0);
     double target5x = MathFloor(atrPips * 5.0);
     double target15x = MathFloor(atrPips * 15.0);
@@ -927,35 +927,22 @@ void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
 }
 
 // Fast TH labels hide/show without deletion (O(1) object operations)
-// mode: 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH
+// mode: 0=OFF, 1=FRACTAL
 void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     // F key (global hide) always wins
-    bool shouldShow = ((mode != 0) && !IsIndicatorHidden());
+    bool shouldShow = ((mode == 1) && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
     // PERF: ObjectSetInteger is a no-op on non-existent objects — skip ObjectFind guards
     ObjectSetInteger(0, objectPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
 
-    bool showFractal = (mode == 1 || mode == 3);
-    bool showStandard = (mode == 2 || mode == 3);
-
     // Fractal timeframes
-    long fractalTF = (shouldShow && showFractal) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    long fractalTargetsTF = (shouldShow && showFractal && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    long fractalTargetsTF = (shouldShow && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
-        ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
-        ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
+        ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, tf);
         ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTargetsTF);
-    }
-    // Standard timeframes
-    long standardTF = (shouldShow && showStandard) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    long standardTargetsTF = (shouldShow && showStandard && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
-        string timeframeName = STANDARD_TIMEFRAMES[i];
-        ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
-        ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
-        ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, standardTargetsTF);
     }
 }
     bool CreateTHLabel(const string objectPrefix, const string timeframeName, const double thValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
@@ -966,8 +953,8 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     double pipSize = GetCachedPipSize();
     if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE)) return false;
     double thValuePips = NormalizeDouble((thValuePoints * point) / pipSize, 1);
-    double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
-    double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
+    double shortStepPips = NormalizeDouble(thValuePips * SS_MULTIPLIER, 1);
+    double longStepPips = NormalizeDouble(thValuePips * LS_MULTIPLIER, 1);
     double target3x = MathFloor(thValuePips * 3.0);
     double target5x = MathFloor(thValuePips * 5.0);
     double target15x = MathFloor(thValuePips * 15.0);
@@ -1156,8 +1143,8 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     storedCount++;
     StoreLabelPosition(timeframeName, currentXPos, currentYPos);
         double thValuePips = NormalizeDouble((thPoints * GetCachedPoint()) / GetCachedPipSize(), 1);
-        double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
-        double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
+        double shortStepPips = NormalizeDouble(thValuePips * SS_MULTIPLIER, 1);
+        double longStepPips = NormalizeDouble(thValuePips * LS_MULTIPLIER, 1);
         double target3x = MathFloor(thValuePips * 3.0);
         double target5x = MathFloor(thValuePips * 5.0);
         double target15x = MathFloor(thValuePips * 15.0);
@@ -1241,8 +1228,8 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
         g_storedTHs[thIndex].timeframeName = timeframeName;
     g_storedTHs[thIndex].thValue = thPoints;
         double thValuePips = NormalizeDouble((thPoints * GetCachedPoint()) / GetCachedPipSize(), 1);
-        double shortStepPips = NormalizeDouble(thValuePips * 1.5, 1);
-        double longStepPips = NormalizeDouble(thValuePips * 2.0, 1);
+        double shortStepPips = NormalizeDouble(thValuePips * SS_MULTIPLIER, 1);
+        double longStepPips = NormalizeDouble(thValuePips * LS_MULTIPLIER, 1);
         double target3x = MathFloor(thValuePips * 3.0);
         double target5x = MathFloor(thValuePips * 5.0);
         double target15x = MathFloor(thValuePips * 15.0);

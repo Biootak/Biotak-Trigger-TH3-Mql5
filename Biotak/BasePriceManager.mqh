@@ -488,7 +488,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     double CalculateM1PowerForBasePrice(const double basePrice)
 {
         if(basePrice <= 0) return 0.0;
-    double m1Percent = 0.0208;
+    double m1Percent = MODIFIED_FRACTAL_PERCENTAGES[0]; // M1: 0.0208
     double powerM1 = basePrice * m1Percent;
     return powerM1;
 }
@@ -776,7 +776,7 @@ string ExtractTimeBlock(const string &entry)
     double oldPowerM1 = g_referenceM1Power;
     double newPowerM1 = CalculateM1PowerForBasePrice(newBasePrice);
     double deltaAbsPct = 0.0;
-    if(oldPowerM1 != 0.0 && MathAbs(oldPowerM1) > 0.0000001)
+    if(oldPowerM1 != 0.0 && MathAbs(oldPowerM1) > EPSILON_PRICE)
     {
         deltaAbsPct = MathAbs(newPowerM1 - oldPowerM1) / MathAbs(oldPowerM1) * 100.0;
     }
@@ -918,7 +918,7 @@ string ExtractTimeBlock(const string &entry)
     continue;
         }
     double deltaAbsPct = 0.0;
-    if(rebuildReferenceM1 != 0.0 && MathAbs(rebuildReferenceM1) > 0.0000001)
+    if(rebuildReferenceM1 != 0.0 && MathAbs(rebuildReferenceM1) > EPSILON_PRICE)
         {
             deltaAbsPct = MathAbs(newM1Power - rebuildReferenceM1) / MathAbs(rebuildReferenceM1) * 100.0;
         }

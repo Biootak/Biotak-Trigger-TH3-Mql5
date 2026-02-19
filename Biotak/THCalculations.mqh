@@ -122,25 +122,11 @@ double CalculateShortStep(const double thValue) {
     return thValue * E_MULTIPLIER;
 }
     double CalculateTPStep(const double eValue) {
-    // Formula from EventHandlers.mqh: TP = E * 3 = TH * TP_MULTIPLIER
-    return eValue * 3.0;
+    // Formula from EventHandlers.mqh: TP = E * TP_E_MULTIPLIER
+    return eValue * TP_E_MULTIPLIER;
 }
 
-// Reconstructed CalculateSharedPatternStep
-double CalculateSharedPatternStep(const double currentStructure, const double currentPattern,
-                                 const double higherPatternStructure, const double higherPatternPattern) {
-        #ifdef ENABLE_DEBUG_LOGS
-    Print("[D][TH] CalculateSharedPatternStep: currentS=", currentStructure,
-          ", currentP=", currentPattern, ", higherS=", higherPatternStructure, 
-          ", higherP=", higherPatternPattern);
-    #endif
-    
-    // Return current SS only as fallback
-    if(currentStructure > 0 && currentPattern > 0) {
-        return (2 * currentStructure) - currentPattern;  // SS formula
-    }
-    return 0.0;
-}
+// [REMOVED] CalculateSharedPatternStep — dead code, zero callers.
 
 //+------------------------------------------------------------------+
 //| Calculate Factor Step Size                                        |
@@ -217,13 +203,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     return 0;
     }
     
-    // ═══════════════════════════════════════════════════════════════
-    // CRITICAL FIX #6: Validate result is reasonable
-    // ═══════════════════════════════════════════════════════════════
-    if(stepSize <= 0) {
-        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid step size result: ", stepSize);
-    return 0;
-    }
+    // Validate result is reasonable
     if(stepSize < GetCachedPoint() * 0.1) {
         _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Step size too small (", stepSize, ") - would create too many levels");
     return 0;

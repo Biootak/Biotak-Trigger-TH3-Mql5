@@ -28,31 +28,20 @@ int OnInitHandler() {    InitializeGlobalCache();
         double gvarValue = GlobalVariableGet(thLabelsGvarName);
     bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
     bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-    bool isTwo = MathAbs(gvarValue - 2.0) < EPSILON_GENERAL;
-    bool isThree = MathAbs(gvarValue - 3.0) < EPSILON_GENERAL;
-    if(isZero || isOne || isTwo || isThree) {
+    if(isZero || isOne) {
             g_thLabelsMode = (int)gvarValue;
             g_thLabelsVisible = (g_thLabelsMode != 0);
         } else {
             _LOG_GATE_E Print("[E][GEN] OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
-    int defaultMode = 0;
-    if(inpShowTHLabels) {
-        if(inpShowFractalTHs && inpShowStandardTHs) defaultMode = 3;
-        else if(inpShowFractalTHs) defaultMode = 1;
-        else if(inpShowStandardTHs) defaultMode = 2;
-        else defaultMode = 0;
-    }
+    int defaultMode = (inpShowFractalTHs) ? 1 : 0;
     GlobalVariableSet(thLabelsGvarName, (double)defaultMode);
     g_thLabelsMode = defaultMode;
     g_thLabelsVisible = (g_thLabelsMode != 0);
         }
     } else {
         int defaultMode = 0;
-        if(inpShowTHLabels) {
-            if(inpShowFractalTHs && inpShowStandardTHs) defaultMode = 3;
-            else if(inpShowFractalTHs) defaultMode = 1;
-            else if(inpShowStandardTHs) defaultMode = 2;
-            else defaultMode = 0;
+        if(inpShowTHLabels && inpShowFractalTHs) {
+            defaultMode = 1;
         }
         g_thLabelsMode = defaultMode;
         g_thLabelsVisible = (g_thLabelsMode != 0);
@@ -709,15 +698,15 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     Print("[D][GEN] Structure Value: ", DoubleToString(data.structureValue, 10));
     Print("[D][GEN] Pattern Value: ", DoubleToString(data.patternValue, 10));
     Print("[D][GEN] Trigger Value: ", DoubleToString(data.triggerValue, 10));
-    Print("[D][GEN] SS (1.5 × Structure): ", DoubleToString(data.structureValue * 1.5, 10));
-    Print("[D][GEN] LS (2.0 × Structure): ", DoubleToString(data.structureValue * 2.0, 10));
+    Print("[D][GEN] SS (1.5 × Structure): ", DoubleToString(data.structureValue * SS_MULTIPLIER, 10));
+    Print("[D][GEN] LS (2.0 × Structure): ", DoubleToString(data.structureValue * LS_MULTIPLIER, 10));
     Print("[D][GEN] ==============================================");
     s_lastTHDebugLogTime = currentDebugTime;
         }
     #endif
     
-    data.shortStep = data.structureValue * 1.5;
-    data.longStep = data.structureValue * 2.0;
+    data.shortStep = data.structureValue * SS_MULTIPLIER;
+    data.longStep = data.structureValue * LS_MULTIPLIER;
     data.pointSize = 1.0;
     data.midpointPrice = GetMidpointPrice(g_thStartPointType);
     if(data.midpointPrice <= 0 || data.midpointPrice == EMPTY_VALUE) {
@@ -1257,10 +1246,8 @@ void RunIncrementalObjectCleanup()
 
     TH3_PROF_START(Labels);
     if(g_atrLabelsVisible && inpShowATRLabels) DisplayATRLabels(objectPrefix);
-    bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
-    bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
-    if(inpShowTHLabels && g_thLabelsMode != 0 && showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-    if(inpShowTHLabels && g_thLabelsMode != 0 && showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+    if(inpShowTHLabels && g_thLabelsMode == 1)
+        DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     TH3_PROF_END(Labels);
     // FIX: Snapshot final Y offset so mode/lock/factor labels always appear below all data labels
     g_modeLabelYOffset = g_currentLabelYOffset;
@@ -1485,12 +1472,8 @@ void RedrawLabelsOnly() {
         DisplayATRLabels(objectPrefix);
     }
 
-    bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
-    bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
-    // TH labels need a valid base price; if not ready yet, skip TH to avoid broken output.
-    if(inpShowTHLabels && g_thLabelsMode != 0 && g_dailyClosePriceForTH != EMPTY_VALUE && g_dailyClosePriceForTH > 0.0) {
-        if(showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-        if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+    if(inpShowTHLabels && g_thLabelsMode == 1 && g_dailyClosePriceForTH != EMPTY_VALUE && g_dailyClosePriceForTH > 0.0) {
+        DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
     }
     // FIX: Snapshot final offset for mode/lock/factor labels
     g_modeLabelYOffset = g_currentLabelYOffset;
@@ -1533,37 +1516,17 @@ void AdjustFactorValue(int direction)
 }
 
 //+------------------------------------------------------------------+
-//| HELPER: Cycle TH3 frequency forward (binary subdivision)         |
+//| HELPER: Adjust TH3 frequency by direction (binary subdivision)   |
+//| direction: +1 = increase, -1 = decrease                          |
 //| Each step = 1.5625% (100/64). Index range: 1..128 (200%)         |
 //+------------------------------------------------------------------+
-void CycleTH3Frequency()
+void AdjustTH3Frequency(int direction)
 {
     if(!inpEnableTH3Tool) return;
     if(g_th3FreqIndex < MIN_TH3_FREQ_INDEX || g_th3FreqIndex > MAX_TH3_FREQ_INDEX)
         g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
-    int newIndex = g_th3FreqIndex + 1;
-    if(newIndex > MAX_TH3_FREQ_INDEX) return;  // Clamp at 400% — don't wrap
-    g_th3FreqIndex = newIndex;
-    g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
-    string chartIdStr = GetCachedChartIdStr();
-    GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
-    GlobalVariableSet("Biotak_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
-    UpdateAllTH3Objects();
-    UpdateTH3FreqLabel(g_th3FreqOverride);
-    ThrottledChartRedraw();
-    Print("TH3 Frequency: ", DoubleToString(g_th3FreqOverride, 4), "% [#", g_th3FreqIndex, "] depth=", GetBinaryDepthLevel(g_th3FreqIndex));
-}
-
-//+------------------------------------------------------------------+
-//| HELPER: Decrease TH3 frequency (binary subdivision, clamp at min)|
-//+------------------------------------------------------------------+
-void DecrementTH3Frequency()
-{
-    if(!inpEnableTH3Tool) return;
-    if(g_th3FreqIndex < MIN_TH3_FREQ_INDEX || g_th3FreqIndex > MAX_TH3_FREQ_INDEX)
-        g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
-    int newIndex = g_th3FreqIndex - 1;
-    if(newIndex < MIN_TH3_FREQ_INDEX) return;  // Clamp at 1.5625% — don't wrap
+    int newIndex = g_th3FreqIndex + direction;
+    if(newIndex > MAX_TH3_FREQ_INDEX || newIndex < MIN_TH3_FREQ_INDEX) return;
     g_th3FreqIndex = newIndex;
     g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
     string chartIdStr = GetCachedChartIdStr();
@@ -1834,8 +1797,7 @@ void DecrementTH3Frequency()
         g_thLabelsVisible = false;
         GlobalVariableSet(thGvar, 0.0);
     } else {
-        if(g_thLabelsMode < 0 || g_thLabelsMode > 3) g_thLabelsMode = 0;
-        g_thLabelsMode = (g_thLabelsMode + 1) % 4; // OFF->FRACTAL->STANDARD->BOTH->OFF
+        g_thLabelsMode = (g_thLabelsMode == 0) ? 1 : 0;
         g_thLabelsVisible = (g_thLabelsMode != 0);
         GlobalVariableSet(thGvar, (double)g_thLabelsMode);
     }
@@ -1843,7 +1805,7 @@ void DecrementTH3Frequency()
     SetTHLabelsVisibility(objectPrefix, (inpShowTHLabels ? g_thLabelsMode : 0));
     g_labelsRelayoutNeeded = true;
     RedrawLabelsOnly();
-        LOG_IP1(LOG_CAT_LABELS, "TH Labels mode=", IntegerToString(g_thLabelsMode) + " (0=OFF,1=FRACTAL,2=STANDARD,3=BOTH)");
+        LOG_IP1(LOG_CAT_LABELS, "TH Labels mode=", IntegerToString(g_thLabelsMode) + " (0=OFF,1=FRACTAL)");
     ThrottledChartRedraw();
     return;
         }
@@ -1876,10 +1838,10 @@ void DecrementTH3Frequency()
     else if(lparam == '2') { AdjustFactorValue(+1); return; }
 
     // KEY '3' — Decrease TH3 Frequency (cycle backward through array)
-    else if(lparam == '3') { DecrementTH3Frequency(); return; }
+    else if(lparam == '3') { AdjustTH3Frequency(-1); return; }
 
     // KEY '4' — Increase TH3 Frequency (cycle forward through array)
-    else if(lparam == '4') { CycleTH3Frequency(); return; }
+    else if(lparam == '4') { AdjustTH3Frequency(+1); return; }
 
     if(IsHotkeyPressed(lparam, sparam, inpResetKey))
         {            g_stepModeOverride = -1;

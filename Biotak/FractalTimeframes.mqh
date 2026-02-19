@@ -1,3 +1,6 @@
+#ifndef FRACTAL_TIMEFRAMES_MQH
+#define FRACTAL_TIMEFRAMES_MQH
+
 string GetFractalTimeframeForCurrent() {
         string currentTimeframe=GetCurrentTimeframe();
     
@@ -200,3 +203,5 @@ int GetStructureTimeframeMinutes() {
     string structTF = GetStructureTimeframeForCurrent();
     return GetFractalTimeframeMinutes(structTF);
 }
+
+#endif // FRACTAL_TIMEFRAMES_MQH

@@ -4,7 +4,6 @@
 #property copyright "Biotak"
 #property strict
 #include "FloatingPointHelper.mqh"
-#include "MathConstants.mqh"
 
 struct STHCacheEntry {
         double basePrice;
@@ -94,7 +93,7 @@ struct STHCacheEntry {
     g_thCache.digits = -1;
     g_thCache.result = 0.0;
     g_thCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] TH Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] TH Cache Invalidated");
     }
     double GetCachedFactorStepSize(double highPrice, double lowPrice, double factor) {    if(!g_factorCache.valid) {
         return 0.0;
@@ -135,7 +134,7 @@ struct STHCacheEntry {
     g_factorCache.period = 0;
     g_factorCache.stepSize = 0.0;
     g_factorCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Factor Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Factor Cache Invalidated");
     }
     string GetCachedFractalTimeframe(int period) {
     if(!g_timeframeCache.valid || g_timeframeCache.period != period) {
@@ -165,7 +164,7 @@ struct STHCacheEntry {
     g_timeframeCache.percentage = 0.0;
     g_timeframeCache.periodSeconds = -1;
     g_timeframeCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Timeframe Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Timeframe Cache Invalidated");
     }
     int GetCachedPeriodSeconds(int period) {
         if(g_cachedPeriod != period || g_cachedPeriodSeconds < 0) {
@@ -183,7 +182,7 @@ struct STHCacheEntry {
     g_cachedPeriod = -1;
     g_cachedPeriodSeconds = -1;
     g_cachedPeriodSecondsUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] PeriodSeconds Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] PeriodSeconds Cache Invalidated");
     }
     bool GetCachedZoneGeometry(double topPrice, double bottomPrice, 
                            int extensionMultiplier, int historicalPeriods,
@@ -230,7 +229,7 @@ struct STHCacheEntry {
     g_geometryCache.startTime = 0;
     g_geometryCache.endTime = 0;
     g_geometryCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Geometry Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Geometry Cache Invalidated");
     }
     double GetCachedExtensionMultiplier(int period, int periodSeconds) {
     if(!g_extensionMultiplierCache.valid || 
@@ -260,7 +259,7 @@ struct STHCacheEntry {
     g_extensionMultiplierCache.periodSeconds = -1;
     g_extensionMultiplierCache.multiplier = 0.0;
     g_extensionMultiplierCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Extension Multiplier Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Extension Multiplier Cache Invalidated");
     }
     void InvalidateTimeframeDependentCaches() {
     InvalidateTHCache();
@@ -269,12 +268,12 @@ struct STHCacheEntry {
     InvalidatePeriodSecondsCache();
     InvalidateGeometryCache();
     InvalidateExtensionMultiplierCache();
-    _LOG_GATE_E Print("[E][SYNC] Timeframe-Dependent Caches Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Timeframe-Dependent Caches Invalidated");
     }
     void InvalidateSettingsDependentCaches() {
     InvalidateFactorCache();
     InvalidateGeometryCache();
-    _LOG_GATE_E Print("[E][SYNC] Settings-Dependent Caches Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Settings-Dependent Caches Invalidated");
     }
     string GetCacheStatusSummary() {
         string status = "Cache Status:\n";

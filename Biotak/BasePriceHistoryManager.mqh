@@ -10,6 +10,11 @@
 #define HISTORY_PRINT if(false) Print
 #endif
     string SanitizeSymbolForFilename(const string symbol) {
+        // PERF: Cache result since symbol never changes during indicator lifetime
+        static string s_cachedInput = "";
+        static string s_cachedResult = "";
+        if(symbol == s_cachedInput && s_cachedResult != "") return s_cachedResult;
+        s_cachedInput = symbol;
         string safe = symbol;
     StringReplace(safe, "..", "");
     StringReplace(safe, "/", "");
@@ -28,6 +33,7 @@
     if(StringLen(safe) == 0) {
         safe = "UNKNOWN";
     }
+    s_cachedResult = safe;
     return safe;
 }
     string GetHistoryFilePath(int year, int dayOfYear)
@@ -66,6 +72,7 @@
     if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] LoadHistory: File locked (error ", errorCode, "), retrying...");
+    Sleep(retryDelay);
     continue;
             }
             else
@@ -138,6 +145,7 @@
     if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Temp file locked (error ", errorCode, "), retrying...");
+    Sleep(retryDelay);
     continue;
             }
             else
@@ -164,6 +172,7 @@
     if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Write failed, retrying...");
+    Sleep(retryDelay);
     continue;
             }
             else
@@ -181,6 +190,7 @@
                 {
                     HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Failed to delete old file (error ", deleteError, "), retrying...");
     FileDelete(tempPath);
+    Sleep(retryDelay);
     continue;
                 }
                 else
@@ -194,6 +204,7 @@
     if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Failed to rename temp file (error ", moveError, "), retrying...");
+    Sleep(retryDelay);
     continue;
             }
             else
@@ -233,7 +244,9 @@
     int errorCode = GetLastError();
     if(attempt < maxRetries - 1)
         {
-            HISTORY_PRINT("[BasePriceHistoryManager] AppendEntry: File locked (error ", errorCode, "), retrying in ", retryDelay, "ms...");        }
+            HISTORY_PRINT("[BasePriceHistoryManager] AppendEntry: File locked (error ", errorCode, "), retrying in ", retryDelay, "ms...");
+            Sleep(retryDelay);
+        }
         else
         {
             HISTORY_PRINT("[BasePriceHistoryManager] AppendEntry: ERROR - Failed after ", maxRetries, " attempts. Error: ", errorCode);
@@ -470,7 +483,9 @@
         int errorCode = GetLastError();
     if(retry < 2)
                         {
-                            HISTORY_PRINT("[BasePriceHistoryManager] CleanupOldHistory: Delete failed (error ", errorCode, "), retrying...");                        }
+                            HISTORY_PRINT("[BasePriceHistoryManager] CleanupOldHistory: Delete failed (error ", errorCode, "), retrying...");
+                            Sleep(100);
+                        }
                         else
                         {
                             HISTORY_PRINT("[BasePriceHistoryManager] CleanupOldHistory: WARNING - Failed to delete: ", fullPath, " (error ", errorCode, ")");

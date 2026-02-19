@@ -10,7 +10,7 @@ bool ValidateWidth(int width, const string name) {
 }
     bool ValidateRange(double value, double minVal, double maxVal, const string name) {
         if(value < minVal || value > maxVal) {
-        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", DoubleToString(value, 3), ") out of range [");
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", DoubleToString(value, 3), ") out of range [", DoubleToString(minVal, 3), " - ", DoubleToString(maxVal, 3), "]");
     return false;
     }
     return true;

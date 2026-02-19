@@ -4,6 +4,7 @@
 #ifndef UTILITY_FUNCTIONS_MQH
 #define UTILITY_FUNCTIONS_MQH
 #include "ZoneFactory.mqh"
+#include "MathConstants.mqh"
 
 //+------------------------------------------------------------------+
 //| Throttled ChartRedraw() to prevent excessive CPU usage           |
@@ -190,7 +191,7 @@ double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
         {
             double structureValue = 0, patternValue = 0, triggerValue = 0;
             CalculateFractalValues(thValue, structureValue, patternValue, triggerValue);
-            double shortStep = structureValue * 1.5;
+            double shortStep = structureValue * SS_MULTIPLIER;
             if(mode == M_STEP && inpMStepBasisType == MSTEP_BASIS_M_EQUAL)
                 return CalculateMDistance(shortStep);
             return shortStep;

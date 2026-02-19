@@ -319,7 +319,7 @@ void DrawABCDTargetLevels(const string mainObjName, double pC, double baseUnit,
         } else {
             ObjectMove(0, lineName, 0, startTime, center);
             ObjectMove(0, lineName, 1, endTime, center);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, clrDarkBlue);
+            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, inpABCDLineColor);
         }
 
         if(inpTH3LabelPosition != TH3_LABEL_HIDDEN) {
@@ -332,7 +332,7 @@ void DrawABCDTargetLevels(const string mainObjName, double pC, double baseUnit,
         if(inpTH3ZoneStyle == TH3_ZONE_LINES) {
             double upper = center + zoneHalfWidth;
             double lower = center - zoneHalfWidth;
-            color zoneColor = (inpTH3ZoneColor == clrNONE) ? clrDarkBlue : inpTH3ZoneColor;
+            color zoneColor = (inpTH3ZoneColor == clrNONE) ? inpABCDLineColor : inpTH3ZoneColor;
             string idx = IntegerToString(i + 1);
 
             CreateOrUpdateTrendLine(mainObjName + "_ZoneUpper_" + idx,

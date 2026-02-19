@@ -5,7 +5,7 @@
 #define ZONE_FACTORY_MQH
 
 #include "ConstantsAndEnums.mqh"
-#include "ZoneValidator.mqh"
+// ZoneValidator.mqh removed - was empty (no validation functions)
 #include "ObjectCache.mqh"
 #include "PropertyChangeDetector.mqh"
 #include "VisibilityManager.mqh"

@@ -30,7 +30,6 @@
 // Zone System
 #include "Biotak\CalculationCache.mqh"
 #include "Biotak\ZoneFactory.mqh"
-#include "Biotak\ZoneValidator.mqh"
 #include "Biotak\ZoneConstants.mqh"
 
 // Object Cache & Optimization
@@ -55,7 +54,6 @@
 #include "Biotak\ObjectFunctions.mqh"
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\UnifiedZoneSystem.mqh"
-#include "Biotak\ZoneTrackingHelpers.mqh"
 #include "Biotak\LevelPipeline.mqh"
 
 #include "Biotak\LabelFunctions.mqh"

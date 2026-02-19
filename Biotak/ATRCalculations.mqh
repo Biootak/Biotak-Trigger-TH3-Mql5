@@ -222,104 +222,10 @@ double CalculateTrueRange(const int barIndex) {
 
 //|                                                                  |
 //| Matches Java: OptimizedCalculations.calculateATROptimized()      |
-//| NOTE: Respects timeframe lock - uses GetEffectiveBars()          |
-//| AUDIT FIX: Added validation and SafeDivide                       |
-//+------------------------------------------------------------------+
-double CalculateSimpleATR(const int period) {
-    // AUDIT FIX: Validate period range
-    if(period <= 0 || period > 10000) {
-        _LOG_GATE_E Print("[E][ATR] CalculateSimpleATR: Invalid period (", period, ")");
-    return 0.0;
-    }
-    
-    // Use GetEffectiveBars() to respect timeframe lock
-    
-    int barsAvailable = GetEffectiveBars();
-    if(barsAvailable <= period) {
-        _LOG_GATE_W Print("[W][ATR] CalculateSimpleATR: Not enough bars (", barsAvailable, " < ", period, ")");
-    return 0.0;
-    }
-    double sumTR = 0.0;
-    int validBars = 0;
-    
-    // Start from bar 1 (completed bar), not bar 0 (current bar)
-    // Bar 0 is still forming and its High/Low/Close can change
-    // Calculate ATR from completed bars only (index 1 = last completed bar)
-    for(int i = 1; i <= period && i < barsAvailable; i++) {
-        double tr = CalculateTrueRange(i);
-        
-        // AUDIT FIX: Use IsZero for comparison
-        if(!IsZero(tr, EPSILON_PRICE)) {
-            sumTR += tr;
-    validBars++;
-        }
-    }
-    
-    // AUDIT FIX: Use SafeDivide
-    return SafeDivide(sumTR, (double)validBars, 0.0, EPSILON_GENERAL);
-}
-
-//+------------------------------------------------------------------+
-//| SHARED HELPER: Compute True Range array from batch HLC data      |
-//| Returns count of valid TR values written to trValues[]            |
-//| trValues[] must be pre-allocated with at least maxPeriod elements |
-//+------------------------------------------------------------------+
-int ComputeTRFromBatchArrays(double &trValues[], const double &highArr[], 
-                              const double &lowArr[], const double &closeArr[],
-                              int copyCount, int maxPeriod)
-{
-    int trCount = 0;
-    for(int i = 1; i <= maxPeriod && i < copyCount - 1; i++) {
-        double high = highArr[i];
-        double low  = lowArr[i];
-        double prevClose = closeArr[i + 1];
-        
-        if(!IsValidPrice(high, EPSILON_PRICE) || !IsValidPrice(low, EPSILON_PRICE) ||
-           !IsValidPrice(prevClose, EPSILON_PRICE) || IsLess(high, low, EPSILON_PRICE)) {
-            trValues[i - 1] = 0.0;
-        } else {
-            double hl = high - low;
-            double hc = MathAbs(high - prevClose);
-            double lc = MathAbs(low - prevClose);
-            double tr = hl;
-            if(hc > tr) tr = hc;
-            if(lc > tr) tr = lc;
-            trValues[i - 1] = tr;
-        }
-        trCount++;
-    }
-    return trCount;
-}
-
-//+------------------------------------------------------------------+
-//| SHARED HELPER: Calculate simple average ATR from pre-computed TR  |
-//| Uses SMA (not Wilder's RMA). Requires >= 50% valid bars per period|
-//+------------------------------------------------------------------+
-void CalculateSimpleATRFromTR(double &results[], const double &trValues[], int maxPeriod)
-{
-    int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3,
-                     ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-    for(int p = 0; p < 6; p++) {
-        int period = periods[p];
-        if(period > maxPeriod) {
-            results[p] = 0.0;
-            continue;
-        }
-        double sum = 0.0;
-        int count = 0;
-        for(int i = 0; i < period && i < maxPeriod; i++) {
-            if(!IsZero(trValues[i], EPSILON_PRICE)) {
-                sum += trValues[i];
-                count++;
-            }
-        }
-        if(count >= period / 2) {
-            results[p] = SafeDivide(sum, (double)count, 0.0, EPSILON_GENERAL);
-        } else {
-            results[p] = 0.0;
-        }
-    }
-}
+// [REMOVED] CalculateSimpleATR, ComputeTRFromBatchArrays, CalculateSimpleATRFromTR
+// These were dead code — only called from the also-dead CalculateATRBatch.
+// ComputeTRFromBatchArrays also had a bug (used closeArr[i+1] instead of closeArr[i-1]).
+// The live ATR path uses CalculateATRBatchWilders() exclusively.
 
 //+------------------------------------------------------------------+
 //| Core Wilder's ATR Batch Calculation for Any Timeframe            |
@@ -498,123 +404,8 @@ void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
     #endif
 }
 
-//+------------------------------------------------------------------+
-//| Batch ATR Calculation for Multiple Periods                       |
-
-//|                                                                  |
-//| OPTIMIZATION: Calculates TR once and reuses for all periods      |
-//| Matches Java: OptimizedCalculations.calculateATRBatch()          |
-//| NOTE: Respects timeframe lock - uses GetEffectiveBars()          |
-//| AUDIT FIX: Added validation, SafeDivide, and error handling      |
-//+------------------------------------------------------------------+
-void CalculateATRBatch(double &results[]) {
-    // Initialize results array
-    ArrayResize(results, 6);
-    ArrayInitialize(results, 0.0);
-    
-    // Use GetEffectiveBars() to respect timeframe lock
-    
-    int barsAvailable = GetEffectiveBars();
-    
-    // AUDIT FIX: Validate bars available
-    if(barsAvailable <= 0) {
-        _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: No bars available");
-    return;
-    }
-    
-    // Calculate only periods we have enough data for
-    
-    // Need period + 1 bars: period bars for TR + 1 for prevClose
-    // But start from bar 1 (completed), so need period + 2 total bars
-    if(barsAvailable < ATR_PERIOD_1 + 2) {
-        _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: Not enough bars (", barsAvailable, "), need at least ", ATR_PERIOD_1 + 2);
-    return;
-    }
-    
-    // If limited bars, calculate what we can and skip larger periods
-    if(barsAvailable <= ATR_PERIOD_6 + 2) {
-        _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: Limited bars (", barsAvailable, "), calculating available periods only");
-    int periods_limited[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
-                                 ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-    for(int p = 0; p < 6; p++) {
-            // Only calculate if we have enough bars (period + 2: period bars + 1 prevClose + skip bar 0)
-            if(barsAvailable >= periods_limited[p] + 2) {
-                results[p] = CalculateSimpleATR(periods_limited[p]);
-            } else {
-                results[p] = 0.0;
-                _LOG_GATE_W Print("[W][ATR] CalculateATRBatch: Skipping ATR period ", periods_limited[p]);
-    }
-        }
-        return;
-    }
-    
-    // Pre-calculate True Range for all bars we need using batch CopyXxx
-    // Use CopyHigh/CopyLow/CopyClose/CopyOpen batch calls instead of
-    // per-bar iHigh/iLow/iClose/iOpen (reduces ~1000 API calls to ~4)
-    int maxPeriod = ATR_PERIOD_6;
-    int tf = GetEffectiveTimeframe();
-    ENUM_TIMEFRAMES etf = (ENUM_TIMEFRAMES)tf;
-    
-    // Batch copy HLC data in 3 calls instead of ~1000 individual calls
-    // PERF: CopyOpen removed — not needed for True Range (H-L, |H-prevC|, |L-prevC|)
-    double highArr[], lowArr[], closeArr[];
-    int copyCount = MathMin(maxPeriod + 2, barsAvailable);
-    int copiedHigh  = CopyHigh(_Symbol, etf, 0, copyCount, highArr);
-    int copiedLow   = CopyLow(_Symbol, etf, 0, copyCount, lowArr);
-    int copiedClose = CopyClose(_Symbol, etf, 0, copyCount, closeArr);
-    if(copiedHigh < copyCount || copiedLow < copyCount || 
-       copiedClose < copyCount) {
-        _LOG_GATE_E Print("[E][ATR] CalculateATRBatch: CopyXxx failed (H:", copiedHigh, " L:", copiedLow);
-        // Fallback to per-bar method
-        // Use completed bars only (start from bar 1)
-        double trFallback[];
-    if(ArrayResize(trFallback, maxPeriod) != maxPeriod) return;
-        
-        // Calculate TR for completed bars (bar 1 to bar maxPeriod)
-        for(int i = 1; i <= maxPeriod && i < barsAvailable; i++) {
-            trFallback[i-1] = CalculateTrueRange(i);  // Store at i-1
-        }
-    int periods_fb[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3, 
-                            ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-    for(int p = 0; p < 6; p++) {
-        double sum_fb = 0.0; int count_fb = 0;
-    int limit_fb = MathMin(periods_fb[p], maxPeriod);
-    for(int i = 0; i < limit_fb; i++) {
-                if(!IsZero(trFallback[i], EPSILON_PRICE)) { 
-                    sum_fb += trFallback[i];
-    count_fb++; 
-                }
-            }
-            
-            // Only calculate if we have at least 50% of required bars
-            if(count_fb >= periods_fb[p] / 2) {
-                results[p] = SafeDivide(sum_fb, (double)count_fb, 0.0, EPSILON_GENERAL);
-            } else {
-                results[p] = 0.0;
-            }
-        }
-        ArrayFree(trFallback);
-    return;
-    }
-    
-    // Compute TR from batch arrays using shared helper
-    double trValues[];
-    if(ArrayResize(trValues, maxPeriod) != maxPeriod) {
-        _LOG_GATE_E Print("[E][ATR] CalculateATRBatch: Failed to resize TR array");
-        return;
-    }
-    
-    ComputeTRFromBatchArrays(trValues, highArr, lowArr, closeArr, copyCount, maxPeriod);
-    
-    ArrayFree(highArr);
-    ArrayFree(lowArr);
-    ArrayFree(closeArr);
-    
-    // Calculate ATR for each period using shared helper
-    CalculateSimpleATRFromTR(results, trValues, maxPeriod);
-    
-    ArrayFree(trValues);
-}
+// [REMOVED] CalculateATRBatch — dead code (zero external callers).
+// Live path uses CalculateATRBatchWilders() exclusively.
 
 //+------------------------------------------------------------------+
 //| Calculate Weighted ATR                                           |
@@ -875,54 +666,9 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
     return result;
 }
 
-//+------------------------------------------------------------------+
-//| Batch ATR Calculation for Specific Timeframe                     |
-//| BUGFIX: Calculate from target TF data directly                   |
-//| REFACTORED: Uses shared ComputeTRFromBatchArrays + SimpleATRFromTR|
-//+------------------------------------------------------------------+
-void CalculateATRBatchForTimeframe(double &results[], const ENUM_TIMEFRAMES targetTF) {
-    ArrayResize(results, 6);
-    ArrayInitialize(results, 0.0);
-    
-    int barsAvailable = iBars(_Symbol, targetTF);
-    
-    if(barsAvailable <= 0) {
-        _LOG_GATE_D Print("[D][ATR] CalculateATRBatchForTimeframe: No bars available for TF=", targetTF);
-        return;
-    }
-    
-    if(barsAvailable < ATR_PERIOD_1 + 2) {
-        _LOG_GATE_D Print("[D][ATR] CalculateATRBatchForTimeframe: Not enough bars for TF=", targetTF);
-        return;
-    }
-    
-    int maxPeriod = ATR_PERIOD_6;
-    double highArr[], lowArr[], closeArr[];
-    int copyCount = MathMin(maxPeriod + 2, barsAvailable);
-    
-    int copiedHigh  = CopyHigh(_Symbol, targetTF, 0, copyCount, highArr);
-    int copiedLow   = CopyLow(_Symbol, targetTF, 0, copyCount, lowArr);
-    int copiedClose = CopyClose(_Symbol, targetTF, 0, copyCount, closeArr);
-    
-    if(copiedHigh < copyCount || copiedLow < copyCount || 
-       copiedClose < copyCount) {
-        _LOG_GATE_E Print("[E][ATR] CalculateATRBatchForTimeframe: CopyXxx failed for TF=", targetTF);
-        return;
-    }
-    
-    double trValues[];
-    if(ArrayResize(trValues, maxPeriod) != maxPeriod) return;
-    
-    ComputeTRFromBatchArrays(trValues, highArr, lowArr, closeArr, copyCount, maxPeriod);
-    
-    ArrayFree(highArr);
-    ArrayFree(lowArr);
-    ArrayFree(closeArr);
-    
-    CalculateSimpleATRFromTR(results, trValues, maxPeriod);
-    
-    ArrayFree(trValues);
-}
+// [REMOVED] CalculateATRBatchForTimeframe — dead code (zero external callers).
+// Used removed ComputeTRFromBatchArrays + CalculateSimpleATRFromTR.
+// Live path uses CalculateATRBatchWilders() exclusively.
 
 //+------------------------------------------------------------------+
 //| Get Current Timeframe in Minutes                                 |

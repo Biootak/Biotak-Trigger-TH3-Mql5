@@ -1,7 +1,7 @@
 ﻿#property copyright "Â© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link "@biotak"
 #include "UnifiedZoneSystem.mqh"
-#include "ZoneTrackingHelpers.mqh"
+// ZoneTrackingHelpers.mqh removed - was empty (all tracking functions dead)
 //+------------------------------------------------------------------+
 //| PERF: Delete surplus zone/line objects beyond what was just drawn |
 
@@ -256,11 +256,11 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
     }
     double stepSize = 0;
     switch(basis) {
-        case FACTOR_BASIS_CONTROL:            stepSize = GetStepSizeForBasisType(basePrice, 1.75, PERIOD_CURRENT);
+        case FACTOR_BASIS_CONTROL:            stepSize = GetStepSizeForBasisType(basePrice, CONTROL_MULTIPLIER, PERIOD_CURRENT);
     break;
-    case FACTOR_BASIS_SS:            stepSize = GetStepSizeForBasisType(basePrice, 1.5, PERIOD_CURRENT);
+    case FACTOR_BASIS_SS:            stepSize = GetStepSizeForBasisType(basePrice, SS_MULTIPLIER, PERIOD_CURRENT);
     break;
-    case FACTOR_BASIS_LS:            stepSize = GetStepSizeForBasisType(basePrice, 2.0, PERIOD_CURRENT);
+    case FACTOR_BASIS_LS:            stepSize = GetStepSizeForBasisType(basePrice, LS_MULTIPLIER, PERIOD_CURRENT);
     break;
     case FACTOR_BASIS_TH:
     case FACTOR_BASIS_TRIGGER:            stepSize = GetStepSizeForBasisType(basePrice, 1.0, PERIOD_CURRENT);
@@ -273,7 +273,7 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
     break;
     default:
             _LOG_GATE_W Print("[W][DRAW] GetStepSizeForFactorBasis: Unknown basis=", basis, ", using Control");
-    stepSize = GetStepSizeForBasisType(basePrice, 1.75, PERIOD_CURRENT);
+    stepSize = GetStepSizeForBasisType(basePrice, CONTROL_MULTIPLIER, PERIOD_CURRENT);
     break;
     }
     if(stepSize <= 0) {
@@ -506,8 +506,8 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
         ENUM_TIMEFRAMES tf = GetTimeframeByType(tfType);
     if(tf <= 0) return 0;
     double th = GetStepSizeForBasisType(basePrice, 1.0, tf);
-    double ss = GetStepSizeForBasisType(basePrice, 1.5, tf);
-    double ls = GetStepSizeForBasisType(basePrice, 2.0, tf);
+    double ss = GetStepSizeForBasisType(basePrice, SS_MULTIPLIER, tf);
+    double ls = GetStepSizeForBasisType(basePrice, LS_MULTIPLIER, tf);
     int validCount = 0;
     if(th > 0) validCount++;
     if(ss > 0) validCount++;
@@ -1215,8 +1215,8 @@ double CalculateComboStepSize(const double basePrice) {
     
     ENUM_TIMEFRAMES timeframe;
     double multiplier;
-    // Step type suffix determines multiplier: TH=1.0, SS=1.5, LS=2.0
-    static const double stepMultipliers[3] = {1.0, 1.5, 2.0};
+    // Step type suffix determines multiplier: TH=1.0, SS=SS_MULTIPLIER, LS=LS_MULTIPLIER
+    static const double stepMultipliers[3] = {1.0, SS_MULTIPLIER, LS_MULTIPLIER};
     switch(component) {        case COMP_SUB_TH:
         case COMP_SUB_SS:
         case COMP_SUB_LS:
@@ -1377,10 +1377,10 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
             multiplier = 1.0;
     break;
     case COMBO_STEP_SS:
-            multiplier = 1.5;
+            multiplier = SS_MULTIPLIER;
     break;
     case COMBO_STEP_LS:
-            multiplier = 2.0;
+            multiplier = LS_MULTIPLIER;
     break;
     default:
             _LOG_GATE_W Print("[W][DRAW] GetStepMultiplier: Unexpected stepType=", stepType, ", using 1.0 (TH)");

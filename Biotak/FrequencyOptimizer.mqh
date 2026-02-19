@@ -54,18 +54,10 @@ struct FreqCandidate {
 };
 
 //+------------------------------------------------------------------+
-//| Calculate Step3 price for a given frequency and ABCD pattern     |
-//| Step3 = C ± 3 × baseUnit, where baseUnit = AB × (freq/100)     |
+//| Calculate Step3 price — delegates to CalculateStepNPrice         |
 //+------------------------------------------------------------------+
 double CalculateStep3Price(double pA, double pB, double pC, double frequency) {
-    double abDistance = MathAbs(pB - pA);
-    if(abDistance <= 0 || frequency <= 0) return 0;
-
-    double baseUnit = abDistance * (frequency / 100.0);
-    bool isBullish = (pB > pA);
-
-    // Step3 = C + 3*baseUnit (bullish) or C - 3*baseUnit (bearish)
-    return isBullish ? (pC + 3.0 * baseUnit) : (pC - 3.0 * baseUnit);
+    return CalculateStepNPrice(pA, pB, pC, frequency, 3.0);
 }
 
 //+------------------------------------------------------------------+
@@ -83,7 +75,7 @@ double CalculateStepNPrice(double pA, double pB, double pC, double frequency, do
 }
 
 //+------------------------------------------------------------------+
-//| MULTI-STEP RESONANCE SCORE (40% weight)                         |
+//| MULTI-STEP RESONANCE SCORE (35% weight)                         |
 //| Like finding the fundamental frequency of a standing wave:       |
 //| the best frequency makes ALL harmonics (Steps 1,3,5,7) align    |
 //| with structural nodes (reference midpoints) simultaneously.     |
@@ -235,7 +227,7 @@ double ScoreMultiStepResonance(double pA, double pB, double pC, double frequency
 }
 
 //+------------------------------------------------------------------+
-//| TIME SCORE (25% weight) — Gann: Price = Time                    |
+//| TIME SCORE (18% weight) — Gann: Price = Time                    |
 //| Checks if the implied CD duration forms harmonic ratio with      |
 //| AB and BC durations. Uses frequency for cycle-time resonance.    |
 //+------------------------------------------------------------------+
@@ -314,7 +306,7 @@ double ScoreTimeAlignment(double step3Price, double pC, double frequency,
 }
 
 //+------------------------------------------------------------------+
-//| PATTERN PROJECTION SCORE (15% weight)                            |
+//| PATTERN PROJECTION SCORE (12% weight)                            |
 //| Detects harmonic patterns (Gartley/Bat/Butterfly/Crab) from     |
 //| BC/AB ratio, computes ideal D-point, scores frequency alignment  |
 //|                                                                  |
@@ -435,7 +427,7 @@ double ScorePatternProjection(double step3Price, const WaveAnalysisResult &analy
 }
 
 //+------------------------------------------------------------------+
-//| HARMONIC SCORE (15% weight)                                      |
+//| HARMONIC SCORE (13% weight)                                      |
 //| Checks if frequency has binary subdivision harmonic properties   |
 //| Plus fractal-frequency bridge: bonus when freq aligns with       |
 //| MODIFIED_FRACTAL_PERCENTAGES or their binary multiples           |

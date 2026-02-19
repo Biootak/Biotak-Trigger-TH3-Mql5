@@ -29,9 +29,9 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     // High/Low alerts (skip in Custom Price mode)
     if(inpEnableHighLowAlerts && g_thStartPointType != TH_START_POINT_CUSTOM_PRICE) {
         if(currentPrice >= g_highestHigh && ShouldTriggerAlert("HistoricalHigh", currentBarTime))
-            TriggerAlert("Price reached Historical High: " + DoubleToString(g_highestHigh, Digits));
+            TriggerAlert("Price reached Historical High: " + DoubleToString(g_highestHigh, GetCachedDigits()));
     if(currentPrice <= g_lowestLow && ShouldTriggerAlert("HistoricalLow", currentBarTime))
-            TriggerAlert("Price reached Historical Low: " + DoubleToString(g_lowestLow, Digits));
+            TriggerAlert("Price reached Historical Low: " + DoubleToString(g_lowestLow, GetCachedDigits()));
     }
 
     // TH Level alerts
@@ -39,9 +39,9 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
         string prefix = objectPrefix + "TH_Level_";
     string lineNameMid = prefix + "Mid";
     double midpointLevel = ObjectGetDouble(0, lineNameMid, OBJPROP_PRICE, 0);
-    if(midpointLevel != EMPTY_VALUE && MathAbs(currentPrice - midpointLevel) < Point) {
+    if(midpointLevel != EMPTY_VALUE && MathAbs(currentPrice - midpointLevel) < GetCachedPoint()) {
         if(ShouldTriggerAlert("MidpointLevel", currentBarTime))
-                TriggerAlert("Price reached Midpoint: " + DoubleToString(midpointLevel, Digits));
+                TriggerAlert("Price reached Midpoint: " + DoubleToString(midpointLevel, GetCachedDigits()));
         }
     int maxLevels = MathMin(inpMaxLevels, 256);
     // PERF: Cache prefix substring + step strings outside conditionals
@@ -62,7 +62,7 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     if(lvl != EMPTY_VALUE && currentPrice >= lvl) {
         string key = "TriggerTH_Up_" + stepStr;
     if(ShouldTriggerAlert(key, currentBarTime))
-                            TriggerAlert("Price reached TH Up " + stepStr + ": " + DoubleToString(lvl, Digits));
+                            TriggerAlert("Price reached TH Up " + stepStr + ": " + DoubleToString(lvl, GetCachedDigits()));
                     }
                 }
         string nameBelow = prefixDown + stepStr;
@@ -72,7 +72,7 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     if(lvl != EMPTY_VALUE && currentPrice <= lvl) {
         string key = "TriggerTH_Down_" + stepStr;
     if(ShouldTriggerAlert(key, currentBarTime))
-                            TriggerAlert("Price reached TH Down " + stepStr + ": " + DoubleToString(lvl, Digits));
+                            TriggerAlert("Price reached TH Down " + stepStr + ": " + DoubleToString(lvl, GetCachedDigits()));
                     }
                 }
         // PERF: Early exit — levels are sequential, so if neither Up nor Down exists

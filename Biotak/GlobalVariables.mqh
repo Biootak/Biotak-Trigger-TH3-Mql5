@@ -39,7 +39,7 @@ static bool g_triggerLevelsEnabled = true;
 static bool g_linesVisible = true;
 static bool g_atrLabelsVisible = true;
 static bool g_thLabelsVisible = true;
-static int  g_thLabelsMode = 0; // 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH
+static int  g_thLabelsMode = 0; // 0=OFF, 1=FRACTAL
 static int g_stepModeOverride = -1;        // -1 = use input, 0-5 = override
 static double g_factorValueOverride = 0;   // 0 = use input, >0 = override
 static int g_factorColorOverride = -1;     // -1 = use input

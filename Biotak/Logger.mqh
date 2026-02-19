@@ -286,6 +286,7 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
     #define LOG_DP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_DEBUG, cat, msg, p1, __FUNCTION__, __LINE__)
     #define LOG_DP2(cat, msg, p1, p2)    LogMessageP2(LOG_LEVEL_DEBUG, cat, msg, p1, p2, __FUNCTION__, __LINE__)
     #define LOG_DP3(cat, msg, p1, p2, p3) LogMessageP3(LOG_LEVEL_DEBUG, cat, msg, p1, p2, p3, __FUNCTION__, __LINE__)
+    #define LOG_DP4(cat, msg, p1, p2, p3, p4) LogMessageP4(LOG_LEVEL_DEBUG, cat, msg, p1, p2, p3, p4, __FUNCTION__, __LINE__)
 
     // INFO — important state changes
     #define LOG_I(cat, msg)              LogMessage(LOG_LEVEL_INFO, cat, msg, __FUNCTION__, __LINE__)
@@ -320,6 +321,7 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
     #define LOG_DP1(cat, msg, p1)
     #define LOG_DP2(cat, msg, p1, p2)
     #define LOG_DP3(cat, msg, p1, p2, p3)
+    #define LOG_DP4(cat, msg, p1, p2, p3, p4)
 
     // INFO+ — active in production with runtime level check
     #define LOG_I(cat, msg)              if(g_runtimeLogLevel <= LOG_LEVEL_INFO) LogMessage(LOG_LEVEL_INFO, cat, msg)
@@ -365,8 +367,8 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
     #define DEBUG_PRINTF(msg, p1)              LOG_DP1(LOG_CAT_GENERAL, msg, p1)
     #define DEBUG_PRINTF2(msg, p1, p2)         LOG_DP2(LOG_CAT_GENERAL, msg, p1, p2)
     #define DEBUG_PRINTF3(msg, p1, p2, p3)     LOG_DP3(LOG_CAT_GENERAL, msg, p1, p2, p3)
-    #define DEBUG_PRINTF4(msg, p1, p2, p3, p4) LOG_D(LOG_CAT_GENERAL, msg)
-    #define DEBUG_PRINTF5(msg, p1, p2, p3, p4, p5) LOG_D(LOG_CAT_GENERAL, msg)
+    #define DEBUG_PRINTF4(msg, p1, p2, p3, p4) LOG_DP4(LOG_CAT_GENERAL, msg, p1, p2, p3, p4)
+    #define DEBUG_PRINTF5(msg, p1, p2, p3, p4, p5) LOG_DP4(LOG_CAT_GENERAL, msg, p1, p2, p3, (string)(p4) + (string)(p5))
     #define ATR_PRINT(msg)                     LOG_D(LOG_CAT_ATR, msg)
     #define ATR_PRINTF(msg, p1)                LOG_DP1(LOG_CAT_ATR, msg, p1)
     #define ATR_PRINTF2(msg, p1, p2)           LOG_DP2(LOG_CAT_ATR, msg, p1, p2)
