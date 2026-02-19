@@ -1,4 +1,4 @@
-﻿#property copyright "Â© Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property copyright "Â© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link "@biotak"
 #include "UnifiedZoneSystem.mqh"
 // ZoneTrackingHelpers.mqh removed - was empty (all tracking functions dead)
@@ -36,7 +36,10 @@ bool CreateOrUpdateHLine(const string name, double price,
     if(!objectExists) objectExists = (ObjectFind(0, name) >= 0);
     
     if(!objectExists) {
-        ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+        if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, price)) {
+            _LOG_GATE_E Print("[E][DRAW] CreateOrUpdateHLine: Failed to create '", name, "', error=", GetLastError());
+            return false;
+        }
         ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
         ObjectSetInteger(0, name, OBJPROP_STYLE, style);
         ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
@@ -190,10 +193,10 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
 //+------------------------------------------------------------------+
 //| Get default Factor value from Control step size                  |
 
-//| Simple Formula: Step = Range / (Factor Ã— 2)                      |
-//| We want: Step = Control = (SS + LS) / 2 = TH Ã— 1.75              |
-//| So: TH Ã— 1.75 = Range / (Factor Ã— 2)                             |
-//| Therefore: Factor = Range / (TH Ã— 1.75 Ã— 2)                      |
+//| Simple Formula: Step = Range / (Factor x 2)                      |
+//| We want: Step = Control = (SS + LS) / 2 = TH x 1.75              |
+//| So: TH x 1.75 = Range / (Factor x 2)                             |
+//| Therefore: Factor = Range / (TH x 1.75 x 2)                      |
 //|                                                                  |
 //| NOW SUPPORTS MULTIPLE BASIS TYPES:                               |
 //| - Control, SS, LS, TH, Trigger, Pattern, Structure, Combo       |
@@ -236,9 +239,9 @@ double GetDefaultFactorValue(const double basePrice) {
     double result = NormalizeDouble(MathMax(0.01, MathMin(10000, factor)), 2);
     #ifdef ENABLE_DEBUG_LOGS
     Print("[D][DRAW] GetDefaultFactorValue: Basis=", EnumToString(inpFactorAutoBasis),
-          ", basePrice=", DoubleToString(basePrice, Digits), 
-          ", Range=", DoubleToString(range, Digits),
-          ", StepSize=", DoubleToString(stepSize, Digits),
+          ", basePrice=", DoubleToString(basePrice, GetCachedDigits()), 
+          ", Range=", DoubleToString(range, GetCachedDigits()),
+          ", StepSize=", DoubleToString(stepSize, GetCachedDigits()),
           ", Factor=", DoubleToString(result, 2));
     #endif
     return result;
@@ -448,22 +451,22 @@ double CalculateTripleComboStepSize(const double basePrice,
         #ifdef ENABLE_DEBUG_LOGS
         Print("[W][DRAW] CalculateTripleComboStepSize: Suspicious result detected");
     Print("[D][DRAW]    Operation=", EnumToString(operation));
-    Print("[D][DRAW]    Step1=", DoubleToString(stepValue1, Digits),
-              ", Step2=", DoubleToString(stepValue2, Digits), 
-              ", Step3=", DoubleToString(stepValue3, Digits));
-    Print("[D][DRAW]    Result=", DoubleToString(result, Digits),
-              " (min=", DoubleToString(minStep, Digits), 
-              ", max=", DoubleToString(maxStep, Digits), ")");
+    Print("[D][DRAW]    Step1=", DoubleToString(stepValue1, GetCachedDigits()),
+              ", Step2=", DoubleToString(stepValue2, GetCachedDigits()), 
+              ", Step3=", DoubleToString(stepValue3, GetCachedDigits()));
+    Print("[D][DRAW]    Result=", DoubleToString(result, GetCachedDigits()),
+              " (min=", DoubleToString(minStep, GetCachedDigits()), 
+              ", max=", DoubleToString(maxStep, GetCachedDigits()), ")");
     Print("[D][DRAW]    Using fallback: average");
     #endif
     result = (stepValue1 + stepValue2 + stepValue3) / 3.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
     Print("[I][DRAW] CalculateTripleComboStepSize: SUCCESS");
-    Print("[D][DRAW]    TF1=", EnumToString(tf1), ", Step1=", DoubleToString(stepValue1, Digits));
-    Print("[D][DRAW]    TF2=", EnumToString(tf2), ", Step2=", DoubleToString(stepValue2, Digits));
-    Print("[D][DRAW]    TF3=", EnumToString(tf3), ", Step3=", DoubleToString(stepValue3, Digits));
-    Print("[D][DRAW]    Operation=", EnumToString(operation), ", Result=", DoubleToString(result, Digits));
+    Print("[D][DRAW]    TF1=", EnumToString(tf1), ", Step1=", DoubleToString(stepValue1, GetCachedDigits()));
+    Print("[D][DRAW]    TF2=", EnumToString(tf2), ", Step2=", DoubleToString(stepValue2, GetCachedDigits()));
+    Print("[D][DRAW]    TF3=", EnumToString(tf3), ", Step3=", DoubleToString(stepValue3, GetCachedDigits()));
+    Print("[D][DRAW]    Operation=", EnumToString(operation), ", Result=", DoubleToString(result, GetCachedDigits()));
     #endif
     return result;
 }
@@ -519,9 +522,9 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     if(validCount < 3) {
         #ifdef ENABLE_DEBUG_LOGS
             Print("[W][DRAW] GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
-    Print("[E][DRAW]    TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
-    Print("[E][DRAW]    SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
-            Print("[E][DRAW]    LS: ", (ls > 0 ? DoubleToString(ls, Digits) : "INVALID"));
+    Print("[E][DRAW]    TH: ", (th > 0 ? DoubleToString(th, GetCachedDigits()) : "INVALID"));
+    Print("[E][DRAW]    SS: ", (ss > 0 ? DoubleToString(ss, GetCachedDigits()) : "INVALID"));
+            Print("[E][DRAW]    LS: ", (ls > 0 ? DoubleToString(ls, GetCachedDigits()) : "INVALID"));
     #endif
     if(validCount == 1) {
                 _LOG_GATE_D Print("[D][DRAW]  MEAN COMPONENT INFO: ", EnumToString(comp));
@@ -538,7 +541,7 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
     double result = CalculateMeanByType(validValues, inpAggregateMeanType);
     #ifdef ENABLE_DEBUG_LOGS
         Print("[I][DRAW] GetStepSizeFromComponent: MEAN component ", EnumToString(comp),
-              " = ", DoubleToString(result, Digits), " (", validCount, "/3 valid values, ",
+              " = ", DoubleToString(result, GetCachedDigits()), " (", validCount, "/3 valid values, ",
               EnumToString(inpAggregateMeanType), " mean)");
     #endif
     return result;
@@ -562,7 +565,7 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| Calculate Geometric Mean of N values: â¿âˆš(v1 Ã— v2 Ã— ... Ã— vn)    |
+//| Calculate Geometric Mean of N values: â¿âˆš(v1 x v2 x ... x vn)    |
 
 //|                                                                  |
 //| Uses logarithmic approach to prevent overflow          |
@@ -794,7 +797,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
         }
         
         componentValues[i] = val;
-        _LOG_GATE_D Print("[D][DRAW]   Component[", i, "] = ", DoubleToString(val, Digits));
+        _LOG_GATE_D Print("[D][DRAW]   Component[", i, "] = ", DoubleToString(val, GetCachedDigits()));
     }
     double result = CalculateMeanByType(componentValues, inpQuickTestMeanType);
     if(result <= 0) {
@@ -809,7 +812,7 @@ double CalculateQuickTestStepSize(const double basePrice) {
     case MEAN_HARMONIC: meanTypeName = "Harmonic"; break;
     }
     Print("[I][DRAW] Quick Test [", meanTypeName, " Mean of ", componentCount, " components]: Result=",
-    DoubleToString(result, Digits));
+    DoubleToString(result, GetCachedDigits()));
     #endif
     return NormalizeDouble(result, GetCachedDigits());
 }
@@ -870,7 +873,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     if(inpComboOp2 == OP_NONE || inpComboComp3 == COMP_IGNORE) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("[D][DRAW]  Dual Group: Only Group 1 active (Op2=NONE or Comp3=IGNORE)");
-    Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, Digits));
+    Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, GetCachedDigits()));
     #endif
     return valG1;
     }
@@ -880,7 +883,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
         Print("[E][DRAW] Dual Group: Component 3 invalid or failed");
     Print("[D][DRAW]    Component 3: ", EnumToString(inpComboComp3));
     Print("[D][DRAW]    Fallback: Using Group 1 result only");
-        Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, Digits));
+        Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, GetCachedDigits()));
     #endif
         _LOG_GATE_W Print("[W][DRAW] DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3));
     return valG1;
@@ -892,7 +895,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     Print("[D][DRAW]    Op3: ", EnumToString(inpComboOp3));
     Print("[D][DRAW]    Component 4: ", EnumToString(inpComboComp4));
     Print("[D][DRAW]    Fallback: Using Group 1 result only");
-    Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, Digits));
+    Print("[D][DRAW]    Group 1 Result: ", DoubleToString(valG1, GetCachedDigits()));
     Print("[E][DRAW] DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
     #endif
     return valG1;
@@ -901,10 +904,10 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     if(finalResult <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("[E][DRAW] Dual Group: Final combination failed");
-    Print("[D][DRAW]    Group 1: ", DoubleToString(valG1, Digits));
+    Print("[D][DRAW]    Group 1: ", DoubleToString(valG1, GetCachedDigits()));
     Print("[D][DRAW]    Op2: ", EnumToString(inpComboOp2));
-    Print("[D][DRAW]    Group 2: ", DoubleToString(valG2, Digits));
-    Print("[D][DRAW]    Result: ", DoubleToString(finalResult, Digits));
+    Print("[D][DRAW]    Group 2: ", DoubleToString(valG2, GetCachedDigits()));
+    Print("[D][DRAW]    Result: ", DoubleToString(finalResult, GetCachedDigits()));
     Print("[D][DRAW]    Fallback: Using Group 1 result only");
     Print("[W][DRAW] DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2),
               ") produced invalid result. Using Group 1 result only.");
@@ -913,10 +916,10 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     }
     #ifdef ENABLE_DEBUG_LOGS
     Print("[I][DRAW] Dual Group: SUCCESS");
-    Print("[D][DRAW]    Group 1: ", DoubleToString(valG1, Digits));
+    Print("[D][DRAW]    Group 1: ", DoubleToString(valG1, GetCachedDigits()));
     Print("[D][DRAW]    Op2: ", EnumToString(inpComboOp2));
-    Print("[D][DRAW]    Group 2: ", DoubleToString(valG2, Digits));
-    Print("[D][DRAW]    Final Result: ", DoubleToString(finalResult, Digits));
+    Print("[D][DRAW]    Group 2: ", DoubleToString(valG2, GetCachedDigits()));
+    Print("[D][DRAW]    Final Result: ", DoubleToString(finalResult, GetCachedDigits()));
     #endif
     return finalResult;
 }
@@ -939,7 +942,7 @@ double ApplyCalculatorOperator(const double value1, const double value2,
         Print("[E][DRAW] ApplyOperationWithComponent: Next component invalid");
     Print("[D][DRAW]    Component: ", EnumToString(nextComp));
     Print("[D][DRAW]    Operator: ", EnumToString(op));
-    Print("[D][DRAW]    Keeping current value: ", DoubleToString(currentVal, Digits));
+    Print("[D][DRAW]    Keeping current value: ", DoubleToString(currentVal, GetCachedDigits()));
     Print("[W][DRAW] CALCULATOR WARNING: Component ", EnumToString(nextComp),
               " calculation failed. Skipping operation ", EnumToString(op));
     #endif
@@ -949,19 +952,19 @@ double ApplyCalculatorOperator(const double value1, const double value2,
     if (result <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("[E][DRAW] ApplyOperationWithComponent: Operation produced invalid result");
-    Print("[D][DRAW]    Current: ", DoubleToString(currentVal, Digits));
+    Print("[D][DRAW]    Current: ", DoubleToString(currentVal, GetCachedDigits()));
     Print("[D][DRAW]    Operator: ", EnumToString(op));
-    Print("[D][DRAW]    Next: ", DoubleToString(nextVal, Digits));
-    Print("[D][DRAW]    Result: ", DoubleToString(result, Digits));
+    Print("[D][DRAW]    Next: ", DoubleToString(nextVal, GetCachedDigits()));
+    Print("[D][DRAW]    Result: ", DoubleToString(result, GetCachedDigits()));
     Print("[D][DRAW]    Fallback to current value");
     Print("[W][DRAW] CALCULATOR WARNING: Operation ", EnumToString(op),
               " produced invalid result. Keeping previous value.");
     #endif
     return currentVal;    }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[I][DRAW] ApplyOperationWithComponent: ", DoubleToString(currentVal, Digits),
-          " ", EnumToString(op), " ", DoubleToString(nextVal, Digits), 
-          " = ", DoubleToString(result, Digits));
+    Print("[I][DRAW] ApplyOperationWithComponent: ", DoubleToString(currentVal, GetCachedDigits()),
+          " ", EnumToString(op), " ", DoubleToString(nextVal, GetCachedDigits()), 
+          " = ", DoubleToString(result, GetCachedDigits()));
     #endif
     return result;
 }
@@ -1049,7 +1052,7 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     #ifdef ENABLE_DEBUG_LOGS
         Print("[D][DRAW]  N-ARY Mode: Collected ", componentCount, " valid components");
     for(int i = 0; i < componentCount; i++) {
-            Print("[D][DRAW]    Component[", i, "] = ", DoubleToString(componentValues[i], Digits));
+            Print("[D][DRAW]    Component[", i, "] = ", DoubleToString(componentValues[i], GetCachedDigits()));
         }
     #endif
     double naryResult = 0;
@@ -1196,10 +1199,10 @@ double CalculateComboStepSize(const double basePrice) {
     Print("[I][DRAW] CalculateComboStepSize: SUCCESS");
     Print("[D][DRAW]    Preset=", EnumToString(inpComboPreset));
     Print("[D][DRAW]    TF1=", EnumToString(tf1), " (", timeframe1, "), Step1Type=", EnumToString(step1Type),
-          " (Ã—", multiplier1, "), Value=", DoubleToString(step1, Digits));
+          " (x", multiplier1, "), Value=", DoubleToString(step1, GetCachedDigits()));
     Print("[D][DRAW]    TF2=", EnumToString(tf2), " (", timeframe2, "), Step2Type=", EnumToString(step2Type),
-          " (Ã—", multiplier2, "), Value=", DoubleToString(step2, Digits));
-    Print("[D][DRAW]    Operation=", EnumToString(operation), ", Result=", DoubleToString(comboStep, Digits));
+          " (x", multiplier2, "), Value=", DoubleToString(step2, GetCachedDigits()));
+    Print("[D][DRAW]    Operation=", EnumToString(operation), ", Result=", DoubleToString(comboStep, GetCachedDigits()));
     #endif
     return comboStep;
 }
@@ -1430,8 +1433,8 @@ double ApplyComboOperation(const double value1, const double value2,
                 result = avgValue;
     #ifdef ENABLE_DEBUG_LOGS
                 Print("[W][DRAW] ApplyComboOperation: Subtract result too small (",
-                      DoubleToString(result, Digits), " < ", DoubleToString(minThreshold, Digits), 
-                      "), using average=", DoubleToString(avgValue, Digits));
+                      DoubleToString(result, GetCachedDigits()), " < ", DoubleToString(minThreshold, GetCachedDigits()), 
+                      "), using average=", DoubleToString(avgValue, GetCachedDigits()));
     #endif
     }
             break;
@@ -1443,11 +1446,11 @@ double ApplyComboOperation(const double value1, const double value2,
     if(result > overflowThreshold) {
         #ifdef ENABLE_DEBUG_LOGS
                 Print("[W][DRAW] ApplyComboOperation: Multiply overflow detected");
-    Print("[D][DRAW]    v1=", DoubleToString(value1, Digits),
-                      ", v2=", DoubleToString(value2, Digits), 
-                      ", result=", DoubleToString(result, Digits), 
-                      " > threshold=", DoubleToString(overflowThreshold, Digits));
-                Print("[D][DRAW]    Clamping to max input=", DoubleToString(maxInput, Digits));
+    Print("[D][DRAW]    v1=", DoubleToString(value1, GetCachedDigits()),
+                      ", v2=", DoubleToString(value2, GetCachedDigits()), 
+                      ", result=", DoubleToString(result, GetCachedDigits()), 
+                      " > threshold=", DoubleToString(overflowThreshold, GetCachedDigits()));
+                Print("[D][DRAW]    Clamping to max input=", DoubleToString(maxInput, GetCachedDigits()));
     #endif
                 result = maxInput;
             }
@@ -1518,20 +1521,20 @@ double ApplyComboOperation(const double value1, const double value2,
         #ifdef ENABLE_DEBUG_LOGS
         Print("[W][DRAW] ApplyComboOperation: Suspicious result detected");
     Print("[D][DRAW]    Operation=", EnumToString(operation));
-    Print("[D][DRAW]    v1=", DoubleToString(value1, Digits),
-              ", v2=", DoubleToString(value2, Digits));
-    Print("[D][DRAW]    Result=", DoubleToString(result, Digits),
-              " (min=", DoubleToString(minInput, Digits), 
-              ", max=", DoubleToString(maxInput, Digits), ")");
+    Print("[D][DRAW]    v1=", DoubleToString(value1, GetCachedDigits()),
+              ", v2=", DoubleToString(value2, GetCachedDigits()));
+    Print("[D][DRAW]    Result=", DoubleToString(result, GetCachedDigits()),
+              " (min=", DoubleToString(minInput, GetCachedDigits()), 
+              ", max=", DoubleToString(maxInput, GetCachedDigits()), ")");
     Print("[D][DRAW]    Using fallback: average");
     #endif
     result = (value1 + value2) / 2.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[I][DRAW] ApplyComboOperation: v1=", DoubleToString(value1, Digits),
-          ", v2=", DoubleToString(value2, Digits), 
+    Print("[I][DRAW] ApplyComboOperation: v1=", DoubleToString(value1, GetCachedDigits()),
+          ", v2=", DoubleToString(value2, GetCachedDigits()), 
           ", op=", EnumToString(operation), 
-          ", result=", DoubleToString(result, Digits));
+          ", result=", DoubleToString(result, GetCachedDigits()));
     #endif
     return result;
 }
@@ -1713,7 +1716,7 @@ ENUM_TIMEFRAMES GetStructureTimeframe() {
 
 //|                                                                  |
 //| EXAMPLES:                                                        |
-//| NEW FORMULA: L(n) = base Ã— 2^(n-1)  [Fractal 2Ã— ratio]         |
+//| NEW FORMULA: L(n) = base x 2^(n-1)  [Fractal 2x ratio]         |
 //| Base=2: L1=2, L2=4, L3=8, L4=16, L5=32                          |
 //| Base=3: L1=3, L2=6, L3=12, L4=24, L5=48                         |
 //| Base=4: L1=4, L2=8, L3=16, L4=32, L5=64                         |
@@ -1742,8 +1745,8 @@ int CalculateStructureInterval(const int baseMultiplier, const int level) {
         _LOG_GATE_E Print("[E][DRAW] Invalid level: ", level, " (must be 1-5)");
     return 0;
     }
-    // NEW: base Ã— 2^(level-1) instead of base^level
-    // This preserves the fractal 2Ã— ratio: L(n+1)/L(n) = 2
+    // NEW: base x 2^(level-1) instead of base^level
+    // This preserves the fractal 2x ratio: L(n+1)/L(n) = 2
     // And ensures all L1-L5 are always reachable within maxLevels
     return baseMultiplier * (int)MathPow(2, level - 1);
 }
@@ -1965,6 +1968,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
                          HasPriceChanged(s_prevFactor, factor) ||
                          HasPriceChanged(s_prevStep, stepSize);
     double pipSize = (GetCachedDigits() <= 3) ? 0.01 : 0.0001;
+    if(pipSize <= 0) pipSize = 0.0001;  // Guard: prevent division by zero
     double rangePips = (highPrice - lowPrice) / pipSize;
     double stepPips = stepSize / pipSize;
     string highLineName = objectPrefix + "Factor_High";

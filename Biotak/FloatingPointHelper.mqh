@@ -1,4 +1,4 @@
-﻿#ifndef FLOATING_POINT_HELPER_MQH
+#ifndef FLOATING_POINT_HELPER_MQH
 #define FLOATING_POINT_HELPER_MQH
 
 // Epsilon Constants
@@ -52,7 +52,7 @@ double SafeDivide(double numerator, double denominator, double defaultValue = 0.
     return value;
 }
     double NormalizePrice(double price) {
-        return NormalizeDouble(price, Digits);
+        return NormalizeDouble(price, GetCachedDigits());
 }
     bool IsValidPrice(double price, double epsilon = EPSILON_PRICE) {
     return (price >= epsilon && price <= 1000000000.0);
@@ -72,7 +72,8 @@ double SafeDivide(double numerator, double denominator, double defaultValue = 0.
     return numerator / denominator;
 }
     double RoundToPip(double value) {
-        double pipSize = (Digits == 3 || Digits == 5) ? Point * 10 : Point;
+        int cachedDigits = GetCachedDigits();
+        double pipSize = (cachedDigits == 3 || cachedDigits == 5) ? GetCachedPoint() * 10 : GetCachedPoint();
     if(IsZero(pipSize, EPSILON_GENERAL)) return value;
     return MathRound(value / pipSize) * pipSize;
 }

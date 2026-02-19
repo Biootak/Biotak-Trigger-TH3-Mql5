@@ -533,13 +533,13 @@ double CalculateWeightedATR() {
     static datetime s_lastATRLog = 0;
     if(currentTime - s_lastATRLog > 300) {  // Log every 5 minutes
         Print("[D][ATR] ========== WEIGHTED ATR CALCULATION ==========");
-    Print("[D][ATR] ATR₅: ", DoubleToString(atrValues[0], Digits));
-    Print("[D][ATR] ATR₁₀: ", DoubleToString(atrValues[1], Digits));
-    Print("[D][ATR] ATR₂₁: ", DoubleToString(atrValues[2], Digits));
-    Print("[D][ATR] ATR₆₆: ", DoubleToString(atrValues[3], Digits));
-    Print("[D][ATR] ATR₁₃₂: ", DoubleToString(atrValues[4], Digits));
-    Print("[D][ATR] ATR₂₆₄: ", DoubleToString(atrValues[5], Digits));
-    Print("[D][ATR] Weighted ATR: ", DoubleToString(result, Digits));
+    Print("[D][ATR] ATR₅: ", DoubleToString(atrValues[0], GetCachedDigits()));
+    Print("[D][ATR] ATR₁₀: ", DoubleToString(atrValues[1], GetCachedDigits()));
+    Print("[D][ATR] ATR₂₁: ", DoubleToString(atrValues[2], GetCachedDigits()));
+    Print("[D][ATR] ATR₆₆: ", DoubleToString(atrValues[3], GetCachedDigits()));
+    Print("[D][ATR] ATR₁₃₂: ", DoubleToString(atrValues[4], GetCachedDigits()));
+    Print("[D][ATR] ATR₂₆₄: ", DoubleToString(atrValues[5], GetCachedDigits()));
+    Print("[D][ATR] Weighted ATR: ", DoubleToString(result, GetCachedDigits()));
     Print("[D][ATR] Effective TF: ", effectiveTF, " Bars: ", effectiveBars);
     Print("[D][ATR] ==============================================");
     s_lastATRLog = TimeCurrent();
@@ -828,7 +828,7 @@ void UpdateMultiTFCache(const int timeframeMinutes, const double atrValue) {
         static datetime s_lastCacheLog = 0;
     if(currentTime - s_lastCacheLog > 300) { // Log every 5 minutes
             Print("[I][ATR] UpdateMultiTFCache: Updated cache entry [", targetIndex, "] TF=",
-                  timeframeMinutes, " min, ATR=", DoubleToString(atrValue, Digits));
+                  timeframeMinutes, " min, ATR=", DoubleToString(atrValue, GetCachedDigits()));
     s_lastCacheLog = currentTime;
         }
     #endif
@@ -867,7 +867,7 @@ void InvalidateATRCache() {
 
     #ifdef ENABLE_DEBUG_LOGS
     if(invalidatedCount > 0) {
-        Print("[E][ATR]  InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
+        Print("[D][ATR]  InvalidateATRCache: Invalidated ", invalidatedCount, " cache entries");
     }
     #endif
 }

@@ -116,7 +116,10 @@ void CreateOrUpdateTrendLine(const string name, datetime t1, double p1,
                              ENUM_LINE_STYLE style, bool rayRight, bool back)
 {
     if(ObjectFind(0, name) < 0) {
-        ObjectCreate(0, name, OBJ_TREND, 0, t1, p1, t2, p2);
+        if(!ObjectCreate(0, name, OBJ_TREND, 0, t1, p1, t2, p2)) {
+            _LOG_GATE_E Print("[E][TH3] CreateOrUpdateTrendLine: Failed to create '", name, "', error=", GetLastError());
+            return;
+        }
         ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
         ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
         ObjectSetInteger(0, name, OBJPROP_STYLE, style);
@@ -168,10 +171,20 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
     pD = isBullish ? (pC + abDist) : (pC - abDist);
     if(pD <= 0) return false;
 
-    int bcBars = MathAbs(iBarShift(_Symbol, _Period, tB) - iBarShift(_Symbol, _Period, tC));
+    // BUG FIX: iBarShift returns -1 when no bar found (weekend/holiday gaps)
+    // WHY: Without this check, bcBars becomes wildly wrong, barD goes negative,
+    // and Point D is silently projected to the current bar — wrong location.
+    int barB = iBarShift(_Symbol, _Period, tB);
+    int barC = iBarShift(_Symbol, _Period, tC);
+    if(barB < 0 || barC < 0) {
+        // Fallback: estimate time of D from BC time distance
+        tD = tC + (tC - tB);
+        return true;
+    }
+    int bcBars = MathAbs(barB - barC);
     if(bcBars < 1) bcBars = 1;
 
-    int barD = iBarShift(_Symbol, _Period, tC) - bcBars;
+    int barD = barC - bcBars;
     if(barD < 0) barD = 0;
 
     tD = iTime(_Symbol, 0, barD);
@@ -238,7 +251,10 @@ void DrawABCDPoints(const string mainObjName, datetime tA, double pA,
         ENUM_ARROW_ANCHOR dotAnchor = isHigh[i] ? ANCHOR_BOTTOM : ANCHOR_TOP;
 
         if(ObjectFind(0, pointName) < 0) {
-            ObjectCreate(0, pointName, OBJ_ARROW, 0, times[i], prices[i]);
+            if(!ObjectCreate(0, pointName, OBJ_ARROW, 0, times[i], prices[i])) {
+                _LOG_GATE_E Print("[E][TH3] DrawABCDPoints: Failed to create '", pointName, "', error=", GetLastError());
+                continue;
+            }
             ObjectSetInteger(0, pointName, OBJPROP_COLOR, inpABCDPointColor);
             ObjectSetInteger(0, pointName, OBJPROP_ARROWCODE, TH3_ARROW_CODE);
             ObjectSetInteger(0, pointName, OBJPROP_WIDTH, TH3_POINT_WIDTH);
@@ -261,7 +277,10 @@ void DrawABCDPoints(const string mainObjName, datetime tA, double pA,
             ENUM_ANCHOR_POINT labelAnchor = isHigh[i] ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;
 
             if(ObjectFind(0, labelName) < 0) {
-                ObjectCreate(0, labelName, OBJ_TEXT, 0, times[i], labelPrice);
+                if(!ObjectCreate(0, labelName, OBJ_TEXT, 0, times[i], labelPrice)) {
+                    _LOG_GATE_E Print("[E][TH3] DrawABCDPoints: Failed to create label '", labelName, "', error=", GetLastError());
+                    continue;
+                }
                 ObjectSetString(0, labelName, OBJPROP_TEXT, "  " + names[i]);
                 ObjectSetInteger(0, labelName, OBJPROP_COLOR, inpABCDPointColor);
                 ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, inpFontSize + 1);
@@ -294,7 +313,11 @@ void DrawABCDTargetLevels(const string mainObjName, double pC, double baseUnit,
     string targetNames[TH3_TARGET_COUNT]  = {"Step1", "Step3", "Step5", "Step7"};
     double multipliers[TH3_TARGET_COUNT]  = {1.0, 3.0, 5.0, 7.0};
 
+    // BUG FIX: iBarShift returns -1 if startTime falls on weekend/holiday
+    // WHY: MathMax(0, -1 - extension) = 0, causing endTime = current bar time,
+    // which draws target Fibo zones with wrong end-time.
     int barShift = iBarShift(_Symbol, _Period, startTime);
+    if(barShift < 0) barShift = 0;
     datetime endTime = iTime(_Symbol, 0, MathMax(0, barShift - TH3_BAR_EXTENSION));
 
     double zonePercent = MathMax(0.01, MathMin(1.0, inpTH3ZoneHeightPercent / 100.0));
@@ -307,7 +330,10 @@ void DrawABCDTargetLevels(const string mainObjName, double pC, double baseUnit,
 
         string lineName = mainObjName + TH3_SUFFIX_TARGET + IntegerToString(i + 1);
         if(ObjectFind(0, lineName) < 0) {
-            ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, center, endTime, center);
+            if(!ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, center, endTime, center)) {
+                _LOG_GATE_E Print("[E][TH3] DrawABCDTargetLevels: Failed to create '", lineName, "', error=", GetLastError());
+                continue;
+            }
             ObjectSetInteger(0, lineName, OBJPROP_COLOR, inpABCDLineColor);
             ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, inpABCDLineColor);
             ObjectSetInteger(0, lineName, OBJPROP_WIDTH, TH3_TARGET_LINE_WIDTH);
@@ -419,7 +445,10 @@ void DrawABCDInfoLabel(const string mainObjName, double abDist, double pB,
 
     bool labelCreated = false;
     if(ObjectFind(0, infoLabel) < 0) {
-        ObjectCreate(0, infoLabel, OBJ_LABEL, 0, 0, 0);
+        if(!ObjectCreate(0, infoLabel, OBJ_LABEL, 0, 0, 0)) {
+            _LOG_GATE_E Print("[E][TH3] DrawABCDInfoLabel: Failed to create '", infoLabel, "', error=", GetLastError());
+            return;
+        }
         labelCreated = true;
     }
 
@@ -484,6 +513,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA,
     double frequency = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
     double baseUnit  = abDist * (frequency / 100.0);
     double pipSize   = GetCachedPipSize();
+    if(pipSize <= 0) pipSize = GetCachedPoint();  // Guard: fallback to Point if pip size invalid
 
     DrawABCDPoints(mainObjName, tA, pA, tB, pB, tC, pC);
 
@@ -544,6 +574,8 @@ void CreateABCDTempPoint(const string pointLabel, datetime clickTime, double cli
     // Smart positioning: detect if click is near candle high or low
     // to place the label above peaks and below valleys
     int barIndex = iBarShift(_Symbol, _Period, clickTime);
+    // BUG FIX: iBarShift returns -1 if no bar found (weekend/holiday gap)
+    if(barIndex < 0) barIndex = 0;
     double candleHigh = iHigh(_Symbol, _Period, barIndex);
     double candleLow  = iLow(_Symbol, _Period, barIndex);
     double candleMid  = (candleHigh + candleLow) / 2.0;

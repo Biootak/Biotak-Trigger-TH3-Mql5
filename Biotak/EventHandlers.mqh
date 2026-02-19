@@ -83,7 +83,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     string symbolName = GetCachedSymbol();
     string gvarName = "Biotak_CustomPrice_" + symbolName;
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
-    int digits = Digits;
+    int digits = GetCachedDigits();
     double validatedCustomPrice = inpCustomTHStartPrice;
     if(validatedCustomPrice < 0.0) {
         _LOG_GATE_E Print("[E][GEN] Invalid custom price (negative): ", validatedCustomPrice);
@@ -94,11 +94,13 @@ int OnInitHandler() {    InitializeGlobalCache();
     validatedCustomPrice = 0.0;
     }
     {
+        ResetLastError();
         double val = GlobalVariableGet(overrideFlagName);
     g_customPriceKeyboardOverride = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? (bool)val : false;
     }
     double savedPrice;
     {
+        ResetLastError();
         double val = GlobalVariableGet(gvarName);
     savedPrice = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? val : 0.0;
     }
@@ -110,21 +112,21 @@ int OnInitHandler() {    InitializeGlobalCache();
     #endif
     if(g_customPriceKeyboardOverride && savedPrice > 0.0) {        g_customTHStartPrice = savedPrice;
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-    DEBUG_PRINTF("OnInit: Using keyboard/drag price (override): ", DoubleToString(g_customTHStartPrice, digits));
-    CreateCustomPriceLine(g_customTHStartPrice, digits);
+    DEBUG_PRINTF("OnInit: Using keyboard/drag price (override): ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
+    CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
         
     } else if(validatedCustomPrice > 0.0) {        g_customTHStartPrice = validatedCustomPrice;
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
     g_customPriceKeyboardOverride = false;
     GlobalVariableSet(gvarName, g_customTHStartPrice);
     GlobalVariableSet(overrideFlagName, 0.0);
-    DEBUG_PRINTF("OnInit: Using custom price from settings: ", DoubleToString(g_customTHStartPrice, digits));
-    CreateCustomPriceLine(g_customTHStartPrice, digits);
+    DEBUG_PRINTF("OnInit: Using custom price from settings: ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
+    CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
         
     } else if(savedPrice > 0.0) {        g_customTHStartPrice = savedPrice;
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-        _LOG_GATE_D Print("[D][GEN] OnInit: Restored custom price from GlobalVariable: ", DoubleToString(g_customTHStartPrice, digits));
-    CreateCustomPriceLine(g_customTHStartPrice, digits);
+        _LOG_GATE_D Print("[D][GEN] OnInit: Restored custom price from GlobalVariable: ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
+    CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
         
     } else {        g_customTHStartPrice = 0.0;
     g_thStartPointType = inpTHStartPointType;
@@ -151,6 +153,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     }
     string lockFlagName = "Biotak_LockTF_" + chartIdStr;
     {
+        ResetLastError();
         double val = GlobalVariableGet(lockFlagName);
     if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             g_timeframeLocked = (bool)val;
@@ -158,6 +161,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     }
     string lockPeriodName = "Biotak_LockTFPeriod_" + chartIdStr;
     {
+        ResetLastError();
         double val = GlobalVariableGet(lockPeriodName);
     if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             g_lockedPeriod = (int)val;
@@ -165,6 +169,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     }
     string stepModeGvarName = "Biotak_StepMode_" + chartIdStr;
     {
+        ResetLastError();
         double val = GlobalVariableGet(stepModeGvarName);
     if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
         int tempMode = (int)val;
@@ -179,6 +184,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     }
     string factorGvarName = "Biotak_Factor_" + chartIdStr;
     {
+        ResetLastError();
         double val = GlobalVariableGet(factorGvarName);
     if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
         if(val > 0 && val <= MAX_SAFE_FACTOR) {
@@ -201,6 +207,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     string th3FreqGvarName = "Biotak_TH3Freq_" + chartIdStr;
     string th3FreqIdxGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
     {
+        ResetLastError();
         double val = GlobalVariableGet(th3FreqGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             double maxFreq = GetFrequencyByIndex(MAX_TH3_FREQ_INDEX);
@@ -214,6 +221,7 @@ int OnInitHandler() {    InitializeGlobalCache();
             g_th3FreqOverride = 0.0;
         }
         // Restore frequency index
+        ResetLastError();
         double idxVal = GlobalVariableGet(th3FreqIdxGvarName);
         if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             int idx = (int)idxVal;
@@ -260,6 +268,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     PrintBuildInfo();
     string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
     {
+        ResetLastError();
         double val = GlobalVariableGet(th3UpdateFlag);
     if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND && val > 0)
         {            UpdateAllTH3Objects();
@@ -268,7 +277,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     }
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[E][GEN] AUDIT COMPLETE: All critical memory leaks fixed");
+    Print("[I][GEN] AUDIT COMPLETE: All critical memory leaks fixed");
     Print("[D][GEN] [FAST] OPTIMIZED: API calls cached (Symbol, Digits, Point)");
     Print("[D][GEN] [CLEAN] MEMORY: BasePriceManager cleanup added");
     Print("[D][GEN] [CFG] BUILD: Debug/Production modes with compile-time optimization");
@@ -301,7 +310,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, selected);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                  "[PIN] Custom Price: " + DoubleToString(price, digits) + " | " + tooltipSuffix);
+                  "[PIN] Custom Price: " + DoubleToString(price, GetCachedDigits()) + " | " + tooltipSuffix);
     g_customPriceLineCreated = true;
     return true;
 }
@@ -674,7 +683,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     return true;
     }
     
-    int digits = Digits;
+    int digits = GetCachedDigits();
     
     // TH-based step calculations
     double timeframePercentage = GetTimeframeTH();
@@ -750,8 +759,8 @@ void ApplyCacheInvalidation(const int invalidationFlags,
 
     if((invalidationFlags & CACHE_INV_CUSTOM_PRICE) != 0) {
         InvalidateTHCache();
-        _LOG_GATE_I Print("[I][GEN] Custom price changed: ", DoubleToString(previousCustomPrice, Digits),
-                          " -> ", DoubleToString(currentCustomPrice, Digits));
+        _LOG_GATE_I Print("[I][GEN] Custom price changed: ", DoubleToString(previousCustomPrice, GetCachedDigits()),
+                          " -> ", DoubleToString(currentCustomPrice, GetCachedDigits()));
     }
 }
 
@@ -947,7 +956,7 @@ void RunIncrementalObjectCleanup()
     #endif
     string errorMsg = "Failed to calculate Combo Step!\n\n";
     errorMsg += "Preset: " + EnumToString(inpComboPreset) + "\n";
-    errorMsg += "Base Price: " + DoubleToString(dailyClosePrice, Digits) + "\n\n";
+    errorMsg += "Base Price: " + DoubleToString(dailyClosePrice, GetCachedDigits()) + "\n\n";
     errorMsg += "Please check:\n";
     errorMsg += "1. Preset configuration is valid\n";
     errorMsg += "2. Base price is positive\n";
@@ -959,12 +968,12 @@ void RunIncrementalObjectCleanup()
     if(MathAbs(comboStep - s_lastLoggedComboStep) > 0.0000001) {
         #ifdef ENABLE_DEBUG_LOGS
                 Print("[D][GEN] ========== COMBO STEP (UNIFIED) ==========");
-    Print("[D][GEN] TF: ", GetCurrentTimeframe(), " | TH: ", DoubleToString(data.thValue, Digits));
+    Print("[D][GEN] TF: ", GetCurrentTimeframe(), " | TH: ", DoubleToString(data.thValue, GetCachedDigits()));
     Print("[D][GEN] Preset: ", EnumToString(inpComboPreset));
-    Print("[D][GEN] Combo Step = ", DoubleToString(comboStep, Digits));
-    Print("[D][GEN] Structure: ", DoubleToString(data.structureValue, Digits),
-                      " | Pattern: ", DoubleToString(data.patternValue, Digits),
-                      " | Trigger: ", DoubleToString(data.triggerValue, Digits));
+    Print("[D][GEN] Combo Step = ", DoubleToString(comboStep, GetCachedDigits()));
+    Print("[D][GEN] Structure: ", DoubleToString(data.structureValue, GetCachedDigits()),
+                      " | Pattern: ", DoubleToString(data.patternValue, GetCachedDigits()),
+                      " | Trigger: ", DoubleToString(data.triggerValue, GetCachedDigits()));
     Print("[D][GEN] ==========================================");
     #endif
     s_lastLoggedComboStep = comboStep;
@@ -997,7 +1006,7 @@ void RunIncrementalObjectCleanup()
             string modeStr = (g_factorValueOverride > 0) ? "KEYBOARD" : 
                             ((inpFactorMode == FACTOR_MODE_AUTO) ? "AUTO" : "MANUAL");
     Print("[D][GEN] FACTOR_STEP: Mode=", modeStr, ", Factor=", DoubleToString(factorValue, 2));
-    Print("[D][GEN]    Center=", DoubleToString(data.midpointPrice, Digits),
+    Print("[D][GEN]    Center=", DoubleToString(data.midpointPrice, GetCachedDigits()),
                   " (", (g_thStartPointType == TH_START_POINT_CUSTOM_PRICE ? "Custom" : "Midpoint"), ")");
     Print("[D][GEN]    MaxLevels: Above=", data.maxLevelsAbove, ", Below=", data.maxLevelsBelow);
     #endif
@@ -1028,11 +1037,11 @@ void RunIncrementalObjectCleanup()
                 double pipSizeDbg = GetCachedPipSize();
     if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
                 Print("[D][GEN] [HARM] FACTOR_STEP: Harmonic Mode");
-    Print("[D][GEN]    BaseStep=", DoubleToString(factorStepSize, Digits),
+    Print("[D][GEN]    BaseStep=", DoubleToString(factorStepSize, GetCachedDigits()),
                       " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     Print("[D][GEN]    Ratio=", harmonicRatio,
                       " (", DoubleToString((harmonicRatio - 1.0) * 100, 1), "% larger)");
-    Print("[D][GEN]    LargeStep=", DoubleToString(factorStepSize * harmonicRatio, Digits),
+    Print("[D][GEN]    LargeStep=", DoubleToString(factorStepSize * harmonicRatio, GetCachedDigits()),
                       " (", DoubleToString(factorStepSize * harmonicRatio / pipSizeDbg, 1), " pips)");
     #endif
     // Factor Harmonic mode
@@ -1052,7 +1061,7 @@ void RunIncrementalObjectCleanup()
                 Print("[D][GEN] [STD] FACTOR_STEP: Standard Mode");
     double pipSizeDbg = GetCachedPipSize();
     if(IsZero(pipSizeDbg, EPSILON_PRICE)) pipSizeDbg = Point;
-    Print("[D][GEN]    StepSize=", DoubleToString(factorStepSize, Digits),
+    Print("[D][GEN]    StepSize=", DoubleToString(factorStepSize, GetCachedDigits()),
                       " (", DoubleToString(factorStepSize / pipSizeDbg, 1), " pips)");
     #endif
     // Factor Standard mode
@@ -1159,17 +1168,12 @@ void RunIncrementalObjectCleanup()
         UpdateBasePrice();
         TH3_PROF_END(BasePrice);
 
-        MqlDateTime nextCheckDt;
-        TimeToStruct(nowServerTs, nextCheckDt);
-        if(nextCheckDt.min < 30) {
-            nextCheckDt.min = 30;
-        } else {
-            nextCheckDt.hour++;
-            nextCheckDt.min = 0;
-        }
-        nextCheckDt.sec = 0;
+        // Round up to next 30-min boundary using pure datetime arithmetic
+        // Avoids MqlDateTime.hour overflow (hour=24 is undocumented behavior)
+        int secIntoDay = (int)(nowServerTs % 86400);
+        int secIntoBlock = secIntoDay % 1800;
         // +1 second prevents repeat runs at the exact boundary timestamp.
-        s_nextBasePriceCheckServer = StructToTime(nextCheckDt) + 1;
+        s_nextBasePriceCheckServer = nowServerTs - secIntoBlock + 1800 + 1;
     }
 
     double thBasePrice = GetBasePriceForTH();
@@ -1213,7 +1217,7 @@ void RunIncrementalObjectCleanup()
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastDebugLog = 0;
     if(TimeGMT() - s_lastDebugLog > 60) {
-        Print("[D][GEN] [MT4 DEBUG] RedrawAllObjects executing - Bid: ", DoubleToString(Bid, Digits));
+        Print("[D][GEN] [MT4 DEBUG] RedrawAllObjects executing - Bid: ", DoubleToString(Bid, GetCachedDigits()));
     s_lastDebugLog = TimeGMT();
     }
     #endif
@@ -1308,7 +1312,7 @@ void RunIncrementalObjectCleanup()
         #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastLevelRedrawLog = 0;
     if(TimeCurrent() - s_lastLevelRedrawLog > 5) {
-            Print("[D][GEN] [MT4] [DRAW] REDRAWING LEVELS | Base Price: ", DoubleToString(g_dailyClosePriceForTH, Digits),
+            Print("[D][GEN] [MT4] [DRAW] REDRAWING LEVELS | Base Price: ", DoubleToString(g_dailyClosePriceForTH, GetCachedDigits()),
                   " | Mode: ", GetStepModeName(GetCurrentStepMode()));
     s_lastLevelRedrawLog = TimeCurrent();
         }
@@ -1542,10 +1546,7 @@ void AdjustTH3Frequency(int direction)
 {
         if(id == CHARTEVENT_KEYDOWN)
     {
-        string mutableHideKey = inpHideKey;
-    StringToUpper(mutableHideKey);
-    int hideKeyCode = StringGetCharacter(mutableHideKey, 0);
-    if(IsHotkeyPressed(lparam, sparam, inpHideKey))
+        if(IsHotkeyPressed(lparam, sparam, inpHideKey))
         {
         string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
     double currentState = 0.0;
@@ -1718,10 +1719,10 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, true);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                          "[PIN] Custom Price: " + DoubleToString(currentPrice, Digits) + " | Drag to adjust, Double-click to confirm");
+                          "[PIN] Custom Price: " + DoubleToString(currentPrice, GetCachedDigits()) + " | Drag to adjust, Double-click to confirm");
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
-            _LOG_GATE_D Print("[D][GEN] [PIN] Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
+            _LOG_GATE_D Print("[D][GEN] [PIN] Custom price set to: ", DoubleToString(currentPrice, GetCachedDigits()), " - Drag to adjust.");
     ThrottledChartRedraw();
     return;
         }
@@ -1893,7 +1894,7 @@ void AdjustTH3Frequency(int direction)
     GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
     GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
     if(inpCustomTHStartPrice > 0.0) {                GlobalVariableSet("Biotak_CustomPrice_" + symbolName, inpCustomTHStartPrice);
-    CreateCustomPriceLine(inpCustomTHStartPrice, Digits);
+    CreateCustomPriceLine(inpCustomTHStartPrice, GetCachedDigits());
             } else {
         if(GlobalVariableCheck("Biotak_CustomPrice_" + symbolName)) GlobalVariableDel("Biotak_CustomPrice_" + symbolName);
     ObjectDelete(0, g_customPriceHorizontalLineName);
@@ -1951,7 +1952,7 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, false);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                  "[PIN] Custom Price: " + DoubleToString(savedCustomPrice, Digits) + " | Drag to adjust (live update)");
+                                  "[PIN] Custom Price: " + DoubleToString(savedCustomPrice, GetCachedDigits()) + " | Drag to adjust (live update)");
     g_customPriceLineCreated = true;
                 }
             }
@@ -2049,12 +2050,12 @@ void AdjustTH3Frequency(int direction)
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
     GlobalVariableSet(gvarName, selectedPrice);
     GlobalVariableSet(overrideFlagName, 1.0);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
+    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, GetCachedDigits()) + " | Drag to adjust (live update)");
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
-                _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+                _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, GetCachedDigits()));
     }
         }
         
@@ -2077,12 +2078,12 @@ void AdjustTH3Frequency(int direction)
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
     GlobalVariableSet(gvarName, selectedPrice);
     GlobalVariableSet(overrideFlagName, 1.0);
-    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
+    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, GetCachedDigits()) + " | Drag to adjust (live update)");
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
-            _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+            _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, GetCachedDigits()));
     }
     }
     if(id == CHARTEVENT_MOUSE_MOVE && g_customPriceLineCreated)
@@ -2134,12 +2135,12 @@ void AdjustTH3Frequency(int direction)
     GlobalVariableSet(gvarName, draggedPrice);
     GlobalVariableSet(overrideFlagName, 1.0);
     if (g_waitingForCustomPriceClick) {
-        string tooltip = "Current price: " + DoubleToString(draggedPrice, Digits) + " - Double-click to confirm";
+        string tooltip = "Current price: " + DoubleToString(draggedPrice, GetCachedDigits()) + " - Double-click to confirm";
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, tooltip);
         } else {
-        string tooltip = "Custom TH start price: " + DoubleToString(draggedPrice, Digits) + " - Drag to adjust";
+        string tooltip = "Custom TH start price: " + DoubleToString(draggedPrice, GetCachedDigits()) + " - Drag to adjust";
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, tooltip);
-            _LOG_GATE_D Print("[D][GEN] Custom TH start price updated to: ", DoubleToString(draggedPrice, Digits));
+            _LOG_GATE_D Print("[D][GEN] Custom TH start price updated to: ", DoubleToString(draggedPrice, GetCachedDigits()));
     }        
         g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;

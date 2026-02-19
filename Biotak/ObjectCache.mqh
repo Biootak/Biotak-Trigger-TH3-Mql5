@@ -153,15 +153,40 @@ int HashObjectName(const string name) {
     _LOG_GATE_W Print("[W][SYNC] Object cache collision - forcing LRU eviction");
     EvictLRUEntry();
     
-    // Try again after eviction
-    CacheAddObject(name, price, clr, style, width);
+    // CRITICAL FIX: Non-recursive retry after eviction to prevent stack overflow
+    // Previous code called CacheAddObject() recursively which could infinite-loop
+    // if EvictLRUEntry() failed to free a usable slot
+    slot = HashObjectName(name);
+    for(int probe2 = 0; probe2 < CACHE_HASH_BUCKETS; probe2++) {
+        int retryIdx = (slot + probe2) % CACHE_HASH_BUCKETS;
+        if(!g_objectCacheHash[retryIdx].occupied || g_objectCacheHash[retryIdx].deleted) {
+            g_objectCacheHash[retryIdx].name = name;
+            g_objectCacheHash[retryIdx].entry.name = name;
+            g_objectCacheHash[retryIdx].entry.lastPrice = price;
+            g_objectCacheHash[retryIdx].entry.lastColor = clr;
+            g_objectCacheHash[retryIdx].entry.lastStyle = style;
+            g_objectCacheHash[retryIdx].entry.lastWidth = width;
+            g_objectCacheHash[retryIdx].entry.exists = true;
+            g_objectCacheHash[retryIdx].entry.lastUpdate = CacheGetFrameTime();
+            g_objectCacheHash[retryIdx].occupied = true;
+            g_objectCacheHash[retryIdx].deleted = false;
+            g_objectCacheHash[retryIdx].lastAccess = CacheGetFrameTime();
+            g_objectCacheSize++;
+            return;
+        }
+    }
+    _LOG_GATE_E Print("[E][SYNC] CRITICAL: Cache completely full after eviction, cannot insert '", name, "'");
 }
     void EvictLRUEntry() {
         if(g_objectCacheSize == 0) return;
     
-    // PERF: O(1) fast path — use tracked LRU minimum if valid
+    // PERF: O(1) fast path — use tracked LRU minimum if STILL valid
+    // HIGH FIX: Verify the tracked entry wasn't accessed since we tracked it
+    // Without this check, a frequently-accessed (hot) entry could be evicted
+    // because g_lruMinTime was stale from insertion time
     if(g_lruMinIdx >= 0 && g_lruMinIdx < CACHE_HASH_BUCKETS &&
-       g_objectCacheHash[g_lruMinIdx].occupied) {
+       g_objectCacheHash[g_lruMinIdx].occupied &&
+       g_objectCacheHash[g_lruMinIdx].lastAccess <= g_lruMinTime) {
         int lruIdx = g_lruMinIdx;
         _LOG_GATE_D Print("[D][SYNC] [DEL] Evicting LRU cache entry (O(1)): '", g_objectCacheHash[lruIdx].name, "'");
         g_objectCacheHash[lruIdx].name = "";
@@ -174,6 +199,9 @@ int HashObjectName(const string name) {
         g_lruMinTime = 0;
         return;
     }
+    // Tracked entry was accessed since tracking — invalidate and fall through to full scan
+    g_lruMinIdx = -1;
+    g_lruMinTime = 0;
     
     // Fallback: Full scan to find LRU entry
     int lruIdx = -1;
@@ -306,7 +334,7 @@ int HashObjectName(const string name) {
         }
     }
     if(invalidCount > 0) {
-        _LOG_GATE_E Print("[E][SYNC] Cache validation found ", invalidCount, " invalid entries out of ", g_objectCacheSize);
+        _LOG_GATE_I Print("[W][SYNC] Cache validation found ", invalidCount, " invalid entries out of ", g_objectCacheSize);
     }
     return invalidCount;
 }

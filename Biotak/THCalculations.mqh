@@ -1,3 +1,6 @@
+#ifndef TH_CALCULATIONS_MQH
+#define TH_CALCULATIONS_MQH
+
 #property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
 
@@ -33,7 +36,7 @@
     
     // VALIDATION: Digits range check
     if(digits < 0 || digits > 8) {
-        _LOG_GATE_E Print("[E][TH] CalculateTH: Invalid digits (", digits, "), must be 0-8");
+        _LOG_GATE_E Print("[E][TH] CalculateTH: Invalid digits (", GetCachedDigits(), "), must be 0-8");
     return 0;
     }
     
@@ -44,13 +47,13 @@
     }
     
     // [OK] OPTIMIZATION: Check calculation cache before performing arithmetic
-    double cachedResult = GetCachedTHCalculation(price, percentage, digits);
+    double cachedResult = GetCachedTHCalculation(price, percentage, GetCachedDigits());
     if(cachedResult > 0) {
         return cachedResult;
     }
     
     // Normalize values for calculation
-    double normalizedPrice = NormalizeDouble(price, digits);
+    double normalizedPrice = NormalizeDouble(price, GetCachedDigits());
     double normalizedPercentage = NormalizeDouble(percentage, 6);
     
     // Formula matching MotiveWave EXACTLY:
@@ -58,18 +61,17 @@
     double result = (normalizedPrice * normalizedPercentage) / 100.0;
     
     // Store result in cache for future use
-    StoreTHCalculation(price, percentage, digits, result);
+    StoreTHCalculation(price, percentage, GetCachedDigits(), result);
     return result;
 }
     double CalculateTHPoints(const double price, const int digits, const double percentage) {
         if(price <= 0 || percentage <= 0) return 0;
     
-    // Use IsZero for float comparison instead of == 0.0
-    static double s_pointValue = 0.0;
-    if(IsZero(s_pointValue, EPSILON_PRICE)) s_pointValue = GetCachedPoint();
-    if(IsZero(s_pointValue, EPSILON_PRICE)) return 0;
+    // Use GetCachedPoint() which handles its own invalidation
+    double pointValue = GetCachedPoint();
+    if(IsZero(pointValue, EPSILON_PRICE)) return 0;
     double thStepPriceUnits = (price * percentage) / 100.0;
-    return thStepPriceUnits <= 0 ? 0 : (thStepPriceUnits / s_pointValue);
+    return thStepPriceUnits <= 0 ? 0 : (thStepPriceUnits / pointValue);
 }
     double GetTimeframeTH() {
         return CalculateTimeframeTH(GetFractalTimeframeForCurrent());
@@ -84,6 +86,16 @@
     
     // Cache miss - perform lookup
     int totalTimeframes = ArraySize(FRACTAL_TIMEFRAMES);
+    int totalPercentages = ArraySize(MODIFIED_FRACTAL_PERCENTAGES);
+    
+    // MEDIUM FIX: Validate parallel arrays have matching sizes
+    // If they diverge after a code change, accessing MODIFIED_FRACTAL_PERCENTAGES[i]
+    // with FRACTAL_TIMEFRAMES bounds would cause out-of-bounds access
+    if(totalTimeframes != totalPercentages) {
+        _LOG_GATE_E Print("[E][TH] CRITICAL: FRACTAL_TIMEFRAMES size (", totalTimeframes, 
+                          ") != MODIFIED_FRACTAL_PERCENTAGES size (", totalPercentages, ")");
+        return 1.0; // safe fallback
+    }
     
     // Use exact string comparison instead of StringFind
     // StringFind can cause false matches (e.g., "M1" matches "H1+M4")
@@ -140,11 +152,11 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     // CRITICAL FIX #1: Validate prices with epsilon
     // ═══════════════════════════════════════════════════════════════
     if(highPrice < EPSILON_PRICE || lowPrice < EPSILON_PRICE) {
-        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, Digits));
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid prices - High=", DoubleToString(highPrice, GetCachedDigits()));
     return 0;
     }
     if(highPrice <= lowPrice) {
-        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, Digits));
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Invalid range - High (", DoubleToString(highPrice, GetCachedDigits()));
     return 0;
     }
     
@@ -154,7 +166,7 @@ double CalculateFactorStepSize(const double highPrice, const double lowPrice, co
     double range = highPrice - lowPrice;
     double minRange = GetCachedPoint() * 10; // At least 10 pips
     if(range < minRange) {
-        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Range too small (", DoubleToString(range, Digits));
+        _LOG_GATE_E Print("[E][TH] CalculateFactorStepSize: Range too small (", DoubleToString(range, GetCachedDigits()));
     return 0;
     }
     
@@ -275,3 +287,5 @@ double CalculateStandardPercentage(const int timeInMinutes) {
     }
     return result;
 }
+
+#endif // TH_CALCULATIONS_MQH

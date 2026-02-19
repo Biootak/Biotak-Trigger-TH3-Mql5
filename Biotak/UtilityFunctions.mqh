@@ -155,7 +155,7 @@ void ClearAllModeLabels() {
 double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
 {
     int digits = GetCachedDigits();
-    if(digits <= 0) digits = Digits;
+    if(digits <= 0) digits = GetCachedDigits();
 
     double basePrice = g_dailyClosePriceForTH;
     if(basePrice <= 0 || basePrice == EMPTY_VALUE) {
@@ -165,7 +165,7 @@ double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
     if(basePrice <= 0) return 0.0;
 
     double timeframePercentage = GetTimeframeTH();
-    double thValue = CalculateTH(basePrice, digits, timeframePercentage);
+    double thValue = CalculateTH(basePrice, GetCachedDigits(), timeframePercentage);
     if(thValue <= 0) return 0.0;
     thValue = GetAdaptedStepSize(thValue);
 
@@ -424,7 +424,7 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     return false;
     }
     if(prevPrice <= 0 || currentPrice <= 0) {
-        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid prices - Prev=", DoubleToString(prevPrice, Digits));
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid prices - Prev=", DoubleToString(prevPrice, GetCachedDigits()));
     return false;
     }
     if(prevPrice == currentPrice) {
@@ -432,14 +432,14 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     return false;
     }
     if(zoneHeight <= 0) {
-        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid zone height: ", DoubleToString(zoneHeight, Digits));
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid zone height: ", DoubleToString(zoneHeight, GetCachedDigits()));
     return false;
     }
     double midPoint = (prevPrice + currentPrice) / 2.0;
     double upperPrice = NormalizeDouble(midPoint + zoneHeight, GetCachedDigits());
     double lowerPrice = NormalizeDouble(midPoint - zoneHeight, GetCachedDigits());
     if(upperPrice <= lowerPrice) {
-        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, Digits));
+        _LOG_GATE_E Print("[E][ZONE] CreateGenericMidZone: Invalid zone boundaries - Upper=", DoubleToString(upperPrice, GetCachedDigits()));
     return false;
     }    
     SZoneCreationRequest request;

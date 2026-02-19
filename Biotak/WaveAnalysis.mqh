@@ -173,10 +173,19 @@ void BuildWaveData(WaveData &wave, double p1, datetime t1, double p2, datetime t
     wave.fib786 = p1 + 0.786 * dir;   // √φ reciprocal — deep retracement
 
     // Time/speed
-    wave.barDuration = iBarShift(_Symbol, _Period, t1) - iBarShift(_Symbol, _Period, t2);
-    if(wave.barDuration < 0) wave.barDuration = -wave.barDuration;
-    if(wave.barDuration < 1) wave.barDuration = 1;
-    wave.speed = wave.distance / (double)wave.barDuration;
+    // BUG FIX: iBarShift returns -1 when bar not found (weekend/holiday gaps)
+    // WHY: Without this check, barDuration becomes wildly wrong (~51+ bars off),
+    // corrupting wave.speed and all downstream frequency scoring.
+    int barIdx1 = iBarShift(_Symbol, _Period, t1);
+    int barIdx2 = iBarShift(_Symbol, _Period, t2);
+    if(barIdx1 < 0 || barIdx2 < 0) {
+        wave.barDuration = 1;
+        wave.speed = wave.distance;
+    } else {
+        wave.barDuration = MathAbs(barIdx1 - barIdx2);
+        if(wave.barDuration < 1) wave.barDuration = 1;
+        wave.speed = wave.distance / (double)wave.barDuration;
+    }
 
     wave.isValid = (wave.distance > GetCachedPoint() * ABCD_MIN_DISTANCE_POINTS);
 }
@@ -331,8 +340,11 @@ void DetectConfluenceZones(WaveAnalysisResult &result, double abDistance) {
 
         for(int k = 0; k < clusterSize; k++) {
             int idx = clusterMembers[k];
-            wavesSeen[result.midpoints[idx].waveIndex] = true;
-            typesSeen[result.midpoints[idx].type] = true;
+            // BUG PREVENTION: Bounds check to prevent array overflow if wave/type counts change
+            int wi = result.midpoints[idx].waveIndex;
+            int ti = result.midpoints[idx].type;
+            if(wi >= 0 && wi < 6) wavesSeen[wi] = true;
+            if(ti >= 0 && ti < 7) typesSeen[ti] = true;
             priceSum += result.midpoints[idx].price;
             if(result.midpoints[idx].price < lowP) lowP = result.midpoints[idx].price;
             if(result.midpoints[idx].price > highP) highP = result.midpoints[idx].price;

@@ -1,4 +1,7 @@
-﻿#define HISTORY_DIR ".biotak\\history\\"
+﻿#ifndef BASE_PRICE_HISTORY_MANAGER_MQH
+#define BASE_PRICE_HISTORY_MANAGER_MQH
+
+#define HISTORY_DIR ".biotak\\history\\"
 #define HISTORY_FILE_PREFIX "base_price_history_"
 #define HISTORY_FILE_EXT ".txt"
 #define HISTORY_VERSION_FILE ".biotak\\history\\.version"
@@ -611,3 +614,5 @@
     
     HISTORY_PRINT("[BasePriceHistoryManager] Deleted ", deletedCount, " history files");
 }
+
+#endif // BASE_PRICE_HISTORY_MANAGER_MQH

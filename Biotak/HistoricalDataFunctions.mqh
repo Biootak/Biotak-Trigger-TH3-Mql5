@@ -37,6 +37,15 @@ bool UpdateHistoricalValues() {
     static double cachedPrices[6];
     datetime currentTime = TimeCurrent();
     if(currentTime - lastUpdate >= SECONDS_PER_DAY || lastUpdate == 0) {
+        // BUG FIX: Verify D1 data is available before accessing
+        // WHY: On terminal startup or symbol switch, D1 data may not be loaded yet.
+        // iClose/iOpen/iHigh/iLow return 0.0 (not EMPTY_VALUE), which passes through
+        // the caller's EMPTY_VALUE check, causing g_dailyClosePriceForTH=0.0
+        // and persistent silent failure (no levels drawn until manual reload).
+        if(iBars(_Symbol, PERIOD_D1) < 2) {
+            // D1 data not ready — don't cache, let next call retry
+            return 0.0;
+        }
         cachedPrices[0] = iClose(_Symbol, PERIOD_D1, 1);
     cachedPrices[1] = iOpen(_Symbol, PERIOD_D1, 1);
     cachedPrices[2] = iHigh(_Symbol, PERIOD_D1, 1);

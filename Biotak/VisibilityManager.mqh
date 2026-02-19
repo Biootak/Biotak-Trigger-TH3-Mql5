@@ -113,10 +113,12 @@ void ApplyVisibilityState(const string name, const bool isLine)
 
 // PERF: For existing objects, only update visibility if state changed this frame
 // Saves ~800 ObjectSetInteger calls per redraw when visibility is stable
-// FIX: Periodic re-sync every 10 frames to self-heal corrupted visibility states
+// FIX: Periodic re-sync every 50 frames to self-heal corrupted visibility states
+// WHY: 10 was too aggressive — 800 API calls every 10th frame wasted CPU.
+//      50 frames still catches corruption within ~5 seconds at typical tick rates.
 void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
 {
-    if(!g_visibilityChangedThisFrame && (g_visibilityFrameCounter % 10) != 0) return;
+    if(!g_visibilityChangedThisFrame && (g_visibilityFrameCounter % 50) != 0) return;
     long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
 }

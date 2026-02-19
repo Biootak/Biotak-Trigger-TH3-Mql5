@@ -129,6 +129,13 @@ int EmergencyCleanupObjects()
     {
         string objName = ObjectName(0, i, -1, -1);
         
+        // CRITICAL FIX: Only process objects belonging to THIS indicator
+        // Previous code deleted OTHER indicators' objects older than 1 hour,
+        // which silently broke user's chart setup and other EAs/indicators
+        if(StringLen(objName) < prefixLen || StringSubstr(objName, 0, prefixLen) != cachedPrefix) {
+            continue;
+        }
+        
         // Skip TH3 structures (user drawings - never delete)
         if(StringFind(objName, "TH3_Structure_") >= 0) {
             continue;
@@ -136,12 +143,6 @@ int EmergencyCleanupObjects()
         
         // Skip custom price line (user setting)
         if(StringFind(objName, "CustomPriceHorizontalLine") >= 0) {
-            continue;
-        }
-        
-        // CRITICAL FIX: Skip current indicator objects (prevent self-deletion)
-        // OPTIMIZED: Use StringSubstr for faster prefix check
-        if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix) {
             continue;
         }
         
@@ -168,10 +169,13 @@ int EmergencyCleanupObjects()
     int phase2Deleted = 0;
         
         // Delete all zones (can be recreated)
-        phase2Deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);
+        // CRITICAL FIX: Scope zone deletion to THIS indicator's prefix only
+        // Previous code used generic "Zone_" and "Mid_" prefixes which deleted
+        // objects from OTHER indicators that use similar naming
+        phase2Deleted += ObjectsDeleteAll(0, cachedPrefix + "Zone_", -1, -1);
         
         // Delete all mid-zones (can be recreated)
-        phase2Deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
+        phase2Deleted += ObjectsDeleteAll(0, cachedPrefix + "Mid_", -1, -1);
         
         // Bulk cache clear needed after ObjectsDeleteAll (cannot track individual names)
         CacheClear();

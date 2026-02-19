@@ -1,3 +1,5 @@
+#ifndef BASE_PRICE_MANAGER_MQH
+#define BASE_PRICE_MANAGER_MQH
 
 #include "BasePriceHistoryManager.mqh"
 #include "MarketHoursDetector.mqh"
@@ -19,7 +21,7 @@ void PrintRecentM30Bars(int count = 5)
         Print("[D][DATA] [BasePriceManager] ║  Bar ", i, ":");
     Print("[D][DATA] [BasePriceManager] ║    Server Time: ", TimeToString(barTime, TIME_DATE|TIME_MINUTES));
     Print("[D][DATA] [BasePriceManager] ║    GMT Time:    ", TimeToString(barTimeGMT, TIME_DATE|TIME_MINUTES));
-    Print("[D][DATA] [BasePriceManager] ║    Close:       ", DoubleToString(barClose, Digits));
+    Print("[D][DATA] [BasePriceManager] ║    Close:       ", DoubleToString(barClose, GetCachedDigits()));
     }
     Print("[D][DATA] [BasePriceManager] ╚═══════════════════════════════════════════════════════════════╝");
     }
@@ -190,13 +192,66 @@ int GetCachedSymbolStateIndex() {
     _g_cachedStateSymbol = sym;
     return _g_cachedStateIdx;
 }
-    #define g_basePriceCached (g_symbolStates[GetCachedSymbolStateIndex()].basePriceCached)
-#define g_lastProcessedBlockTimestamp (g_symbolStates[GetCachedSymbolStateIndex()].lastProcessedBlockTimestamp)
-#define g_referenceM1Power (g_symbolStates[GetCachedSymbolStateIndex()].referenceM1Power)
-#define g_historyCount (g_symbolStates[GetCachedSymbolStateIndex()].historyCount)
-#define g_lastHistoryDay (g_symbolStates[GetCachedSymbolStateIndex()].lastHistoryDay)
-#define g_lastHistoryYear (g_symbolStates[GetCachedSymbolStateIndex()].lastHistoryYear)
-#define g_systemInitialized (g_symbolStates[GetCachedSymbolStateIndex()].systemInitialized)
+
+//+------------------------------------------------------------------+
+//| CRITICAL FIX: Safe symbol state index with crash prevention      |
+//| GetCachedSymbolStateIndex() can return -1 when:                  |
+//|   - Symbol state limit reached                                   |
+//|   - Array resize fails                                           |
+//|   - Corrupted state count                                        |
+//| Without this guard, macros expand to g_symbolStates[-1] → crash  |
+//+------------------------------------------------------------------+
+int GetSafeSymbolStateIndex() {
+    int idx = GetCachedSymbolStateIndex();
+    if(idx >= 0 && idx < g_symbolStateCount) {
+        return idx;
+    }
+    // Force-create a state entry rather than crash
+    _g_cachedStateIdx = -1;
+    _g_cachedStateSymbol = "";
+    idx = GetSymbolStateIndex();
+    if(idx >= 0 && idx < g_symbolStateCount) {
+        _g_cachedStateIdx = idx;
+        _g_cachedStateSymbol = _Symbol;
+        return idx;
+    }
+    // Last resort: ensure at least one state exists
+    if(g_symbolStateCount == 0) {
+        if(ArrayResize(g_symbolStates, 1) == 1) {
+            g_symbolStates[0].symbol = _Symbol;
+            g_symbolStates[0].basePriceCached = 0.0;
+            g_symbolStates[0].lastProcessedBlockTimestamp = 0;
+            g_symbolStates[0].referenceM1Power = 0.0;
+            g_symbolStates[0].historyCount = 0;
+            g_symbolStates[0].lastHistoryDay = 0;
+            g_symbolStates[0].lastHistoryYear = 0;
+            g_symbolStates[0].systemInitialized = false;
+            g_symbolStates[0].lastAccessTime = TimeCurrent();
+            ArrayResize(g_symbolStates[0].basePriceHistory, 0);
+            g_symbolStateCount = 1;
+            _g_cachedStateIdx = 0;
+            _g_cachedStateSymbol = _Symbol;
+            _LOG_GATE_E Print("[E][DATA] CRITICAL: Forced symbol state creation to prevent crash");
+            return 0;
+        }
+    }
+    // Absolute fallback: return 0 if any state exists
+    if(g_symbolStateCount > 0) {
+        _LOG_GATE_E Print("[E][DATA] CRITICAL: Using fallback state index 0 for symbol ", _Symbol);
+        return 0;
+    }
+    // This should never happen but prevents -1 from propagating
+    _LOG_GATE_E Print("[E][DATA] FATAL: Cannot create symbol state - system in unrecoverable state");
+    return 0;
+}
+
+    #define g_basePriceCached (g_symbolStates[GetSafeSymbolStateIndex()].basePriceCached)
+#define g_lastProcessedBlockTimestamp (g_symbolStates[GetSafeSymbolStateIndex()].lastProcessedBlockTimestamp)
+#define g_referenceM1Power (g_symbolStates[GetSafeSymbolStateIndex()].referenceM1Power)
+#define g_historyCount (g_symbolStates[GetSafeSymbolStateIndex()].historyCount)
+#define g_lastHistoryDay (g_symbolStates[GetSafeSymbolStateIndex()].lastHistoryDay)
+#define g_lastHistoryYear (g_symbolStates[GetSafeSymbolStateIndex()].lastHistoryYear)
+#define g_systemInitialized (g_symbolStates[GetSafeSymbolStateIndex()].systemInitialized)
 
 bool ValidateRestoredBasePrice(const double restoredPrice, const double currentBid, double &validatedPrice)
 {
@@ -371,11 +426,11 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
                     Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
     if(isValid)
                     {
-                        Print("[I][DATA] ║  [OK] BASE PRICE RESTORED: ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
+                        Print("[I][DATA] ║  [OK] BASE PRICE RESTORED: ", DoubleToString(g_basePriceCached, GetCachedDigits()), " | M1: ", DoubleToString(g_referenceM1Power, 5));
     }
                     else
                     {
-                        Print("[W][DATA] ║  [WARN] STALE PRICE REJECTED: ", DoubleToString(restoredPrice, Digits), " -> ", DoubleToString(g_basePriceCached, Digits));
+                        Print("[W][DATA] ║  [WARN] STALE PRICE REJECTED: ", DoubleToString(restoredPrice, GetCachedDigits()), " -> ", DoubleToString(g_basePriceCached, GetCachedDigits()));
     }
                     Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     }
@@ -393,7 +448,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
                 if(!g_systemInitialized)
                 {
                     Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
-                    Print("[D][DATA] ║  [NEW] BASE PRICE INIT: ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
+                    Print("[D][DATA] ║  [NEW] BASE PRICE INIT: ", DoubleToString(g_basePriceCached, GetCachedDigits()), " | M1: ", DoubleToString(g_referenceM1Power, 5));
     Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     }
     #endif
@@ -411,7 +466,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
             if(!g_systemInitialized)
             {
                 Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
-                Print("[D][DATA] ║  [NEW] BASE PRICE INIT (First Run): ", DoubleToString(g_basePriceCached, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
+                Print("[D][DATA] ║  [NEW] BASE PRICE INIT (First Run): ", DoubleToString(g_basePriceCached, GetCachedDigits()), " | M1: ", DoubleToString(g_referenceM1Power, 5));
     Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     }
     #endif
@@ -427,7 +482,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
             Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
             Print("[D][DATA] ║  CHART REOPENED - RESTORING TODAY'S BASE PRICE               ║");
     Print("[D][DATA] ║  Date: Day ", dayOfYear, " of Year ", year);
-    Print("[D][DATA] ║  Base Price: ", DoubleToString(g_basePriceCached, Digits));
+    Print("[D][DATA] ║  Base Price: ", DoubleToString(g_basePriceCached, GetCachedDigits()));
     Print("[D][DATA] ║  Total Entries: ", g_historyCount);
     Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     PrintBasePriceHistory();
@@ -450,7 +505,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
                 Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
                 Print("[I][DATA] ║  [OK] HISTORY REBUILT SUCCESSFULLY                             ║");
     Print("[D][DATA] ║  Total Entries: ", g_historyCount);
-    Print("[D][DATA] ║  Base Price: ", DoubleToString(g_basePriceCached, Digits));
+    Print("[D][DATA] ║  Base Price: ", DoubleToString(g_basePriceCached, GetCachedDigits()));
     Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     PrintBasePriceHistory();
     SaveBasePriceHistoryToFile();
@@ -488,6 +543,11 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
     double CalculateM1PowerForBasePrice(const double basePrice)
 {
         if(basePrice <= 0) return 0.0;
+    // MEDIUM FIX: Validate array has at least one element before accessing index 0
+    if(ArraySize(MODIFIED_FRACTAL_PERCENTAGES) == 0) {
+        _LOG_GATE_E Print("[E][TH] CRITICAL: MODIFIED_FRACTAL_PERCENTAGES array is empty");
+        return 0.0;
+    }
     double m1Percent = MODIFIED_FRACTAL_PERCENTAGES[0]; // M1: 0.0208
     double powerM1 = basePrice * m1Percent;
     return powerM1;
@@ -762,7 +822,7 @@ string ExtractTimeBlock(const string &entry)
     _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ║  Server Time:      ", TimeToString(m30BarTime, TIME_DATE|TIME_MINUTES));
     _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ║  GMT Time:         ", TimeToString(m30BarTimeGMT, TIME_DATE|TIME_MINUTES));
     _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ║  Expected Block:   ", TimeToString(previousBlockStartGMT, TIME_DATE|TIME_MINUTES), " (GMT)");
-    _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ║  Close Price:      ", DoubleToString(newBasePrice, Digits));
+    _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ║  Close Price:      ", DoubleToString(newBasePrice, GetCachedDigits()));
     _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ║  Timezone Offset:  GMT", (timezoneOffsetHours >= 0 ? "+" : ""), timezoneOffsetHours, " hours");
     _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ╚═══════════════════════════════════════════════════════════════╝");
     if(g_basePriceCached == EMPTY_VALUE || g_basePriceCached == 0.0)
@@ -770,7 +830,7 @@ string ExtractTimeBlock(const string &entry)
     g_referenceM1Power = CalculateM1PowerForBasePrice(newBasePrice);
     AddBasePriceHistoryEntry(m30BarTime, newBasePrice, newBasePrice, 
                                  "-", 0.0, 0.0, g_referenceM1Power);
-        _LOG_GATE_D Print("[D][DATA] INIT: Base price ", DoubleToString(newBasePrice, Digits), " | M1: ", DoubleToString(g_referenceM1Power, 5));
+        _LOG_GATE_D Print("[D][DATA] INIT: Base price ", DoubleToString(newBasePrice, GetCachedDigits()), " | M1: ", DoubleToString(g_referenceM1Power, 5));
     return true;
     }
     double oldPowerM1 = g_referenceM1Power;
@@ -800,7 +860,7 @@ string ExtractTimeBlock(const string &entry)
     string okStatus = StringFormat("OK D=%.3f%%", deltaAbsPct);
     AddBasePriceHistoryEntry(m30BarTime, newBasePrice, newBasePrice, 
                                  okStatus, deltaAbsPct, oldPowerM1, newPowerM1);
-        _LOG_GATE_D Print("[D][DATA] OK: Base price updated to ", DoubleToString(newBasePrice, Digits));
+        _LOG_GATE_D Print("[D][DATA] OK: Base price updated to ", DoubleToString(newBasePrice, GetCachedDigits()));
     SaveBasePriceHistoryToFile();
     return true;
     }
@@ -809,7 +869,7 @@ string ExtractTimeBlock(const string &entry)
         string skipStatus = StringFormat("SKIP D=%.3f%%", deltaAbsPct);
     AddBasePriceHistoryEntry(m30BarTime, newBasePrice, g_basePriceCached, 
                                  skipStatus, deltaAbsPct, oldPowerM1, newPowerM1);
-        _LOG_GATE_W Print("[W][DATA] SKIP: Base price unchanged at ", DoubleToString(g_basePriceCached, Digits));
+        _LOG_GATE_W Print("[W][DATA] SKIP: Base price unchanged at ", DoubleToString(g_basePriceCached, GetCachedDigits()));
     SaveBasePriceHistoryToFile();
     return false;
     }
@@ -863,6 +923,21 @@ string ExtractTimeBlock(const string &entry)
     string existingHistory[];
     int existingCount = g_historyCount;
     GetHistoryArray(existingHistory);
+    // PERF: Pre-extract existing time strings to avoid O(n²) string parsing
+    // WHY: HistoryEntryExists() was parsing every entry with StringFind+StringSubstr
+    // for each of ~48 blocks, causing 48×48 = 2304 string operations per rebuild.
+    // Now we parse once → O(n) extract, then O(n) lookup per block.
+    string existingTimeStrings[];
+    ArrayResize(existingTimeStrings, existingCount);
+    int existingTimeCount = 0;
+    for(int h = 0; h < existingCount; h++) {
+        string entry = GetHistoryEntry(h);
+        if(StringLen(entry) == 0) continue;
+        int pipePos = StringFind(entry, "|");
+        if(pipePos <= 0) continue;
+        existingTimeStrings[existingTimeCount] = StringSubstr(entry, 0, pipePos);
+        existingTimeCount++;
+    }
     string rebuiltHistory[];
     int rebuiltCount = 0;
     ArrayResize(rebuiltHistory, totalBlocks);
@@ -878,7 +953,12 @@ string ExtractTimeBlock(const string &entry)
     datetime blockEndServer = blockStartServer + (30 * 60);
     datetime blockStartGMT = ConvertServerToGMT(blockStartServer);
     string blockTimeStr = TimeToString(blockStartGMT, TIME_MINUTES);
-    if(HistoryEntryExists(blockTimeStr))
+    // PERF: Use pre-extracted time strings instead of O(n) HistoryEntryExists
+    bool blockExists = false;
+    for(int t = 0; t < existingTimeCount; t++) {
+        if(existingTimeStrings[t] == blockTimeStr) { blockExists = true; break; }
+    }
+    if(blockExists)
         {
             _LOG_GATE_W Print("[W][DATA] [BasePriceManager] Block ", blockTimeStr, " already exists, skipping");
     continue;
@@ -901,7 +981,7 @@ string ExtractTimeBlock(const string &entry)
     #ifdef ENABLE_DEBUG_LOGS
         Print("[D][DATA] [BasePriceManager] Block ", blockTimeStr,
               " | M30 Bar: ", TimeToString(m30BarTime, TIME_MINUTES),
-              " | Close: ", DoubleToString(closePrice, Digits));
+              " | Close: ", DoubleToString(closePrice, GetCachedDigits()));
     #endif
     double newM1Power = CalculateM1PowerForBasePrice(closePrice);
     if(isFirstEntry)
@@ -914,7 +994,7 @@ string ExtractTimeBlock(const string &entry)
     rebuiltCount++;
     successCount++;
     isFirstEntry = false;
-            _LOG_GATE_D Print("[D][DATA] [BasePriceManager] INIT: ", blockTimeStr, " | Price: ", DoubleToString(closePrice, Digits));
+            _LOG_GATE_D Print("[D][DATA] [BasePriceManager] INIT: ", blockTimeStr, " | Price: ", DoubleToString(closePrice, GetCachedDigits()));
     continue;
         }
     double deltaAbsPct = 0.0;
@@ -957,7 +1037,7 @@ string ExtractTimeBlock(const string &entry)
                                    status, rebuildReferenceM1, oldM1, newM1Power);
     rebuiltHistory[rebuiltCount] = entry;
     rebuiltCount++;
-        _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ", status, ": ", blockTimeStr, " | Price: ", DoubleToString(closePrice, Digits));
+        _LOG_GATE_D Print("[D][DATA] [BasePriceManager] ", status, ": ", blockTimeStr, " | Price: ", DoubleToString(closePrice, GetCachedDigits()));
     }
     _LOG_GATE_D Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
     _LOG_GATE_D Print("[D][DATA] ║  REBUILD STATISTICS                                           ║");
@@ -985,7 +1065,7 @@ string ExtractTimeBlock(const string &entry)
     _LOG_GATE_D Print("[D][DATA] ╔═══════════════════════════════════════════════════════════════╗");
     _LOG_GATE_I Print("[I][DATA] ║  [OK] REBUILD COMPLETE                                          ║");
     _LOG_GATE_D Print("[D][DATA] ║  Total Entries: ", g_historyCount);
-    _LOG_GATE_D Print("[D][DATA] ║  Base Price: ", DoubleToString(g_basePriceCached, Digits));
+    _LOG_GATE_D Print("[D][DATA] ║  Base Price: ", DoubleToString(g_basePriceCached, GetCachedDigits()));
     _LOG_GATE_D Print("[D][DATA] ║  M1 Power: ", DoubleToString(g_referenceM1Power, 5));
     _LOG_GATE_D Print("[D][DATA] ╚═══════════════════════════════════════════════════════════════╝");
     }
@@ -1107,7 +1187,7 @@ void SaveBasePriceHistoryToFile()
     FileWriteString(fileHandle, "+---------------------------------------------------------------------------------------------------------------------+\n");
     FileWriteString(fileHandle, "\n");
     FileWriteString(fileHandle, "=== CURRENT STATE ===\n");
-    FileWriteString(fileHandle, StringFormat("Current Base Price: %s\n", DoubleToString(g_basePriceCached, Digits)));
+    FileWriteString(fileHandle, StringFormat("Current Base Price: %s\n", DoubleToString(g_basePriceCached, GetCachedDigits())));
     FileWriteString(fileHandle, StringFormat("Current M1 Power: %s\n", DoubleToString(g_referenceM1Power, 5)));
     FileWriteString(fileHandle, StringFormat("Total Entries Today: %d\n", g_historyCount));
     FileWriteString(fileHandle, "\n");
@@ -1131,15 +1211,17 @@ void SaveBasePriceHistoryToFile()
             FileWriteString(fileHandle, StringFormat("Bar %d:\n", i));
     FileWriteString(fileHandle, StringFormat("  Server Time: %s\n", TimeToString(barTime, TIME_DATE|TIME_MINUTES)));
     FileWriteString(fileHandle, StringFormat("  GMT Time: %s\n", TimeToString(barTimeGMT, TIME_DATE|TIME_MINUTES)));
-    FileWriteString(fileHandle, StringFormat("  Close: %s\n", DoubleToString(barClose, Digits)));
+    FileWriteString(fileHandle, StringFormat("  Close: %s\n", DoubleToString(barClose, GetCachedDigits())));
         }
     }
     
     FileClose(fileHandle);
     Print("[D][DATA] [BasePriceManager] SaveHistoryToFile: Saved ", g_historyCount, " entries to ", filename);
     }
-#elsevoid SaveBasePriceHistoryToFile()
-{    return;
+#else
+void SaveBasePriceHistoryToFile()
+{
+    return;
 }
     #endif
     void CleanupBasePriceManager()
@@ -1160,3 +1242,5 @@ void SaveBasePriceHistoryToFile()
     
     DEBUG_PRINT("[BasePriceManager] CleanupBasePriceManager() - Cleanup complete (memory leak fixed)");
 }
+
+#endif // BASE_PRICE_MANAGER_MQH
