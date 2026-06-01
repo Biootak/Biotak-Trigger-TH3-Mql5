@@ -1,0 +1,115 @@
+# MetaTrader compiled files
+*.ex4
+*.ex5
+
+# MetaEditor temporary files
+*.bak
+*.tmp
+*.temp
+*.autosave
+*.mq5~
+*.mqh~
+
+# Log files
+*.log
+build-logs/
+
+# Windows system files
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Windows shortcuts
+*.lnk
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux system files
+*~
+.directory
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains IDEs (Rider, CLion, etc.)
+.idea/
+*.iml
+*.iws
+
+# Backup files
+*.orig
+*~
+*.backup
+*.bak
+
+# Git merge/conflict files (should be resolved before commit)
+*.BACKUP.*
+*.BASE.*
+*.LOCAL.*
+*.REMOTE.*
+*_BACKUP_*.txt
+*_BASE_*.txt
+*_LOCAL_*.txt
+*_REMOTE_*.txt
+
+# Test files (optional - remove if you want to track test files)
+github_test.txt
+
+# Build directories (if you use custom build scripts)
+build/
+dist/
+out/
+
+# Documentation build outputs (if you generate docs)
+docs/_build/
+site/
+
+# Environment and configuration files with sensitive data
+*.env
+.env.local
+secrets.txt
+
+# MetaTrader terminal data (if accidentally copied)
+history/
+bases/
+logs/
+tester/
+
+# MetaTrader 5 local data (generated locally, not source)
+MQL5/Logs/
+MQL5/Tester/
+MQL5/Files/
+MQL5/Bases/
+MQL5/Profiles/Logs/
+MQL5/Profiles/Tester/
+
+# Compressed archives (usually temporary)
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# Temporary documentation and summaries
+PROJECT_ISSUES.md
+FIXES_APPLIED.md
+SOLUTION_OPTIMIZED.md
+PERSISTENT_STORAGE_SUMMARY.md
+
+# Keep important documentation
+!README.md
+!WARP.md
+
+.kiro/

@@ -1,0 +1,254 @@
+#ifndef INPUT_VALIDATOR_MQH
+#define INPUT_VALIDATOR_MQH
+
+bool ValidateWidth(int width, const string name) {
+        if(width <= 0 || width > 10) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", width, ") out of range [1-10]");
+    return false;
+    }
+    return true;
+}
+    bool ValidateRange(double value, double minVal, double maxVal, const string name) {
+        if(value < minVal || value > maxVal) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", DoubleToString(value, 3), ") out of range [", DoubleToString(minVal, 3), " - ", DoubleToString(maxVal, 3), "]");
+    return false;
+    }
+    return true;
+}
+    bool ValidatePositive(int value, const string name) {
+        if(value <= 0) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", value, ") must be positive");
+    return false;
+    }
+    return true;
+}
+    bool ValidateNonNegative(int value, const string name) {
+        if(value < 0) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", value, ") must be non-negative");
+    return false;
+    }
+    return true;
+}
+    bool ValidateTransparency(int value, const string name) {
+        if(value < 0 || value > 100) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " (", value, ") out of range [0-100]");
+    return false;
+    }
+    return true;
+}
+
+bool ValidateHotkeyString(const string key, const string name) {
+    if(StringLen(key) <= 0) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " is empty");
+        return false;
+    }
+    // We only use first character, so enforce 1-char to avoid surprising behavior
+    if(StringLen(key) != 1) {
+        _LOG_GATE_E Print("[E][INIT] ERROR: ", name, " must be exactly 1 character (got '", key, "')");
+        return false;
+    }
+    return true;
+}
+
+int GetHotkeyCodeUpper(const string key) {
+    string k = key;
+    StringToUpper(k);
+    return (int)StringGetCharacter(k, 0);
+}
+
+bool ValidateHotkeysUniqueAndSafe() {
+    // Validate shape
+    if(!ValidateHotkeyString(inpHideKey, "HideKey")) return false;
+    if(!ValidateHotkeyString(inpLinesToggleKey, "LinesToggleKey")) return false;
+    if(!ValidateHotkeyString(inpLockKey, "LockKey")) return false;
+    if(!ValidateHotkeyString(inpCustomPriceKey, "CustomPriceKey")) return false;
+    if(!ValidateHotkeyString(inpTriggerLevelsKey, "TriggerLevelsKey")) return false;
+    if(!ValidateHotkeyString(inpStepModeKey, "StepModeKey")) return false;
+    if(!ValidateHotkeyString(inpTH3ToolKey, "TH3ToolKey")) return false;
+    if(!ValidateHotkeyString(inpATRLabelsKey, "ATRLabelsKey")) return false;
+    if(!ValidateHotkeyString(inpTHLabelsKey, "THLabelsKey")) return false;
+    if(!ValidateHotkeyString(inpResetKey, "ResetKey")) return false;
+
+    // Reserved hardcoded keys used elsewhere
+    int reserved[] = {'1','2','3','4'};
+    string reservedNames[] = {"'1' (Factor -)","'2' (Factor +)","'3' (TH3 Freq -)","'4' (TH3 Freq +)"};
+
+    int codes[];
+    string names[];
+    ArrayResize(codes, 10);
+    ArrayResize(names, 10);
+    codes[0] = GetHotkeyCodeUpper(inpHideKey);         names[0] = "HideKey";
+    codes[1] = GetHotkeyCodeUpper(inpLinesToggleKey);  names[1] = "LinesToggleKey";
+    codes[2] = GetHotkeyCodeUpper(inpLockKey);         names[2] = "LockKey";
+    codes[3] = GetHotkeyCodeUpper(inpCustomPriceKey);  names[3] = "CustomPriceKey";
+    codes[4] = GetHotkeyCodeUpper(inpTriggerLevelsKey);names[4] = "TriggerLevelsKey";
+    codes[5] = GetHotkeyCodeUpper(inpATRLabelsKey);    names[5] = "ATRLabelsKey";
+    codes[6] = GetHotkeyCodeUpper(inpTHLabelsKey);     names[6] = "THLabelsKey";
+    codes[7] = GetHotkeyCodeUpper(inpTH3ToolKey);      names[7] = "TH3ToolKey";
+    codes[8] = GetHotkeyCodeUpper(inpStepModeKey);     names[8] = "StepModeKey";
+    codes[9] = GetHotkeyCodeUpper(inpResetKey);        names[9] = "ResetKey";
+
+    // Disallow reserved conflicts
+    for(int i=0; i<ArraySize(codes); i++) {
+        for(int r=0; r<ArraySize(reserved); r++) {
+            if(codes[i] == reserved[r]) {
+                _LOG_GATE_E Print("[E][INIT] ERROR: ", names[i], " conflicts with reserved key ", reservedNames[r]);
+                return false;
+            }
+        }
+    }
+
+    // Uniqueness
+    for(int i=0; i<ArraySize(codes); i++) {
+        for(int j=i+1; j<ArraySize(codes); j++) {
+            if(codes[i] == codes[j]) {
+                _LOG_GATE_E Print("[E][INIT] ERROR: Hotkey conflict: ", names[i], " and ", names[j], " use the same key");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+    int ValidateInputs() {
+    // Base Price Threshold
+    if(!ValidateRange(inpBasePriceThresholdPercent, 0.0001, 10.0, "BasePriceThreshold"))
+        return INIT_PARAMETERS_INCORRECT;
+
+    // Harmonic Ratio
+    if(inpEnableHarmonicPattern) {
+        if(!ValidateRange(inpHarmonicRatio, 1.01, 2.0, "HarmonicRatio"))
+            return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpHarmonicBaseWidth, "HarmonicBaseWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpHarmonicLargeWidth, "HarmonicLargeWidth")) return INIT_PARAMETERS_INCORRECT;
+    }
+
+    // Font
+    if(!ValidatePositive(inpFontSize, "FontSize")) return INIT_PARAMETERS_INCORRECT;
+    if(inpFontSize > 100) return INIT_PARAMETERS_INCORRECT;
+
+    // Widths
+    if(!ValidateWidth(inpCustomPriceLevelWidth, "CustomPriceLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpHighWidth, "HighWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpLowWidth, "LowWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpTriggerWidth, "TriggerWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpCLevelWidth, "CLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpMLevelWidth, "MLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpSSLevelWidth, "SSLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpLSLevelWidth, "LSLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpComboLevelWidth, "ComboLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpTPLevelWidth, "TPLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpFactorLevelWidth, "FactorLevelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpTH3Width, "TH3Width")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpABCDWidth, "ABCDWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpTH3ZoneBorderWidth, "TH3ZoneBorderWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpStructureL1Width, "StructureL1Width")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpStructureL2Width, "StructureL2Width")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpStructureL3Width, "StructureL3Width")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpStructureL4Width, "StructureL4Width")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateWidth(inpStructureL5Width, "StructureL5Width")) return INIT_PARAMETERS_INCORRECT;
+
+    // Label Position & Spacing
+    if(!ValidateNonNegative(inpLabelsMarginTop, "LabelsMarginTop")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelsMarginLeft, "LabelsMarginLeft")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelsMarginBottom, "LabelsMarginBottom")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpTHLabelsMarginBottom, "THLabelsMarginBottom")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelRowGap, "LabelRowGap")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpLabelColumnGap, "LabelColumnGap")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpSectionGap, "SectionGap")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidatePositive(inpMaxLabelWidth, "MaxLabelWidth")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpABCDInfoXDistance, "ABCDInfoX")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpABCDInfoYDistance, "ABCDInfoY")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpModeLabelXDistance, "ModeLabelX")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateNonNegative(inpModeLabelYDistance, "ModeLabelY")) return INIT_PARAMETERS_INCORRECT;
+
+    // Levels
+    if(!ValidatePositive(inpMaxLevels, "MaxLevels")) return INIT_PARAMETERS_INCORRECT;
+
+    // Performance warnings
+    if(inpMaxLevels > MAX_SAFE_LEVELS) {
+        _LOG_GATE_W Print("[W][INIT] WARNING: TH Levels exceed MAX_SAFE_LEVELS (", MAX_SAFE_LEVELS, ")");
+    }
+
+    // Transparency
+    if(!ValidateTransparency(inpTH3ZoneTransparency, "TH3ZoneTransparency")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateTransparency(inpMidZoneTransparency, "MidZoneTransparency")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateTransparency(inpTriggerTransparency, "TriggerTransparency")) return INIT_PARAMETERS_INCORRECT;
+
+    // Zone Heights
+    if(!ValidateRange(inpTH3ZoneHeightPercent, 1.0, 100.0, "TH3ZoneHeight")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateRange(inpMidZoneHeightPercent, 1.0, 100.0, "MidZoneHeight")) return INIT_PARAMETERS_INCORRECT;
+
+    // Historical
+    if(!ValidateNonNegative(inpHistoricalPeriods, "HistoricalPeriods")) return INIT_PARAMETERS_INCORRECT;
+
+    // Factor
+    if(!ValidateRange(inpFactorValue, 0.01, 10000.0, "FactorValue")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidateRange(inpFactorAdjustStep, 0.01, 100.0, "FactorAdjustStep")) return INIT_PARAMETERS_INCORRECT;
+
+    // TH3
+    if(!ValidateRange(inpTH3BaseStepPercent, 0.1, 1000.0, "TH3BaseStepPercent")) return INIT_PARAMETERS_INCORRECT;
+
+    // Font Sizes
+    if(!ValidatePositive(inpABCDInfoFontSize, "ABCDInfoFontSize")) return INIT_PARAMETERS_INCORRECT;
+    if(!ValidatePositive(inpModeLabelFontSize, "ModeLabelFontSize")) return INIT_PARAMETERS_INCORRECT;
+
+    // Combo validation
+    ValidateComboModeConfiguration();
+
+    // Hotkeys (must be unique, 1-char, and not collide with reserved numeric keys)
+    if(!ValidateHotkeysUniqueAndSafe()) return INIT_PARAMETERS_INCORRECT;
+    _LOG_GATE_I Print("[I][INIT] All input validations passed");
+    return INIT_SUCCEEDED;
+}
+    void ValidateComboModeConfiguration() {
+        #ifdef ENABLE_DEBUG_LOGS
+    string modeName;
+    switch(inpComboMode) {
+        case COMBO_MODE_QUICK_TEST: modeName = "Quick Test"; break;
+    case COMBO_MODE_PRESET:     modeName = "Preset"; break;
+    case COMBO_MODE_ADVANCED:   modeName = "Advanced"; break;
+    default:                    modeName = "Unknown"; break;
+    }
+    Print("[D][INIT] Combo Mode: ", modeName);
+    if(inpComboMode == COMBO_MODE_ADVANCED) {
+        int activeComponents = 0;
+    if(inpComboComp1 != COMP_IGNORE) activeComponents++;
+    if(inpComboComp2 != COMP_IGNORE) activeComponents++;
+    if(inpComboComp3 != COMP_IGNORE) activeComponents++;
+    if(inpComboComp4 != COMP_IGNORE) activeComponents++;
+    if(activeComponents == 0) {
+            Print("[W][INIT] WARNING: All combo components set to IGNORE");
+        }
+    if(inpComboOp1 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp1 <= OP_MAX_ALL) {
+            Print("[D][INIT] N-ARY operator detected: topology will be ignored");
+        }
+    }
+    #endif
+    }
+//+------------------------------------------------------------------+
+//| Sanitize filename (from InputValidationEnhanced.mqh)            |
+//+------------------------------------------------------------------+
+string SanitizeFilename(const string filename) {
+    string safe = filename;
+    StringReplace(safe, "..", "");
+    StringReplace(safe, "/", "_");   StringReplace(safe, "\\", "_");
+    StringReplace(safe, ":", "");
+    StringReplace(safe, "*", "");
+    StringReplace(safe, "?", "");
+    StringReplace(safe, "\"", "");
+    StringReplace(safe, "<", "");
+    StringReplace(safe, ">", "");
+    StringReplace(safe, "|", "");
+    StringReplace(safe, "\0", "");
+    StringReplace(safe, "\n", "");   StringReplace(safe, "\r", "");
+    if(StringLen(safe) == 0) safe = "default";
+    #ifdef MAX_PATTERN_NAME_LENGTH
+    if(StringLen(safe) > MAX_PATTERN_NAME_LENGTH) safe = StringSubstr(safe, 0, MAX_PATTERN_NAME_LENGTH);
+    #else
+    if(StringLen(safe) > 100) safe = StringSubstr(safe, 0, 100);
+    #endif
+    return safe;
+}
+
+    #endif
+    // INPUT_VALIDATOR_MQH
