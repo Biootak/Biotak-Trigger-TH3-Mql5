@@ -134,7 +134,7 @@ int GetEffectiveBars() {
     if(tf == GetCachedPeriod()) {
         return Bars(_Symbol, _Period);
     }
-    return iBars(_Symbol, (ENUM_TIMEFRAMES)tf);
+    return Bars(_Symbol, (ENUM_TIMEFRAMES)tf);
 }
 
 //+------------------------------------------------------------------+
@@ -242,7 +242,7 @@ void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
     ArrayResize(results, 6);
     ArrayInitialize(results, 0.0);
     
-    int barsAvailable = iBars(_Symbol, tf);
+    int barsAvailable = Bars(_Symbol, tf);
     
     if(barsAvailable <= 0) {
         _LOG_GATE_W Print("[W][ATR] CalculateATRBatchWilders: No bars available for TF=", tf);
@@ -618,7 +618,7 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
     }
     
     // Get bars available for target timeframe
-    int targetBars = iBars(_Symbol, targetTF);
+    int targetBars = Bars(_Symbol, targetTF);
     if(targetBars <= 0) {
         _LOG_GATE_W Print("[W][ATR] CalculateWeightedATRForTimeframe: No bars available for TF=", targetTF);
         return 0.0;

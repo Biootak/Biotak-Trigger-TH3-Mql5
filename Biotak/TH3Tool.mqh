@@ -23,6 +23,19 @@
 
 // Registry state for fast TH3 bulk updates (avoids chart-wide scans)
 static string g_th3PatternRegistry[];
+static datetime s_th3TimeBuf[];
+static bool     s_th3TimeBufInit = false;
+
+datetime GetTh3BarTime(int shift)
+{
+    if(!s_th3TimeBufInit) {
+        ArrayResize(s_th3TimeBuf, 1);
+        s_th3TimeBufInit = true;
+    }
+    if(CopyTime(_Symbol, _Period, shift, 1, s_th3TimeBuf) <= 0)
+        return 0;
+    return s_th3TimeBuf[0];
+}
 static int    g_th3PatternRegistryCount = 0;
 
 int FindTH3PatternRegistryIndex(const string baseName)
@@ -187,7 +200,7 @@ bool CalculateABCDPointD(datetime tA, double pA, datetime tB, double pB,
     int barD = barC - bcBars;
     if(barD < 0) barD = 0;
 
-    tD = iTime(_Symbol, 0, barD);
+    tD = GetTh3BarTime(barD);
     if(tD <= 0) tD = tC + (tC - tB);
 
     return true;
@@ -313,12 +326,10 @@ void DrawABCDTargetLevels(const string mainObjName, double pC, double baseUnit,
     string targetNames[TH3_TARGET_COUNT]  = {"Step1", "Step3", "Step5", "Step7"};
     double multipliers[TH3_TARGET_COUNT]  = {1.0, 3.0, 5.0, 7.0};
 
-    // BUG FIX: iBarShift returns -1 if startTime falls on weekend/holiday
-    // WHY: MathMax(0, -1 - extension) = 0, causing endTime = current bar time,
-    // which draws target Fibo zones with wrong end-time.
     int barShift = iBarShift(_Symbol, _Period, startTime);
     if(barShift < 0) barShift = 0;
-    datetime endTime = iTime(_Symbol, 0, MathMax(0, barShift - TH3_BAR_EXTENSION));
+    int endBarShift = barShift - TH3_BAR_EXTENSION;
+    datetime endTime = (endBarShift >= 0) ? GetTh3BarTime(endBarShift) : GetTh3BarTime(0);
 
     double zonePercent = MathMax(0.01, MathMin(1.0, inpTH3ZoneHeightPercent / 100.0));
     double zoneHalfWidth = baseUnit * zonePercent;

@@ -1,10 +1,34 @@
 ﻿#ifndef ALERT_FUNCTIONS_MQH
 #define ALERT_FUNCTIONS_MQH
 
+// PERF: Pre-allocated static buffer to avoid per-tick dynamic allocation in
+// the CopyTime calls below (replaces 2 iTime() syscalls in this file).
+static datetime s_alertBarTimeBuf[];
+static bool     s_alertBarTimeBufInit = false;
+
+// PERF: Cached name prefixes — objectPrefix is constant per chart, so 4 string
+// concatenations are reduced to 1 string compare per CheckAlerts call.
+static string s_cachedObjPrefix   = "";
+static string s_cachedPrefix      = "";
+static string s_cachedLineNameMid = "";
+static string s_cachedPrefixUp    = "";
+static string s_cachedPrefixDown  = "";
+
+datetime GetCurrentBarTime()
+{
+    if(!s_alertBarTimeBufInit) {
+        ArrayResize(s_alertBarTimeBuf, 1);
+        s_alertBarTimeBufInit = true;
+    }
+    if(CopyTime(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0, 1, s_alertBarTimeBuf) <= 0)
+        return 0;
+    return s_alertBarTimeBuf[0];
+}
+
 bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 0) {
     if(!inpAlertOnce) return true;
     datetime barTime = currentBarTime;
-    if(barTime <= 0) barTime = iTime(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0);
+    if(barTime <= 0) barTime = GetCurrentBarTime();
     if(barTime > g_lastAlertTime || g_lastAlertLevel != levelName) {
         g_lastAlertTime = barTime;
     g_lastAlertLevel = levelName;
@@ -24,7 +48,7 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     static double s_lastAlertPrice = 0;
     if(MathAbs(currentPrice - s_lastAlertPrice) < GetCachedPoint() * 0.5) return;
     s_lastAlertPrice = currentPrice;
-    datetime currentBarTime = inpAlertOnce ? iTime(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0) : 0;
+    datetime currentBarTime = inpAlertOnce ? GetCurrentBarTime() : 0;
 
     // High/Low alerts (skip in Custom Price mode)
     if(inpEnableHighLowAlerts && g_thStartPointType != TH_START_POINT_CUSTOM_PRICE) {
@@ -36,17 +60,26 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
 
     // TH Level alerts
     if(inpEnableTHAlerts && IsTriggerLevelsEnabled()) {
-        string prefix = objectPrefix + "TH_Level_";
-    string lineNameMid = prefix + "Mid";
+        if(objectPrefix != s_cachedObjPrefix) {
+            s_cachedObjPrefix   = objectPrefix;
+            s_cachedPrefix      = objectPrefix + "TH_Level_";
+            s_cachedLineNameMid = s_cachedPrefix + "Mid";
+            s_cachedPrefixUp    = s_cachedPrefix + "TriggerTH_Up_";
+            s_cachedPrefixDown  = s_cachedPrefix + "TriggerTH_Down_";
+        }
+        string prefix = s_cachedPrefix;
+    string lineNameMid = s_cachedLineNameMid;
     double midpointLevel = ObjectGetDouble(0, lineNameMid, OBJPROP_PRICE, 0);
-    if(midpointLevel != EMPTY_VALUE && MathAbs(currentPrice - midpointLevel) < GetCachedPoint()) {
+    if(IsValidPrice(midpointLevel) && MathAbs(currentPrice - midpointLevel) < GetCachedPoint()) {
         if(ShouldTriggerAlert("MidpointLevel", currentBarTime))
                 TriggerAlert("Price reached Midpoint: " + DoubleToString(midpointLevel, GetCachedDigits()));
         }
-    int maxLevels = MathMin(inpMaxLevels, 256);
+    int maxLevels = MathMin(inpMaxLevels, MAX_SAFE_LEVELS);
+    if(maxLevels < inpMaxLevels)
+        _LOG_GATE_W Print("[W][ALERT] Alert loop capped at MAX_SAFE_LEVELS=", MAX_SAFE_LEVELS, " (requested=", inpMaxLevels, ")");
     // PERF: Cache prefix substring + step strings outside conditionals
-    string prefixUp = prefix + "TriggerTH_Up_";
-    string prefixDown = prefix + "TriggerTH_Down_";
+    string prefixUp = s_cachedPrefixUp;
+    string prefixDown = s_cachedPrefixDown;
     // PERF: Track consecutive misses — if both Up and Down don't exist for
     // 2 consecutive steps, all higher steps won't exist either (levels are sequential).
     // This turns worst-case 512 hash lookups into ~2× actual_level_count.
@@ -59,7 +92,7 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     if(CacheObjectExists(nameAbove)) {
         foundAbove = true;
         double lvl = ObjectGetDouble(0, nameAbove, OBJPROP_PRICE, 0);
-    if(lvl != EMPTY_VALUE && currentPrice >= lvl) {
+    if(IsValidPrice(lvl) && currentPrice >= lvl) {
         string key = "TriggerTH_Up_" + stepStr;
     if(ShouldTriggerAlert(key, currentBarTime))
                             TriggerAlert("Price reached TH Up " + stepStr + ": " + DoubleToString(lvl, GetCachedDigits()));
@@ -69,7 +102,7 @@ bool ShouldTriggerAlert(const string levelName, const datetime currentBarTime = 
     if(CacheObjectExists(nameBelow)) {
         foundBelow = true;
         double lvl = ObjectGetDouble(0, nameBelow, OBJPROP_PRICE, 0);
-    if(lvl != EMPTY_VALUE && currentPrice <= lvl) {
+    if(IsValidPrice(lvl) && currentPrice <= lvl) {
         string key = "TriggerTH_Down_" + stepStr;
     if(ShouldTriggerAlert(key, currentBarTime))
                             TriggerAlert("Price reached TH Down " + stepStr + ": " + DoubleToString(lvl, GetCachedDigits()));

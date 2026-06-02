@@ -92,7 +92,10 @@ param(
 # ============================================================
 
 $SCRIPT_ROOT    = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$DEFAULT_MT5_INSTALL = "C:\Program Files\AMarkets - MetaTrader 5"
+# Default points at the standard MetaQuotes install. Broker-specific installs
+# (e.g. "C:\Program Files\AMarkets - MetaTrader 5") are still discovered by
+# the wildcard scan in Resolve-MetaEditorPath.
+$DEFAULT_MT5_INSTALL = "C:\Program Files\MetaTrader 5"
 $DEFAULT_METAEDITOR  = Join-Path $DEFAULT_MT5_INSTALL "metaeditor64.exe"
 $APPDATA_TERMINAL_ROOT = Join-Path $env:APPDATA "MetaQuotes\Terminal"
 $PROJECT_LOG_DIR = Join-Path $SCRIPT_ROOT "build-logs"

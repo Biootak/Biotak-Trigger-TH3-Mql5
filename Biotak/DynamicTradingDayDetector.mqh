@@ -10,11 +10,28 @@
 #define SESSION_BLOCK_MINUTES      30
 #define SESSION_BLOCK_SECONDS      1800
 
+// PERF: Reusable 1-element buffer for single-bar CopyTime lookups, replacing
+// the legacy iTime() calls below. File-scope so IsMarketOpen() and
+// GetSessionStatistics() share the same allocation.
+static datetime s_sessBarBuf[];
+static bool     s_sessBarBufInit = false;
+
+datetime CopySingleBarTime(int shift)
+{
+    if(!s_sessBarBufInit) {
+        ArrayResize(s_sessBarBuf, 1);
+        s_sessBarBufInit = true;
+    }
+    if(CopyTime(_Symbol, PERIOD_M1, shift, 1, s_sessBarBuf) <= 0)
+        return 0;
+    return s_sessBarBuf[0];
+}
+
 datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1) {
         datetime currentTime = TimeGMT();
     int barsToCheck = MAX_LOOKBACK_BARS_M1;
     int gapThresholdMinutes = SESSION_GAP_THRESHOLD_MIN;
-    int totalBars = iBars(_Symbol, timeframe);
+    int totalBars = Bars(_Symbol, timeframe);
     if(totalBars <= 0) return GetStartOfTradingDay(Symbol(), currentTime);
     
     // PERF: Batch-fetch bar times with CopyTime instead of individual iTime calls
@@ -40,16 +57,16 @@ datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1) {
 }
     bool IsMarketOpen() {
         datetime currentTime = TimeGMT();
-    datetime lastBarTime = iTime(_Symbol, PERIOD_M1, 0);
+    datetime lastBarTime = CopySingleBarTime(0);
     return ((int)(currentTime - lastBarTime) < MARKET_OPEN_FRESHNESS_SEC);
 }
     string GetSessionStatistics() {
         datetime currentTime = TimeGMT();
     datetime sessionStart = FindCurrentSessionStart();
-    int totalBars = iBars(_Symbol, PERIOD_M1);
+    int totalBars = Bars(_Symbol, PERIOD_M1);
     if(totalBars <= 0) return "No M1 bar data available";
-    datetime firstBarTime = iTime(_Symbol, PERIOD_M1, totalBars - 1);
-    datetime lastBarTime = iTime(_Symbol, PERIOD_M1, 0);
+    datetime firstBarTime = CopySingleBarTime(totalBars - 1);
+    datetime lastBarTime  = CopySingleBarTime(0);
     int totalMinutes = (int)((currentTime - sessionStart) / 60);
     int totalBlocks = totalMinutes / SESSION_BLOCK_MINUTES;
     return StringFormat("Session: %s | Blocks: %d | Bars: %d | %s",
