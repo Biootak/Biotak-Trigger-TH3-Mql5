@@ -89,22 +89,8 @@ int CalculateAdaptiveExtensionMultiplier(int periodSeconds)
     return multiplier;
 }
 
-// PERF: Per-frame static cache for zone times — avoids repeated Bars/CopyTime/PeriodSeconds calls
+// PERF: Per-frame static cache for zone times — avoids repeated Bars/iTime/PeriodSeconds calls
 // All zones in the same redraw cycle share identical start/end times
-static datetime s_zoneTimeBuf[];
-static bool     s_zoneTimeBufInit = false;
-
-datetime GetZoneBarTime(int shift)
-{
-    if(!s_zoneTimeBufInit) {
-        ArrayResize(s_zoneTimeBuf, 1);
-        s_zoneTimeBufInit = true;
-    }
-    if(CopyTime(_Symbol, _Period, shift, 1, s_zoneTimeBuf) <= 0)
-        return 0;
-    return s_zoneTimeBuf[0];
-}
-
 bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
 {
     static datetime s_cachedStart = 0;
@@ -113,7 +99,7 @@ bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
     static datetime s_cachedBarTime = 0;
 
     int currentPeriod = GetCachedPeriod();
-    datetime bar0Time = GetZoneBarTime(0);
+    datetime bar0Time = iTime(_Symbol, _Period, 0);
 
     // Return cached result if same period and same bar
     if(s_cachedPeriod == currentPeriod && bar0Time > 0 && bar0Time == s_cachedBarTime &&
@@ -130,7 +116,7 @@ bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
         int recheck = Bars(_Symbol, _Period);
         if(recheck != safeBars) {
             safeBars = recheck;
-            currentTime = (safeBars > 0) ? GetZoneBarTime(0) : 0;
+            currentTime = (safeBars > 0) ? iTime(_Symbol, _Period, 0) : 0;
         }
     }
     if(currentTime <= 0) currentTime = TimeCurrent();
@@ -142,8 +128,8 @@ bool CalculateZoneTimes(datetime &startTime, datetime &endTime)
         : MathMin(safeBars - 1, 5000);
     if(lookback < 0) lookback = 0;
 
-    startTime = GetZoneBarTime(lookback);
-    if(startTime <= 0) startTime = GetZoneBarTime(0);
+    startTime = iTime(_Symbol, _Period, lookback);
+    if(startTime <= 0) startTime = iTime(_Symbol, _Period, 0);
     if(startTime <= 0) return false;
 
     int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)GetCachedPeriod());

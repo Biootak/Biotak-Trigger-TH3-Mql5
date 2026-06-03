@@ -7,19 +7,6 @@
 #define BLOCK_MINUTES 30
 #define SANITY_CHECK_THRESHOLD_PERCENT 10.0
 #define HISTORY_FORMAT_VERSION 4
-static datetime s_bpmM30TimeBuf[];
-static bool     s_bpmM30TimeBufInit = false;
-
-datetime GetM30BarTime(int shift)
-{
-    if(!s_bpmM30TimeBufInit) {
-        ArrayResize(s_bpmM30TimeBuf, 1);
-        s_bpmM30TimeBufInit = true;
-    }
-    if(CopyTime(_Symbol, PERIOD_M30, shift, 1, s_bpmM30TimeBuf) <= 0)
-        return 0;
-    return s_bpmM30TimeBuf[0];
-}
 #ifdef ENABLE_DEBUG_LOGS
 void PrintRecentM30Bars(int count = 5)
 {
@@ -146,7 +133,8 @@ void EvictLeastRecentlyUsedSymbolState() {
     return newIndex;
 }string GetHistoryEntry(int index)
 {
-        int stateIdx = GetSafeSymbolStateIndex();
+        int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return "";
     if(index >= 0 && index < g_symbolStates[stateIdx].historyCount)
     {
         return g_symbolStates[stateIdx].basePriceHistory[index];
@@ -155,7 +143,8 @@ void EvictLeastRecentlyUsedSymbolState() {
 }
     void SetHistoryEntry(int index, string value)
 {
-        int stateIdx = GetSafeSymbolStateIndex();
+        int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return;
     if(index >= 0 && index < ArraySize(g_symbolStates[stateIdx].basePriceHistory))
     {
         g_symbolStates[stateIdx].basePriceHistory[index] = value;
@@ -163,12 +152,14 @@ void EvictLeastRecentlyUsedSymbolState() {
 }
     void ResizeHistory(int newSize)
 {
-        int stateIdx = GetSafeSymbolStateIndex();
+        int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, newSize);
 }
     void GetHistoryArray(string &output[])
 {
-        int stateIdx = GetSafeSymbolStateIndex();
+        int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) { ArrayResize(output, 0); return; }
     int count = g_symbolStates[stateIdx].historyCount;
     ArrayResize(output, count);
     for(int i = 0; i < count; i++)
@@ -178,7 +169,8 @@ void EvictLeastRecentlyUsedSymbolState() {
 }
     void SetHistoryArray(string &inputArray[], int count)
 {
-        int stateIdx = GetSafeSymbolStateIndex();
+        int stateIdx = GetCachedSymbolStateIndex();
+    if(stateIdx < 0) return;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, count);
     for(int i = 0; i < count; i++)
     {
@@ -203,60 +195,27 @@ int GetCachedSymbolStateIndex() {
 
 //+------------------------------------------------------------------+
 //| CRITICAL FIX: Safe symbol state index with crash prevention      |
-//|                                                                    |
-//| The 7 g_* macros below expand to g_symbolStates[GetSafe...()].x  |
-//| and run 50+ times per tick. They MUST always receive a valid      |
-//| index. This function is the single source of truth for state     |
-//| index safety in the entire project.                               |
-//|                                                                    |
-//| Recovery ladder (evaluated top-down, first success wins):          |
-//|   1. Cache hit for current symbol  → return cached index          |
-//|   2. Refresh via GetSymbolStateIndex → return new index           |
-//|   3. State limit hit               → evict LRU, retry once        |
-//|   4. Empty array                   → force-create one state       |
-//|   5. All paths exhausted           → log FATAL, return 0          |
-//|                                                                    |
-//| Path 5 is the last-resort safety net. Reaching it requires a      |
-//| memory allocation failure (ArrayResize returns != 1). At that     |
-//| point the system is in an unrecoverable state; the indicator     |
-//| cannot function and the terminal will be unstable regardless of   |
-//| what we return. We log FATAL and return 0 so that, IF the array   |
-//| happens to be non-empty (e.g. partially resized), we access an   |
-//| existing element rather than g_symbolStates[-1] which would be   |
-//| guaranteed UB.                                                     |
+//| GetCachedSymbolStateIndex() can return -1 when:                  |
+//|   - Symbol state limit reached                                   |
+//|   - Array resize fails                                           |
+//|   - Corrupted state count                                        |
+//| Without this guard, macros expand to g_symbolStates[-1] → crash  |
 //+------------------------------------------------------------------+
 int GetSafeSymbolStateIndex() {
-    //--- Path 1: cache hit
-    if(_g_cachedStateIdx >= 0
-       && _g_cachedStateIdx < g_symbolStateCount
-       && _g_cachedStateSymbol == _Symbol) {
-        return _g_cachedStateIdx;
+    int idx = GetCachedSymbolStateIndex();
+    if(idx >= 0 && idx < g_symbolStateCount) {
+        return idx;
     }
-
-    //--- Cache miss: invalidate and refresh
+    // Force-create a state entry rather than crash
     _g_cachedStateIdx = -1;
     _g_cachedStateSymbol = "";
-    int idx = GetSymbolStateIndex();
+    idx = GetSymbolStateIndex();
     if(idx >= 0 && idx < g_symbolStateCount) {
         _g_cachedStateIdx = idx;
         _g_cachedStateSymbol = _Symbol;
         return idx;
     }
-
-    //--- Path 3: GetSymbolStateIndex failed (likely MAX_SYMBOL_STATES hit).
-    //    Evict the LRU entry and retry once before giving up.
-    if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
-        EvictLeastRecentlyUsedSymbolState();
-        idx = GetSymbolStateIndex();
-        if(idx >= 0 && idx < g_symbolStateCount) {
-            _g_cachedStateIdx = idx;
-            _g_cachedStateSymbol = _Symbol;
-            _LOG_GATE_W Print("[W][DATA] GetSafeSymbolStateIndex: recovered after LRU eviction");
-            return idx;
-        }
-    }
-
-    //--- Path 4: state array is empty — force-create one for the current symbol
+    // Last resort: ensure at least one state exists
     if(g_symbolStateCount == 0) {
         if(ArrayResize(g_symbolStates, 1) == 1) {
             g_symbolStates[0].symbol = _Symbol;
@@ -276,13 +235,13 @@ int GetSafeSymbolStateIndex() {
             return 0;
         }
     }
-
-    //--- Path 5: all recovery paths exhausted. See header comment.
+    // Absolute fallback: return 0 if any state exists
     if(g_symbolStateCount > 0) {
-        _LOG_GATE_E Print("[E][DATA] FATAL: state recovery failed, using shared index 0 for symbol ", _Symbol);
+        _LOG_GATE_E Print("[E][DATA] CRITICAL: Using fallback state index 0 for symbol ", _Symbol);
         return 0;
     }
-    _LOG_GATE_E Print("[F][DATA] FATAL: cannot create symbol state — memory allocation failed for ", _Symbol);
+    // This should never happen but prevents -1 from propagating
+    _LOG_GATE_E Print("[E][DATA] FATAL: Cannot create symbol state - system in unrecoverable state");
     return 0;
 }
 
@@ -595,7 +554,7 @@ bool ValidateRestoredBasePrice(const double restoredPrice, const double currentB
 }
     int FindLastM1CandleInBlock(const datetime blockStart, const datetime blockEnd)
 {
-        int totalM1Bars = Bars(_Symbol, PERIOD_M1);
+        int totalM1Bars = iBars(_Symbol, PERIOD_M1);
     if(totalM1Bars <= 0)
     {
         _LOG_GATE_D Print("[D][DATA] [BasePriceManager] FindLastM1CandleInBlock() - No M1 bars available");
@@ -840,7 +799,7 @@ string ExtractTimeBlock(const string &entry)
     g_referenceM1Power = 0.0;
     }
     int m30BarIdx = 1;
-    datetime m30BarTime = GetM30BarTime(m30BarIdx);
+    datetime m30BarTime = iTime(_Symbol, PERIOD_M30, m30BarIdx);
     double newBasePrice = iClose(_Symbol, PERIOD_M30, m30BarIdx);
     if(m30BarTime == 0)
     {
@@ -1018,7 +977,7 @@ string ExtractTimeBlock(const string &entry)
     missingDataCount++;
     continue;
         }
-    datetime m30BarTime = GetM30BarTime(m30BarIdx);
+    datetime m30BarTime = iTime(_Symbol, PERIOD_M30, m30BarIdx);
     #ifdef ENABLE_DEBUG_LOGS
         Print("[D][DATA] [BasePriceManager] Block ", blockTimeStr,
               " | M30 Bar: ", TimeToString(m30BarTime, TIME_MINUTES),
@@ -1244,7 +1203,7 @@ void SaveBasePriceHistoryToFile()
     FileWriteString(fileHandle, "=== RECENT M30 BARS (Last 5 completed bars) ===\n");
     for(int i = 1; i <= 5; i++)
     {
-        datetime barTime = GetM30BarTime(i);
+        datetime barTime = iTime(_Symbol, PERIOD_M30, i);
     double barClose = iClose(_Symbol, PERIOD_M30, i);
     datetime barTimeGMT = ConvertServerToGMT(barTime);
     if(barTime > 0)

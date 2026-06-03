@@ -6,7 +6,7 @@ bool UpdateHistoricalValues() {
     if(currentTime - g_lastHistoricalUpdate < SECONDS_PER_HOUR && g_initialized) return true;
     double highArray[], lowArray[];
     int totalBars = inpHistoricalPeriods == 0 ?
-                   Bars(_Symbol, inpHistoricalTimeframe) :
+                   iBars(_Symbol, inpHistoricalTimeframe) :
                    inpHistoricalPeriods;
     if(totalBars <= 0) return false;
     if(ArrayResize(highArray, totalBars) != totalBars ||
@@ -42,7 +42,7 @@ bool UpdateHistoricalValues() {
         // iClose/iOpen/iHigh/iLow return 0.0 (not EMPTY_VALUE), which passes through
         // the caller's EMPTY_VALUE check, causing g_dailyClosePriceForTH=0.0
         // and persistent silent failure (no levels drawn until manual reload).
-        if(Bars(_Symbol, PERIOD_D1) < 2) {
+        if(iBars(_Symbol, PERIOD_D1) < 2) {
             // D1 data not ready — don't cache, let next call retry
             return 0.0;
         }
