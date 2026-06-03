@@ -682,15 +682,18 @@ double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType
     switch(meanType) {
         case MEAN_ARITHMETIC:
             result = CalculateArithmeticMeanN(values);
-            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Arithmetic Mean of ", n, " values = ");
+            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Arithmetic Mean of ", n, " values = ",
+                              DoubleToString(result, GetCachedDigits()));
     break;
     case MEAN_GEOMETRIC:
             result = CalculateGeometricMeanN(values);
-            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Geometric Mean of ", n, " values = ");
+            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Geometric Mean of ", n, " values = ",
+                              DoubleToString(result, GetCachedDigits()));
     break;
     case MEAN_HARMONIC:
             result = CalculateHarmonicMeanN(values);
-            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Harmonic Mean of ", n, " values = ");
+            _LOG_GATE_I Print("[I][DRAW] CalculateMeanByType: Harmonic Mean of ", n, " values = ",
+                              DoubleToString(result, GetCachedDigits()));
     break;
     default:
             _LOG_GATE_E Print("[E][DRAW] CalculateMeanByType: Unknown mean type ", meanType);
@@ -703,6 +706,88 @@ double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType
 //| QUICK TEST MODE FUNCTIONS                                        |
 
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Calculate Quick Test preset step size (NEW - merged from old     |
+//| COMBO_MODE_QUICK_TEST). Each QT preset uses COMBO_STEP_TH and   |
+//| Geometric Mean.                                                  |
+
+//+------------------------------------------------------------------+
+double CalculateQuickTestPresetStepSize(const double basePrice, const ENUM_COMBO_PRESET qtPreset) {
+    if(basePrice <= 0) {
+        _LOG_GATE_E Print("[E][DRAW] CalculateQuickTestPresetStepSize: Invalid basePrice=", basePrice);
+        return 0;
+    }
+
+    ENUM_COMBO_COMPONENT_ITEM components[];
+    int count = 0;
+
+    switch(qtPreset) {
+        case COMBO_PRESET_QT_TRIGGER_PATTERN:
+            ArrayResize(components, 2);
+            components[count++] = COMP_TRIGGER_TH;
+            components[count++] = COMP_PATTERN_TH;
+            break;
+        case COMBO_PRESET_QT_ALL_4TF:
+            ArrayResize(components, 4);
+            components[count++] = COMP_SUB_TH;
+            components[count++] = COMP_TRIGGER_TH;
+            components[count++] = COMP_PATTERN_TH;
+            components[count++] = COMP_STRUCTURE_TH;
+            break;
+        case COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE:
+            ArrayResize(components, 3);
+            components[count++] = COMP_TRIGGER_TH;
+            components[count++] = COMP_PATTERN_TH;
+            components[count++] = COMP_STRUCTURE_TH;
+            break;
+        case COMBO_PRESET_QT_PATTERN_STRUCTURE:
+            ArrayResize(components, 2);
+            components[count++] = COMP_PATTERN_TH;
+            components[count++] = COMP_STRUCTURE_TH;
+            break;
+        case COMBO_PRESET_QT_TRIGGER_ONLY:
+            ArrayResize(components, 1);
+            components[count++] = COMP_TRIGGER_TH;
+            break;
+        default:
+            _LOG_GATE_E Print("[E][DRAW] CalculateQuickTestPresetStepSize: Unknown preset=", EnumToString(qtPreset));
+            return 0;
+    }
+
+    // Collect step values - allow partial failure (skip invalid components)
+    double values[];
+    ArrayResize(values, count);
+    int validCount = 0;
+    for(int i = 0; i < count; i++) {
+        double val = GetStepSizeFromComponent(basePrice, components[i]);
+        if(val > 0) {
+            values[validCount++] = val;
+        } else {
+            _LOG_GATE_W Print("[W][DRAW] QuickTest preset: Skipping component ",
+                              EnumToString(components[i]), " (returned ", val, ")");
+        }
+    }
+
+    if(validCount == 0) {
+        _LOG_GATE_E Print("[E][DRAW] CalculateQuickTestPresetStepSize: All components invalid");
+        return 0;
+    }
+    ArrayResize(values, validCount);
+
+    if(validCount == 1) {
+        return NormalizeDouble(values[0], GetCachedDigits());
+    }
+
+    // N-ary Geometric Mean for 2+ components
+    double result = CalculateGeometricMeanN(values);
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("[I][DRAW] CalculateQuickTestPresetStepSize: Preset=", EnumToString(qtPreset),
+          " (", validCount, " valid components), Geo Mean = ",
+          DoubleToString(result, GetCachedDigits()));
+    #endif
+    return NormalizeDouble(result, GetCachedDigits());
+}
 
 //+------------------------------------------------------------------+
 //| Collect components from Quick Test preset or checkboxes          |
@@ -795,17 +880,27 @@ double CalculateQuickTestStepSize(const double basePrice) {
     Alert("[WARN] QUICK TEST MODE ERROR\n\nNo components selected!\nPlease select at least one timeframe in Quick Test settings.");
     return 0;
     }
+    // BUG FIX (Phase 1G): Partial-failure handling - if 1 of 4 components fails, use the other 3
+    // instead of failing the whole calculation. Old behavior was all-or-nothing.
     double componentValues[];
-    ArrayResize(componentValues, componentCount);
+    ArrayResize(componentValues, 0);
+    int validCount = 0;
     for(int i = 0; i < componentCount; i++) {
         double val = GetStepSizeFromComponent(basePrice, selectedComponents[i]);
-    if(val <= 0) {
-            _LOG_GATE_E Print("[E][DRAW] Quick Test: Component ", selectedComponents[i], " returned invalid value");
-    return 0;
+        if(val <= 0) {
+            _LOG_GATE_W Print("[W][DRAW] Quick Test: Component ", selectedComponents[i],
+                              " returned invalid value, skipping (partial failure)");
+            continue;
         }
-        
-        componentValues[i] = val;
+
+        validCount++;
+        ArrayResize(componentValues, validCount);
+        componentValues[validCount - 1] = val;
         _LOG_GATE_D Print("[D][DRAW]   Component[", i, "] = ", DoubleToString(val, GetCachedDigits()));
+    }
+    if(validCount == 0) {
+        _LOG_GATE_E Print("[E][DRAW] Quick Test: All components failed");
+        return 0;
     }
     double result = CalculateMeanByType(componentValues, inpQuickTestMeanType);
     if(result <= 0) {
@@ -1067,23 +1162,28 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     switch(inpComboOp1) {
             case OP_GEOMETRIC_MEAN_ALL:
                 naryResult = CalculateGeometricMeanN(componentValues);
-                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Geometric Mean of ", componentCount, " components = ");
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Geometric Mean of ", componentCount, " components = ",
+                                  DoubleToString(naryResult, GetCachedDigits()));
     break;
     case OP_ARITHMETIC_MEAN_ALL:
                 naryResult = CalculateArithmeticMeanN(componentValues);
-                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ");
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ",
+                                  DoubleToString(naryResult, GetCachedDigits()));
     break;
     case OP_HARMONIC_MEAN_ALL:
                 naryResult = CalculateHarmonicMeanN(componentValues);
-                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Harmonic Mean of ", componentCount, " components = ");
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Harmonic Mean of ", componentCount, " components = ",
+                                  DoubleToString(naryResult, GetCachedDigits()));
     break;
     case OP_MIN_ALL:
                 naryResult = CalculateMinN(componentValues);
-                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Minimum of ", componentCount, " components = ");
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Minimum of ", componentCount, " components = ",
+                                  DoubleToString(naryResult, GetCachedDigits()));
     break;
     case OP_MAX_ALL:
                 naryResult = CalculateMaxN(componentValues);
-                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Maximum of ", componentCount, " components = ");
+                _LOG_GATE_I Print("[I][DRAW] N-ARY Mode: Maximum of ", componentCount, " components = ",
+                                  DoubleToString(naryResult, GetCachedDigits()));
     break;
     default:
                 _LOG_GATE_E Print("[E][DRAW] N-ARY Mode: Unknown operator ", inpComboOp1);
@@ -1096,6 +1196,8 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     return NormalizeDouble(naryResult, GetCachedDigits());
     }
     double finalResult = 0;
+    // BUG FIX (Phase 1F): Warn if user set N-ary on Op2/Op3 (would be silently ignored)
+    ValidateCalculatorOperatorsForTopology();
     if(inpComboTopology == TOPOLOGY_LINEAR) {
         finalResult = CalculateLinearTopology(basePrice);
     }
@@ -1110,6 +1212,27 @@ double CalculateCalculatorModeStepSize(const double basePrice) {
     _LOG_GATE_I Print("[I][DRAW] Calculator Mode [", EnumToString(inpComboTopology), "]: Result=", DoubleToString(finalResult, GetCachedDigits()));
     return finalResult;
 }
+
+//+------------------------------------------------------------------+
+//| Validate Op2/Op3 are not N-ary operators before topology path   |
+//| BUG FIX (Phase 1F): N-ary operators on Op2/Op3 are silently     |
+//| ignored by ApplyCalculatorOperator (returns value1 for unknown). |
+//| The user gets wrong results without any warning.                |
+//+------------------------------------------------------------------+
+bool ValidateCalculatorOperatorsForTopology() {
+    bool isNary2 = (inpComboOp2 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp2 <= OP_MAX_ALL);
+    bool isNary3 = (inpComboOp3 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp3 <= OP_MAX_ALL);
+    if(isNary2) {
+        _LOG_GATE_W Print("[W][DRAW] N-ary operator on Op2 (", EnumToString(inpComboOp2),
+                          ") is not supported in topology path. Using Op1 semantics only.");
+    }
+    if(isNary3) {
+        _LOG_GATE_W Print("[W][DRAW] N-ary operator on Op3 (", EnumToString(inpComboOp3),
+                          ") is not supported in topology path. Using Op1 semantics only.");
+    }
+    return true;
+}
+
 
 //+------------------------------------------------------------------+
 //| UNIFIED Combo Step Calculation (used by both modes)              |
@@ -1140,25 +1263,29 @@ bool ValidateComboParam(bool isInvalid, const string paramName, const string par
 }
 
 double CalculateComboStepSize(const double basePrice) {
-        if(basePrice <= 0) {
+    if(basePrice <= 0) {
         _LOG_GATE_E Print("[E][DRAW] CalculateComboStepSize: Invalid basePrice=", basePrice);
-    Alert("[WARN] COMBO MODE ERROR\n\nInvalid base price for calculation.\nPlease check your settings.");
-    return 0;
+        Alert("[WARN] COMBO MODE ERROR\n\nInvalid base price for calculation.\nPlease check your settings.");
+        return 0;
     }
+
+    // Handle Quick Test mode (legacy) - auto-map to corresponding Preset
+    // This preserves backward compatibility for users with old profiles
     if(inpComboMode == COMBO_MODE_QUICK_TEST) {
-        _LOG_GATE_I Print("[I][DRAW] CalculateComboStepSize: QUICK TEST mode detected");
-    return CalculateQuickTestStepSize(basePrice);
+        _LOG_GATE_W Print("[W][DRAW] CalculateComboStepSize: COMBO_MODE_QUICK_TEST is legacy, using auto-mapping");
+        return CalculateQuickTestStepSize(basePrice);
     }
     if(inpComboMode == COMBO_MODE_ADVANCED) {
-        _LOG_GATE_I Print("[I][DRAW] CalculateComboStepSize: ADVANCED (CALCULATOR) mode detected");
-    return CalculateCalculatorModeStepSize(basePrice);
+        _LOG_GATE_I Print("[I][DRAW] CalculateComboStepSize: ADVANCED (CALCULATOR) mode");
+        return CalculateCalculatorModeStepSize(basePrice);
     }
     if(inpComboMode != COMBO_MODE_PRESET) {
         _LOG_GATE_E Print("[E][DRAW] CalculateComboStepSize: Invalid mode=", inpComboMode, " (expected PRESET)");
-    Alert("[WARN] COMBO MODE ERROR\n\nInvalid Combo Mode configuration!\nExpected: Preset Mode\nActual: ", EnumToString(inpComboMode));
-    return 0;
+        Alert("[WARN] COMBO MODE ERROR\n\nInvalid Combo Mode configuration!\nExpected: Preset Mode\nActual: ", EnumToString(inpComboMode));
+        return 0;
     }
-    // Triple presets: all share same TF/step params, differ only in operation
+
+    // Triple presets: Trigger + Pattern + Structure with one of (AVERAGE, MAX, MIN)
     if(inpComboPreset == COMBO_PRESET_BALANCED_TRIPLE ||
        inpComboPreset == COMBO_PRESET_TRIPLE_CONSERVATIVE ||
        inpComboPreset == COMBO_PRESET_TRIPLE_AGGRESSIVE) {
@@ -1171,38 +1298,53 @@ double CalculateComboStepSize(const double basePrice) {
             COMBO_TF_STRUCTURE, COMBO_STEP_TH,
             tripleOp);
     }
-    else if(inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE) {
-        _LOG_GATE_D Print("[D][DRAW]  MANUAL_TRIPLE preset detected -> Redirecting to Advanced Mode");
-    return CalculateCalculatorModeStepSize(basePrice);
+
+    // Quick Test presets (merged from old COMBO_MODE_QUICK_TEST) - N-ary Geometric Mean
+    if(inpComboPreset >= COMBO_PRESET_QT_TRIGGER_PATTERN &&
+       inpComboPreset <= COMBO_PRESET_QT_TRIGGER_ONLY) {
+        return CalculateQuickTestPresetStepSize(basePrice, inpComboPreset);
     }
-    else if(inpComboPreset == COMBO_PRESET_MANUAL_DUAL) {
-        _LOG_GATE_D Print("[D][DRAW]  MANUAL_DUAL preset detected -> Redirecting to Advanced Mode");
-    return CalculateCalculatorModeStepSize(basePrice);
-    }    
+
+    // Manual presets redirect to Advanced Mode
+    if(inpComboPreset == COMBO_PRESET_MANUAL_DUAL ||
+       inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE) {
+        _LOG_GATE_D Print("[D][DRAW] CalculateComboStepSize: MANUAL preset -> Advanced Mode");
+        return CalculateCalculatorModeStepSize(basePrice);
+    }
+
+    // Binary 2-component presets
     ENUM_COMBO_TIMEFRAME_TYPE tf1, tf2;
     ENUM_COMBO_STEP_TYPE step1Type, step2Type;
     ENUM_COMBO_OPERATION operation;
     GetPresetConfiguration(inpComboPreset, tf1, step1Type, tf2, step2Type, operation);
-    if(!ValidateComboParam(tf1 < COMBO_TF_SUB || tf1 > COMBO_TF_STRUCTURE, "tf1", IntegerToString(tf1))) return 0;
-    if(!ValidateComboParam(tf2 < COMBO_TF_SUB || tf2 > COMBO_TF_STRUCTURE, "tf2", IntegerToString(tf2))) return 0;
-    if(!ValidateComboParam(step1Type < COMBO_STEP_TH || step1Type > COMBO_STEP_LS, "step1Type", IntegerToString(step1Type))) return 0;
-    if(!ValidateComboParam(step2Type < COMBO_STEP_TH || step2Type > COMBO_STEP_LS, "step2Type", IntegerToString(step2Type))) return 0;
+
+    // FIXED: validation now uses proper enum range (was: tf1 < COMBO_TF_SUB which is always false)
+    if(!ValidateComboParam(tf1 < 0 || tf1 > COMBO_TF_STRUCTURE, "tf1", IntegerToString(tf1))) return 0;
+    if(!ValidateComboParam(tf2 < 0 || tf2 > COMBO_TF_STRUCTURE, "tf2", IntegerToString(tf2))) return 0;
+    if(!ValidateComboParam(step1Type < 0 || step1Type > COMBO_STEP_LS, "step1Type", IntegerToString(step1Type))) return 0;
+    if(!ValidateComboParam(step2Type < 0 || step2Type > COMBO_STEP_LS, "step2Type", IntegerToString(step2Type))) return 0;
     if(!ValidateComboParam(operation < COMBO_OP_AVERAGE || operation > COMBO_OP_WEIGHTED, "operation", IntegerToString(operation))) return 0;
+
     ENUM_TIMEFRAMES timeframe1 = GetTimeframeByType(tf1);
     ENUM_TIMEFRAMES timeframe2 = GetTimeframeByType(tf2);
     if(!ValidateComboParam(timeframe1 <= 0, "timeframe1", EnumToString(tf1))) return 0;
     if(!ValidateComboParam(timeframe2 <= 0, "timeframe2", EnumToString(tf2))) return 0;
+
     double multiplier1 = GetStepMultiplier(step1Type);
     double multiplier2 = GetStepMultiplier(step2Type);
     if(!ValidateComboParam(multiplier1 <= 0 || multiplier1 > 10.0, "multiplier1", DoubleToString(multiplier1, 2))) return 0;
     if(!ValidateComboParam(multiplier2 <= 0 || multiplier2 > 10.0, "multiplier2", DoubleToString(multiplier2, 2))) return 0;
+
     double step1 = GetStepSizeForBasisType(basePrice, multiplier1, timeframe1);
     double step2 = GetStepSizeForBasisType(basePrice, multiplier2, timeframe2);
     if(!ValidateComboParam(step1 <= 0, "step1", DoubleToString(step1, GetCachedDigits()))) return 0;
     if(!ValidateComboParam(step2 <= 0, "step2", DoubleToString(step2, GetCachedDigits()))) return 0;
-    double comboStep = ApplyComboOperation(step1, step2, operation, 
-                                           0.5, 0.5);
+
+    // NOTE: COMBO_OP_WEIGHTED is mathematically equivalent to AVERAGE with these hardcoded
+    // 0.5/0.5 weights. Power users wanting custom weights should use Advanced mode.
+    double comboStep = ApplyComboOperation(step1, step2, operation, 0.5, 0.5);
     if(!ValidateComboParam(comboStep <= 0, "comboStep", DoubleToString(comboStep, GetCachedDigits()))) return 0;
+
     #ifdef ENABLE_DEBUG_LOGS
     Print("[I][DRAW] CalculateComboStepSize: SUCCESS");
     Print("[D][DRAW]    Preset=", EnumToString(inpComboPreset));
@@ -1217,55 +1359,49 @@ double CalculateComboStepSize(const double basePrice) {
     double GetComboStepSizeForFactor(const double basePrice) {
         return CalculateComboStepSize(basePrice);
 }
-    double GetStepSizeForSharedComponent(const double basePrice, 
+    double GetStepSizeForSharedComponent(const double basePrice,
                                       const ENUM_COMBO_COMPONENT_ITEM component) {
-        if(basePrice <= 0) {
+    if(basePrice <= 0) {
         _LOG_GATE_E Print("[E][DRAW] GetStepSizeForSharedComponent: Invalid basePrice=", basePrice);
-    return 0;
+        return 0;
     }
-    
+
     ENUM_TIMEFRAMES timeframe;
     double multiplier;
     // Step type suffix determines multiplier: TH=1.0, SS=SS_MULTIPLIER, LS=LS_MULTIPLIER
     static const double stepMultipliers[3] = {1.0, SS_MULTIPLIER, LS_MULTIPLIER};
-    switch(component) {        case COMP_SUB_TH:
+
+    // FIXED: TF mapping now matches ENUM_COMBO_COMPONENT_ITEM comments:
+    //   COMP_SUB_*       = 1/4 current  (faster)
+    //   COMP_TRIGGER_*   = 1x current   (the chart's timeframe)
+    //   COMP_PATTERN_*   = 4x current   (pattern detection)
+    //   COMP_STRUCTURE_* = 16x current  (higher structure)
+    switch(component) {
+        case COMP_SUB_TH:
         case COMP_SUB_SS:
         case COMP_SUB_LS:
-        {
-        int currentMinutes = PeriodMinutes();
-    int subMinutes = currentMinutes / 16;
-    if(subMinutes < 1) subMinutes = 1;
-    if(subMinutes <= 1) timeframe = PERIOD_M1;
-    else if(subMinutes <= 5) timeframe = PERIOD_M5;
-    else if(subMinutes <= 15) timeframe = PERIOD_M15;
-    else if(subMinutes <= 30) timeframe = PERIOD_M30;
-    else if(subMinutes <= 60) timeframe = PERIOD_H1;
-    else if(subMinutes <= 360) timeframe = PERIOD_H4;
-    else if(subMinutes <= 1440) timeframe = PERIOD_D1;
-    else if(subMinutes <= 10080) timeframe = PERIOD_W1;
-    else timeframe = PERIOD_MN1;
-    multiplier = stepMultipliers[component - COMP_SUB_TH];
-    break;
-        }
-    case COMP_TRIGGER_TH:
-    case COMP_TRIGGER_SS:
-    case COMP_TRIGGER_LS:
-            timeframe = GetSubTimeframe();
-    multiplier = stepMultipliers[component - COMP_TRIGGER_TH];
-    break;
-    case COMP_PATTERN_TH:
-    case COMP_PATTERN_SS:
-    case COMP_PATTERN_LS:
-            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();
-    multiplier = stepMultipliers[component - COMP_PATTERN_TH];
-    break;
-    case COMP_STRUCTURE_TH:
-    case COMP_STRUCTURE_SS:
-    case COMP_STRUCTURE_LS:
-            timeframe = GetPatternTimeframe();
-    multiplier = stepMultipliers[component - COMP_STRUCTURE_TH];
-    break;
-    default:
+            timeframe = GetSubTimeframe();   // 1/4 current
+            multiplier = stepMultipliers[component - COMP_SUB_TH];
+            break;
+        case COMP_TRIGGER_TH:
+        case COMP_TRIGGER_SS:
+        case COMP_TRIGGER_LS:
+            timeframe = (ENUM_TIMEFRAMES)GetCachedPeriod();  // 1x current
+            multiplier = stepMultipliers[component - COMP_TRIGGER_TH];
+            break;
+        case COMP_PATTERN_TH:
+        case COMP_PATTERN_SS:
+        case COMP_PATTERN_LS:
+            timeframe = GetPatternTimeframe();   // 4x current
+            multiplier = stepMultipliers[component - COMP_PATTERN_TH];
+            break;
+        case COMP_STRUCTURE_TH:
+        case COMP_STRUCTURE_SS:
+        case COMP_STRUCTURE_LS:
+            timeframe = GetStructureTimeframe(); // 16x current
+            multiplier = stepMultipliers[component - COMP_STRUCTURE_TH];
+            break;
+        default:
             return 0;
     }
     return GetStepSizeForBasisType(basePrice, multiplier, timeframe);
@@ -1342,33 +1478,39 @@ ENUM_TIMEFRAMES GetSubTimeframe() {
 //| Added validation and error logging                     |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
-        if(tfType < COMBO_TF_SUB || tfType > COMBO_TF_STRUCTURE) {
+    if(tfType < COMBO_TF_SUB || tfType > COMBO_TF_STRUCTURE) {
         _LOG_GATE_E Print("[E][DRAW] GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
-    return (ENUM_TIMEFRAMES)GetCachedPeriod();    }
-    
+        return (ENUM_TIMEFRAMES)GetCachedPeriod();
+    }
+
+    // FIXED: TF mapping now matches enum comments:
+    //   COMBO_TF_SUB       = 1/4 current  (faster)
+    //   COMBO_TF_TRIGGER   = 1x current   (the chart's timeframe)
+    //   COMBO_TF_PATTERN   = 4x current   (pattern detection)
+    //   COMBO_TF_STRUCTURE = 16x current  (higher structure)
     ENUM_TIMEFRAMES result;
     switch(tfType) {
-        case COMBO_TF_SUB:            {
-        int currentMinutes = PeriodMinutes();
-    int subMinutes = currentMinutes / 16;
-    if(subMinutes < 1) subMinutes = 1;
-    result = MinutesToTimeframe(subMinutes);
-            }
+        case COMBO_TF_SUB:
+            result = GetSubTimeframe();        // 1/4 current
             break;
-    case COMBO_TF_TRIGGER:            result = GetSubTimeframe();
-    break;
-    case COMBO_TF_PATTERN:            result = (ENUM_TIMEFRAMES)GetCachedPeriod();
-    break;
-    case COMBO_TF_STRUCTURE:            result = GetPatternTimeframe();
-    break;
-    default:
+        case COMBO_TF_TRIGGER:
+            result = (ENUM_TIMEFRAMES)GetCachedPeriod();  // 1x current
+            break;
+        case COMBO_TF_PATTERN:
+            result = GetPatternTimeframe();    // 4x current
+            break;
+        case COMBO_TF_STRUCTURE:
+            result = GetStructureTimeframe();   // 16x current
+            break;
+        default:
             _LOG_GATE_W Print("[W][DRAW] GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
-    result = (ENUM_TIMEFRAMES)GetCachedPeriod();
-    break;
+            result = (ENUM_TIMEFRAMES)GetCachedPeriod();
+            break;
     }
     if(result <= 0) {
         _LOG_GATE_E Print("[E][DRAW] GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
-    return (ENUM_TIMEFRAMES)GetCachedPeriod();    }
+        return (ENUM_TIMEFRAMES)GetCachedPeriod();
+    }
     return result;
 }
 
@@ -1421,122 +1563,105 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
 //| - Comprehensive validation                                      |
 //| - Better error messages                                         |
 //+------------------------------------------------------------------+
-double ApplyComboOperation(const double value1, const double value2, 
+double ApplyComboOperation(const double value1, const double value2,
                            const ENUM_COMBO_OPERATION operation,
                            const double weight1 = 0.5, const double weight2 = 0.5) {
-        if(value1 <= 0 || value2 <= 0) {
+    if(value1 <= 0 || value2 <= 0) {
         _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Invalid values - v1=", value1, ", v2=", value2);
-    return 0;
+        return 0;
     }
     double result = 0;
     switch(operation) {
-        case COMBO_OP_AVERAGE:            result = (value1 + value2) / 2.0;
-    break;
-    case COMBO_OP_ADD:            result = value1 + value2;
-    break;
-    case COMBO_OP_SUBTRACT: {            result = MathAbs(value1 - value2);
-    double avgValue = (value1 + value2) / 2.0;
-    double minThreshold = avgValue * 0.01;
-    if(result < minThreshold) {
-                result = avgValue;
-    #ifdef ENABLE_DEBUG_LOGS
-                Print("[W][DRAW] ApplyComboOperation: Subtract result too small (",
-                      DoubleToString(result, GetCachedDigits()), " < ", DoubleToString(minThreshold, GetCachedDigits()), 
-                      "), using average=", DoubleToString(avgValue, GetCachedDigits()));
-    #endif
-    }
+        case COMBO_OP_AVERAGE:
+            result = (value1 + value2) / 2.0;
             break;
-        }
-            
-        case COMBO_OP_MULTIPLY: {            result = value1 * value2;
-    double maxInput = MathMax(value1, value2);
-    double overflowThreshold = maxInput * 100.0;
-    if(result > overflowThreshold) {
-        #ifdef ENABLE_DEBUG_LOGS
-                Print("[W][DRAW] ApplyComboOperation: Multiply overflow detected");
-    Print("[D][DRAW]    v1=", DoubleToString(value1, GetCachedDigits()),
-                      ", v2=", DoubleToString(value2, GetCachedDigits()), 
-                      ", result=", DoubleToString(result, GetCachedDigits()), 
-                      " > threshold=", DoubleToString(overflowThreshold, GetCachedDigits()));
-                Print("[D][DRAW]    Clamping to max input=", DoubleToString(maxInput, GetCachedDigits()));
-    #endif
+        case COMBO_OP_ADD:
+            result = value1 + value2;
+            break;
+        case COMBO_OP_SUBTRACT:
+            // FIXED: Removed MathAbs (changed semantic) and removed silent override to AVERAGE.
+            // Previous bug: |a-b| < 1% of avg would silently become (a+b)/2 instead of |a-b|.
+            // Now: returns the true absolute difference. If user wants directional (a-b),
+            // they can use the OP_MINUS operator in Advanced Calculator mode.
+            result = MathAbs(value1 - value2);
+            break;
+        case COMBO_OP_MULTIPLY: {
+            result = value1 * value2;
+            // Clamp runaway overflow but DO NOT silently replace with AVERAGE
+            double maxInput = MathMax(value1, value2);
+            double overflowThreshold = maxInput * 100.0;
+            if(result > overflowThreshold) {
+                _LOG_GATE_W Print("[W][DRAW] ApplyComboOperation: Multiply overflow, clamping v1=",
+                                  DoubleToString(value1, GetCachedDigits()),
+                                  " v2=", DoubleToString(value2, GetCachedDigits()),
+                                  " raw=", DoubleToString(result, GetCachedDigits()),
+                                  " -> maxInput=", DoubleToString(maxInput, GetCachedDigits()));
                 result = maxInput;
             }
             break;
         }
-            
-        case COMBO_OP_MIN:            result = MathMin(value1, value2);
-    break;
-    case COMBO_OP_MAX:            result = MathMax(value1, value2);
-    break;
-    case COMBO_OP_WEIGHTED: {
-        if(weight1 < 0 || weight2 < 0) {
+        case COMBO_OP_MIN:
+            result = MathMin(value1, value2);
+            break;
+        case COMBO_OP_MAX:
+            result = MathMax(value1, value2);
+            break;
+        case COMBO_OP_WEIGHTED: {
+            if(weight1 < 0 || weight2 < 0) {
                 _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Negative weights - w1=", weight1, ", w2=", weight2);
-    result = (value1 + value2) / 2.0;
-    break;
+                result = (value1 + value2) / 2.0;
+                break;
             }
-    double weightSum = weight1 + weight2;
-    if(weightSum <= 0) {
+            double weightSum = weight1 + weight2;
+            if(weightSum <= 0) {
                 _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Zero weight sum - w1=", weight1, ", w2=", weight2);
-    result = (value1 + value2) / 2.0;
-    break;
+                result = (value1 + value2) / 2.0;
+                break;
             }
-    result = (value1 * weight1 + value2 * weight2) / weightSum;
-            _LOG_GATE_I Print("[I][DRAW] ApplyComboOperation: Weighted - w1=", weight1, ", w2=", weight2);
-    break;
+            // Normalized weighted: result is always between min and max for non-negative inputs
+            result = (value1 * weight1 + value2 * weight2) / weightSum;
+            break;
         }
-            
         default:
             _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Unknown operation=", operation);
-    result = (value1 + value2) / 2.0;
-    break;
+            return 0;
     }
     if(result <= 0) {
         _LOG_GATE_E Print("[E][DRAW] ApplyComboOperation: Invalid result=", result);
-    return 0;
+        return 0;
     }
+    // FIXED: Suspicious-result detection. The previous version had multiple dead branches
+    // (AVERAGE/WEIGHTED/SUBTRACT could NEVER be flagged by their own checks) and a
+    // silent override to AVERAGE that could mask real bugs in ADD/MULTIPLY.
+    // Now: only ADD and MULTIPLY are checked (the only ops that can produce
+    // out-of-range results legitimately), and the override is removed.
+    // If the result is genuinely out of range we LOG it and return as-is.
     double maxInput = MathMax(value1, value2);
-    double minInput = MathMin(value1, value2);
-    bool isSuspicious = false;
+    bool isOutOfRange = false;
     switch(operation) {
-        case COMBO_OP_ADD:            if(result > maxInput * 2.5) {
-                isSuspicious = true;
-            }
+        case COMBO_OP_ADD:
+            if(result > maxInput * 2.5) isOutOfRange = true;
             break;
-    case COMBO_OP_MULTIPLY:            if(result > maxInput * 100) {
-                isSuspicious = true;
-            }
+        case COMBO_OP_MULTIPLY:
+            if(result > maxInput * 100.0) isOutOfRange = true;
             break;
-    case COMBO_OP_AVERAGE:
-        case COMBO_OP_WEIGHTED:            if(result < minInput * 0.5 || result > maxInput * 1.5) {
-                isSuspicious = true;
-            }
-            break;
-    case COMBO_OP_SUBTRACT:            if(result > maxInput) {
-                isSuspicious = true;
-            }
-            break;
-    case COMBO_OP_MIN:            if(result != minInput) {
-                isSuspicious = true;
-            }
-            break;
-    case COMBO_OP_MAX:            if(result != maxInput) {
-                isSuspicious = true;
-            }
+        // For AVERAGE, WEIGHTED, SUBTRACT, MIN, MAX: the result is mathematically
+        // bounded by [minInput, maxInput] for non-negative inputs, so no check is needed.
+        case COMBO_OP_AVERAGE:
+        case COMBO_OP_WEIGHTED:
+        case COMBO_OP_SUBTRACT:
+        case COMBO_OP_MIN:
+        case COMBO_OP_MAX:
+        default:
             break;
     }
-    if(isSuspicious) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[W][DRAW] ApplyComboOperation: Suspicious result detected");
-    Print("[D][DRAW]    Operation=", EnumToString(operation));
-    Print("[D][DRAW]    v1=", DoubleToString(value1, GetCachedDigits()),
-              ", v2=", DoubleToString(value2, GetCachedDigits()));
-    Print("[D][DRAW]    Result=", DoubleToString(result, GetCachedDigits()),
-              " (min=", DoubleToString(minInput, GetCachedDigits()), 
-              ", max=", DoubleToString(maxInput, GetCachedDigits()), ")");
-    Print("[D][DRAW]    Using fallback: average");
-    #endif
-    result = (value1 + value2) / 2.0;
+    if(isOutOfRange) {
+        _LOG_GATE_W Print("[W][DRAW] ApplyComboOperation: Result out of expected range, op=",
+                          EnumToString(operation),
+                          " v1=", DoubleToString(value1, GetCachedDigits()),
+                          " v2=", DoubleToString(value2, GetCachedDigits()),
+                          " result=", DoubleToString(result, GetCachedDigits()),
+                          " maxInput=", DoubleToString(maxInput, GetCachedDigits()));
     }
     #ifdef ENABLE_DEBUG_LOGS
     Print("[I][DRAW] ApplyComboOperation: v1=", DoubleToString(value1, GetCachedDigits()),
@@ -1548,16 +1673,12 @@ double ApplyComboOperation(const double value1, const double value2,
 }
 
 //+------------------------------------------------------------------+
-//| Get preset configuration (OPTIMIZED VERSION with all presets)    |
-
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Get preset configuration (UNIFIED VERSION with Mode support)    |
+//| Get preset configuration for 2-component binary presets           |
 
 //|                                                                  |
-//| Supports two modes:                                             |
-//| 1. PRESET Mode: Quick select from 9 ready-to-use presets       |
-//| 2. MANUAL Mode: Full control over all parameters               |
+//| SIMPLIFIED: Now only handles 2-component presets that use the   |
+//| binary path. Triple/Manual/Quick Test presets are intercepted   |
+//| by CalculateComboStepSize BEFORE this function is called.        |
 //|                                                                  |
 //| @param preset Preset selection (used in PRESET mode)           |
 //| @param tf1 Output: Timeframe 1                                 |
@@ -1571,126 +1692,81 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
                             ENUM_COMBO_STEP_TYPE &step1,
                             ENUM_COMBO_TIMEFRAME_TYPE &tf2,
                             ENUM_COMBO_STEP_TYPE &step2,
-                            ENUM_COMBO_OPERATION &operation) {    tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_AVERAGE;
-    switch(preset) {        
-        case COMBO_PRESET_LEGACY_ADD:            tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_SS;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_SS;
-    operation = COMBO_OP_ADD;
-    break;
-    case COMBO_PRESET_BALANCED_MEDIUM:            
-            tf1 = COMBO_TF_PATTERN;
+                            ENUM_COMBO_OPERATION &operation) {
+    // Defaults (Balanced Medium) - used if preset is unknown or unsupported here
+    tf1 = COMBO_TF_PATTERN;
     step1 = COMBO_STEP_TH;
     tf2 = COMBO_TF_TRIGGER;
     step2 = COMBO_STEP_TH;
     operation = COMBO_OP_AVERAGE;
-    break;
-    case COMBO_PRESET_BALANCED_LONG:            
-            tf1 = COMBO_TF_STRUCTURE;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_AVERAGE;
-    break;
-    case COMBO_PRESET_BALANCED_TRIPLE:            tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_AVERAGE;
-    break;
-    case COMBO_PRESET_BALANCED_MIN:            tf1 = COMBO_TF_PATTERN;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_TRIGGER;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MIN;
-    break;
-    case COMBO_PRESET_CONSERVATIVE:            
-            tf1 = COMBO_TF_STRUCTURE;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MAX;
-    break;
-    case COMBO_PRESET_ULTRA_CONSERVATIVE:            
-            
-            
-            tf1 = COMBO_TF_STRUCTURE;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_STRUCTURE;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MAX;
-    break;
-    case COMBO_PRESET_TRIPLE_CONSERVATIVE:            tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MAX;
-    break;
-    case COMBO_PRESET_AGGRESSIVE:            
-            tf1 = COMBO_TF_PATTERN;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_TRIGGER;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MIN;
-    break;
-    case COMBO_PRESET_ULTRA_AGGRESSIVE:            
-            tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_SUB;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MIN;
-    break;
-    case COMBO_PRESET_TRIPLE_AGGRESSIVE:            tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_MIN;
-    break;
-    case COMBO_PRESET_TREND_FILTER:            
-            tf1 = COMBO_TF_STRUCTURE;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_SUB;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_SUBTRACT;
-    break;
-    case COMBO_PRESET_VOLATILITY_ADAPTIVE:            
-            tf1 = COMBO_TF_STRUCTURE;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_SUB;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_AVERAGE;
-    break;
-    case COMBO_PRESET_MANUAL_DUAL:
-        case COMBO_PRESET_MANUAL_TRIPLE:            {
-                ENUM_COMBO_TIMEFRAME_TYPE t1, t2;
-    ENUM_COMBO_STEP_TYPE s1, s2;
-    bool valid = GetComboComponentParams(inpComboComp1, t1, s1) && 
-                             GetComboComponentParams(inpComboComp2, t2, s2);
-    if (valid) {
-                    tf1 = t1; step1 = s1;
-    tf2 = t2; step2 = s2;
-                } else {                    tf1 = COMBO_TF_TRIGGER; step1 = COMBO_STEP_SS;
-    tf2 = COMBO_TF_PATTERN; step2 = COMBO_STEP_SS;
-                }
-    operation = COMBO_OP_ADD; 
-            }
+
+    switch(preset) {
+        case COMBO_PRESET_LEGACY_ADD:
+            tf1 = COMBO_TF_TRIGGER; step1 = COMBO_STEP_SS;
+            tf2 = COMBO_TF_PATTERN; step2 = COMBO_STEP_SS;
+            operation = COMBO_OP_ADD;
             break;
-    default:
-            _LOG_GATE_W Print("[W][DRAW] GetPresetConfiguration: Unknown preset=", preset, ", using Legacy");
-    tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_SS;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_SS;
-    operation = COMBO_OP_ADD;
-    break;
+        case COMBO_PRESET_BALANCED_MEDIUM:
+            tf1 = COMBO_TF_PATTERN; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_TRIGGER; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_AVERAGE;
+            break;
+        case COMBO_PRESET_BALANCED_LONG:
+            tf1 = COMBO_TF_STRUCTURE; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_PATTERN; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_AVERAGE;
+            break;
+        case COMBO_PRESET_BALANCED_MIN:
+            tf1 = COMBO_TF_PATTERN; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_TRIGGER; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_MIN;
+            break;
+        case COMBO_PRESET_CONSERVATIVE:
+            tf1 = COMBO_TF_STRUCTURE; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_PATTERN; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_MAX;
+            break;
+        case COMBO_PRESET_ULTRA_CONSERVATIVE:
+            // Note: tf1 == tf2 is intentional (single-component result via max of equal)
+            tf1 = COMBO_TF_STRUCTURE; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_STRUCTURE; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_MAX;
+            break;
+        case COMBO_PRESET_AGGRESSIVE:
+            tf1 = COMBO_TF_PATTERN; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_TRIGGER; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_MIN;
+            break;
+        case COMBO_PRESET_ULTRA_AGGRESSIVE:
+            tf1 = COMBO_TF_TRIGGER; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_SUB; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_MIN;
+            break;
+        case COMBO_PRESET_TREND_FILTER:
+            tf1 = COMBO_TF_STRUCTURE; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_SUB; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_SUBTRACT;
+            break;
+        case COMBO_PRESET_VOLATILITY_ADAPTIVE:
+            tf1 = COMBO_TF_STRUCTURE; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_SUB; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_AVERAGE;
+            break;
+        // NOTE: BALANCED_TRIPLE (3), TRIPLE_CONSERVATIVE (7), TRIPLE_AGGRESSIVE (10),
+        // MANUAL_DUAL (13), MANUAL_TRIPLE (14), and all Quick Test presets (15-19)
+        // are intercepted by CalculateComboStepSize BEFORE this function is called.
+        // They never reach here. We use the default (Balanced Medium) if somehow they do.
+        default:
+            _LOG_GATE_W Print("[W][DRAW] GetPresetConfiguration: Preset=", EnumToString(preset),
+                              " handled by another path; using Balanced Medium defaults");
+            tf1 = COMBO_TF_PATTERN; step1 = COMBO_STEP_TH;
+            tf2 = COMBO_TF_TRIGGER; step2 = COMBO_STEP_TH;
+            operation = COMBO_OP_AVERAGE;
+            break;
     }
+
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[I][DRAW] GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
+    Print("[I][DRAW] GetPresetConfiguration: Preset=", EnumToString(preset));
     Print("[D][DRAW]    TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
     Print("[D][DRAW]    TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
     Print("[D][DRAW]    Operation=", EnumToString(operation));

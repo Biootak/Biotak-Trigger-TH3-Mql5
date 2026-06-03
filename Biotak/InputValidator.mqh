@@ -192,15 +192,30 @@ bool ValidateHotkeysUniqueAndSafe() {
     if(!ValidatePositive(inpABCDInfoFontSize, "ABCDInfoFontSize")) return INIT_PARAMETERS_INCORRECT;
     if(!ValidatePositive(inpModeLabelFontSize, "ModeLabelFontSize")) return INIT_PARAMETERS_INCORRECT;
 
-    // Combo validation
-    ValidateComboModeConfiguration();
+    // Combo validation (Phase 1I: now returns bool, validates enum ranges)
+    if(!ValidateComboModeConfiguration()) return INIT_PARAMETERS_INCORRECT;
 
     // Hotkeys (must be unique, 1-char, and not collide with reserved numeric keys)
     if(!ValidateHotkeysUniqueAndSafe()) return INIT_PARAMETERS_INCORRECT;
     _LOG_GATE_I Print("[I][INIT] All input validations passed");
     return INIT_SUCCEEDED;
 }
-    void ValidateComboModeConfiguration() {
+    // BUG FIX (Phase 1I): Return bool and validate enums instead of just logging.
+    // Also runs even when ENABLE_DEBUG_LOGS is off - critical validations must always run.
+    bool ValidateComboModeConfiguration() {
+        // Validate inpComboMode is in valid range
+        if(inpComboMode < COMBO_MODE_QUICK_TEST || inpComboMode > COMBO_MODE_ADVANCED) {
+            _LOG_GATE_E Print("[E][INIT] Invalid inpComboMode=", (int)inpComboMode,
+                              " (valid range: ", (int)COMBO_MODE_QUICK_TEST, "..", (int)COMBO_MODE_ADVANCED, ")");
+            return false;
+        }
+        // Validate inpComboPreset is in valid range
+        if(inpComboPreset < COMBO_PRESET_BALANCED_MEDIUM || inpComboPreset > COMBO_PRESET_QT_TRIGGER_ONLY) {
+            _LOG_GATE_E Print("[E][INIT] Invalid inpComboPreset=", (int)inpComboPreset,
+                              " (valid range: ", (int)COMBO_PRESET_BALANCED_MEDIUM, "..",
+                              (int)COMBO_PRESET_QT_TRIGGER_ONLY, ")");
+            return false;
+        }
         #ifdef ENABLE_DEBUG_LOGS
     string modeName;
     switch(inpComboMode) {
@@ -222,8 +237,18 @@ bool ValidateHotkeysUniqueAndSafe() {
     if(inpComboOp1 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp1 <= OP_MAX_ALL) {
             Print("[D][INIT] N-ARY operator detected: topology will be ignored");
         }
+        // BUG FIX (Phase 1F): Warn if N-ary on Op2/Op3 (would be silently ignored)
+        if(inpComboOp2 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp2 <= OP_MAX_ALL) {
+            Print("[W][INIT] WARNING: N-ary operator on Op2 (",
+                  EnumToString(inpComboOp2), ") is not supported in topology path");
+        }
+        if(inpComboOp3 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp3 <= OP_MAX_ALL) {
+            Print("[W][INIT] WARNING: N-ary operator on Op3 (",
+                  EnumToString(inpComboOp3), ") is not supported in topology path");
+        }
     }
     #endif
+        return true;
     }
 //+------------------------------------------------------------------+
 //| Sanitize filename (from InputValidationEnhanced.mqh)            |

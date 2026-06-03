@@ -386,52 +386,66 @@ enum ENUM_COMBO_STEP_TYPE {
 //| Preset Combinations (Common Use Cases) - OPTIMIZED FOR UX        |
 
 //|                                                                  |
-//| DESIGN PRINCIPLE: 80/20 Rule - 15 presets cover 98% of needs    |
+//| DESIGN PRINCIPLE: 80/20 Rule - 18 presets cover 98% of needs    |
 
 //|                                                                  |
 //| IMPORTANT: COMBO_PRESET_LEGACY_ADD is the default for backward  |
 //| compatibility with old Combo Step Mode (Component1 + Component2)|
+//|                                                                  |
+//| SIMPLIFIED UX: Quick Test presets (15-19) are exposed in the   |
+//| same list as regular presets, eliminating the Quick Test sub-   |
+//| mode dropdown. All Quick Test presets use TH step + Geometric   |
+//| mean (the most popular default from the old Quick Test mode).   |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_PRESET {
     // ═══════════════════════════════════════════════════════════════
-    
+    // LEGACY (kept for backward compatibility)
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_LEGACY_ADD = 0,            // Legacy: Trigger SS + Pattern SS (ADD)
-    
+
     // ═══════════════════════════════════════════════════════════════
-    
+    // BALANCED FAMILY
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_BALANCED_MEDIUM = 1,       // Balanced Medium: (Pattern + Trigger) / 2 [Most Popular]
     COMBO_PRESET_BALANCED_LONG = 2,         // Balanced Long: (Structure + Pattern) / 2
     COMBO_PRESET_BALANCED_TRIPLE = 3,       // Triple Balanced: (Trigger + Pattern + Structure) / 3
     COMBO_PRESET_BALANCED_MIN = 4,          // Balanced Min: min(Pattern, Trigger)
-    
+
     // ═══════════════════════════════════════════════════════════════
-    
+    // CONSERVATIVE FAMILY
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_CONSERVATIVE = 5,          // Conservative: max(Structure, Pattern)
     COMBO_PRESET_ULTRA_CONSERVATIVE = 6,    // Ultra Conservative: Structure TH
     COMBO_PRESET_TRIPLE_CONSERVATIVE = 7,   // Triple Conservative: max(Trigger, Pattern, Structure)
-    
+
     // ═══════════════════════════════════════════════════════════════
-    
+    // AGGRESSIVE FAMILY
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_AGGRESSIVE = 8,            // Aggressive: min(Pattern, Trigger)
     COMBO_PRESET_ULTRA_AGGRESSIVE = 9,      // Ultra Aggressive: min(Trigger, Sub)
     COMBO_PRESET_TRIPLE_AGGRESSIVE = 10,    // Triple Aggressive: min(Trigger, Pattern, Structure)
-    
+
     // ═══════════════════════════════════════════════════════════════
-    
+    // SPECIAL
     // ═══════════════════════════════════════════════════════════════
     COMBO_PRESET_TREND_FILTER = 11,         // Trend Filter: Structure - Sub
     COMBO_PRESET_VOLATILITY_ADAPTIVE = 12,  // Volatility: (Structure + Sub) / 2
-    
+
     // ═══════════════════════════════════════════════════════════════
-    
-    // These presets redirect to Advanced Mode for full control
+    // ADVANCED REDIRECTS (full manual control)
     // ═══════════════════════════════════════════════════════════════
-    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) -> Redirects to Advanced Mode
-    COMBO_PRESET_MANUAL_TRIPLE = 14         // Advanced Triple: User-defined (3 components) -> Redirects to Advanced Mode
+    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) -> Advanced Mode
+    COMBO_PRESET_MANUAL_TRIPLE = 14,        // Advanced Triple: User-defined (3 components) -> Advanced Mode
+
+    // ═══════════════════════════════════════════════════════════════
+    // QUICK TEST (merged from old COMBO_MODE_QUICK_TEST)
+    // All use COMBO_STEP_TH and Geometric Mean for consistency.
+    // ═══════════════════════════════════════════════════════════════
+    COMBO_PRESET_QT_TRIGGER_PATTERN = 15,           // QT: Trigger + Pattern, Geo Mean
+    COMBO_PRESET_QT_ALL_4TF = 16,                    // QT: Sub + Trigger + Pattern + Structure, Geo Mean
+    COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE = 17,  // QT: Trigger + Pattern + Structure, Geo Mean
+    COMBO_PRESET_QT_PATTERN_STRUCTURE = 18,          // QT: Pattern + Structure, Geo Mean
+    COMBO_PRESET_QT_TRIGGER_ONLY = 19                // QT: Trigger only
 };
 
 // Mode label duration options

@@ -128,6 +128,12 @@ string GetComboPresetName(const ENUM_COMBO_PRESET preset) {
     case COMBO_PRESET_VOLATILITY_ADAPTIVE:  return "Volatility Adaptive";
     case COMBO_PRESET_MANUAL_DUAL:          return "Manual Dual";
     case COMBO_PRESET_MANUAL_TRIPLE:        return "Manual Triple";
+    // Quick Test presets (merged from old COMBO_MODE_QUICK_TEST)
+    case COMBO_PRESET_QT_TRIGGER_PATTERN:           return "QT: Trigger + Pattern";
+    case COMBO_PRESET_QT_ALL_4TF:                   return "QT: All 4 TFs (Sub+Trig+Pat+Str)";
+    case COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE: return "QT: Trigger + Pattern + Structure";
+    case COMBO_PRESET_QT_PATTERN_STRUCTURE:         return "QT: Pattern + Structure";
+    case COMBO_PRESET_QT_TRIGGER_ONLY:              return "QT: Trigger Only";
     default:                                return "Unknown";
     }
 }
