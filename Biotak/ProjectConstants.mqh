@@ -152,6 +152,11 @@ struct FrequencyHistoryEntry {
 const int ZONE_EXTENSION_MULTIPLIER = 100;
 const int PERCENTAGE_TO_DECIMAL = 100;
 
+// UI / Layout
+// Approximate character width as a fraction of font size for text width estimation.
+// 0.6 is a reasonable average for proportional sans-serif fonts (Arial, Tahoma, ...).
+const double FONT_CHAR_WIDTH_FACTOR = 0.6;
+
 // Time
 const int SECONDS_PER_MINUTE = 60;
 const int SECONDS_PER_HOUR = 3600;

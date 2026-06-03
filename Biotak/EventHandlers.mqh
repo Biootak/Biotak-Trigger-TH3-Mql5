@@ -26,17 +26,17 @@ int OnInitHandler() {    InitializeGlobalCache();
     string thLabelsGvarName = "Biotak_THLabels_" + chartIdStr;
     if(GlobalVariableCheck(thLabelsGvarName)) {
         double gvarValue = GlobalVariableGet(thLabelsGvarName);
-    bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
-    bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-    if(isZero || isOne) {
+        bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
+        bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
+        if(isZero || isOne) {
             g_thLabelsMode = (int)gvarValue;
             g_thLabelsVisible = (g_thLabelsMode != 0);
         } else {
             _LOG_GATE_E Print("[E][GEN] OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting to default");
-    int defaultMode = (inpShowFractalTHs) ? 1 : 0;
-    GlobalVariableSet(thLabelsGvarName, (double)defaultMode);
-    g_thLabelsMode = defaultMode;
-    g_thLabelsVisible = (g_thLabelsMode != 0);
+            int defaultMode = (inpShowFractalTHs) ? 1 : 0;
+            GlobalVariableSet(thLabelsGvarName, (double)defaultMode);
+            g_thLabelsMode = defaultMode;
+            g_thLabelsVisible = (g_thLabelsMode != 0);
         }
     } else {
         int defaultMode = 0;
@@ -74,12 +74,12 @@ int OnInitHandler() {    InitializeGlobalCache();
         g_initialized=false;
     }
     g_calculatedOnce=false;
-    
+
     // Initialize ATR Adaptive Scaling system
     InitializeAdaptiveScaling();
-    
+
     g_dailyClosePriceForTH=GetPriceForPreviousDay(inpTHPriceType);
-    if(g_dailyClosePriceForTH==EMPTY_VALUE) {g_dailyClosePriceForTH=EMPTY_VALUE; Print("OnInit: GetPriceForPreviousDay failed, returning INIT_FAILED."); return INIT_FAILED;}
+    if(g_dailyClosePriceForTH==EMPTY_VALUE) {Print("OnInit: GetPriceForPreviousDay failed, returning INIT_FAILED."); return INIT_FAILED;}
     string symbolName = GetCachedSymbol();
     string gvarName = "Biotak_CustomPrice_" + symbolName;
     string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
@@ -87,22 +87,22 @@ int OnInitHandler() {    InitializeGlobalCache();
     double validatedCustomPrice = inpCustomTHStartPrice;
     if(validatedCustomPrice < 0.0) {
         _LOG_GATE_E Print("[E][GEN] Invalid custom price (negative): ", validatedCustomPrice);
-    validatedCustomPrice = 0.0;
+        validatedCustomPrice = 0.0;
     }
     if(validatedCustomPrice > 1000000.0) {
         _LOG_GATE_E Print("[E][GEN] Invalid custom price (too large): ", validatedCustomPrice);
-    validatedCustomPrice = 0.0;
+        validatedCustomPrice = 0.0;
     }
     {
         ResetLastError();
         double val = GlobalVariableGet(overrideFlagName);
-    g_customPriceKeyboardOverride = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? (bool)val : false;
+        g_customPriceKeyboardOverride = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? (bool)val : false;
     }
     double savedPrice;
     {
         ResetLastError();
         double val = GlobalVariableGet(gvarName);
-    savedPrice = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? val : 0.0;
+        savedPrice = (GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) ? val : 0.0;
     }
     #ifdef ENABLE_DEBUG_LOGS
     Print("[D][GEN] === Custom Price Debug (OnInit) ===");
@@ -110,30 +110,34 @@ int OnInitHandler() {    InitializeGlobalCache();
     Print("[D][GEN] savedPrice: ", savedPrice);
     Print("[D][GEN] override: ", g_customPriceKeyboardOverride);
     #endif
-    if(g_customPriceKeyboardOverride && savedPrice > 0.0) {        g_customTHStartPrice = savedPrice;
-    g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-    DEBUG_PRINTF("OnInit: Using keyboard/drag price (override): ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
-    CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
-        
-    } else if(validatedCustomPrice > 0.0) {        g_customTHStartPrice = validatedCustomPrice;
-    g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-    g_customPriceKeyboardOverride = false;
-    GlobalVariableSet(gvarName, g_customTHStartPrice);
-    GlobalVariableSet(overrideFlagName, 0.0);
-    DEBUG_PRINTF("OnInit: Using custom price from settings: ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
-    CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
-        
-    } else if(savedPrice > 0.0) {        g_customTHStartPrice = savedPrice;
-    g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+    if(g_customPriceKeyboardOverride && savedPrice > 0.0) {
+        g_customTHStartPrice = savedPrice;
+        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+        DEBUG_PRINTF("OnInit: Using keyboard/drag price (override): ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
+        CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
+
+    } else if(validatedCustomPrice > 0.0) {
+        g_customTHStartPrice = validatedCustomPrice;
+        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+        g_customPriceKeyboardOverride = false;
+        GlobalVariableSet(gvarName, g_customTHStartPrice);
+        GlobalVariableSet(overrideFlagName, 0.0);
+        DEBUG_PRINTF("OnInit: Using custom price from settings: ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
+        CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
+
+    } else if(savedPrice > 0.0) {
+        g_customTHStartPrice = savedPrice;
+        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
         _LOG_GATE_D Print("[D][GEN] OnInit: Restored custom price from GlobalVariable: ", DoubleToString(g_customTHStartPrice, GetCachedDigits()));
-    CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
-        
-    } else {        g_customTHStartPrice = 0.0;
-    g_thStartPointType = inpTHStartPointType;
-    g_customPriceKeyboardOverride = false;
-    GlobalVariableDel(gvarName);
-    GlobalVariableDel(overrideFlagName);
-    DEBUG_PRINT("OnInit: Using default mode (no custom price)");
+        CreateCustomPriceLine(g_customTHStartPrice, GetCachedDigits());
+
+    } else {
+        g_customTHStartPrice = 0.0;
+        g_thStartPointType = inpTHStartPointType;
+        g_customPriceKeyboardOverride = false;
+        GlobalVariableDel(gvarName);
+        GlobalVariableDel(overrideFlagName);
+        DEBUG_PRINT("OnInit: Using default mode (no custom price)");
     }
     
     g_redrawTHLevelsNeeded = true;
@@ -155,7 +159,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         ResetLastError();
         double val = GlobalVariableGet(lockFlagName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             g_timeframeLocked = (bool)val;
         }
     }
@@ -163,7 +167,7 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         ResetLastError();
         double val = GlobalVariableGet(lockPeriodName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
             g_lockedPeriod = (int)val;
         }
     }
@@ -171,14 +175,14 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         ResetLastError();
         double val = GlobalVariableGet(stepModeGvarName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-        int tempMode = (int)val;
-    if(tempMode >= 0 && tempMode <= 5) {
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            int tempMode = (int)val;
+            if(tempMode >= 0 && tempMode <= 5) {
                 g_stepModeOverride = tempMode;
             } else {
                 _LOG_GATE_W Print("[W][GEN] WARNING: Corrupted StepMode GlobalVariable (", tempMode, "), resetting to default");
-    GlobalVariableDel(stepModeGvarName);
-    g_stepModeOverride = -1;
+                GlobalVariableDel(stepModeGvarName);
+                g_stepModeOverride = -1;
             }
         }
     }
@@ -186,21 +190,22 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         ResetLastError();
         double val = GlobalVariableGet(factorGvarName);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
-        if(val > 0 && val <= MAX_SAFE_FACTOR) {
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND) {
+            if(val > 0 && val <= MAX_SAFE_FACTOR) {
                 g_factorValueOverride = val;
             } else {
                 _LOG_GATE_E Print("[E][GEN] WARNING: Invalid Factor GlobalVariable (", val, "), resetting to default");
-    GlobalVariableDel(factorGvarName);
-    g_factorValueOverride = 0.0;
+                GlobalVariableDel(factorGvarName);
+                g_factorValueOverride = 0.0;
             }
-        } else {            g_factorValueOverride = 0.0;
+        } else {
+            g_factorValueOverride = 0.0;
         }
     }
     if(inpFactorMode == FACTOR_MODE_MANUAL) {
         if(inpFactorValue <= 0 || inpFactorValue > MAX_SAFE_FACTOR) {
             _LOG_GATE_E Print("[E][GEN] ERROR: Invalid inpFactorValue (", inpFactorValue, "), clamping to safe range");
-    g_factorValueOverride = 50.0;
+            g_factorValueOverride = 50.0;
         }
     }
     // Restore TH3 Frequency override + index
@@ -270,11 +275,11 @@ int OnInitHandler() {    InitializeGlobalCache();
     {
         ResetLastError();
         double val = GlobalVariableGet(th3UpdateFlag);
-    if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND && val > 0)
-        {            UpdateAllTH3Objects();
-    GlobalVariableDel(th3UpdateFlag);
+        if(GetLastError() != ERR_GLOBALVARIABLE_NOT_FOUND && val > 0) {
+            UpdateAllTH3Objects();
+            GlobalVariableDel(th3UpdateFlag);
             _LOG_GATE_I Print("[I][GEN] Updated all TH3 objects with new settings");
-    }
+        }
     }
     #ifdef ENABLE_DEBUG_LOGS
     Print("[I][GEN] AUDIT COMPLETE: All critical memory leaks fixed");
@@ -285,20 +290,24 @@ int OnInitHandler() {    InitializeGlobalCache();
     Print("[I][GEN] PERSISTENT: Settings saved to GlobalVariables (survive terminal restart)");
     Print("[D][GEN] To enable 'Chart Shift': Right-click chart > Chart Shift (or F11)");
     #endif
-    if(shouldBeHidden) {        g_redrawTHLevelsNeeded = false;
+    if(shouldBeHidden) {
+        g_redrawTHLevelsNeeded = false;
         _LOG_GATE_D Print("[D][GEN] [LOCK] OnInit: Indicator in HIDDEN state - objects will be hidden when created");
-    } else {        g_redrawTHLevelsNeeded = true;
+    } else {
+        g_redrawTHLevelsNeeded = true;
         _LOG_GATE_D Print("[D][GEN] [SHOW] OnInit: Indicator VISIBLE - objects will be created normally");
     }
     return INIT_SUCCEEDED;
-}bool CreateCustomPriceLine(double price, int digits, bool selected = false, 
+}
+
+bool CreateCustomPriceLine(double price, int digits, bool selected = false,
                            string tooltipSuffix = "Drag to adjust")
 {
-        if(ObjectFind(0, g_customPriceHorizontalLineName) < 0) {
+    if(ObjectFind(0, g_customPriceHorizontalLineName) < 0) {
         if(!ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, price)) {
             _LOG_GATE_E Print("[E][GEN] Failed to create custom price line. Error: ", GetLastError());
-    g_customPriceLineCreated = false;
-    return false;
+            g_customPriceLineCreated = false;
+            return false;
         }
     } else {
         ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, price);
@@ -325,23 +334,22 @@ int OnInitHandler() {    InitializeGlobalCache();
 //+------------------------------------------------------------------+
 void HideAllTHObjects()
 {
-        int total = ObjectsTotal(0, -1, -1);
+    int total = ObjectsTotal(0, -1, -1);
     int hiddenCount = 0;
     string cachedPrefix = inpObjectPrefix;
     int prefixLen = StringLen(cachedPrefix);
     // PERF: Pre-compute constants outside loop
     long noPeriodsVal = OBJ_NO_PERIODS;
     ushort prefixFirstChar = StringGetCharacter(cachedPrefix, 0);
-    for(int i = total - 1; i >= 0; i--)
-    {
+    for(int i = total - 1; i >= 0; i--) {
         string objName = ObjectName(0, i, -1, -1);
-    // PERF: Quick first-char rejection before expensive string comparison
-    if(StringGetCharacter(objName, 0) != prefixFirstChar) continue;
-    if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix)
-        {
-        ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, noPeriodsVal);
-        hiddenCount++;
-        }    }
+        // PERF: Quick first-char rejection before expensive string comparison
+        if(StringGetCharacter(objName, 0) != prefixFirstChar) continue;
+        if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix) {
+            ObjectSetInteger(0, objName, OBJPROP_TIMEFRAMES, noPeriodsVal);
+            hiddenCount++;
+        }
+    }
     // PERF: Batch special label hide — use ObjectDelete which is no-op if not found,
     // avoiding separate ObjectFind syscalls
     ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
@@ -351,22 +359,26 @@ void HideAllTHObjects()
     if(g_customPriceLineCreated)
         ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, noPeriodsVal);
     // NOTE: ABCD pattern objects are NOT hidden by F key — they are independent of TH levels
-    }void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = false)
-{    if (g_waitingForCustomPriceClick || forceDelete) {
+}
+
+void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = false)
+{
+    if (g_waitingForCustomPriceClick || forceDelete) {
         ObjectDelete(0, g_customPriceHorizontalLineName);
-    g_customPriceLineCreated = false;
+        g_customPriceLineCreated = false;
     }
-    
+
     g_waitingForCustomPriceClick = false;
     if (resetGlobalVars) {
         string symbolName = GetCachedSymbol();
-    string gvarName = "Biotak_CustomPrice_" + symbolName;
-    string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
-    GlobalVariableDel(gvarName);
-    GlobalVariableDel(overrideFlagName);
-    g_customTHStartPrice = 0.0;
-    g_thStartPointType = inpTHStartPointType;
-    g_customPriceKeyboardOverride = false;    }
+        string gvarName = "Biotak_CustomPrice_" + symbolName;
+        string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+        GlobalVariableDel(gvarName);
+        GlobalVariableDel(overrideFlagName);
+        g_customTHStartPrice = 0.0;
+        g_thStartPointType = inpTHStartPointType;
+        g_customPriceKeyboardOverride = false;
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -419,8 +431,8 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
     InvalidateObjectCountCache();
 }
 
-    void OnDeinitHandler(const int reason) {
-        DEBUG_PRINT("Starting cleanup");
+void OnDeinitHandler(const int reason) {
+    DEBUG_PRINT("Starting cleanup");
     if(reason == REASON_CHARTCHANGE || reason == REASON_PARAMETERS) {
         string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
         datetime nowSwitch = TimeCurrent();
@@ -435,17 +447,15 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
     ObjectDelete(0, g_th3FreqLabelName);
     ObjectDelete(0, g_lockStatusLabelName);
     ObjectDelete(0, g_customPriceHorizontalLineName);
-    if(reason == REASON_REMOVE)
-    {
+    if(reason == REASON_REMOVE) {
         DEBUG_PRINT("Indicator removed - cleaning all GlobalVariables");
-    CleanupAllGlobalVariables();
-    DeleteAllIndicatorObjects(true);
-    ObjectsDeleteAll(0, "TH3_Structure_");
-    ObjectsDeleteAll(0, TH3_PATTERN_PREFIX);  // Clean up AB=CD pattern objects
-    ObjectsDeleteAll(0, TH3_TEMP_PREFIX);     // Clean up any temp drawing objects
+        CleanupAllGlobalVariables();
+        DeleteAllIndicatorObjects(true);
+        ObjectsDeleteAll(0, "TH3_Structure_");
+        ObjectsDeleteAll(0, TH3_PATTERN_PREFIX);  // Clean up AB=CD pattern objects
+        ObjectsDeleteAll(0, TH3_TEMP_PREFIX);     // Clean up any temp drawing objects
     }
-    else if(reason == REASON_PARAMETERS)
-    {
+    else if(reason == REASON_PARAMETERS) {
         // Clear all ATR and TH labels to apply new settings
         string currentTFStr = IntegerToString(GetCachedPeriod());
         string uniquePrefix = inpObjectPrefix + "TF" + currentTFStr + "_";
@@ -468,30 +478,28 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
         }
         
         string symbolName = GetCachedSymbol();
-    string chartIdStrLocal = GetCachedChartIdStr();
-    string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
-    GlobalVariableSet(overrideFlagName, 0.0);
-    string factorGvarName = "Biotak_Factor_" + chartIdStrLocal;
-    GlobalVariableDel(factorGvarName);
-    g_factorValueOverride = 0.0;
-    string linesGvarName = "Biotak_LinesVisible_" + chartIdStrLocal;
-    GlobalVariableDel(linesGvarName);
-    // ATR labels hotkey override should not survive parameter changes
-    string atrLabelsGvarName = "Biotak_ATRLabels_" + chartIdStrLocal;
-    GlobalVariableDel(atrLabelsGvarName);
-    // TH labels hotkey override should not survive parameter changes
-    string thLabelsGvarNameLocal = "Biotak_THLabels_" + chartIdStrLocal;
-    GlobalVariableDel(thLabelsGvarNameLocal);
-    string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
-    GlobalVariableSet(th3UpdateFlag, 1.0);
-    GlobalVariableTemp(th3UpdateFlag);
-    DEBUG_PRINT("OnDeinit (REASON_PARAMETERS) - reset overrides");
-    DeleteAllIndicatorObjects(false);
-    }
-    else
-    {
+        string chartIdStrLocal = GetCachedChartIdStr();
+        string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+        GlobalVariableSet(overrideFlagName, 0.0);
+        string factorGvarName = "Biotak_Factor_" + chartIdStrLocal;
+        GlobalVariableDel(factorGvarName);
+        g_factorValueOverride = 0.0;
+        string linesGvarName = "Biotak_LinesVisible_" + chartIdStrLocal;
+        GlobalVariableDel(linesGvarName);
+        // ATR labels hotkey override should not survive parameter changes
+        string atrLabelsGvarName = "Biotak_ATRLabels_" + chartIdStrLocal;
+        GlobalVariableDel(atrLabelsGvarName);
+        // TH labels hotkey override should not survive parameter changes
+        string thLabelsGvarNameLocal = "Biotak_THLabels_" + chartIdStrLocal;
+        GlobalVariableDel(thLabelsGvarNameLocal);
+        string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
+        GlobalVariableSet(th3UpdateFlag, 1.0);
+        GlobalVariableTemp(th3UpdateFlag);
+        DEBUG_PRINT("OnDeinit (REASON_PARAMETERS) - reset overrides");
+        DeleteAllIndicatorObjects(false);
+    } else {
         DEBUG_PRINTF("OnDeinit (reason=", reason);
-    DeleteAllIndicatorObjects(false);
+        DeleteAllIndicatorObjects(false);
     }
     CleanupCustomPriceObjects(false, true);
     // FIX: Force ChartRedraw after cleanup so deleted objects disappear immediately
@@ -516,7 +524,7 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
     g_objectCountLast = 0;
     g_lastObjectCleanup = 0;
     DEBUG_PRINT("Cleanup completed successfully");
-    }
+}
 
 //+------------------------------------------------------------------+
 //| Clear all level objects from all modes (OPTIMIZED + SAFE)       |
@@ -1222,11 +1230,12 @@ void RunIncrementalObjectCleanup()
     }
     #endif
     g_dailyClosePriceForTH = thBasePrice;
-    if(currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized)
+    // PERF: Reuse historicalRefreshDue computed at top of function (avoids redundant condition eval)
+    if(historicalRefreshDue)
     {
         if(!UpdateHistoricalValues()) {
             _LOG_GATE_E Print("[E][GEN] RedrawAllObjects: UpdateHistoricalValues failed.");
-    return; 
+    return;
         }
         g_initialized = true;
     g_calculatedOnce = false;
@@ -1261,7 +1270,7 @@ void RunIncrementalObjectCleanup()
     g_calculatedOnce = true;
     g_labelsRelayoutNeeded = false;
     }
-    g_dailyClosePriceForTH = thBasePrice;
+    // PERF: g_dailyClosePriceForTH was already set at line ~1232 — remove duplicate assignment
     string gvarName = "Biotak_CustomPrice_" + s_cachedSymbol;
     string overrideFlagName = "Biotak_CustomPriceOverride_" + s_cachedSymbol;
     bool lineExists = customPriceLineExists;
@@ -1352,15 +1361,18 @@ void RunIncrementalObjectCleanup()
     g_redrawTHLevelsNeeded = false;
     }    
     CheckAlerts(objectPrefix, g_currentPrice);
+    
+    // PERF: Only trigger ChartRedraw if RedrawAllObjects actually did work.
+    // This prevents OnCalculate from forcing 20fps chart repaints when idle.
+    ThrottledChartRedraw();
 }
-    int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
-        static uint s_lastCPUTime = 0;
+int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
+    static uint s_lastCPUTime = 0;
     static int s_cpuWarningCount = 0;
     uint startTime = GetTickCount();
     // PERF: Cache Bid/Ask once per tick
     CacheTickPrices();
-    if(IsIndicatorHidden())
-    {
+    if(IsIndicatorHidden()) {
         return(rates_total);
     }
     static uint s_lastTickMs = 0;
@@ -1393,54 +1405,51 @@ void RunIncrementalObjectCleanup()
     if(invalidationFlags != CACHE_INV_NONE) {
         ApplyCacheInvalidation(invalidationFlags, s_lastPeriod, currentPeriod, s_lastCustomPrice, currentCustomPrice);
     }
-    if(rates_total > 0)
-    {
-        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && 
-           !g_forceClearOnNextDraw && !significantPriceChange && 
+    if(rates_total > 0) {
+        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded &&
+           !g_forceClearOnNextDraw && !significantPriceChange &&
            !timeframeChanged && !customPriceChanged) {
-        return rates_total;
+            return rates_total;
         }
-    LogRedrawDecision(isNewBar, timeframeChanged, customPriceChanged,
-                      g_redrawTHLevelsNeeded, g_forceClearOnNextDraw,
-                      significantPriceChange, tickThrottled);
-    s_lastTickMs = nowMs;
-    s_lastPrice = currentPrice;
-    s_lastBarTime = currentBarTime;
-    s_lastPeriod = currentPeriod;
-    s_lastCustomPrice = currentCustomPrice;
-    TH3_PROF_START(RedrawCall);
-    RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
-    TH3_PROF_END(RedrawCall);
-    // FIX: ChartRedraw after RedrawAllObjects — ensures object changes are immediately visible
-    ThrottledChartRedraw();
-    if(barsChanged || s_lastBarTime == 0) {
-        // PERF: Use cached object count (5s TTL) instead of raw ObjectsTotal syscall
-        int totalObjects = GetCurrentObjectCount();
-    if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
-        #ifdef ENABLE_DEBUG_LOGS
-                if(s_cpuWarningCount % 10 == 0) {                    Print("[WARN] Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
-    Print("[D][GEN] [CLEAN] Consider reducing inpMaxLevels for better performance");
+        LogRedrawDecision(isNewBar, timeframeChanged, customPriceChanged,
+                          g_redrawTHLevelsNeeded, g_forceClearOnNextDraw,
+                          significantPriceChange, tickThrottled);
+        s_lastTickMs = nowMs;
+        s_lastPrice = currentPrice;
+        s_lastBarTime = currentBarTime;
+        s_lastPeriod = currentPeriod;
+        s_lastCustomPrice = currentCustomPrice;
+        TH3_PROF_START(RedrawCall);
+        RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
+        TH3_PROF_END(RedrawCall);
+        // PERF: ThrottledChartRedraw() moved inside RedrawAllObjects to prevent empty 20fps repaints
+        if(barsChanged || s_lastBarTime == 0) {
+            // PERF: Use cached object count (5s TTL) instead of raw ObjectsTotal syscall
+            int totalObjects = GetCurrentObjectCount();
+            if(totalObjects > MAX_SAFE_OBJECTS && totalObjects < CRITICAL_OBJECT_LIMIT) {
+                #ifdef ENABLE_DEBUG_LOGS
+                if(s_cpuWarningCount % 10 == 0) {
+                    Print("[WARN] Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
+                    Print("[D][GEN] [CLEAN] Consider reducing inpMaxLevels for better performance");
                 }
-    #endif
-    s_cpuWarningCount++;
-            }
-            else if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
-        #ifdef ENABLE_DEBUG_LOGS
+                #endif
+                s_cpuWarningCount++;
+            } else if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("[E][GEN] [CRIT] CRITICAL: ", totalObjects, " objects approaching MT4 limit (64000)!");
-    Print("[D][GEN] [CLEAN] EMERGENCY: Using indicator-scoped cleanup...");
-    #endif
-    EmergencyCleanupIndicatorObjects(inpObjectPrefix);
-    }
+                Print("[D][GEN] [CLEAN] EMERGENCY: Using indicator-scoped cleanup...");
+                #endif
+                EmergencyCleanupIndicatorObjects(inpObjectPrefix);
+            }
         }
     }
     uint elapsed = GetTickCount() - startTime;
     if(elapsed > CPU_WARNING_MS) {
         if(elapsed > CPU_CRITICAL_MS) {
             _LOG_GATE_E Print("[E][GEN] [CRIT] CRITICAL CPU: OnCalculate took ", elapsed, "ms! Reduce inpMaxTHLevels!");
-    }
-        else if(s_lastCPUTime == 0 || GetTickCount() - s_lastCPUTime > 60000) {
+        } else if(s_lastCPUTime == 0 || GetTickCount() - s_lastCPUTime > 60000) {
             _LOG_GATE_W Print("[W][GEN] CPU Warning: OnCalculate took ", elapsed, "ms (threshold: ", CPU_WARNING_MS, "ms)");
-    s_lastCPUTime = GetTickCount();
+            s_lastCPUTime = GetTickCount();
         }
     }
     return rates_total;
@@ -1511,9 +1520,8 @@ void AdjustFactorValue(int direction)
     if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
         _LOG_GATE_E Print("[E][GEN] WARNING: Failed to persist Factor value to GlobalVariable");
     }
-    g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
     // FIX: Move UpdateFactorLabel AFTER RedrawAllObjects so g_modeLabelYOffset is finalized
     UpdateFactorLabel(newFactor);
     ThrottledChartRedraw();
@@ -1737,9 +1745,8 @@ void AdjustTH3Frequency(int direction)
     g_thStartPointType = inpTHStartPointType;
     g_customPriceKeyboardOverride = false;
     GlobalVariableSet(overrideFlagName, 0.0);
-    g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
                 _LOG_GATE_D Print("[D][GEN] Custom price mode cancelled - returned to Input Parameter setting");
     ThrottledChartRedraw();
     return;
@@ -1755,12 +1762,29 @@ void AdjustTH3Frequency(int direction)
     } else {
                 LOG_I(LOG_CAT_KEYS, "Trigger Levels: OFF");
     }
-    g_forceClearOnNextDraw = true;
+    
+    // FAST TOGGLE: Instead of g_forceClearOnNextDraw = true which deletes EVERYTHING (causing blinking),
+    // we only delete the objects affected by this toggle (triggers and zones).
+    // Structure lines will remain and just get updated, preventing the full chart blink.
+    string prefixT = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_TH_Level_";
+    g_suppressDeleteEvents = true;
+    
+    // Zones always need to be rebuilt because they merge/split depending on triggerEnabled
+    ObjectsDeleteAll(0, prefixT + "Zone_Above_");
+    ObjectsDeleteAll(0, prefixT + "Zone_Below_");
+    
+    if(!g_triggerLevelsEnabled) {
+        // Triggers turned off - explicitly delete them so they disappear
+        ObjectsDeleteAll(0, prefixT + "TriggerTH_Up_");
+        ObjectsDeleteAll(0, prefixT + "TriggerTH_Down_");
+    }
+    g_suppressDeleteEvents = false;
+
     g_redrawTHLevelsNeeded = true;
     // During custom-price drag, defer heavy redraw to mouse-release path.
     // This prevents transient visibility/state conflicts while object is still being dragged.
     if(!g_customPriceLineDragging)
-        RedrawAllObjects(true);
+        RedrawAllObjects(false);
     ThrottledChartRedraw();
     return;
         }
@@ -1917,9 +1941,9 @@ void AdjustTH3Frequency(int direction)
         {
         bool hadCustomPrice = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
     double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;
-    g_suppressDeleteEvents = true;  // Prevent cascade deletion of ABCD patterns
-    ObjectsDeleteAll(0, inpObjectPrefix);
-    g_suppressDeleteEvents = false;
+    // The old ObjectsDeleteAll(0, inpObjectPrefix) was unnecessarily aggressive
+    // and broke the object cache, causing severe log spam and slowness.
+    // RedrawAllObjects handles old prefix cleanup safely via ClearAllLevels.
     g_timeframeLocked = !g_timeframeLocked;
     if(g_timeframeLocked)
             {
@@ -1938,10 +1962,9 @@ void AdjustTH3Frequency(int direction)
     GlobalVariableSet(lockFlagName, g_timeframeLocked);
     string lockPeriodName = "Biotak_LockTFPeriod_" + lockChartIdStr;
     GlobalVariableSet(lockPeriodName, g_lockedPeriod);
-    g_forceClearOnNextDraw = true;
     g_calculatedOnce = false;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
     if(hadCustomPrice && savedCustomPrice > 0) {                g_customTHStartPrice = savedCustomPrice;
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
     if(ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, savedCustomPrice)) {
@@ -2054,7 +2077,7 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
                 _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, GetCachedDigits()));
     }
         }
@@ -2082,7 +2105,7 @@ void AdjustTH3Frequency(int direction)
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     g_customPriceLineCreated = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
             _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, GetCachedDigits()));
     }
     }
@@ -2105,7 +2128,7 @@ void AdjustTH3Frequency(int direction)
                         g_customTHStartPrice = currentLinePrice;
     g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
     ThrottledChartRedraw();
     g_lastDragRedrawTime = nowMs;
                     }
@@ -2116,9 +2139,8 @@ void AdjustTH3Frequency(int direction)
         {
         if(g_customPriceLineDragging) {
                 g_customPriceLineDragging = false;
-    g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
     ThrottledChartRedraw();
             }
         }
@@ -2142,9 +2164,8 @@ void AdjustTH3Frequency(int direction)
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, tooltip);
             _LOG_GATE_D Print("[D][GEN] Custom TH start price updated to: ", DoubleToString(draggedPrice, GetCachedDigits()));
     }        
-        g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
-    RedrawAllObjects(true);
+    RedrawAllObjects(false);
     }
     if(id == CHARTEVENT_OBJECT_CLICK)
     {

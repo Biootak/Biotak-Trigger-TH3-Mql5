@@ -61,6 +61,14 @@ bool CreateOrUpdateHLine(const string name, double price,
         if(!hasCached || cachedEntry.lastColor != clr) {
             ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
         }
+        // FIX: Update style/width on existing objects when changed (was: only set on new objects).
+        // Without this, changing inpTHLevelStyle/inpTHLevelWidth would never reflect on existing lines.
+        if(!hasCached || cachedEntry.lastStyle != (int)style) {
+            ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        }
+        if(!hasCached || cachedEntry.lastWidth != width) {
+            ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        }
         CacheUpdateObject(name, normPrice, clr, style, width);
         // FIX: Use unified visibility system for existing objects too
         ApplyVisibilityStateIfUnchangedSkip(name, true);

@@ -73,7 +73,8 @@ bool DrawMainLevels(const string prefix) {
         _LOG_GATE_E Print("[E][LBL] DrawTHLevels: Invalid point/pip size for symbol ", s_cachedSymbol);
         return;
     }
-    const double pointsPerPip = s_cachedPointValue / s_cachedPipSize;
+    // Use SafeDivide for defensive division — already gated, but keeps math layer consistent
+    const double pointsPerPip = SafeDivide(s_cachedPointValue, s_cachedPipSize, 1.0, EPSILON_PRICE);
     string prefix=objectPrefix+"TH_Level_";
     // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
     double timeframePercentage=GetTimeframeTH();
@@ -123,20 +124,27 @@ bool DrawMainLevels(const string prefix) {
             return;
         }
         thStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,timeframePercentage);
+        // PERF: Compute base structure step once, then apply multipliers (1×, 2×, 4×, 8×, 16×).
+        // This eliminates 4 redundant CalculateTHPoints calls (was 5, now 1+5 multiplications).
         structureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[0]);
-        doubleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[1]);
-        tripleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[2]);
-        quadrupleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[3]);
-        quintupleStructureTFTHStepSizePoints=CalculateTHPoints(dailyClosePrice,digits,structurePercentages[4]);
+        doubleStructureTFTHStepSizePoints=structureTFTHStepSizePoints*2.0;
+        tripleStructureTFTHStepSizePoints=structureTFTHStepSizePoints*4.0;
+        quadrupleStructureTFTHStepSizePoints=structureTFTHStepSizePoints*8.0;
+        quintupleStructureTFTHStepSizePoints=structureTFTHStepSizePoints*16.0;
         
         // Apply ATR Adaptive Scaling to all step sizes uniformly
         // This preserves the fractal 2× ratio between structure levels
-        thStepSizePoints = GetAdaptedStepSize(thStepSizePoints);
-        structureTFTHStepSizePoints = GetAdaptedStepSize(structureTFTHStepSizePoints);
-        doubleStructureTFTHStepSizePoints = GetAdaptedStepSize(doubleStructureTFTHStepSizePoints);
-        tripleStructureTFTHStepSizePoints = GetAdaptedStepSize(tripleStructureTFTHStepSizePoints);
-        quadrupleStructureTFTHStepSizePoints = GetAdaptedStepSize(quadrupleStructureTFTHStepSizePoints);
-        quintupleStructureTFTHStepSizePoints = GetAdaptedStepSize(quintupleStructureTFTHStepSizePoints);
+        // PERF: GetAdaptedStepSize multiplies by a constant factor (g_smoothedScalingFactor/blendRatio).
+        // Compute the multiplier ONCE, then apply to all 6 values. For FIXED mode, multiplier = 1.0 (no-op).
+        double s_adaptedMult = GetAdaptedStepSize(1.0);
+        if(s_adaptedMult != 1.0) {
+            thStepSizePoints *= s_adaptedMult;
+            structureTFTHStepSizePoints *= s_adaptedMult;
+            doubleStructureTFTHStepSizePoints *= s_adaptedMult;
+            tripleStructureTFTHStepSizePoints *= s_adaptedMult;
+            quadrupleStructureTFTHStepSizePoints *= s_adaptedMult;
+            quintupleStructureTFTHStepSizePoints *= s_adaptedMult;
+        }
         
         basisLabel = "TH";
         // TH trigger tooltip multipliers
@@ -167,9 +175,18 @@ bool DrawMainLevels(const string prefix) {
     return;
     }
     #ifdef ENABLE_DEBUG_LOGS
-    Print("[D][LBL] ?? DrawTHLevels using Base Multiplier: ", baseMultiplier,
-          " ? L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
-          ", L4=", intervals[3], ", L5=", intervals[4]);
+    if(intervalSize >= 5) {
+        Print("[D][LBL] DrawTHLevels using Base Multiplier: ", baseMultiplier,
+              " | L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
+              ", L4=", intervals[3], ", L5=", intervals[4]);
+    } else if(intervalSize > 0) {
+        // Log what we have when size < 5 to avoid out-of-bounds access
+        string logIntervals = "";
+        for(int di = 0; di < intervalSize; di++) {
+            logIntervals += (di > 0 ? ", L" + IntegerToString(di+1) + "=" : "L1=") + IntegerToString(intervals[di]);
+        }
+        Print("[D][LBL] DrawTHLevels using Base Multiplier: ", baseMultiplier, " | ", logIntervals);
+    }
     #endif
     // -------------------------------------------------------------------
     
@@ -633,14 +650,14 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
             ObjectSetInteger(0, targetsObjName, OBJPROP_YDISTANCE, baseY + singleLineHeight_u * 2);
         }
         int labelXDistance = MathAbs(xPos);
-        int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
-        int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
+        int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
+        int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
         int mainOffset = (stepsTextWidth - mainTextWidth) / 2;
         if(mainOffset < 0) mainOffset = 0;
         ObjectSetInteger(0, mainObjName, OBJPROP_XDISTANCE, labelXDistance + mainOffset);
         ObjectSetInteger(0, stepsObjName, OBJPROP_XDISTANCE, labelXDistance);
         if(inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
-            int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+            int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
             int targetsOffset = (mainTextWidth - targetsTextWidth) / 2 + mainOffset;
             if(targetsOffset < 0) targetsOffset = 0;
             ObjectSetInteger(0, targetsObjName, OBJPROP_XDISTANCE, labelXDistance + targetsOffset);
@@ -681,13 +698,13 @@ void InitATRChartLabel(const string name, ENUM_BASE_CORNER corner, ENUM_ANCHOR_P
     int bottomPadding = 20;
     int lineGap = inpLabelRowGap;
     int singleLineHeight = inpFontSize + lineGap;
-    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
-    int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
+    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
+    int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
     int mainOffset = (stepsTextWidth - mainTextWidth) / 2;
     if(mainOffset < 0) mainOffset = 0;
     int targetsOffset = 0;
     if(inpShowATRTargets) {
-        int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+        int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
     targetsOffset = (mainTextWidth - targetsTextWidth) / 2 + mainOffset;
     if(targetsOffset < 0) targetsOffset = 0;
     }
@@ -1038,13 +1055,13 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     int bottomPadding = 0;
     int lineGap = inpLabelRowGap;
     int singleLineHeight = inpFontSize + lineGap;
-    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * 0.6);
-    int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * 0.6);
+    int mainTextWidth = (int)(StringLen(mainText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
+    int stepsTextWidth = (int)(StringLen(stepsText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
     int mainOffset = (stepsTextWidth - mainTextWidth) / 2;
     if(mainOffset < 0) mainOffset = 0;
     int targetsOffset = 0;
     if(inpShowTHTargets) {
-        int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * 0.6);
+        int targetsTextWidth = (int)(StringLen(targetsText) * inpFontSize * FONT_CHAR_WIDTH_FACTOR);
     targetsOffset = (mainTextWidth - targetsTextWidth) / 2 + mainOffset;
     if(targetsOffset < 0) targetsOffset = 0;
     }

@@ -35,7 +35,14 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     bool objectInCache = CacheGetObject(name, cachedEntry);
     bool objectExists = false;
     if(objectInCache && cachedEntry.exists) {
-        objectExists = true;
+        // FIX: Verify cache accuracy - cache can be stale after ObjectsDeleteAll
+        if(ObjectFind(0, name) < 0) {
+            CacheRemoveObject(name);
+            objectInCache = false;
+            objectExists = false;
+        } else {
+            objectExists = true;
+        }
     } else {
         objectExists = (ObjectFind(0, name) >= 0);
     }
@@ -140,7 +147,13 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     return false;
     }
     bool objectExists = CacheObjectExists(name);
-    if(!objectExists) {
+    if(objectExists) {
+        // FIX: Verify cache accuracy
+        if(ObjectFind(0, name) < 0) {
+            CacheRemoveObject(name);
+            objectExists = false;
+        }
+    } else {
         objectExists = (ObjectFind(0, name) >= 0);
     }
     
@@ -170,10 +183,10 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         } else {
             s_lastInputFont = inpFontName;
     safeFontName = inpFontName;
-    static string validFonts[9] = {"Arial", "Arial Black", "Courier New", "Tahoma", "Verdana",
-                                "Times New Roman", "Calibri", "Segoe UI", "Consolas"};
+    static string validFonts[10] = {"Arial", "Arial Bold", "Arial Black", "Courier New", "Tahoma", "Verdana",
+                                 "Times New Roman", "Calibri", "Segoe UI", "Consolas"};
     bool fontValid = false;
-    for(int i = 0; i < 9; i++) {
+    for(int i = 0; i < 10; i++) {
         if(safeFontName == validFonts[i]) {
                 fontValid = true;
     break;
