@@ -204,25 +204,24 @@ bool ValidateHotkeysUniqueAndSafe() {
     // Also runs even when ENABLE_DEBUG_LOGS is off - critical validations must always run.
     bool ValidateComboModeConfiguration() {
         // Validate inpComboMode is in valid range
-        if(inpComboMode < COMBO_MODE_QUICK_TEST || inpComboMode > COMBO_MODE_ADVANCED) {
+        if(inpComboMode < COMBO_MODE_PRESET || inpComboMode > COMBO_MODE_ADVANCED) {
             _LOG_GATE_E Print("[E][INIT] Invalid inpComboMode=", (int)inpComboMode,
-                              " (valid range: ", (int)COMBO_MODE_QUICK_TEST, "..", (int)COMBO_MODE_ADVANCED, ")");
+                              " (valid range: ", (int)COMBO_MODE_PRESET, "..", (int)COMBO_MODE_ADVANCED, ")");
             return false;
         }
         // Validate inpComboPreset is in valid range
-        if(inpComboPreset < COMBO_PRESET_BALANCED_MEDIUM || inpComboPreset > COMBO_PRESET_QT_TRIGGER_ONLY) {
+        if(inpComboPreset < COMBO_PRESET_LEGACY_ADD || inpComboPreset > COMBO_PRESET_QT_TRIGGER_ONLY) {
             _LOG_GATE_E Print("[E][INIT] Invalid inpComboPreset=", (int)inpComboPreset,
-                              " (valid range: ", (int)COMBO_PRESET_BALANCED_MEDIUM, "..",
+                              " (valid range: ", (int)COMBO_PRESET_LEGACY_ADD, "..",
                               (int)COMBO_PRESET_QT_TRIGGER_ONLY, ")");
             return false;
         }
         #ifdef ENABLE_DEBUG_LOGS
     string modeName;
     switch(inpComboMode) {
-        case COMBO_MODE_QUICK_TEST: modeName = "Quick Test"; break;
-    case COMBO_MODE_PRESET:     modeName = "Preset"; break;
-    case COMBO_MODE_ADVANCED:   modeName = "Advanced"; break;
-    default:                    modeName = "Unknown"; break;
+        case COMBO_MODE_PRESET:     modeName = "Preset"; break;
+        case COMBO_MODE_ADVANCED:   modeName = "Advanced"; break;
+        default:                    modeName = "Unknown"; break;
     }
     Print("[D][INIT] Combo Mode: ", modeName);
     if(inpComboMode == COMBO_MODE_ADVANCED) {

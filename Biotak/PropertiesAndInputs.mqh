@@ -1,4 +1,4 @@
-﻿#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link "@biotak"
 #property version "3.10"
 #property indicator_chart_window
@@ -80,10 +80,7 @@ input color inpComboLevelColor = clrMagenta;
 input ENUM_LINE_STYLE inpComboLevelStyle = STYLE_DOT;
 input int inpComboLevelWidth = 1;
 input ENUM_COMBO_MODE inpComboMode = COMBO_MODE_PRESET;
-input ENUM_COMBO_PRESET inpComboPreset = COMBO_PRESET_BALANCED_MEDIUM;
-input ENUM_QUICK_TEST_PRESET inpQuickTestPreset = QUICK_PRESET_TRIGGER_PATTERN; // DEPRECATED: Use inpComboPreset (Quick Test merged into Preset)
-input ENUM_COMBO_STEP_TYPE inpQuickTestStepType = COMBO_STEP_TH;                 // DEPRECATED: Legacy support only
-input ENUM_MEAN_TYPE inpQuickTestMeanType = MEAN_GEOMETRIC;                       // DEPRECATED: Legacy support only
+input ENUM_COMBO_PRESET inpComboPreset = COMBO_PRESET_BALANCED_MEDIUM; // Simplified: includes Quick Test presets
 input ENUM_CALCULATOR_TOPOLOGY inpComboTopology = TOPOLOGY_DUAL_GROUP;
 input ENUM_COMBO_COMPONENT_ITEM inpComboComp1 = COMP_TRIGGER_SS;
 input ENUM_COMBO_OPERATOR inpComboOp1 = OP_PLUS;
