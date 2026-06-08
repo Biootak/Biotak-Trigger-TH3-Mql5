@@ -1,5 +1,7 @@
-#ifndef LOGGER_MQH
+﻿  #ifndef LOGGER_MQH
 #define LOGGER_MQH
+
+#property strict
 
 //+------------------------------------------------------------------+
 //| Unified Professional Logger for Biotak Trigger TH3               |
@@ -116,11 +118,9 @@ bool LogRateCheck(const string rateKey)
             g_logRateSlots[existingSlot].suppressedCount++;
             return false;  // Suppress
         }
-        // Enough time passed — allow and reset
-        int suppressed = g_logRateSlots[existingSlot].suppressedCount;
+        // Enough time passed - allow and reset
         g_logRateSlots[existingSlot].lastLogTime = now;
         g_logRateSlots[existingSlot].suppressedCount = 0;
-        // If messages were suppressed, we'll note it (caller can handle)
         return true;
     }
     
@@ -177,7 +177,7 @@ string LogLevelName(const ENUM_LOG_LEVEL level)
 }
 
 //+------------------------------------------------------------------+
-//| Core log function — all macros funnel through this               |
+//| Core log function - all macros funnel through this               |
 //+------------------------------------------------------------------+
 void LogMessage(const ENUM_LOG_LEVEL level,
                 const ENUM_LOG_CATEGORY category,
@@ -261,57 +261,46 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
 
 //+------------------------------------------------------------------+
 //| Compile-time macros                                              |
-//|                                                                  |
-//| Usage:                                                           |
-//|   LOG_T(LOG_CAT_ATR, "Starting ATR calculation")                 |
-//|   LOG_D(LOG_CAT_KEYS, "Key pressed: " + sparam)                 |
-//|   LOG_I(LOG_CAT_INIT, "Indicator initialized v3.10")             |
-//|   LOG_W(LOG_CAT_DATA, "Missing price data for " + tf)           |
-//|   LOG_E(LOG_CAT_ZONES, "Failed to create zone: " + name)        |
-//|   LOG_F(LOG_CAT_GENERAL, "Unrecoverable state corruption")      |
-//|                                                                  |
-//|   LOG_TP1(LOG_CAT_ATR, "ATR value: ", DoubleToString(val,1))    |
 //+------------------------------------------------------------------+
 
 #ifdef DEBUG_BUILD
 
-    // TRACE — hotpath details, compiled out in production
+    // TRACE
     #define LOG_T(cat, msg)              LogMessage(LOG_LEVEL_TRACE, cat, msg, __FUNCTION__, __LINE__)
     #define LOG_TP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_TRACE, cat, msg, p1, __FUNCTION__, __LINE__)
     #define LOG_TP2(cat, msg, p1, p2)    LogMessageP2(LOG_LEVEL_TRACE, cat, msg, p1, p2, __FUNCTION__, __LINE__)
     #define LOG_TP3(cat, msg, p1, p2, p3) LogMessageP3(LOG_LEVEL_TRACE, cat, msg, p1, p2, p3, __FUNCTION__, __LINE__)
     
-    // DEBUG — diagnostic info, compiled out in production
+    // DEBUG
     #define LOG_D(cat, msg)              LogMessage(LOG_LEVEL_DEBUG, cat, msg, __FUNCTION__, __LINE__)
     #define LOG_DP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_DEBUG, cat, msg, p1, __FUNCTION__, __LINE__)
     #define LOG_DP2(cat, msg, p1, p2)    LogMessageP2(LOG_LEVEL_DEBUG, cat, msg, p1, p2, __FUNCTION__, __LINE__)
     #define LOG_DP3(cat, msg, p1, p2, p3) LogMessageP3(LOG_LEVEL_DEBUG, cat, msg, p1, p2, p3, __FUNCTION__, __LINE__)
-    #define LOG_DP4(cat, msg, p1, p2, p3, p4) LogMessageP4(LOG_LEVEL_DEBUG, cat, msg, p1, p2, p3, p4, __FUNCTION__, __LINE__)
 
-    // INFO — important state changes
+    // INFO
     #define LOG_I(cat, msg)              LogMessage(LOG_LEVEL_INFO, cat, msg, __FUNCTION__, __LINE__)
     #define LOG_IP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_INFO, cat, msg, p1, __FUNCTION__, __LINE__)
     #define LOG_IP2(cat, msg, p1, p2)    LogMessageP2(LOG_LEVEL_INFO, cat, msg, p1, p2, __FUNCTION__, __LINE__)
     #define LOG_IP3(cat, msg, p1, p2, p3) LogMessageP3(LOG_LEVEL_INFO, cat, msg, p1, p2, p3, __FUNCTION__, __LINE__)
 
-    // WARN — potential problems
+    // WARN
     #define LOG_W(cat, msg)              LogMessage(LOG_LEVEL_WARN, cat, msg, __FUNCTION__, __LINE__)
     #define LOG_WP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_WARN, cat, msg, p1, __FUNCTION__, __LINE__)
     #define LOG_WP2(cat, msg, p1, p2)    LogMessageP2(LOG_LEVEL_WARN, cat, msg, p1, p2, __FUNCTION__, __LINE__)
 
-    // ERROR — recoverable errors
+    // ERROR
     #define LOG_E(cat, msg)              LogMessage(LOG_LEVEL_ERROR, cat, msg, __FUNCTION__, __LINE__)
     #define LOG_EP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_ERROR, cat, msg, p1, __FUNCTION__, __LINE__)
     #define LOG_EP2(cat, msg, p1, p2)    LogMessageP2(LOG_LEVEL_ERROR, cat, msg, p1, p2, __FUNCTION__, __LINE__)
     #define LOG_EP3(cat, msg, p1, p2, p3) LogMessageP3(LOG_LEVEL_ERROR, cat, msg, p1, p2, p3, __FUNCTION__, __LINE__)
 
-    // FATAL — unrecoverable
+    // FATAL
     #define LOG_F(cat, msg)              LogMessage(LOG_LEVEL_FATAL, cat, msg, __FUNCTION__, __LINE__)
     #define LOG_FP1(cat, msg, p1)        LogMessageP1(LOG_LEVEL_FATAL, cat, msg, p1, __FUNCTION__, __LINE__)
 
 #else // PRODUCTION BUILD
 
-    // TRACE & DEBUG — completely compiled out (zero overhead)
+    // TRACE & DEBUG - completely compiled out (zero overhead)
     #define LOG_T(cat, msg)
     #define LOG_TP1(cat, msg, p1)
     #define LOG_TP2(cat, msg, p1, p2)
@@ -321,9 +310,8 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
     #define LOG_DP1(cat, msg, p1)
     #define LOG_DP2(cat, msg, p1, p2)
     #define LOG_DP3(cat, msg, p1, p2, p3)
-    #define LOG_DP4(cat, msg, p1, p2, p3, p4)
 
-    // INFO+ — active in production with runtime level check
+    // INFO+ - active in production with runtime level check
     #define LOG_I(cat, msg)              if(g_runtimeLogLevel <= LOG_LEVEL_INFO) LogMessage(LOG_LEVEL_INFO, cat, msg)
     #define LOG_IP1(cat, msg, p1)        if(g_runtimeLogLevel <= LOG_LEVEL_INFO) LogMessageP1(LOG_LEVEL_INFO, cat, msg, p1)
     #define LOG_IP2(cat, msg, p1, p2)    if(g_runtimeLogLevel <= LOG_LEVEL_INFO) LogMessageP2(LOG_LEVEL_INFO, cat, msg, p1, p2)
@@ -348,7 +336,6 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
 //| Maps old DEBUG_PRINT/ERROR_PRINT/WARN_PRINT to new logger       |
 //+------------------------------------------------------------------+
 
-// These override the BuildConfig.mqh definitions when Logger is included
 #ifdef _LOGGER_OVERRIDE_LEGACY
     #undef DEBUG_PRINT
     #undef DEBUG_PRINTF
@@ -367,8 +354,8 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
     #define DEBUG_PRINTF(msg, p1)              LOG_DP1(LOG_CAT_GENERAL, msg, p1)
     #define DEBUG_PRINTF2(msg, p1, p2)         LOG_DP2(LOG_CAT_GENERAL, msg, p1, p2)
     #define DEBUG_PRINTF3(msg, p1, p2, p3)     LOG_DP3(LOG_CAT_GENERAL, msg, p1, p2, p3)
-    #define DEBUG_PRINTF4(msg, p1, p2, p3, p4) LOG_DP4(LOG_CAT_GENERAL, msg, p1, p2, p3, p4)
-    #define DEBUG_PRINTF5(msg, p1, p2, p3, p4, p5) LOG_DP4(LOG_CAT_GENERAL, msg, p1, p2, p3, (string)(p4) + (string)(p5))
+    #define DEBUG_PRINTF4(msg, p1, p2, p3, p4) LOG_D(LOG_CAT_GENERAL, msg)
+    #define DEBUG_PRINTF5(msg, p1, p2, p3, p4, p5) LOG_D(LOG_CAT_GENERAL, msg)
     #define ATR_PRINT(msg)                     LOG_D(LOG_CAT_ATR, msg)
     #define ATR_PRINTF(msg, p1)                LOG_DP1(LOG_CAT_ATR, msg, p1)
     #define ATR_PRINTF2(msg, p1, p2)           LOG_DP2(LOG_CAT_ATR, msg, p1, p2)
@@ -381,12 +368,8 @@ ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
 //| Print-Compatible Gate Macros                                     |
 //|                                                                  |
 //| For blocks with non-string Print() arguments where LOG_D etc.    |
-//| cannot be used due to MQL5 lacking variadic macros.              |
+//| cannot be used due to MQL4 lacking variadic macros.              |
 //| Provides runtime level filtering + compile-time elimination.     |
-//|                                                                  |
-//| Usage:                                                           |
-//|   _LOG_GATE_D Print("[D][ATR] msg ", numericVar, " more");       |
-//|   _LOG_GATE_E Print("[E][INIT] fatal: ", errorCode);             |
 //+------------------------------------------------------------------+
 #ifdef ENABLE_DEBUG_LOGS
     #define _LOG_GATE_D if(g_runtimeLogLevel <= LOG_LEVEL_DEBUG)

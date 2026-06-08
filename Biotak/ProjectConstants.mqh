@@ -1,38 +1,32 @@
-﻿#ifndef PROJECT_CONSTANTS_MQH
-#define PROJECT_CONSTANTS_MQH
-
-#property copyright " Biotak"
-
-// Factor Limits
-const double MIN_FACTOR_VALUE = 0.01;
-const double MAX_FACTOR_VALUE = 10000.0;
-const double DEFAULT_FACTOR_FALLBACK = 50.0;
+﻿  //+------------------------------------------------------------------+
+//|                                      ProjectConstants.mqh        |
+//|                     Centralized Constants - PLATINUM VERSION     |
+//|                     Centralized Constants - Platinum Version     |
+//|                                                                  |
+//| BENEFITS:                                                        |
+//| - Single source of truth for all constants                      |
+//| - Easy to maintain and update                                   |
+//| - No magic numbers in code                                      |
+//| - Self-documenting with clear names                             |
+//+------------------------------------------------------------------+
+#property strict
 
 //+------------------------------------------------------------------+
 //| TH3 Binary Subdivision Frequency System                          |
 //| Theory: Every real number in [0,100] has exact representation    |
-//| as n/2^k × 100%. At depth=6: freq = index × (100/64) = i×1.5625 |
+//| as n/2^k  100%. At depth=6: freq = index  (100/64) = i1.5625 |
 //| This replaces the old GM-interpolated array (22 incorrect values)|
 //+------------------------------------------------------------------+
 const int    BINARY_SUBDIVISION_DEPTH = 6;              // 2^6 = 64 subdivisions per 100%
 const double BINARY_SUBDIVISION_STEP  = 1.5625;         // 100.0 / 64 = 1.5625% per index
-const int    MIN_TH3_FREQ_INDEX       = 1;              // 1.5625% (minimum meaningful frequency)
-const int    MAX_TH3_FREQ_INDEX       = 256;            // 400.0% (extended range)
-const int    DEFAULT_TH3_FREQ_INDEX   = 18;             // 28.125% (18 × 1.5625 = 28.125, was index 16 in old array)
+#define MIN_TH3_FREQ_INDEX        1              // 1.5625%
+#define MAX_TH3_FREQ_INDEX        256            // 400.0% (extended range)
+#define DEFAULT_TH3_FREQ_INDEX    18             // 28.125%
 
-//+------------------------------------------------------------------+
-//| Get frequency percentage by index — pure runtime calculation      |
-//| No static array needed. freq(i) = i × 1.5625%                    |
-//| Key levels: 16=25% (1/4), 32=50% (1/2), 48=75% (3/4), 64=100%  |
-//+------------------------------------------------------------------+
 double GetFrequencyByIndex(int index) {
     return index * BINARY_SUBDIVISION_STEP;
 }
 
-//+------------------------------------------------------------------+
-//| Find nearest valid frequency index for a given percentage         |
-//| Used for: migrating old saved values, syncing after manual input  |
-//+------------------------------------------------------------------+
 int FindNearestFreqIndex(double freqPercent) {
     if(freqPercent <= 0) return MIN_TH3_FREQ_INDEX;
     int idx = (int)MathRound(freqPercent / BINARY_SUBDIVISION_STEP);
@@ -41,32 +35,13 @@ int FindNearestFreqIndex(double freqPercent) {
     return idx;
 }
 
-//+------------------------------------------------------------------+
-//| Get binary depth level of an index (2-adic valuation)             |
-//| Returns how many times index is divisible by 2:                   |
-//|   v₂(64)=6, v₂(32)=5, v₂(16)=4, v₂(8)=3, v₂(4)=2, v₂(2)=1    |
-//| Higher depth = more fundamental frequency level ("louder note")  |
-//+------------------------------------------------------------------+
 int GetBinaryDepthLevel(int index) {
     if(index <= 0) return 0;
     int depth = 0;
-    while((index & 1) == 0) {
-        depth++;
-        index >>= 1;
-    }
+    while((index & 1) == 0) { depth++; index >>= 1; }
     return depth;
 }
 
-//+------------------------------------------------------------------+
-//| Check if index is a "clean" binary level at given depth           |
-//| depth=0: all indices (64ths)                                     |
-//| depth=1: even indices (32nds) — divisible by 2                   |
-//| depth=2: divisible by 4 (16ths)                                  |
-//| depth=3: divisible by 8 (8ths)                                   |
-//| depth=4: divisible by 16 (quarters)                              |
-//| depth=5: divisible by 32 (halves: 50%, 100%, ...)               |
-//| depth=6: divisible by 64 (wholes: 100%, 200%)                   |
-//+------------------------------------------------------------------+
 bool IsCleanBinaryLevel(int index, int minDepth) {
     return GetBinaryDepthLevel(index) >= minDepth;
 }
@@ -75,87 +50,219 @@ bool IsCleanBinaryLevel(int index, int minDepth) {
 #define ABCD_MIN_DISTANCE_POINTS 10
 #define ABCD_DEBOUNCE_MS 300
 
-// UI Timing (milliseconds)
-const uint DOUBLE_CLICK_THRESHOLD_MS = 300;
-const uint CHART_CHANGE_THROTTLE_MS = 250;
+// Frequency History
+#ifndef FREQ_HISTORY_SIZE
+#define FREQ_HISTORY_SIZE 8
+#endif
+#define MIN_STEP1_PIPS 2.0
 
-// Hotkey Defaults
-const double DEFAULT_FACTOR_ADJUST_STEP = 0.1;
-const double DEFAULT_TH3_FREQ_ADJUST_STEP = 1.0; // Legacy (kept for compatibility)
+// ==============================================================================
+// PERCENTAGE CONSTANTS
+//  
+// ==============================================================================
+const int MIN_TRANSPARENCY_PERCENT = 0;
+const int MAX_TRANSPARENCY_PERCENT = 100;
+const int DEFAULT_TRANSPARENCY_PERCENT = 50;
 
-// Zone Height
-const double MIN_ZONE_HEIGHT_PERCENT = 0.01;
-const double MAX_ZONE_HEIGHT_PERCENT = 1.0;
-const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125;
+const double MIN_ZONE_HEIGHT_PERCENT = 0.01;    // 1%
+const double MAX_ZONE_HEIGHT_PERCENT = 1.0;     // 100%
+const double DEFAULT_ZONE_HEIGHT_PERCENT = 0.125; // 12.5%
 
-// Frequency History — remember past pattern frequencies for coherence scoring
-#define FREQ_HISTORY_SIZE 8    // Ring buffer: last 8 pattern results
-#define MIN_STEP1_PIPS   2.0   // Minimum Step1 distance in pips to be meaningful
+// ==============================================================================
+// MULTIPLIERS & FACTORS
+//   
+// ==============================================================================
+const int ZONE_EXTENSION_MULTIPLIER = 10000;    // For calculating endTime
+const int ALPHA_SCALE_FACTOR = 255;             // For alpha channel calculation
+const int PERCENTAGE_TO_DECIMAL = 100;          // Convert percent to decimal
 
-//+------------------------------------------------------------------+
-//| FrequencyResult - Result of frequency optimization               |
-//| Defined here (before GlobalVariables.mqh) so it can be used      |
-//| as a global variable for info label display                      |
-//+------------------------------------------------------------------+
-struct FrequencyResult {
-    int       bestIndex;          // Binary subdivision index (freq = index × 1.5625%)
-    double    bestFrequency;      // The optimal frequency percentage
-    double    totalScore;         // Combined score (0..1)
-    double    multiStepScore;     // Multi-step resonance score (was midpointScore)
-    double    patternScore;       // Harmonic pattern projection score (Gartley/Bat/etc.)
-    double    timeScore;          // Gann price=time alignment score
-    double    sqrtScore;          // Gann square root price harmony score
-    double    harmonicScore;      // Harmonic/phase relationship score
-    double    historyScore;       // Coherence with previous pattern frequencies
-    double    confidence;         // Confidence level (0..1): how consistent components are
-    double    step1Price;         // Step1 = C ± 1×baseUnit
-    double    step3Price;         // Step3 = C ± 3×baseUnit (primary target)
-    double    step5Price;         // Step5 = C ± 5×baseUnit
-    double    step7Price;         // Step7 = C ± 7×baseUnit
-    int       matchedSteps;       // How many steps (0-4) matched reference levels
-    string    matchLabel;         // Which reference midpoint matched Step3
-    string    patternType;        // Detected harmonic pattern type (e.g. "Gartley")
-    int       matchWaveIndex;     // Which wave the best match belongs to
-    double    errorPips;          // Distance in pips between Step3 and matched midpoint
-    bool      isValid;
+// ==============================================================================
+// PERFORMANCE CONSTANTS
+//  
+// ==============================================================================
+const int CACHE_LOG_INTERVAL = 100;             // Cache hits log interval
+const int ZONE_EXTENSION_PERIODS = 100;         // Number of periods to extend zone
+const int MAX_ZONES_PER_CHART = 500;            // Maximum zones on chart
+const int OBJECT_CACHE_SIZE = 1000;             // Object cache size
 
-    void Reset() {
-        bestIndex = -1; bestFrequency = 0; totalScore = 0;
-        multiStepScore = 0; patternScore = 0; timeScore = 0;
-        sqrtScore = 0; harmonicScore = 0; historyScore = 0; confidence = 0;
-        step1Price = 0; step3Price = 0; step5Price = 0; step7Price = 0;
-        matchedSteps = 0; matchLabel = ""; patternType = "";
-        matchWaveIndex = -1; errorPips = 0; isValid = false;
-    }
-};
+// ==============================================================================
+// LIMITS & THRESHOLDS
+//   
+// ==============================================================================
+const int MAX_MOVEMENT_CANDLES = 10000;         // Max movement candles
+const int MAX_REST_CANDLES = 1000;              // Max rest candles
+const int MAX_LEARNING_DATA_SIZE = 10000;       // Max learning data size
 
-//+------------------------------------------------------------------+
-//| FrequencyHistoryEntry — one entry in the ring buffer              |
-//| Stores result + XABC context for coherence analysis               |
-//+------------------------------------------------------------------+
-struct FrequencyHistoryEntry {
-    FrequencyResult result;     // What the optimizer found
-    double    abDistance;       // |AB| distance for scale comparison
-    double    ratioBC_AB;       // BC/AB ratio for pattern similarity
-    int       freqIndex;        // Best frequency index (binary subdivision)
-    datetime  timestamp;        // When this pattern was recorded
-    bool      isUsed;           // Whether this slot has data
+const double MAX_PRICE_DEVIATION = 2.0;         // Max price deviation (200%)
+const double MAX_ZONE_HEIGHT_PERCENT_LIMIT = 1.0; // Zone height limit
 
-    void Reset() {
-        result.Reset();
-        abDistance = 0; ratioBC_AB = 0; freqIndex = 0;
-        timestamp = 0; isUsed = false;
-    }
-};
+// ==============================================================================
+// FREQUENCY CALCULATION
+//  
+// ==============================================================================
+const int FREQUENCY_BASE = 100;                 // For Step N: frequency = 100/N
 
-// Multipliers
-const int ZONE_EXTENSION_MULTIPLIER = 100;
-const int PERCENTAGE_TO_DECIMAL = 100;
+// Step-specific frequencies
+const double FREQUENCY_STEP_3 = 33.333;         // 100/3
+const double FREQUENCY_STEP_5 = 20.0;           // 100/5
+const double FREQUENCY_STEP_7 = 14.286;         // 100/7
 
-// Time
+// ==============================================================================
+// CONSOLIDATION THRESHOLDS
+//  Consolidation
+// ==============================================================================
+const double CONSOLIDATION_VERY_LOW = 0.6;      // 60% - Very low energy
+const double CONSOLIDATION_LOW = 1.0;           // 100% - Sufficient energy
+const double CONSOLIDATION_MEDIUM = 1.5;        // 150% - High energy
+
+// ==============================================================================
+// PATTERN DETECTION THRESHOLDS
+//   
+// ==============================================================================
+const double GANN_ANGLE_STRONG_IMPULSIVE = 75.0;    // Gann angle for strong pattern
+const double GANN_ANGLE_MEDIUM_IMPULSIVE = 50.0;   // Gann angle for medium pattern
+const double CONSOLIDATION_IMPULSIVE_MAX = 0.1;    // Max consolidation for impulsive (10%)
+const double TIME_SYMMETRY_GOOD = 0.8;             // Good time symmetry (80%)
+
+// ==============================================================================
+// LOGGING INTERVALS
+//  
+// ==============================================================================
+const int TEST_ARRAY_SIZE = 100;                // Test array size
+const int TEST_OVERFLOW_COUNT = 100;            // Overflow count in test
+const int LABEL_OFFSET_MAX_PIPS = 100;          // Max label offset (pips)
+const int PATTERN_BARS_PADDING = 100;           // Padding for pattern display
+
+// ==============================================================================
+// TIME CONSTANTS
+//  
+// ==============================================================================
 const int SECONDS_PER_MINUTE = 60;
 const int SECONDS_PER_HOUR = 3600;
 const int SECONDS_PER_DAY = 86400;
+const int SECONDS_PER_MONTH = 2592000;          // 30 days
 
-#endif
-    // PROJECT_CONSTANTS_MQH
+const int MUTEX_STALE_TIMEOUT_SECONDS = 2;      // Mutex stale timeout
+const int MUTEX_RETRY_ATTEMPTS = 10;            // Mutex retry attempts
+const int MUTEX_RETRY_DELAY_MS = 10;            // Mutex retry delay (ms)
+
+// ==============================================================================
+// ARRAY SIZES
+//  
+// ==============================================================================
+const int DEFAULT_ARRAY_SIZE = 10;
+const int SMALL_ARRAY_SIZE = 50;
+const int MEDIUM_ARRAY_SIZE = 100;
+const int LARGE_ARRAY_SIZE = 500;
+
+// ==============================================================================
+// VALIDATION CONSTANTS
+//  
+// ==============================================================================
+const double MIN_PRICE_VALUE = 0.00001;         // Min valid price
+const double MAX_PRICE_MULTIPLIER = 1000000.0;  // Max price multiplier
+const int MIN_BARS_REQUIRED = 1;                // Min required bars
+const int MAX_BARS_LOOKBACK = 10000;            // Max lookback bars
+
+// ==============================================================================
+// ERROR CODES (Centralized)
+//   ()
+// ==============================================================================
+const int ERROR_CODE_SUCCESS = 0;
+const int ERROR_CODE_INVALID_INPUT = -1;
+const int ERROR_CODE_MEMORY_LIMIT = -2;
+const int ERROR_CODE_FILE_OPERATION = -3;
+const int ERROR_CODE_STATE_CONFLICT = -4;
+const int ERROR_CODE_OVERFLOW = -5;
+
+// Visual Alignment Constants
+const double FONT_CHAR_WIDTH_FACTOR = 0.6;
+
+// ==============================================================================
+// HELPER FUNCTIONS
+//  
+// ==============================================================================
+
+//+------------------------------------------------------------------+
+//| Convert Percentage to Decimal                                    |
+//|                                                  |
+//+------------------------------------------------------------------+
+double PercentToDecimal(double percent)
+{
+    return percent / PERCENTAGE_TO_DECIMAL;
+}
+
+//+------------------------------------------------------------------+
+//| Convert Decimal to Percentage                                    |
+//|                                                  |
+//+------------------------------------------------------------------+
+double DecimalToPercent(double decimal)
+{
+    return decimal * PERCENTAGE_TO_DECIMAL;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Alpha from Transparency                                |
+//|  alpha  transparency                                     |
+//+------------------------------------------------------------------+
+int TransparencyToAlpha(int transparency)
+{
+    // Clamp transparency
+    if(transparency < MIN_TRANSPARENCY_PERCENT) transparency = MIN_TRANSPARENCY_PERCENT;
+    if(transparency > MAX_TRANSPARENCY_PERCENT) transparency = MAX_TRANSPARENCY_PERCENT;
+    
+    // Calculate alpha
+    return (int)((MAX_TRANSPARENCY_PERCENT - transparency) * ALPHA_SCALE_FACTOR / PERCENTAGE_TO_DECIMAL);
+}
+
+//+------------------------------------------------------------------+
+//| Validate Transparency Range                                      |
+//|   transparency                                   |
+//+------------------------------------------------------------------+
+bool IsValidTransparency(int transparency)
+{
+    return (transparency >= MIN_TRANSPARENCY_PERCENT && 
+            transparency <= MAX_TRANSPARENCY_PERCENT);
+}
+
+//+------------------------------------------------------------------+
+//| Validate Zone Height Percent                                     |
+//|    zone                                      |
+//+------------------------------------------------------------------+
+bool IsValidZoneHeightPercent(double heightPercent)
+{
+    return (heightPercent >= MIN_ZONE_HEIGHT_PERCENT && 
+            heightPercent <= MAX_ZONE_HEIGHT_PERCENT);
+}
+
+//+------------------------------------------------------------------+
+//| Get Frequency for Step                                           |
+//|                                               |
+//+------------------------------------------------------------------+
+double GetFrequencyForStep(int step)
+{
+    if(step <= 0) return 0.0;
+    return (double)FREQUENCY_BASE / step;
+}
+
+// IsValidPrice is defined in FloatingPointHelper.mqh (with epsilon parameter)
+
+//+------------------------------------------------------------------+
+//| Print Constants Summary (Debug)                                  |
+//|    ()                                        |
+//+------------------------------------------------------------------+
+void PrintConstantsSummary()
+{
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("=============================================================");
+    Print(" PROJECT CONSTANTS SUMMARY");
+    Print("=============================================================");
+    Print("Transparency Range: ", MIN_TRANSPARENCY_PERCENT, "-", MAX_TRANSPARENCY_PERCENT, "%");
+    Print("Zone Height Range: ", DoubleToString(MIN_ZONE_HEIGHT_PERCENT * 100, 2), "-", 
+          DoubleToString(MAX_ZONE_HEIGHT_PERCENT * 100, 2), "%");
+    Print("Max Zones Per Chart: ", MAX_ZONES_PER_CHART);
+    Print("Max Learning Data: ", MAX_LEARNING_DATA_SIZE);
+    Print("Cache Log Interval: ", CACHE_LOG_INTERVAL);
+    Print("=============================================================");
+    #endif
+}

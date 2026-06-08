@@ -1,21 +1,23 @@
-//+------------------------------------------------------------------+
+  //+------------------------------------------------------------------+
 //|                                            AdaptiveScaling.mqh   |
 //|                                                                  |
 //| ATR-Based Volatility Adaptive Scaling for Biotak Trigger TH3    |
 //|                                                                  |
 //| Normalizes TH-based level spacing to match real market           |
 //| volatility using Weighted ATR, while preserving the fractal      |
-//| 2× ratio between consecutive structure levels.                   |
+//| 2  ratio between consecutive structure levels.                   |
 //|                                                                  |
 //| Three modes:                                                     |
 //| FIXED: No adaptation (original behavior)                         |
 //| ATR_ADAPTIVE: Full ATR normalization (scalingFactor = ATR/TH)   |
-//| BLENDED: Weighted mix (α × ATR + (1-α) × TH)                   |
+//| BLENDED: Weighted mix (    ATR + (1- )   TH)                   |
 //|                                                                  |
 //| Smoothing: EMA on scaling factor, updated on bar close only.    |
 //+------------------------------------------------------------------+
-#property copyright "© Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
+
+#property strict
 
 #ifndef ADAPTIVE_SCALING_MQH
 #define ADAPTIVE_SCALING_MQH
@@ -45,7 +47,7 @@ void InitializeAdaptiveScaling() {
 
 //+------------------------------------------------------------------+
 //| Calculate EMA Alpha from period                                  |
-//| α = 2 / (period + 1)                                            |
+//|   = 2 / (period + 1)                                            |
 //+------------------------------------------------------------------+
 double GetEMAAlpha(const int period) {
     int safePeriod = MathMax(1, period);
@@ -71,11 +73,14 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
         return false;
     }
     
-    // Only update on new bar close (bar count change)
-    int currentBars = Bars(GetCachedSymbol(), (ENUM_TIMEFRAMES)GetEffectiveTimeframe());
-    if(g_scalingInitialized && currentBars == g_lastScalingBarCount) {
-        return false; // No new bar, skip recalculation
+    // Update frequency gate: allow updates every 5 seconds instead of every bar
+    // This makes the indicator much more responsive to intraday volatility spikes.
+    static datetime s_lastScalingUpdate = 0;
+    datetime now = TimeCurrent();
+    if(g_scalingInitialized && (now - s_lastScalingUpdate) < 5) {
+        return false; 
     }
+    s_lastScalingUpdate = now;
     
     // Validate base price
     if(basePrice < EPSILON_PRICE) {
@@ -83,8 +88,8 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
         return false;
     }
     
-    // Get theoretical TH for current timeframe
-    double timeframePercentage = GetTimeframeTH();
+    // Get theoretical TH for current timeframe (un-adapted base TH)
+    double timeframePercentage = GetBaseTimeframeTH();
     if(timeframePercentage <= 0) {
         _LOG_GATE_E Print("[E][ADAPT] UpdateATRScalingFactor: Invalid timeframe percentage=", DoubleToString(timeframePercentage, 10));
         return false;
@@ -96,10 +101,13 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
         return false;
     }
     
-    // Get real ATR from existing weighted ATR system
-    double weightedATR = CalculateWeightedATR();
+    // Use the core Weighted ATR system for calculation (consistent with labels)
+    double weightedATR = CalculateWeightedATR_Locked();
+    
     if(weightedATR <= 0) {
-        _LOG_GATE_W Print("[W][ADAPT] UpdateATRScalingFactor: ATR=0, keeping previous scaling factor");
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("[W][ADAPT] UpdateATRScalingFactor: ATR=0, keeping previous scaling factor");
+        #endif
         return false;
     }
     
@@ -123,41 +131,107 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
         g_smoothedScalingFactor = rawFactor;
         g_scalingInitialized = true;
     } else {
-        // EMA: smoothed = prev × (1 - α) + raw × α
+        // Fast-track for large changes in Aggressive mode (v3.11)
+        if(inpFractalJumpStrategy == JUMP_AGGRESSIVE && MathAbs(rawFactor - g_smoothedScalingFactor) > 1.0) {
+            alpha = MathMin(1.0, alpha * 2.0); 
+        }
+        // EMA: smoothed = prev * (1 - alpha) + raw * alpha
         g_smoothedScalingFactor = g_smoothedScalingFactor * (1.0 - alpha) + rawFactor * alpha;
     }
     
     // Clamp smoothed result too
     g_smoothedScalingFactor = MathMax(MIN_SCALING_FACTOR, MathMin(MAX_SCALING_FACTOR, g_smoothedScalingFactor));
     
-    g_lastScalingBarCount = currentBars;
+    int oldShift = g_fractalShift;
     
-    #ifdef ENABLE_DEBUG_LOGS
-    static datetime s_lastAdaptLog = 0;
-    datetime now = TimeCurrent();
-    if(now - s_lastAdaptLog > 300) {  // Log every 5 minutes
-        Print("[D][ADAPT] ========== ADAPTIVE SCALING UPDATE ==========");
-        Print("[D][ADAPT] Mode: ", EnumToString(inpAdaptiveMode));
-        Print("[D][ADAPT] ATR: ", DoubleToString(weightedATR, digits));
-        Print("[D][ADAPT] Theoretical TH: ", DoubleToString(theoreticalTH, digits));
-        Print("[D][ADAPT] Raw Factor (ATR/TH): ", DoubleToString(rawFactor, 4));
-        Print("[D][ADAPT] Smoothed Factor: ", DoubleToString(g_smoothedScalingFactor, 4));
-        Print("[D][ADAPT] EMA Alpha: ", DoubleToString(alpha, 4), " (period=", smoothingPeriod, ")");
-        if(inpAdaptiveMode == ADAPTIVE_BLENDED)
-            Print("[D][ADAPT] Blend Ratio: ", DoubleToString(inpAdaptiveBlendRatio, 2));
-        Print("[D][ADAPT] ==============================================");
-        s_lastAdaptLog = now;
+    // UPDATE FRACTAL SHIFT (Global State)
+    if(inpAdaptiveMode == ADAPTIVE_FRACTAL) {
+        // Find base index for current timeframe
+        int baseIdx = -1;
+        string baseTF = GetBaseFractalTimeframeForCurrent();
+        int tfArraySize = ArraySize(FRACTAL_TIMEFRAMES);
+        
+        for(int i = 0; i < tfArraySize; i++) {
+            if(FRACTAL_TIMEFRAMES[i] == baseTF) {
+                baseIdx = i;
+                break;
+            }
+        }
+        
+        if(baseIdx != -1) {
+            if(inpFractalJumpStrategy == JUMP_AGGRESSIVE) {
+                // DIRECT THRESHOLD STRATEGY (v3.11):
+                // Find the first fractal level whose TH is greater than or equal to current ATR.
+                
+                int targetIdx = baseIdx;
+                double pipSize = GetCachedPipSize();
+                double atrPips = (pipSize > 0) ? weightedATR / pipSize : 0;
+                
+                for(int i = baseIdx; i < tfArraySize; i++) {
+                    double p = MODIFIED_FRACTAL_PERCENTAGES[i];
+                    double th = CalculateTH(basePrice, digits, p);
+                    
+                    if(th >= weightedATR) {
+                        targetIdx = i;
+                        break;
+                    }
+                    targetIdx = i;
+                }
+                g_fractalShift = targetIdx - baseIdx;
+                
+                #ifdef ENABLE_DEBUG_LOGS
+                // CRITICAL LOG: Now showing Pips instead of Points for clarity
+                static datetime s_lastLogTime = 0;
+                if(now - s_lastLogTime > 10) { // Log every 10 seconds
+                    string currentFractal = FRACTAL_TIMEFRAMES[baseIdx + g_fractalShift];
+                    Print("[FRACTAL_LOG] Stable ATR: ", DoubleToString(atrPips, 1), " Pips",
+                          " | Target Fractal: ", currentFractal, 
+                          " | Shift: ", g_fractalShift, 
+                          " | Ratio: ", DoubleToString(g_smoothedScalingFactor, 2));
+                    s_lastLogTime = now;
+                }
+                #endif
+            } else {
+                // CONSERVATIVE STRATEGY: Original log2-based jumping
+                if(g_smoothedScalingFactor <= 1.2) {
+                    g_fractalShift = 0;
+                } else {
+                    g_fractalShift = (int)MathRound((MathLog(g_smoothedScalingFactor) / MathLog(2.0)) + 0.1);
+                }
+            }
+        } else {
+            g_fractalShift = 0;
+        }
+        
+        // Clamp shift to valid range [0, 5]
+        if(g_fractalShift < 0) g_fractalShift = 0;
+        if(g_fractalShift > 5) g_fractalShift = 5;
+        
+        if(g_fractalShift != oldShift) {
+             _LOG_GATE_I Print("[I][ADAPT] Fractal Shift changed: ", oldShift, " -> ", g_fractalShift, " (ATR: ", DoubleToString(weightedATR / GetCachedPoint(), 1), " pips)");
+             return true; // Shift changed, need redraw
+        }
+    } else {
+        g_fractalShift = 0;
+        if(g_fractalShift != oldShift) return true;
     }
-    #endif
     
-    return true;
+    return false; // No significant change needing redraw
+}
+
+//+------------------------------------------------------------------+
+//| Get fractal level shift based on ATR/TH ratio                    |
+//| Only used in ADAPTIVE_FRACTAL mode                               |
+//+------------------------------------------------------------------+
+int GetFractalShift() {
+    return g_fractalShift;
 }
 
 //+------------------------------------------------------------------+
 //| Get Adapted Step Size                                            |
 //|                                                                  |
 //| Applies the appropriate scaling to a step size based on the     |
-//| selected adaptive mode. Preserves fractal 2× ratio because     |
+//| selected adaptive mode. Preserves fractal 2  ratio because     |
 //| the same scaling factor is applied to ALL levels uniformly.     |
 //|                                                                  |
 //| @param originalStepSize  The raw TH-based step size             |
@@ -178,18 +252,25 @@ double GetAdaptedStepSize(const double originalStepSize) {
     switch(inpAdaptiveMode) {
         case ADAPTIVE_ATR:
         {
-            // Full ATR adaptation: stepSize × scalingFactor
+            // Full ATR adaptation: stepSize   scalingFactor
             return originalStepSize * factor;
         }
         
         case ADAPTIVE_BLENDED:
         {
             // Blended: interpolate between original and ATR-adapted
-            // result = original × (1 - blendRatio) + (original × scalingFactor) × blendRatio
-            // Simplified: result = original × ((1 - blendRatio) + scalingFactor × blendRatio)
+            // result = original * (1 - blendRatio) + (original * scalingFactor) * blendRatio
+            // Simplified: result = original * ((1 - blendRatio) + scalingFactor * blendRatio)
             double blendRatio = MathMax(0.0, MathMin(1.0, inpAdaptiveBlendRatio));
             double blendedFactor = (1.0 - blendRatio) + factor * blendRatio;
             return originalStepSize * blendedFactor;
+        }
+        
+        case ADAPTIVE_FRACTAL:
+        {
+            // Fractal Jump is handled at the timeframe selection level
+            // so we don't apply another multiplier here.
+            return originalStepSize;
         }
         
         default:

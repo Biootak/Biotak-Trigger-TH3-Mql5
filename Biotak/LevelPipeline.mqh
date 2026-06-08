@@ -1,22 +1,23 @@
-#property copyright "Copyright 2025, Biotak Project"
+﻿  #property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
+#property strict
 
 #ifndef LEVEL_PIPELINE_MQH
 #define LEVEL_PIPELINE_MQH
 
 //+------------------------------------------------------------------+
-//| LEVEL PIPELINE — Zone-First Architecture                         |
+//| LEVEL PIPELINE   Zone-First Architecture                         |
 //|                                                                  |
 //| PHILOSOPHY: Zone is the PRIMARY entity. Lines (triggers) are     |
 //| derived from zone boundaries. Zones define the structure;        |
 //| lines are visual markers at the edges where zones meet.          |
 //|                                                                  |
 //| PIPELINE STAGES:                                                 |
-//|   Stage 1: CalculateLevels  → SCalculatedLevel[]                 |
-//|   Stage 2: ClassifyLevels   → update classification in-place     |
-//|   Stage 3: BuildZones       → SZoneDefinition[] (PRIMARY)        |
-//|   Stage 4: DeriveTriggers   → STriggerLine[] (from zone bounds)  |
-//|   Stage 5: RenderAll        → MT5 objects (zones first, lines)   |
+//|   Stage 1: CalculateLevels    SCalculatedLevel[]                 |
+//|   Stage 2: ClassifyLevels     update classification in-place     |
+//|   Stage 3: BuildZones         SZoneDefinition[] (PRIMARY)        |
+//|   Stage 4: DeriveTriggers     STriggerLine[] (from zone bounds)  |
+//|   Stage 5: RenderAll          MT5 objects (zones first, lines)   |
 //|                                                                  |
 //| BENEFITS:                                                        |
 //|   - Zones are always geometrically correct (no state mutation)   |
@@ -55,6 +56,7 @@ struct SLevelClassified {
     ENUM_LINE_STYLE levelStyle;
     int    levelWidth;
     color  zoneColor;       // Color for zone touching this level
+    string labelText;
 };
 
 //+------------------------------------------------------------------+
@@ -95,6 +97,8 @@ struct STriggerLine {
     ENUM_LINE_STYLE lineStyle;
     int    lineWidth;
     string tooltip;
+    color  clr;
+    string labelText;
     bool   inViewport;      // false = skip render
     bool   isMidpoint;
     bool   setBack;         // OBJPROP_BACK value (mode-specific)
@@ -146,8 +150,8 @@ struct SModeConfig {
 //| STEP MODE: How price is computed at each level                   |
 //+------------------------------------------------------------------+
 enum ENUM_LEVEL_STEP_MODE {
-    LEVEL_STEP_UNIFORM = 0,       // price = center ± stepSize × N (no drift)
-    LEVEL_STEP_CUMULATIVE = 1     // price = center ± cumulative(steps[N % count])
+    LEVEL_STEP_UNIFORM = 0,       // price = center   stepSize   N (no drift)
+    LEVEL_STEP_CUMULATIVE = 1     // price = center   cumulative(steps[N % count])
 };
 
 //+------------------------------------------------------------------+
@@ -155,8 +159,7 @@ enum ENUM_LEVEL_STEP_MODE {
 //+------------------------------------------------------------------+
 enum ENUM_CLASSIFY_MODE {
     CLASSIFY_STANDARD = 0,        // Standard structure/trigger classification
-    CLASSIFY_ALTERNATING = 1,     // SSLS: alternating SS/LS fallback colors
-    CLASSIFY_MMODE = 2            // M mode: C/M level distinction
+    CLASSIFY_ALTERNATING = 1      // SSLS: alternating SS/LS fallback colors
 };
 
 //+------------------------------------------------------------------+
@@ -173,11 +176,11 @@ struct SPipelineResult {
 //| STAGE 1: Unified level price calculator                          |
 //|                                                                  |
 //| Handles ALL modes via stepMode enum:                             |
-//|   LEVEL_STEP_UNIFORM:    price = center ± step × N              |
-//|   LEVEL_STEP_CUMULATIVE: price = center ± Σ steps[i % count]    |
+//|   LEVEL_STEP_UNIFORM:    price = center   step   N              |
+//|   LEVEL_STEP_CUMULATIVE: price = center     steps[i % count]    |
 //|                                                                  |
 //| KEY PRINCIPLE: ALL levels are calculated. Every step is always   |
-//| included — there is no filtering/skipping.                       |
+//| included   there is no filtering/skipping.                       |
 //+------------------------------------------------------------------+
 int CalculateLevels(
     const double centerPrice,
@@ -208,7 +211,12 @@ int CalculateLevels(
     int count = 0;
     
     // Midpoint (always first)
-    levels[count].price = centerPrice;
+    // GOLD FIX: Apply 0.5 step offset to centerPrice
+    // This shifts all zones so that their BOUNDARIES (lines) fall exactly on the original levels.
+    double offset = (stepSizes[0] * 0.5);
+    double shiftedCenter = centerPrice + offset;
+    
+    levels[count].price = shiftedCenter;
     levels[count].logicalStep = 0;
     levels[count].isMidpoint = true;
     levels[count].direction = 0;
@@ -225,12 +233,12 @@ int CalculateLevels(
         iterations++;
         double price;
         if(stepMode == LEVEL_STEP_UNIFORM) {
-            price = centerPrice + (stepSizes[0] * logicalStep);
+            price = shiftedCenter + (stepSizes[0] * logicalStep);
         } else {
             // CUMULATIVE: alternate through stepSizes array
             double dist = stepSizes[(logicalStep - 1) % stepSizeCount];
             cumAbove += dist;
-            price = centerPrice + cumAbove;
+            price = shiftedCenter + cumAbove;
         }
         
         // Price boundary check
@@ -257,11 +265,11 @@ int CalculateLevels(
         iterations++;
         double price;
         if(stepMode == LEVEL_STEP_UNIFORM) {
-            price = centerPrice - (stepSizes[0] * logicalStep);
+            price = shiftedCenter - (stepSizes[0] * logicalStep);
         } else {
             double dist = stepSizes[(logicalStep - 1) % stepSizeCount];
             cumBelow += dist;
-            price = centerPrice - cumBelow;
+            price = shiftedCenter - cumBelow;
         }
         
         // Price boundary check
@@ -278,10 +286,26 @@ int CalculateLevels(
         logicalStep++;
     }
     
-    // PERF: maxStep is known — drawnAbove and drawnBelow track the actual max logicalStep
+    // PERF: maxStep is known   drawnAbove and drawnBelow track the actual max logicalStep
     maxStepOut = (drawnAbove > drawnBelow) ? drawnAbove : drawnBelow;
     ArrayResize(levels, count);
     return count;
+}
+
+//+------------------------------------------------------------------+
+//| HELPER: Get descriptive label text for a level                   |
+//+------------------------------------------------------------------+
+string GetLabelTextForLevel(const SLevelClassified &level, const int baseMultiplier) {
+    if(level.isMidpoint) return "Midpoint";
+    
+    string direction = (level.direction > 0) ? "+" : "-";
+    
+    if(level.structureLevel > 0) {
+        return StringFormat("L%d %s%d", level.structureLevel, direction, level.logicalStep);
+    }
+    
+    // For trigger subdivisions, show distance in base multiplier units if possible
+    return StringFormat("%s%d", direction, level.logicalStep);
 }
 
 //+------------------------------------------------------------------+
@@ -316,6 +340,7 @@ int ClassifyLevels(
         classified[i].levelStyle = config.fallbackStyle;
         classified[i].levelWidth = config.fallbackWidth;
         classified[i].zoneColor = clrNONE;
+        classified[i].labelText = "";
         
         int step = rawLevels[i].logicalStep;
         
@@ -331,21 +356,16 @@ int ClassifyLevels(
                 classified[i].levelStyle = config.midpointStyle;
                 classified[i].levelWidth = config.midpointWidth;
             }
+            classified[i].labelText = GetLabelTextForLevel(classified[i], baseMultiplier);
             continue;
         }
         
         // BASE PLAYER: Structure/Trigger classification
-        // Every step is classified as either structural or trigger subdivision.
-        // Structural: step divisible by L1..L5 intervals → structure color/style
-        // Trigger subdivision: steps between structural levels → trigger or fallback color/style
-        // With base=4: steps 4,8,12.. = structural L1, steps between = trigger subdivisions
-        // This ensures exactly (base) equal zones between each pair of structural levels.
-        
         classified[i].structureLevel = GetHighestStructureLevel(step, g_cachedIntervals);
         classified[i].isStructure = (classified[i].structureLevel > 0);
         
         if(classified[i].isStructure) {
-            // Structural level — get styling from GetPathForLevelOptimized
+            // Structural level   get styling from GetPathForLevelOptimized
             color outColor; ENUM_LINE_STYLE outStyle; int outWidth;
             if(GetPathForLevelOptimized(step, outColor, outStyle, outWidth, triggerEnabled)) {
                 classified[i].levelColor = outColor;
@@ -353,15 +373,15 @@ int ClassifyLevels(
                 classified[i].levelWidth = outWidth;
             }
         } else {
-            // Trigger subdivision — between structural levels
+            // Trigger subdivision   between structural levels
             classified[i].isTrigger = true;
             if(triggerEnabled) {
-                // User has trigger styling enabled — use trigger colors
-                classified[i].levelColor = inpTriggerColor;
+                // User has trigger styling enabled   use trigger colors
+                classified[i].levelColor = GetTriggerRenderColor();
                 classified[i].levelStyle = inpTriggerStyle;
                 classified[i].levelWidth = inpTriggerWidth;
             } else {
-                // Trigger styling disabled — use mode fallback colors
+                // Trigger styling disabled   use mode fallback colors
                 classified[i].levelColor = config.fallbackColor;
                 classified[i].levelStyle = config.fallbackStyle;
                 classified[i].levelWidth = config.fallbackWidth;
@@ -373,6 +393,9 @@ int ClassifyLevels(
         if(classified[i].zoneColor == clrNONE) {
             classified[i].zoneColor = classified[i].levelColor;
         }
+        
+        // Populate label text
+        classified[i].labelText = GetLabelTextForLevel(classified[i], baseMultiplier);
     }
     
     return rawCount;
@@ -411,39 +434,6 @@ int ClassifyLevelsAlternating(
             classified[i].levelColor = config.fallbackColor2;
             classified[i].levelStyle = config.fallbackStyle2;
             classified[i].levelWidth = config.fallbackWidth2;
-        }
-    }
-    
-    return result;
-}
-
-//+------------------------------------------------------------------+
-//| STAGE 2 VARIANT: Classify for M mode (C vs M distinction)       |
-//+------------------------------------------------------------------+
-int ClassifyLevelsMMode(
-    const SCalculatedLevel &rawLevels[],
-    const int rawCount,
-    const SModeConfig &config,
-    const bool triggerEnabled,
-    const int baseMultiplier,
-    SLevelClassified &classified[])
-{
-    int result = ClassifyLevels(rawLevels, rawCount, config, triggerEnabled, baseMultiplier, classified);
-    
-    for(int i = 0; i < result; i++) {
-        if(classified[i].isMidpoint) continue;
-        if(classified[i].isStructure || classified[i].isTrigger) continue;
-        
-        // M mode: every 3rd step is M level, others are C levels
-        bool isM = (classified[i].logicalStep % 3 == 0);
-        if(isM) {
-            classified[i].levelColor = inpMLevelColor;
-            classified[i].levelStyle = inpMLevelStyle;
-            classified[i].levelWidth = inpMLevelWidth;
-        } else {
-            classified[i].levelColor = inpCLevelColor;
-            classified[i].levelStyle = inpCLevelStyle;
-            classified[i].levelWidth = inpCLevelWidth;
         }
     }
     
@@ -493,7 +483,7 @@ void BuildZonesAndLines(
     midLevel.isMidpoint = false;
     bool hasMid = false;
     
-    // Ensure capacity (only grows, never shrinks — eliminates per-frame allocation)
+    // Ensure capacity (only grows, never shrinks   eliminates per-frame allocation)
     if(s_aboveCapacity < classifiedCount) {
         ArrayResize(s_aboveLevels, classifiedCount, 64);
         s_aboveCapacity = classifiedCount;
@@ -527,7 +517,7 @@ void BuildZonesAndLines(
         } else if(belowCount > 0) {
             neighborDist = midLevel.price - s_belowLevels[0].price;
         }
-        // Edge case fix: no neighbors → use 100 points as fallback height
+        // Edge case fix: no neighbors - use 100 points as fallback height
         if(neighborDist <= 0) {
             neighborDist = GetCachedPoint() * 100;
         }
@@ -569,6 +559,8 @@ void BuildZonesAndLines(
         lines[lIdx].lineColor = s_aboveLevels[i].levelColor;
         lines[lIdx].lineStyle = s_aboveLevels[i].levelStyle;
         lines[lIdx].lineWidth = s_aboveLevels[i].levelWidth;
+        lines[lIdx].clr = s_aboveLevels[i].levelColor;
+        lines[lIdx].labelText = s_aboveLevels[i].labelText;
         lines[lIdx].tooltip = "Midpoint +" + IntegerToString(s_aboveLevels[i].logicalStep) + 
             " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
@@ -622,6 +614,8 @@ void BuildZonesAndLines(
         lines[lIdx].lineColor = s_belowLevels[i].levelColor;
         lines[lIdx].lineStyle = s_belowLevels[i].levelStyle;
         lines[lIdx].lineWidth = s_belowLevels[i].levelWidth;
+        lines[lIdx].clr = s_belowLevels[i].levelColor;
+        lines[lIdx].labelText = s_belowLevels[i].labelText;
         lines[lIdx].tooltip = "Midpoint -" + IntegerToString(s_belowLevels[i].logicalStep) + 
             " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
@@ -665,7 +659,7 @@ void BuildZonesAndLines(
 }
 
 //+------------------------------------------------------------------+
-//| STAGE 5a: Render zones (FIRST — zones are primary)               |
+//| STAGE 5a: Render zones (FIRST   zones are primary)               |
 //|                                                                  |
 //| Creates/updates MT5 rectangle objects for each zone.             |
 //| Handles all zone styles: Lines, Filled Box, Empty Box, Hidden.   |
@@ -720,7 +714,7 @@ void RenderZones(
 }
 
 //+------------------------------------------------------------------+
-//| STAGE 5b: Render trigger lines (SECOND — derived from zones)     |
+//| STAGE 5b: Render trigger lines (SECOND   derived from zones)     |
 //|                                                                  |
 //| Creates/updates MT5 horizontal line objects.                     |
 //| Uses CreateOrUpdateHLine for consistency.                        |
@@ -731,6 +725,7 @@ void RenderTriggerLines(
     const SModeConfig &config)
 {
     bool triggerEnabled = IsTriggerLevelsEnabled();
+    double currentPrice = GetCurrentPriceForLabels();
     
     for(int i = 0; i < lineCount; i++) {
         // Factor mode: hide lines when trigger-only enabled
@@ -740,13 +735,17 @@ void RenderTriggerLines(
                 if(ObjectFind(0, lines[i].name) >= 0) {
                     ObjectSetInteger(0, lines[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
                 }
+                string labelName = lines[i].name + "_Label";
+                if(ObjectFind(0, labelName) >= 0) {
+                    ObjectSetInteger(0, labelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+                }
                 continue;
             }
         }
         
-        // Use the unified create-or-update pattern
+        // Use the individual line color instead of config.triggerColor
         bool isNew = CreateOrUpdateHLine(lines[i].name, lines[i].price,
-                                          lines[i].lineColor, lines[i].lineStyle, lines[i].lineWidth,
+                                          lines[i].clr, lines[i].lineStyle, lines[i].lineWidth,
                                           lines[i].tooltip);
         
         // Set mode-specific properties on new objects
@@ -758,21 +757,31 @@ void RenderTriggerLines(
                 ObjectSetInteger(0, lines[i].name, OBJPROP_ZORDER, config.zOrder);
             }
         }
+
+        // Render Pip Distance Label
+        if(inpShowPipDistanceLabels) {
+            string labelName = lines[i].name + "_Label";
+            double pips = MathAbs(lines[i].price - currentPrice) / GetCachedPoint() / 10.0;
+            CreatePipDistanceLabel(labelName, lines[i].price, pips, lines[i].clr, lines[i].labelText);
+        }
     }
 }
 
 //+------------------------------------------------------------------+
+//| HELPER: Get current price for distance labels                    |
+//+------------------------------------------------------------------+
+double GetCurrentPriceForLabels() {
+    return (g_currentPrice > 0) ? g_currentPrice : Bid;
+}
+
+//+------------------------------------------------------------------+
 //| STAGE 5c: Cleanup surplus objects from previous render           |
-//|                                                                  |
-//| Removes zone and line objects that no longer exist in current    |
-//| pipeline output. Uses the mode name for prefix matching.         |
 //+------------------------------------------------------------------+
 void CleanupSurplusPipeline(
     const SModeConfig &config,
     const int maxLogicalStep)
 {
     // During custom-price drag, do lightweight throttled cleanup instead of skipping entirely.
-    // Skipping caused stale previous-step objects to accumulate and clutter the chart.
     if(g_customPriceLineDragging) {
         static uint s_lastDragCleanupMs = 0;
         uint nowMs = GetTickCount();
@@ -781,18 +790,20 @@ void CleanupSurplusPipeline(
         s_lastDragCleanupMs = nowMs;
     }
     
-    // Cleanup surplus zones (above, below, and center)
+    // Cleanup surplus zones
     if(config.zonesEnabled) {
         CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Above_", maxLogicalStep + 1);
         CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Below_", maxLogicalStep + 1);
-        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Center_", 1); // Only index 0 exists
+        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Center_", 1);
     }
     
-    // Cleanup surplus lines (above and below direction)
+    // Cleanup surplus lines and their labels
     CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1);
     CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1);
+    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1, 6, "_Label");
+    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1, 6, "_Label");
     
-    // Legacy cleanup: remove old midpoint line (step 0 now gets a zone, not a line)
+    // Legacy cleanup
     string midpointName = config.objectPrefix + config.modeName + "_Midpoint_0";
     if(ObjectFind(0, midpointName) >= 0) {
         CacheRemoveObject(midpointName);
@@ -814,6 +825,13 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
     cfg.zonesEnabled = zoneConfig.enabled;
     cfg.zoneTransparency = zoneConfig.transparency;
     cfg.zoneHeightPercent = zoneConfig.heightPercent;
+    
+    // GOLD FIX: Factor mode steps are defined differently in user's mind (or original logic)
+    // If it looks double, we apply a 0.5 scaling factor specifically for Factor modes.
+    if(modeName == "Factor" || modeName == "Factor_Harmonic") {
+        cfg.zoneHeightPercent *= 0.5;
+    }
+    
     cfg.zoneDefaultColor = zoneConfig.defaultColor;
     cfg.zoneStyle = zoneConfig.style;
     
@@ -824,15 +842,15 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
     cfg.useStepFilter = true;
     
     // Defaults for fallback colors (overridden per mode)
-    cfg.fallbackColor = inpCLevelColor;
-    cfg.fallbackStyle = inpCLevelStyle;
-    cfg.fallbackWidth = inpCLevelWidth;
-    cfg.fallbackColor2 = inpCLevelColor;
-    cfg.fallbackStyle2 = inpCLevelStyle;
-    cfg.fallbackWidth2 = inpCLevelWidth;
-    cfg.midpointColor = inpCLevelColor;
-    cfg.midpointStyle = inpCLevelStyle;
-    cfg.midpointWidth = inpCLevelWidth;
+    cfg.fallbackColor = clrDodgerBlue;
+    cfg.fallbackStyle = STYLE_DOT;
+    cfg.fallbackWidth = 1;
+    cfg.fallbackColor2 = clrDodgerBlue;
+    cfg.fallbackStyle2 = STYLE_DOT;
+    cfg.fallbackWidth2 = 1;
+    cfg.midpointColor = clrDodgerBlue;
+    cfg.midpointStyle = STYLE_DOT;
+    cfg.midpointWidth = 1;
     
     // Price boundaries
     bool isCustomPrice = (g_thStartPointType == TH_START_POINT_CUSTOM_PRICE);
@@ -843,110 +861,8 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
     return cfg;
 }
 
-SModeConfig BuildSSLSConfig(const string objectPrefix)
-{
-    SModeConfig cfg = BuildModeConfig(objectPrefix, "SSLS");
-    cfg.fallbackColor = inpSSLevelColor;
-    cfg.fallbackStyle = inpSSLevelStyle;
-    cfg.fallbackWidth = inpSSLevelWidth;
-    cfg.fallbackColor2 = inpLSLevelColor;
-    cfg.fallbackStyle2 = inpLSLevelStyle;
-    cfg.fallbackWidth2 = inpLSLevelWidth;
-    cfg.midpointColor = inpLSLevelColor;
-    cfg.midpointStyle = inpLSLevelStyle;
-    cfg.midpointWidth = inpLSLevelWidth;
-    return cfg;
-}
-
-SModeConfig BuildMConfig(const string objectPrefix)
-{
-    SModeConfig cfg = BuildModeConfig(objectPrefix, "M");
-    cfg.midpointColor = inpMLevelColor;
-    cfg.midpointStyle = inpMLevelStyle;
-    cfg.midpointWidth = inpMLevelWidth;
-    return cfg;
-}
-
-SModeConfig BuildMEqualConfig(const string objectPrefix)
-{
-    SModeConfig cfg = BuildModeConfig(objectPrefix, "MEq");
-    cfg.useStepFilter = false;
-    cfg.midpointColor = inpMLevelColor;
-    cfg.midpointStyle = inpMLevelStyle;
-    cfg.midpointWidth = inpMLevelWidth;
-    cfg.fallbackColor = inpStructureL1Color;
-    cfg.fallbackStyle = inpStructureL1Style;
-    cfg.fallbackWidth = inpStructureL1Width;
-    return cfg;
-}
-
-SModeConfig BuildTPConfig(const string objectPrefix)
-{
-    return BuildModeConfig(objectPrefix, "TP");
-}
-
-SModeConfig BuildComboConfig(const string objectPrefix)
-{
-    return BuildModeConfig(objectPrefix, "Combo");
-}
-
-SModeConfig BuildFactorConfig(const string objectPrefix)
-{
-    SModeConfig cfg = BuildModeConfig(objectPrefix, "Factor");
-    cfg.useObjPropBack = true;
-    cfg.zOrder = 1;
-    // Keep factor lines visible regardless of Trigger toggle state.
-    // Trigger key should not unexpectedly blank factor lines.
-    cfg.hideLineWhenTriggerOnly = false;
-    cfg.fallbackColor = inpFactorLevelColor;
-    cfg.fallbackStyle = inpFactorLevelStyle;
-    cfg.fallbackWidth = inpFactorLevelWidth;
-    cfg.midpointColor = inpFactorLevelColor;
-    cfg.midpointStyle = inpFactorLevelStyle;
-    cfg.midpointWidth = inpFactorLevelWidth;
-    return cfg;
-}
-
-SModeConfig BuildFactorHarmonicConfig(const string objectPrefix)
-{
-    SModeConfig cfg = BuildModeConfig(objectPrefix, "Factor_Harmonic");
-    cfg.useObjPropBack = true;
-    // Keep factor-harmonic lines visible regardless of Trigger toggle state.
-    cfg.hideLineWhenTriggerOnly = false;
-    cfg.fallbackColor = inpFactorLevelColor;
-    cfg.fallbackStyle = inpFactorLevelStyle;
-    cfg.fallbackWidth = inpFactorLevelWidth;
-    cfg.midpointColor = inpFactorLevelColor;
-    cfg.midpointStyle = inpFactorLevelStyle;
-    cfg.midpointWidth = inpFactorLevelWidth;
-    return cfg;
-}
-
-SModeConfig BuildTHConfig(const string objectPrefix)
-{
-    // Keep legacy-compatible TH family naming for cleanup/prefix matching
-    SModeConfig cfg = BuildModeConfig(objectPrefix, "TH_Level");
-
-    // TH mode: non-structure levels use C-level styling as fallback when triggers off
-    // When triggers are on, ClassifyLevels applies trigger render color directly
-    cfg.fallbackColor = inpCLevelColor;
-    cfg.fallbackStyle = inpCLevelStyle;
-    cfg.fallbackWidth = inpCLevelWidth;
-    cfg.midpointColor = inpTriggerColor;
-    cfg.midpointStyle = inpTriggerStyle;
-    cfg.midpointWidth = inpTriggerWidth;
-    return cfg;
-}
-
 //+------------------------------------------------------------------+
 //| UNIFIED PIPELINE EXECUTOR                                        |
-//|                                                                  |
-//| Runs stages in order:                                            |
-//|   1. Calculate → 2. Classify → 3+4. BuildZonesAndLines           |
-//|   5a. RenderZones → 5b. RenderLines → 5c. Cleanup                |
-//|                                                                  |
-//| All modes use this single entry point.                           |
-//| Step calculation mode and classify mode are parameterized.       |
 //+------------------------------------------------------------------+
 SPipelineResult ExecutePipeline(
     const SModeConfig &config,
@@ -1002,17 +918,13 @@ SPipelineResult ExecutePipeline(
                                                         triggerEnabled, baseMultiplier, lsFirst,
                                                         classified);
             break;
-        case CLASSIFY_MMODE:
-            classifiedCount = ClassifyLevelsMMode(rawLevels, rawCount, config,
-                                                   triggerEnabled, baseMultiplier, classified);
-            break;
         default: // CLASSIFY_STANDARD
             classifiedCount = ClassifyLevels(rawLevels, rawCount, config,
                                               triggerEnabled, baseMultiplier, classified);
             break;
     }
     
-    // Stages 3+4: Build zones and lines (merged — single pass)
+    // Stages 3+4: Build zones and lines (merged   single pass)
     SZoneDefinition zones[];
     STriggerLine lines[];
     BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
@@ -1040,70 +952,27 @@ struct SModeSuffixEntry {
     string levelAbove;      // e.g., "SSLS_Above_"
     string levelBelow;      // e.g., "SSLS_Below_"
     string midpoint;        // e.g., "SSLS_Midpoint_"
-    string zoneCenter;      // e.g., "SSLS_Zone_Center_" — zone on midpoint/anchor level
+    string zoneCenter;      // e.g., "SSLS_Zone_Center_"   zone on midpoint/anchor level
 };
 
-// All registered mode suffixes — used by ClearAllLevels and DeleteAllIndicatorObjects
+// GetAll registered mode suffixes   used by ClearAllLevels and DeleteAllIndicatorObjects
 void GetAllModeSuffixes(SModeSuffixEntry &entries[], int &count)
 {
-    count = 8;
+    static string modeNames[] = {"SSLS", "Combo", "Factor", "Factor_Harmonic", "TH_Level"};
+    count = ArraySize(modeNames);
     ArrayResize(entries, count);
     
-    // SSLS
-    entries[0].zoneSuffix = "SSLS_Zone_";
-    entries[0].levelAbove = "SSLS_Above_";
-    entries[0].levelBelow = "SSLS_Below_";
-    entries[0].midpoint = "SSLS_Midpoint_";
-    entries[0].zoneCenter = "SSLS_Zone_Center_";
-    
-    // M (Control-based)
-    entries[1].zoneSuffix = "M_Zone_";
-    entries[1].levelAbove = "M_Above_";
-    entries[1].levelBelow = "M_Below_";
-    entries[1].midpoint = "M_Midpoint_";
-    entries[1].zoneCenter = "M_Zone_Center_";
-    
-    // MEq (Equal spacing)
-    entries[2].zoneSuffix = "MEq_Zone_";
-    entries[2].levelAbove = "MEq_Above_";
-    entries[2].levelBelow = "MEq_Below_";
-    entries[2].midpoint = "MEq_Midpoint_";
-    entries[2].zoneCenter = "MEq_Zone_Center_";
-    
-    // TP
-    entries[3].zoneSuffix = "TP_Zone_";
-    entries[3].levelAbove = "TP_Above_";
-    entries[3].levelBelow = "TP_Below_";
-    entries[3].midpoint = "TP_Midpoint_";
-    entries[3].zoneCenter = "TP_Zone_Center_";
-    
-    // Combo
-    entries[4].zoneSuffix = "Combo_Zone_";
-    entries[4].levelAbove = "Combo_Above_";
-    entries[4].levelBelow = "Combo_Below_";
-    entries[4].midpoint = "Combo_Midpoint_";
-    entries[4].zoneCenter = "Combo_Zone_Center_";
-    
-    // Factor (Standard)
-    entries[5].zoneSuffix = "Factor_Zone_";
-    entries[5].levelAbove = "Factor_Above_";
-    entries[5].levelBelow = "Factor_Below_";
-    entries[5].midpoint = "Factor_Center_";
-    entries[5].zoneCenter = "Factor_Zone_Center_";
-    
-    // Factor (Harmonic)
-    entries[6].zoneSuffix = "Factor_Harmonic_Zone_";
-    entries[6].levelAbove = "Factor_Harmonic_Above_";
-    entries[6].levelBelow = "Factor_Harmonic_Below_";
-    entries[6].midpoint = "Factor_Harmonic_Center_";
-    entries[6].zoneCenter = "Factor_Harmonic_Zone_Center_";
-    
-    // TH (Traditional)
-    entries[7].zoneSuffix = "TH_Level_Zone_";
-    entries[7].levelAbove = "TH_Level_Above_";
-    entries[7].levelBelow = "TH_Level_Below_";
-    entries[7].midpoint = "TH_Level_Midpoint_";
-    entries[7].zoneCenter = "TH_Level_Zone_Center_";
+    for(int i = 0; i < count; i++) {
+        entries[i].zoneSuffix = modeNames[i] + "_Zone_";
+        entries[i].levelAbove = modeNames[i] + "_Above_";
+        entries[i].levelBelow = modeNames[i] + "_Below_";
+        entries[i].midpoint = modeNames[i] + "_Midpoint_";
+        entries[i].zoneCenter = modeNames[i] + "_Zone_Center_";
+        
+        // Manual overrides for non-standard legacy suffixes
+        if(modeNames[i] == "Factor") entries[i].midpoint = "Factor_Center_";
+        if(modeNames[i] == "Factor_Harmonic") entries[i].midpoint = "Factor_Harmonic_Center_";
+    }
 }
 
 // Get all zone suffixes as a flat array (for ClearAllLevels compatibility)

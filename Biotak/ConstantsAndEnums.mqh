@@ -1,42 +1,52 @@
-﻿#ifndef CONSTANTS_AND_ENUMS_MQH
+   #ifndef CONSTANTS_AND_ENUMS_MQH
 #define CONSTANTS_AND_ENUMS_MQH
 
 #define MAX_LINES 10
+
+// Object naming constants (for cleanup)
+#define TH3_PATTERN_PREFIX      "ABCD_Pattern_"
+#define TH3_TEMP_PREFIX         "ABCD_Temp_"
+#define TH3_TEMP_LINE_PREFIX    "ABCD_Temp_Line_"
 #define CACHE_TIMEOUT 60
 
-// Visibility Constants for OBJPROP_TIMEFRAMES
-// Used by VisibilityManager for hide/show without deletion
-#ifndef OBJ_ALL_PERIODS
-#define OBJ_ALL_PERIODS 0xFFFFFFFF  // Show on all timeframes
-#endif
-    #ifndef OBJ_NO_PERIODS
-#define OBJ_NO_PERIODS 0            // Hide on all timeframes
-#endif
-
 // Performance & Safety Constants
-#define MAX_SAFE_LEVELS 200           // Maximum safe number of levels per side
-#define MAX_SAFE_OBJECTS 3000         // Warning threshold for total objects
-#define CRITICAL_OBJECT_LIMIT 50000   // Critical threshold (MT5 limit ~64K)
-#define CPU_WARNING_MS 100            // Warning if OnCalculate takes >100ms
-#define CPU_CRITICAL_MS 500           // Critical if OnCalculate takes >500ms
+#define MAX_SAFE_LEVELS 2000          // Maximum safe number of levels per side
+#define MAX_SAFE_OBJECTS 5000         // Warning threshold for total objects
+#define CRITICAL_OBJECT_LIMIT 50000   // Critical threshold (MT4 limit ~64K)
+#define CPU_WARNING_MS 50             // Warning if OnCalculate takes >50ms
+#define CPU_CRITICAL_MS 200           // Critical if OnCalculate takes >200ms
 
 // Array Safety Constants (GOLD FIX v3)
 #define MAX_PREFIX_COUNT 50           // Maximum number of object prefixes (with safety margin)
-#define OBJECT_COUNT_INCREASE_THRESHOLD 30   // Trigger cleanup if objects increased by 30
-#define REDRAW_THROTTLE_SECONDS 0     // No artificial delay between redraws — immediate UI response
-#define CLEANUP_INTERVAL_SECONDS 60   // 1 minute between periodic cleanups
+#define OBJECT_COUNT_INCREASE_THRESHOLD 100  // Trigger cleanup if objects increased by 100
+#define REDRAW_THROTTLE_SECONDS 10    // Minimum 10 seconds between redraws
+#define CLEANUP_INTERVAL_SECONDS 300  // 5 minutes between periodic cleanups
+#define CHART_CHANGE_THROTTLE_MS 100  // Throttle CHARTEVENT_CHART_CHANGE bursts (ms)
+#define DOUBLE_CLICK_THRESHOLD_MS 300 // Double-click detection window (ms)
 
 // Division Safety Constants (GOLD FIX v3)
 #define MIN_SAFE_DIVISIONS 0.001      // Minimum divisions to prevent precision loss
 #define MAX_SAFE_FACTOR 10000.0       // Maximum factor value to prevent overflow
 
+// Visibility Constants for OBJPROP_TIMEFRAMES (visual align MT5)
+// Used by VisibilityManager for hide/show without deletion
+#ifndef OBJ_ALL_PERIODS
+#define OBJ_ALL_PERIODS 0xFFFFFFFF  // Show on all timeframes
+#endif
+#ifndef OBJ_NO_PERIODS
+#define OBJ_NO_PERIODS 0            // Hide on all timeframes
+#endif
+
+//                         
 #ifndef OBJPROP_BOLD
 #define OBJPROP_BOLD 5
 #endif
-    const string FRACTAL_TIMEFRAMES[] = {
+
+const string FRACTAL_TIMEFRAMES[] = {
     "M1", "M4", "M16", "H1+M4", "H4+M16", "H17+M4",
     "D2+H20+M16", "D11+H9+M4", "D45+H12+M16"
 };
+// FRACTAL_SHORT_NAMES (visual align MT5     used for compact label rendering)
 const string FRACTAL_SHORT_NAMES[] = {
     "M1", "M4", "M16", "H1.4", "H4.16", "H17.4",
     "D2.20.16", "D11.9.4", "D45.12.16"
@@ -49,33 +59,37 @@ const double MODIFIED_FRACTAL_PERCENTAGES[] = {
     0.0833,   // M16: 8.33%
     0.1666,   // H1+M4: 16.66%
     0.3333,   // H4+M16: 33.33%
-    0.6666,   // H17+M4: 66.66% [OK]
+    0.6666,   // H17+M4: 66.66%  
     1.3332,   // D2+H20+M16: 133.32%
     2.6664,   // D11+H9+M4: 266.64%
     5.3328    // D45+H12+M16: 533.28%
 };
-    const color FRACTAL_COLORS[] = {
+const color FRACTAL_COLORS[] = {
     clrBlack, clrBlack, clrBlack, clrBlue, clrRed,
     clrRed, clrGreen, clrBlack, clrBlack
 };
-    const string STANDARD_TIMEFRAMES[] = {"D1", "W1", "MN1"};
-    const int STANDARD_MINUTES[] = {1440, 10080, 43200};
-    const color STANDARD_COLORS[] = {clrBlue, clrBlue, clrBlue};
-    enum ENUM_TH_START_POINT_TYPE {
+const string STANDARD_TIMEFRAMES[] = {"D1", "W1", "MN1"};
+const int STANDARD_MINUTES[] = {1440, 10080, 43200};
+const color STANDARD_COLORS[] = {clrBlue, clrBlue, clrBlue};
+
+enum ENUM_TH_START_POINT_TYPE {
     TH_START_POINT_MIDPOINT = 0,      // Midpoint
     TH_START_POINT_HISTORICAL_HIGH = 1, // Historical High
     TH_START_POINT_HISTORICAL_LOW = 2,  // Historical Low
     TH_START_POINT_CUSTOM_PRICE = 3    // Custom Price
 };
-    enum ENUM_LINE_OBJECT_TYPE {
+
+enum ENUM_LINE_OBJECT_TYPE {
     LINE_OBJECT_HORIZONTAL_LINE = 0,
     LINE_OBJECT_RAY_LINE = 1
 };
-    enum ENUM_LABEL_CORNER_POSITION {
+
+enum ENUM_LABEL_CORNER_POSITION {
     LABEL_CORNER_LEFT_TOP = 0,
     LABEL_CORNER_LEFT_BOTTOM = 1
 };
-    enum ENUM_LABEL_ARRANGEMENT {
+
+enum ENUM_LABEL_ARRANGEMENT {
     LABEL_ARRANGEMENT_VERTICAL = 0,
     LABEL_ARRANGEMENT_HORIZONTAL = 1
 };
@@ -85,10 +99,8 @@ const double MODIFIED_FRACTAL_PERCENTAGES[] = {
 enum ENUM_STEP_CALCULATION_MODE {
     TH_STEP = 0,        // Traditional TH step mode
     SS_LS_STEP = 1,     // Short Step / Long Step alternating mode
-    M_STEP = 2,         // M levels mode (Control-based)
-    TP_STEP = 3,        // TP levels mode (TH × 0.75 × 3 = TH × 2.25)
-    COMBO_STEP = 4,     // Combo Step mode (customizable: Component1 + Component2)
-    FACTOR_STEP = 5     // Factor Step mode (divides High-Low range by Factor × 2)
+    COMBO_STEP = 2,     // Combo Step mode (customizable: Component1 + Component2)
+    FACTOR_STEP = 3     // Factor Step mode (divides High-Low range by Factor    2)
 };
 
 // Factor calculation mode (Auto vs Manual)
@@ -99,22 +111,22 @@ enum ENUM_FACTOR_MODE {
 
 //+------------------------------------------------------------------+
 //| Factor Auto Basis - What to base the auto calculation on         |
-
+//|           Factor                                       |
 //|                                                                  |
-//| CONTROL: Average of SS and LS (TH×1.75) - Balanced [DEFAULT]    |
-//| SS: Short Step (TH×1.5) - Closer levels, more lines             |
-//| LS: Long Step (TH×2.0) - Wider levels, fewer lines              |
-//| TH: Pure TH (TH×1.0) - Standard spacing                         |
+//| CONTROL: Average of SS and LS (TH  - Balanced [DEFAULT]    |
+//| SS: Short Step (TH  - Closer levels, more lines             |
+//| LS: Long Step (TH  - Wider levels, fewer lines              |
+//| TH: Pure TH (TH  - Standard spacing                         |
 //| TRIGGER: Current timeframe TH - Responsive to current TF        |
 //| PATTERN: 4x timeframe TH - Medium-term structure                |
 //| STRUCTURE: 16x timeframe TH - Long-term structure               |
 //| COMBO: Average of 2 components - Custom mix like Combo Mode     |
 //+------------------------------------------------------------------+
 enum ENUM_FACTOR_AUTO_BASIS {
-    FACTOR_BASIS_CONTROL = 0,      // Control: (SS+LS)/2 = TH×1.75 [Balanced]
-    FACTOR_BASIS_SS = 1,           // Short Step: TH×1.5 (More levels)
-    FACTOR_BASIS_LS = 2,           // Long Step: TH×2.0 (Fewer levels)
-    FACTOR_BASIS_TH = 3,           // Pure TH: TH×1.0 (Standard)
+    FACTOR_BASIS_CONTROL = 0,      // Control: (SS+LS)/2 = TH  [Balanced]
+    FACTOR_BASIS_SS = 1,           // Short Step: TH  (More levels)
+    FACTOR_BASIS_LS = 2,           // Long Step: TH  (Fewer levels)
+    FACTOR_BASIS_TH = 3,           // Pure TH: TH  (Standard)
     FACTOR_BASIS_TRIGGER = 4,      // Trigger: Current TF (Responsive)
     FACTOR_BASIS_PATTERN = 5,      // Pattern: 4x TF (Medium-term)
     FACTOR_BASIS_STRUCTURE = 6,    // Structure: 16x TF (Long-term)
@@ -122,67 +134,41 @@ enum ENUM_FACTOR_AUTO_BASIS {
 };
 
 //+------------------------------------------------------------------+
-//| Volatility Adaptive Mode                                         |
-//|                                                                  |
-//| Controls how level spacing adapts to real market volatility      |
-//|                                                                  |
-//| FIXED: Original behavior — TH = basePrice × fractalPercentage   |
-//| ATR_ADAPTIVE: Scale TH by ATR/TH ratio for volatility match     |
-//| BLENDED: Weighted mix of Fixed and ATR-Adaptive                  |
-//|                                                                  |
-//| In all modes, fractal 2× ratio between levels is preserved.     |
-//+------------------------------------------------------------------+
-enum ENUM_ADAPTIVE_MODE {
-    ADAPTIVE_FIXED = 0,       // Fixed (Original TH — no adaptation)
-    ADAPTIVE_ATR = 1,         // ATR Adaptive (Levels match real volatility)
-    ADAPTIVE_BLENDED = 2      // Blended (Mix of Fixed + ATR Adaptive)
-};
-
-//+------------------------------------------------------------------+
 //| Structure Base Multiplier - Valid range 2-9                      |
+//|        -                                            |
 //|                                                                  |
 //| Defines the hierarchical structure levels:                      |
-//| L1 = base×1, L2 = base×2, L3 = base×4, L4 = base×8, L5 = base×16|
+//| L1 = base^1, L2 = base^2, L3 = base^3, L4 = base^4, L5 = base^5|
 //|                                                                  |
-//| Each consecutive level is 2× the previous (fractal ratio).      |
-//| Formula: L(n) = base × 2^(n-1)                                  |
+//| Example with base=3: L1=3, L2=9, L3=27, L4=81, L5=243          |
+//| Example with base=4: L1=4, L2=16, L3=64, L4=256, L5=1024       |
 //|                                                                  |
-//| Example with base=3: L1=3, L2=6, L3=12, L4=24, L5=48           |
-//| Example with base=4: L1=4, L2=8, L3=16, L4=32, L5=64           |
-//| Example with base=9: L1=9, L2=18, L3=36, L4=72, L5=144         |
-//|                                                                  |
-//| All L1-L5 are always reachable within maxLevels=144.            |
 //| NOTE: Value 1 is INVALID because all levels become identical    |
+//| (1^1 = 1^2 = 1^3 = 1^4 = 1^5 = 1)                              |
 //+------------------------------------------------------------------+
 enum ENUM_STRUCTURE_BASE_MULTIPLIER {
     BASE_MULTIPLIER_2 = 2,   // Base 2: L1=2, L2=4, L3=8, L4=16, L5=32
-    BASE_MULTIPLIER_3 = 3,   // Base 3: L1=3, L2=6, L3=12, L4=24, L5=48
-    BASE_MULTIPLIER_4 = 4,   // Base 4: L1=4, L2=8, L3=16, L4=32, L5=64
-    BASE_MULTIPLIER_5 = 5,   // Base 5: L1=5, L2=10, L3=20, L4=40, L5=80
-    BASE_MULTIPLIER_6 = 6,   // Base 6: L1=6, L2=12, L3=24, L4=48, L5=96
-    BASE_MULTIPLIER_7 = 7,   // Base 7: L1=7, L2=14, L3=28, L4=56, L5=112
-    BASE_MULTIPLIER_8 = 8,   // Base 8: L1=8, L2=16, L3=32, L4=64, L5=128
-    BASE_MULTIPLIER_9 = 9    // Base 9: L1=9, L2=18, L3=36, L4=72, L5=144
+    BASE_MULTIPLIER_3 = 3,   // Base 3: L1=3, L2=9, L3=27, L4=81, L5=243 [DEFAULT]
+    BASE_MULTIPLIER_4 = 4,   // Base 4: L1=4, L2=16, L3=64, L4=256, L5=1024
+    BASE_MULTIPLIER_5 = 5,   // Base 5: L1=5, L2=25, L3=125, L4=625, L5=3125
+    BASE_MULTIPLIER_6 = 6,   // Base 6: L1=6, L2=36, L3=216, L4=1296, L5=7776
+    BASE_MULTIPLIER_7 = 7,   // Base 7: L1=7, L2=49, L3=343, L4=2401, L5=16807
+    BASE_MULTIPLIER_8 = 8,   // Base 8: L1=8, L2=64, L3=512, L4=4096, L5=32768
+    BASE_MULTIPLIER_9 = 9    // Base 9: L1=9, L2=81, L3=729, L4=6561, L5=59049
 };
 
 // Harmonic Ratio validation constants
-#define MIN_HARMONIC_RATIO 1.01   
-#define MAX_HARMONIC_RATIO 2.0    
+#define MIN_HARMONIC_RATIO 1.01   //   1%   (meaningful alternation)
+#define MAX_HARMONIC_RATIO 2.0    //   2x (maximum variation)
 #define DEFAULT_HARMONIC_RATIO 1.333  // Golden-like ratio (4/3)
-
-// Adaptive Scaling Constants
-#define MIN_SCALING_FACTOR 0.1          // Minimum ATR/TH scaling factor
-#define MAX_SCALING_FACTOR 10.0         // Maximum ATR/TH scaling factor
-#define DEFAULT_SMOOTHING_PERIOD 20     // Default EMA period for scaling factor
-#define DEFAULT_BLEND_RATIO 0.5         // Default blend ratio (50% TH + 50% ATR)
 
 //+------------------------------------------------------------------+
 //| Mean Type Selection (for aggregates and quick test)              |
-
+//|                        (  aggregates                       |
 //+------------------------------------------------------------------+
 enum ENUM_MEAN_TYPE {
     MEAN_ARITHMETIC = 0,    // Arithmetic Mean: (A + B + ...) / n
-    MEAN_GEOMETRIC = 1,     // Geometric Mean: ⁿ√(A × B × ...)
+    MEAN_GEOMETRIC = 1,     // Geometric Mean:     B   ...)
     MEAN_HARMONIC = 2       // Harmonic Mean: n / (1/A + 1/B + ...)
 };
 
@@ -191,7 +177,7 @@ enum ENUM_MEAN_TYPE {
 
 //+------------------------------------------------------------------+
 //| Quick Test Presets (Simplified Component Selection)              |
-
+//| Preset        (      components)                     |
 //|                                                                  |
 //| NOTE: CUSTOM removed - use Advanced mode for full control       |
 //+------------------------------------------------------------------+
@@ -212,19 +198,18 @@ enum ENUM_SSLS_BASIS_TYPE {
 
 //+------------------------------------------------------------------+
 //| Calculation Basis (matching Java CalculationBasis enum)          |
-
+//|         (                                          |
 //|                                                                  |
-
+//| TH_BASIS -        TH (                        |
+//| ATR_BASIS -        ATR    (Weighted ATR)             |
 //+------------------------------------------------------------------+
-
-// M step basis type
-enum ENUM_MSTEP_BASIS_TYPE {
-    MSTEP_BASIS_C_BASED = 0,    // Control-based (C ladder with every 3rd as M)
-    MSTEP_BASIS_M_EQUAL = 1     // Equal M spacing
+enum ENUM_CALCULATION_BASIS {
+    CALC_BASIS_TH = 0,          // TH-Based (Theoretical) -   
+    CALC_BASIS_ATR = 1          // ATR-Based (Actual) -   
 };
 
 // Smart Combo Component Selection (Unified)
-
+//              (            
 enum ENUM_COMBO_COMPONENT_ITEM {
     // Sub Components (Fastest - 1/4x)
     COMP_SUB_TH = 0,            // Sub TH
@@ -246,10 +231,10 @@ enum ENUM_COMBO_COMPONENT_ITEM {
     COMP_STRUCTURE_SS = 10,     // Structure SS
     COMP_STRUCTURE_LS = 11,     // Structure LS
     
-    // ═══════════════════════════════════════════════════════════════
-    
+    //  
+    // AGGREGATE COMPONENTS (                  
     // These calculate the mean of TH, SS, LS for a timeframe
-    // ═══════════════════════════════════════════════════════════════
+    //  
     COMP_SUB_MEAN = 12,         // Sub Mean: (Sub_TH + Sub_SS + Sub_LS) / 3
     COMP_TRIGGER_MEAN = 13,     // Trigger Mean: (Trigger_TH + Trigger_SS + Trigger_LS) / 3
     COMP_PATTERN_MEAN = 14,     // Pattern Mean: (Pattern_TH + Pattern_SS + Pattern_LS) / 3
@@ -261,52 +246,52 @@ enum ENUM_COMBO_COMPONENT_ITEM {
 
 //+------------------------------------------------------------------+
 //| Combo Operators for Calculator Mode (Manual)                     |
-
+//|               (                       |
 //|                                                                  |
 //| BINARY OPERATORS (2 operands): OP_PLUS to OP_HARMONIC_MEAN      |
 //| N-ARY OPERATORS (all components): OP_GEOMETRIC_MEAN_ALL to end  |
 //|                                                                  |
 //| USAGE EXAMPLE (N-ARY):                                           |
 //| Component 1: Trigger SS                                          |
-//| Operator 1: Geometric Mean (All)  <- Collects ALL components     |
+//| Operator 1: Geometric Mean (All)       Collects ALL components     |
 //| Component 2: Pattern LS                                          |
 //| Operator 2: [Ignored]                                            |
 //| Component 3: Structure TH                                        |
 //| Operator 3: [Ignored]                                            |
 //| Component 4: Ignore                                              |
-//| Result: ³√(Trigger_SS × Pattern_LS × Structure_TH)              |
+//| Result:         Pattern_LS   Structure_TH)              |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_OPERATOR {
-    // ═══════════════════════════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════════════════════════
+    //  
+    // BINARY OPERATORS (    - Work on 2 values
+    //  
     OP_PLUS = 0,                // Plus: A + B
     OP_MINUS = 1,               // Minus: A - B
-    OP_MULTIPLY = 2,            // Multiply: A × B
-    OP_DIVIDE = 3,              // Divide: A ÷ B
+    OP_MULTIPLY = 2,            // Multiply: A   B
+    OP_DIVIDE = 3,              // Divide: A   B
     OP_AVERAGE = 4,             // Arithmetic Mean: (A + B) / 2
-    OP_GEOMETRIC_MEAN = 5,      // Geometric Mean: √(A × B)
+    OP_GEOMETRIC_MEAN = 5,      // Geometric Mean:     B)
     OP_HARMONIC_MEAN = 6,       // Harmonic Mean: 2AB / (A + B)
     
-    // ═══════════════════════════════════════════════════════════════
-    
+    //  
+    // N-ARY OPERATORS (           - Work on ALL active components
     // When used as Operator 1, collects ALL non-IGNORE components
-    // ═══════════════════════════════════════════════════════════════
-    OP_GEOMETRIC_MEAN_ALL = 7,  // Geometric Mean (All): ⁿ√(C1 × C2 × ... × Cn)
+    //  
+    OP_GEOMETRIC_MEAN_ALL = 7,  // Geometric Mean (All):     C2   ...   Cn)
     OP_ARITHMETIC_MEAN_ALL = 8, // Arithmetic Mean (All): (C1 + C2 + ... + Cn) / n
     OP_HARMONIC_MEAN_ALL = 9,   // Harmonic Mean (All): n / (1/C1 + 1/C2 + ... + 1/Cn)
     OP_MIN_ALL = 10,            // Minimum (All): min(C1, C2, ..., Cn)
     OP_MAX_ALL = 11,            // Maximum (All): max(C1, C2, ..., Cn)
     
-    // ═══════════════════════════════════════════════════════════════
+    //  
     // SPECIAL
-    // ═══════════════════════════════════════════════════════════════
+    //  
     OP_NONE = 12                // None (End Chain)
 };
 
 //+------------------------------------------------------------------+
 //| Calculator Topology (Architecture of Calculation)                |
-
+//|             (                             |
 //+------------------------------------------------------------------+
 enum ENUM_CALCULATOR_TOPOLOGY {
     TOPOLOGY_LINEAR = 0,        // Linear: ((A op B) op C) op D [Sequential]
@@ -314,56 +299,61 @@ enum ENUM_CALCULATOR_TOPOLOGY {
 };
 
 //+------------------------------------------------------------------+
-//| Advanced Combo Operations for Factor Auto Basis                  |
+//| Helper structure to hold common calculation values              |
+//| All values are in PRICE units (matching MotiveWave)             |
+//+------------------------------------------------------------------+
+struct SCommonStepData {
+    double thValue;              // TH value in PRICE units
+    double structureValue;       // Structure value in PRICE units
+    double patternValue;         // Pattern value in PRICE units
+    double triggerValue;         // Trigger value in PRICE units
+    double shortStep;            // SS = 1.5 * Structure (PRICE units)
+    double longStep;             // LS = 2.0 * Structure (PRICE units)
+    double pointSize;            // DEPRECATED: No longer used (set to 1.0)
+    double midpointPrice;        // Start point price
+    int maxLevelsAbove;          // Adaptive max levels above
+    int maxLevelsBelow;          // Adaptive max levels below
+};
 
+//+------------------------------------------------------------------+
+//| Advanced Combo Operations for Factor Auto Basis                  |
+//|      Combo   Factor Auto Basis                  |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_OPERATION {
     COMBO_OP_AVERAGE = 0,       // Average: (A + B) / 2 [Default]
     COMBO_OP_ADD = 1,           // Add: A + B
     COMBO_OP_SUBTRACT = 2,      // Subtract: A - B (or |A - B|)
-    COMBO_OP_MULTIPLY = 3,      // Multiply: A × B
+    COMBO_OP_MULTIPLY = 3,      // Multiply: A   B
     COMBO_OP_MIN = 4,           // Minimum: min(A, B) or min(A, B, C)
     COMBO_OP_MAX = 5,           // Maximum: max(A, B) or max(A, B, C)
-    COMBO_OP_WEIGHTED = 6       // Weighted: A×W1 + B×W2 (W1+W2=1)
+    COMBO_OP_WEIGHTED = 6       // Weighted: A  + B  (W1+W2=1)
 };
 
 //+------------------------------------------------------------------+
-//| Combo Mode Selection (Quick Test / Preset / Advanced)            |
-
+//| Combo Mode Selection (Preset / Advanced)                         |
+//|                       Combo (Preset /               )                             |
 //|                                                                  |
-//| THREE INDEPENDENT MODES - No overlap, no conflicts              |
+//| TWO INDEPENDENT MODES - Simplified and user-friendly             |
 //|                                                                  |
-//| QUICK_TEST: Fast testing with presets (For testing combinations)|
-//|   - Select preset (which timeframes)                            |
-//|   - Select step type (TH/SS/LS for all)                         |
-//|   - Select mean type (how to combine)                           |
-//|   Uses: inpQuickTestPreset, inpQuickTestStepType, inpQuickTestMeanType |
+//| PRESET: Quick select from ready-to-use combinations              |
+//|   - 18 predefined combinations                                   |
+//|   - Includes Quick Test options                                  |
+//|   - Recommended for daily use                                    |
+//|   Uses: inpComboPreset                                           |
 //|                                                                  |
-//| PRESET: Quick select from ready-to-use combinations             |
-//|   - 15 predefined combinations                                  |
-//|   - Each preset has fixed components and operation              |
-//|   - Recommended for daily use                                   |
-//|   Uses: inpComboPreset                                          |
-//|                                                                  |
-//| ADVANCED: Full manual control (For power users)                 |
-//|   - Select topology (Linear/Dual Group)                         |
-//|   - Select 4 components and 3 operators                         |
-//|   - Supports N-ary operators (work on all components)           |
+//| ADVANCED: Full manual control (For power users)                  |
+//|   - Select topology (Linear/Dual Group)                          |
+//|   - Select 4 components and 3 operators                          |
 //|   - Maximum flexibility                                         |
-//|   Uses: inpComboTopology, inpComboComp1-4, inpComboOp1-3       |
-//|                                                                  |
-//| GLOBAL SETTING (All modes):                                     |
-//|   - inpAggregateMeanType: ONLY for COMP_*_MEAN components       |
+//|   Uses: inpComboTopology, inpComboComp1-4, inpComboOp1-3        |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_MODE {
-    COMBO_MODE_QUICK_TEST = 0,  // Quick Test (Fast testing)
-    COMBO_MODE_PRESET = 1,      // Preset Mode (Recommended)
-    COMBO_MODE_ADVANCED = 2     // Advanced Mode (Full control)
+    COMBO_MODE_PRESET = 0,      // Preset Mode (Recommended)
+    COMBO_MODE_ADVANCED = 1     // Advanced Mode (Full control)
 };
 
 //+------------------------------------------------------------------+
 //| Timeframe Types for Advanced Combo                               |
-
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_TIMEFRAME_TYPE {
     COMBO_TF_SUB = 0,           // Sub: 1/4 current (faster)
@@ -374,79 +364,98 @@ enum ENUM_COMBO_TIMEFRAME_TYPE {
 
 //+------------------------------------------------------------------+
 //| Step Size Type (TH, SS, LS)                                      |
-
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_STEP_TYPE {
-    COMBO_STEP_TH = 0,          // TH: Base step (1.0×)
-    COMBO_STEP_SS = 1,          // SS: Short step (1.5×)
-    COMBO_STEP_LS = 2           // LS: Long step (2.0×)
+    COMBO_STEP_TH = 0,          // TH: Base step (1.0  )
+    COMBO_STEP_SS = 1,          // SS: Short step (1.5  )
+    COMBO_STEP_LS = 2           // LS: Long step (2.0  )
+};
+
+//+------------------------------------------------------------------+
+//| Combo Calculation Configuration Struct                           |
+//|                                                                                            |
+//+------------------------------------------------------------------+
+struct SComboConfig {
+    ENUM_COMBO_TIMEFRAME_TYPE tf1;
+    ENUM_COMBO_STEP_TYPE      step1;
+    ENUM_COMBO_TIMEFRAME_TYPE tf2;
+    ENUM_COMBO_STEP_TYPE      step2;
+    ENUM_COMBO_TIMEFRAME_TYPE tf3;
+    ENUM_COMBO_STEP_TYPE      step3;
+    ENUM_COMBO_OPERATION      operation;
+    double                    weight1;
+    double                    weight2;
+    double                    weight3;
+    int                       activeComponents;
+    bool                      isTriple;
 };
 
 //+------------------------------------------------------------------+
 //| Preset Combinations (Common Use Cases) - OPTIMIZED FOR UX        |
-
 //|                                                                  |
-//| DESIGN PRINCIPLE: 80/20 Rule - 15 presets cover 98% of needs    |
-
+//| DESIGN PRINCIPLE: 80/20 Rule - 18 presets cover 98% of needs    |
 //|                                                                  |
 //| IMPORTANT: COMBO_PRESET_LEGACY_ADD is the default for backward  |
 //| compatibility with old Combo Step Mode (Component1 + Component2)|
+//|                                                                  |
+//| SIMPLIFIED UX: Quick Test presets (15-19) are exposed in the   |
+//| same list as regular presets, eliminating the Quick Test sub-   |
+//| mode dropdown. All Quick Test presets use TH step + Geometric   |
+//| mean (the most popular default from the old Quick Test mode).   |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_PRESET {
-    // ═══════════════════════════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════════════════════════
+    //                                                                                                                                                                                              
+    // LEGACY (kept for backward compatibility)
+    //                                                                                                                                                                                              
     COMBO_PRESET_LEGACY_ADD = 0,            // Legacy: Trigger SS + Pattern SS (ADD)
-    
-    // ═══════════════════════════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════════════════════════
+
+    //                                                                                                                                                                                              
+    // BALANCED FAMILY
+    //                                                                                                                                                                                              
     COMBO_PRESET_BALANCED_MEDIUM = 1,       // Balanced Medium: (Pattern + Trigger) / 2 [Most Popular]
     COMBO_PRESET_BALANCED_LONG = 2,         // Balanced Long: (Structure + Pattern) / 2
     COMBO_PRESET_BALANCED_TRIPLE = 3,       // Triple Balanced: (Trigger + Pattern + Structure) / 3
     COMBO_PRESET_BALANCED_MIN = 4,          // Balanced Min: min(Pattern, Trigger)
-    
-    // ═══════════════════════════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════════════════════════
+
+    //                                                                                                                                                                                              
+    // CONSERVATIVE FAMILY
+    //                                                                                                                                                                                              
     COMBO_PRESET_CONSERVATIVE = 5,          // Conservative: max(Structure, Pattern)
     COMBO_PRESET_ULTRA_CONSERVATIVE = 6,    // Ultra Conservative: Structure TH
     COMBO_PRESET_TRIPLE_CONSERVATIVE = 7,   // Triple Conservative: max(Trigger, Pattern, Structure)
-    
-    // ═══════════════════════════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════════════════════════
+
+    //                                                                                                                                                                                              
+    // AGGRESSIVE FAMILY
+    //                                                                                                                                                                                              
     COMBO_PRESET_AGGRESSIVE = 8,            // Aggressive: min(Pattern, Trigger)
     COMBO_PRESET_ULTRA_AGGRESSIVE = 9,      // Ultra Aggressive: min(Trigger, Sub)
     COMBO_PRESET_TRIPLE_AGGRESSIVE = 10,    // Triple Aggressive: min(Trigger, Pattern, Structure)
-    
-    // ═══════════════════════════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════════════════════════
+
+    //                                                                                                                                                                                              
+    // SPECIAL
+    //                                                                                                                                                                                              
     COMBO_PRESET_TREND_FILTER = 11,         // Trend Filter: Structure - Sub
     COMBO_PRESET_VOLATILITY_ADAPTIVE = 12,  // Volatility: (Structure + Sub) / 2
-    
-    // ═══════════════════════════════════════════════════════════════
-    
-    // These presets redirect to Advanced Mode for full control
-    // ═══════════════════════════════════════════════════════════════
-    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) -> Redirects to Advanced Mode
-    COMBO_PRESET_MANUAL_TRIPLE = 14         // Advanced Triple: User-defined (3 components) -> Redirects to Advanced Mode
-};
 
-// Mode label duration options
+    //                                                                                                                                                                                              
+    // ADVANCED REDIRECTS (full manual control)
+    //                                                                                                                                                                                              
+    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) -> Advanced Mode
+    COMBO_PRESET_MANUAL_TRIPLE = 14,        // Advanced Triple: User-defined (3 components) -> Advanced Mode
 
-enum ENUM_MODE_LABEL_DURATION {
-    MODE_LABEL_1_SEC = 1,       // 1 Second
-    MODE_LABEL_2_SEC = 2,       // 2 Seconds (Default)
-    MODE_LABEL_3_SEC = 3,       // 3 Seconds
-    MODE_LABEL_5_SEC = 5,       // 5 Seconds
-    MODE_LABEL_10_SEC = 10,     // 10 Seconds
-    MODE_LABEL_PERMANENT = 0    // Permanent (Always Show)
+    //                                                                                                                                                                                              
+    // QUICK TEST (merged from old COMBO_MODE_QUICK_TEST)
+    // All use COMBO_STEP_TH and Geometric Mean for consistency.
+    //                                                                                                                                                                                              
+    COMBO_PRESET_QT_TRIGGER_PATTERN = 15,           // QT: Trigger + Pattern, Geo Mean
+    COMBO_PRESET_QT_ALL_4TF = 16,                    // QT: Sub + Trigger + Pattern + Structure, Geo Mean
+    COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE = 17,  // QT: Trigger + Pattern + Structure, Geo Mean
+    COMBO_PRESET_QT_PATTERN_STRUCTURE = 18,          // QT: Pattern + Structure, Geo Mean
+    COMBO_PRESET_QT_TRIGGER_ONLY = 19                // QT: Trigger only
 };
 
 // TH3 Label Position
-
+//         label    TH3
 enum ENUM_TH3_LABEL_POSITION {
     TH3_LABEL_START = 0,        // Start (Beginning of line)
     TH3_LABEL_MIDDLE = 1,       // Middle (Center of visible range)
@@ -455,7 +464,7 @@ enum ENUM_TH3_LABEL_POSITION {
 };
 
 // Unified Zone Display Style (Used by ALL modes)
-
+//          Zone    (      
 enum ENUM_ZONE_STYLE {
     ZONE_STYLE_LINES = 0,         // Lines Only (Two boundary lines)
     ZONE_STYLE_BOX_FILLED = 1,    // Filled Box (Rectangle with fill)
@@ -464,7 +473,7 @@ enum ENUM_ZONE_STYLE {
 };
 
 // Legacy aliases for backward compatibility
-
+//                      
 #define ENUM_TH3_ZONE_STYLE ENUM_ZONE_STYLE
 #define ENUM_FACTOR_ZONE_STYLE ENUM_ZONE_STYLE
 #define TH3_ZONE_LINES ZONE_STYLE_LINES
@@ -477,22 +486,194 @@ enum ENUM_ZONE_STYLE {
 #define FACTOR_ZONE_HIDDEN ZONE_STYLE_HIDDEN
 
 // TH3 Drawing Mode
-
+//     TH3 (Steps       AB=CD)
 enum ENUM_TH3_DRAWING_MODE {
     TH3_MODE_STEPS = 0,         // Steps Mode (2-point drag)
-    TH3_MODE_ABCD = 1           // AB=CD Mode (3-point click: A, B, C -> calculates D)
+    TH3_MODE_ABCD = 1           // AB=CD Mode (3-point click: A, B, C       calculates D)
 };
+
+// NOTE: TH3_TEST_FREQUENCIES[] removed   replaced by Binary Subdivision Frequency System
+// in ProjectConstants.mqh (runtime calculation via GetFrequencyByIndex())
+
+//+------------------------------------------------------------------+
+//| ENUM: Adaptive Scaling Mode                                      |
+//|                                                    |
+//+------------------------------------------------------------------+
+enum ENUM_ADAPTIVE_MODE {
+    ADAPTIVE_FIXED   = 0,    // Fixed (No Adaptation)
+    ADAPTIVE_ATR     = 1,    // ATR Adaptive (Full)
+    ADAPTIVE_BLENDED = 2,    // Blended (Mix ATR + TH)
+    ADAPTIVE_FRACTAL = 3     // Fractal Jump (Power of 2 steps based on ATR)
+};
+
+// Fractal Jump Strategy
+enum ENUM_FRACTAL_JUMP_STRATEGY {
+    JUMP_CONSERVATIVE = 0,   // Conservative (Original log2 with bias)
+    JUMP_AGGRESSIVE   = 1    // Aggressive (Jump to higher levels earlier)
+};
+
+// Adaptive Scaling Constants
+#define MIN_SCALING_FACTOR      0.1    // Minimum allowed scaling factor
+#define MAX_SCALING_FACTOR      10.0   // Maximum allowed scaling factor
+#define DEFAULT_SMOOTHING_PERIOD 20    // Default EMA smoothing period
+#define DEFAULT_BLEND_RATIO     0.5    // Default blend ratio (50/50)
+
+// Global State Variables for Adaptive Scaling
+static int g_fractalShift = 0;          // Current fractal level shift (power of 2)
 
 //+------------------------------------------------------------------+
 //| TH3 Object Name Suffixes (Magic Numbers Elimination)            |
-
+//|            TH3 (  Magic Numbers)                       |
 //+------------------------------------------------------------------+
-const string TH3_SUFFIX_LINE_AB = "_Line_AB";
-    const string TH3_SUFFIX_LINE_BC = "_Line_BC";
-    const string TH3_SUFFIX_TARGET = "_Target_";
-    const string TH3_SUFFIX_POINT = "_Point_";
-    const string TH3_SUFFIX_LABEL = "_Label_";
-    const string TH3_SUFFIX_INFO = "_Info";
-    const string TH3_SUFFIX_ZONE = "_Zone";
-    #endif
-    // CONSTANTS_AND_ENUMS_MQH
+#define TH3_SUFFIX_LINE_AB "_Line_AB"
+#define TH3_SUFFIX_LINE_BC "_Line_BC"
+#define TH3_SUFFIX_TARGET  "_Target_"
+#define TH3_SUFFIX_POINT   "_Point_"
+#define TH3_SUFFIX_LABEL   "_Label_"
+#define TH3_SUFFIX_INFO    "_Info"
+#define TH3_SUFFIX_ZONE    "_Zone"
+
+//  
+// ZONE ERROR CODES (used by ZoneValidator / ZoneCalculator)
+//  
+#define ZONE_ERROR_NONE             0
+#define ZONE_ERROR_INVALID_PRICES   1
+#define ZONE_ERROR_EQUAL_PRICES     2
+#define ZONE_ERROR_INVALID_HEIGHT   3
+#define ZONE_ERROR_INVERTED_BOUNDS  4
+#define ZONE_ERROR_OUT_OF_RANGE     5
+
+//  
+// PIPELINE STRUCTS (used by Zone system)
+//  
+
+struct SLevelRawData {
+    double price;
+    int    logicalStep;
+    int    stepTypeIndex;
+};
+
+struct SStyleConfig {
+    double zoneHeightPercent;
+    int    zoneTransparency;
+    int    baseMultiplier;
+    bool   showStructure;
+    bool   showTrigger;
+    bool   showZones;
+    bool   globalShowLines;
+    color  structColorL1;
+    color  triggerColor;
+    int    structStyleL1;
+    int    structWidthL1;
+    int    triggerStyle;
+    int    triggerWidth;
+};
+
+struct SZoneValidationResult {
+    bool   isValid;
+    int    errorCode;
+    string errorMessage;
+};
+
+struct SLevelClassification {
+    bool   isStructure;
+    bool   isActive;
+    color  levelColor;
+    int    style;
+    int    width;
+};
+
+struct SZoneGeometry {
+    bool   isValid;
+    double topPrice;
+    double bottomPrice;
+    double midPoint;
+    int    linkedLevelIndex;
+};
+
+struct SLineRenderInfo {
+    bool           isVisible;
+    color          clr;
+    ENUM_LINE_STYLE style;
+    int            width;
+    string         name;
+    double         price;
+    string         tooltip;
+    bool           selectable;
+};
+
+struct SZoneRenderInfo {
+    bool   isVisible;
+    string name;
+    color  clr;
+    int    transparency;
+    bool   filled;
+    double topPrice;
+    double bottomPrice;
+};
+
+struct FrequencyResult {
+    int       bestIndex;
+    double    bestFrequency;
+    double    totalScore;
+    double    multiStepScore;
+    double    patternScore;
+    double    timeScore;
+    double    sqrtScore;
+    double    harmonicScore;
+    double    historyScore;
+    double    confidence;
+    double    step1Price;
+    double    step3Price;
+    double    step5Price;
+    double    step7Price;
+    int       matchedSteps;
+    string    matchLabel;
+    string    patternType;
+    int       matchWaveIndex;
+    double    errorPips;
+    bool      isValid;
+    void Reset() {
+        bestIndex = -1;
+        bestFrequency = 0;
+        totalScore = 0;
+        multiStepScore = 0;
+        patternScore = 0;
+        timeScore = 0;
+        sqrtScore = 0;
+        harmonicScore = 0;
+        historyScore = 0;
+        confidence = 0;
+        step1Price = 0;
+        step3Price = 0;
+        step5Price = 0;
+        step7Price = 0;
+        matchedSteps = 0;
+        matchLabel = "";
+        patternType = "";
+        matchWaveIndex = -1;
+        errorPips = 0;
+        isValid = false;
+    }
+};
+
+#define FREQ_HISTORY_SIZE 20
+
+struct FrequencyHistoryEntry {
+    FrequencyResult result;
+    double    abDistance;
+    double    ratioBC_AB;
+    int       freqIndex;
+    datetime  timestamp;
+    bool      isUsed;
+    void Reset() {
+        result.Reset();
+        abDistance = 0;
+        ratioBC_AB = 0;
+        freqIndex = -1;
+        timestamp = 0;
+        isUsed = false;
+    }
+};
+
+#endif // CONSTANTS_AND_ENUMS_MQH

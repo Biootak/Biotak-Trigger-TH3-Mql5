@@ -1,69 +1,106 @@
-﻿#ifndef HISTORICAL_DATA_FUNCTIONS_MQH
+﻿  #ifndef HISTORICAL_DATA_FUNCTIONS_MQH
 #define HISTORICAL_DATA_FUNCTIONS_MQH
 
+#property strict
+
 bool UpdateHistoricalValues() {
-        datetime currentTime = TimeCurrent();
-    if(currentTime - g_lastHistoricalUpdate < SECONDS_PER_HOUR && g_initialized) return true;
+    // Only update if necessary
+    datetime currentTime = TimeCurrent();
+    if(currentTime - g_lastHistoricalUpdate < 3600 && g_initialized) return true;
+
+    // OPTIMIZATION: Use dynamic arrays and ensure cleanup
     double highArray[], lowArray[];
-    int totalBars = inpHistoricalPeriods == 0 ?
-                   iBars(_Symbol, inpHistoricalTimeframe) :
+    
+    // MT4 approach: User has full control via input parameters
+    // inpHistoricalPeriods = 0 means use all available bars
+    // Otherwise use the specified number of periods
+    int totalBars = inpHistoricalPeriods == 0 ? 
+                   iBars(Symbol(), inpHistoricalTimeframe) : 
                    inpHistoricalPeriods;
-    if(totalBars <= 0) return false;
-    if(ArrayResize(highArray, totalBars) != totalBars ||
-       ArrayResize(lowArray, totalBars) != totalBars) {
-        ArrayFree(highArray);
-    ArrayFree(lowArray);
-    return false;
-    }
-    int copiedHigh = CopyHigh(_Symbol, inpHistoricalTimeframe, 0, totalBars, highArray);
-    int copiedLow = CopyLow(_Symbol, inpHistoricalTimeframe, 0, totalBars, lowArray);
-    if(copiedHigh <= 0 || copiedLow <= 0) {
-        ArrayFree(highArray);
-    ArrayFree(lowArray);
-    return false;
+    
+    if(totalBars <= 0) {
+        // FIX: Don't just fail, log that we're waiting for data
+        static datetime s_lastBarsWarning = 0;
+        if(currentTime - s_lastBarsWarning > 30) {
+            Print("UpdateHistoricalValues: Waiting for historical data (", EnumToString(inpHistoricalTimeframe), ")...");
+            s_lastBarsWarning = currentTime;
+        }
+        return false;
     }
 
+    // Resize arrays
+    if(ArrayResize(highArray, totalBars) != totalBars || ArrayResize(lowArray, totalBars) != totalBars) {
+        Print("UpdateHistoricalValues: Failed to resize arrays. Error: ", GetLastError());
+        ArrayFree(highArray);
+        ArrayFree(lowArray);
+        return false;
+    }
+
+    // Use single error check for data copying
+    int copiedHigh = CopyHigh(Symbol(), inpHistoricalTimeframe, 0, totalBars, highArray);
+    int copiedLow = CopyLow(Symbol(), inpHistoricalTimeframe, 0, totalBars, lowArray);
+    
+    if(copiedHigh <= 0 || copiedLow <= 0) {
+        Print("UpdateHistoricalValues: Failed to copy data. High=", copiedHigh, ", Low=", copiedLow);
+        ArrayFree(highArray);
+        ArrayFree(lowArray);
+        return false;
+    }
+
+    // Optimize max/min calculation
     g_highestHigh = highArray[ArrayMaximum(highArray)];
     g_lowestLow = lowArray[ArrayMinimum(lowArray)];
+    
+    // MEMORY CLEANUP: Free temporary arrays immediately after use
     ArrayFree(highArray);
     ArrayFree(lowArray);
-    if(g_highestHigh <= 0 || g_lowestLow <= 0) return false;
+    
+    if(g_highestHigh <= 0 || g_lowestLow <= 0) {
+        Print("UpdateHistoricalValues: Invalid high/low values");
+        return false;
+    }
+    
     g_lastHistoricalUpdate = currentTime;
-    InvalidateTHCache();
+    // g_thCache removed - matching MT5
+    
     return true;
 }
-    double GetPriceForPreviousDay(ENUM_APPLIED_PRICE priceType) {
-        static datetime lastUpdate = 0;
-    static double cachedPrices[6];
-    datetime currentTime = TimeCurrent();
-    if(currentTime - lastUpdate >= SECONDS_PER_DAY || lastUpdate == 0) {
-        // BUG FIX: Verify D1 data is available before accessing
-        // WHY: On terminal startup or symbol switch, D1 data may not be loaded yet.
-        // iClose/iOpen/iHigh/iLow return 0.0 (not EMPTY_VALUE), which passes through
-        // the caller's EMPTY_VALUE check, causing g_dailyClosePriceForTH=0.0
-        // and persistent silent failure (no levels drawn until manual reload).
-        if(iBars(_Symbol, PERIOD_D1) < 2) {
-            // D1 data not ready — don't cache, let next call retry
-            return 0.0;
-        }
-        cachedPrices[0] = iClose(_Symbol, PERIOD_D1, 1);
-    cachedPrices[1] = iOpen(_Symbol, PERIOD_D1, 1);
-    cachedPrices[2] = iHigh(_Symbol, PERIOD_D1, 1);
-    cachedPrices[3] = iLow(_Symbol, PERIOD_D1, 1);
-    cachedPrices[4] = (cachedPrices[2] + cachedPrices[3]) / 2.0;
-    cachedPrices[5] = (cachedPrices[2] + cachedPrices[3] + cachedPrices[0]) / 3.0;
-    lastUpdate = currentTime;
-    }
 
-    switch((int)priceType) {
-        case PRICE_OPEN:    return cachedPrices[1];
-    case PRICE_HIGH:    return cachedPrices[2];
-    case PRICE_LOW:     return cachedPrices[3];
-    case PRICE_MEDIAN:  return cachedPrices[4];
-    case PRICE_TYPICAL: return cachedPrices[5];
-    case PRICE_CLOSE:
-        default:            return cachedPrices[0];
+// Cache previous day prices
+double GetPriceForPreviousDay(ENUM_APPLIED_PRICE priceType) {
+    static datetime lastUpdate = 0;
+    static double cachedPrices[6] = {0};
+    
+    datetime currentTime = TimeCurrent();
+    if(currentTime-lastUpdate >= 86400 || lastUpdate==0) { // Update cache daily
+        static MqlRates dailyRates[];
+        if(ArraySize(dailyRates) < 1 && ArrayResize(dailyRates, 1) != 1) {
+            return EMPTY_VALUE;
+        }
+        ResetLastError();
+        int copied = CopyRates(Symbol(), PERIOD_D1, 1, 1, dailyRates);
+        if(copied != 1 || dailyRates[0].time <= 0 ||
+           dailyRates[0].close <= 0.0 || dailyRates[0].open <= 0.0 ||
+           dailyRates[0].high <= 0.0 || dailyRates[0].low <= 0.0) {
+            return EMPTY_VALUE;
+        }
+        cachedPrices[0]=dailyRates[0].close;
+        cachedPrices[1]=dailyRates[0].open;
+        cachedPrices[2]=dailyRates[0].high;
+        cachedPrices[3]=dailyRates[0].low;
+        cachedPrices[4]=(cachedPrices[2]+cachedPrices[3])/2.0;
+        cachedPrices[5]=(cachedPrices[2]+cachedPrices[3]+cachedPrices[0])/3.0;
+        lastUpdate = currentTime;
     }
+    
+    switch((int)priceType) {
+        case 1: return cachedPrices[1]; // Open
+        case 2: return cachedPrices[2]; // High
+        case 3: return cachedPrices[3]; // Low
+        case 4: return cachedPrices[4]; // Median
+        case 5: return cachedPrices[5]; // Typical
+        case 0: default: return cachedPrices[0]; // Close
+    }
+    return EMPTY_VALUE;
 }
-    #endif
-    // HISTORICAL_DATA_FUNCTIONS_MQH
+#endif // HISTORICAL_DATA_FUNCTIONS_MQH

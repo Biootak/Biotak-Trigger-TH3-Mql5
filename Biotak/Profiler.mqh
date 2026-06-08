@@ -1,5 +1,7 @@
-#ifndef TH3_PROFILER_MQH
+﻿  #ifndef TH3_PROFILER_MQH
 #define TH3_PROFILER_MQH
+
+#property strict
 
 // Compile-time lightweight profiler (no inputs, no behavior change when disabled).
 // Enable by defining ENABLE_TH3_PROFILER (no numeric expression needed).

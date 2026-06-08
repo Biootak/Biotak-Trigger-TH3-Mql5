@@ -1,80 +1,143 @@
-﻿#ifndef DYNAMIC_TRADING_DAY_DETECTOR_MQH
-#define DYNAMIC_TRADING_DAY_DETECTOR_MQH
-
+﻿  //+------------------------------------------------------------------+
+//|                                   DynamicTradingDayDetector.mqh |
+//|                                                                  |
+//|  Dynamic Trading Day Detection from actual market data          |
+//|                                                                |
+//+------------------------------------------------------------------+
 #property copyright "Biotak"
+#property strict
 
-#define MAX_LOOKBACK_BARS_M1       (7 * 24 * 60)  // 7 days of M1 bars
-#define SESSION_GAP_THRESHOLD_MIN  120             // Gap minutes to detect session boundary
-#define MAX_LOOKBACK_SECONDS       (7 * 86400)    // 7 days in seconds
-#define MARKET_OPEN_FRESHNESS_SEC  300             // 5 minutes
-#define SESSION_BLOCK_MINUTES      30
-#define SESSION_BLOCK_SECONDS      1800
-
-datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1) {
-        datetime currentTime = TimeGMT();
-    int barsToCheck = MAX_LOOKBACK_BARS_M1;
-    int gapThresholdMinutes = SESSION_GAP_THRESHOLD_MIN;
-    int totalBars = iBars(_Symbol, timeframe);
-    if(totalBars <= 0) return GetStartOfTradingDay(Symbol(), currentTime);
+//+------------------------------------------------------------------+
+//| Find current session start by detecting gaps in data             |
+//+------------------------------------------------------------------+
+datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1)
+{
+    datetime currentTime = TimeGMT();
     
-    // PERF: Batch-fetch bar times with CopyTime instead of individual iTime calls
-    int barsToCopy = MathMin(barsToCheck, totalBars);
-    datetime barTimes[];
-    int copied = CopyTime(_Symbol, timeframe, 0, barsToCopy, barTimes);
-    if(copied <= 1) return GetStartOfTradingDay(Symbol(), currentTime);
+    // Search backwards to find last gap (market close)
+    int barsToCheck = 7 * 24 * 60; // 7 days of M1 bars
+    int gapThresholdMinutes = 120; // 2 hours
     
-    // CopyTime returns ascending: barTimes[0]=oldest, barTimes[copied-1]=newest
-    // Scan from most recent backward looking for session gap.
-    // Session start is the first bar AFTER a detected gap.
-    for(int j = copied - 2; j >= 0; j--) {
-        if(currentTime - barTimes[j] > MAX_LOOKBACK_SECONDS) break;
-    int gapMinutes = (int)((barTimes[j + 1] - barTimes[j]) / 60);
-    if(gapMinutes > gapThresholdMinutes) return barTimes[j + 1];
+    for(int i = 1; i < barsToCheck && i < iBars(Symbol(), timeframe); i++)
+    {
+        datetime currentBarTime = iTime(Symbol(), timeframe, i);
+        datetime previousBarTime = iTime(Symbol(), timeframe, i - 1);
+        
+        // Check if we've gone too far back
+        if(currentTime - currentBarTime > 7 * 24 * 60 * 60)
+            break;
+        
+        // Calculate gap in minutes
+        // i is older bar, i-1 is newer bar
+        int gapMinutes = (int)((previousBarTime - currentBarTime) / 60);
+        
+        // If gap is larger than threshold, this is likely market close/open
+        if(gapMinutes > gapThresholdMinutes)
+        {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("[DynamicDetector] Found gap of ", gapMinutes, " minutes at ", 
+                  TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES));
+            #endif
+            return currentBarTime;
+        }
     }
-    // Fallback: first bar >= 24h ago
-    datetime twentyFourHoursAgo = currentTime - SECONDS_PER_DAY;
-    for(int j = 0; j < copied; j++) {
-        if(barTimes[j] >= twentyFourHoursAgo) return barTimes[j];
+    
+    // No gap found, use 24-hour window
+    datetime twentyFourHoursAgo = currentTime - (24 * 60 * 60);
+    
+    for(int i = iBars(Symbol(), timeframe) - 1; i >= 0; i--)
+    {
+        datetime barTime = iTime(Symbol(), timeframe, i);
+        if(barTime >= twentyFourHoursAgo)
+        {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("[DynamicDetector] Using 24-hour window start: ", 
+                  TimeToString(barTime, TIME_DATE|TIME_MINUTES));
+            #endif
+            return barTime;
+        }
     }
+    
+    // Fallback to default
     return GetStartOfTradingDay(Symbol(), currentTime);
 }
-    bool IsMarketOpen() {
-        datetime currentTime = TimeGMT();
-    datetime lastBarTime = iTime(_Symbol, PERIOD_M1, 0);
-    return ((int)(currentTime - lastBarTime) < MARKET_OPEN_FRESHNESS_SEC);
+
+//+------------------------------------------------------------------+
+//| Check if market is currently open                                |
+//+------------------------------------------------------------------+
+bool IsMarketOpen()
+{
+    datetime currentTime = TimeGMT();
+    datetime lastBarTime = iTime(Symbol(), PERIOD_M1, 0);
+    
+    // Check if we have recent data (within last 5 minutes)
+    int timeSinceLastBar = (int)(currentTime - lastBarTime);
+    
+    return (timeSinceLastBar < 5 * 60);
 }
-    string GetSessionStatistics() {
-        datetime currentTime = TimeGMT();
+
+//+------------------------------------------------------------------+
+//| Get session statistics for debugging                             |
+//+------------------------------------------------------------------+
+string GetSessionStatistics()
+{
+    datetime currentTime = TimeGMT();
     datetime sessionStart = FindCurrentSessionStart();
-    int totalBars = iBars(_Symbol, PERIOD_M1);
-    if(totalBars <= 0) return "No M1 bar data available";
-    datetime firstBarTime = iTime(_Symbol, PERIOD_M1, totalBars - 1);
-    datetime lastBarTime = iTime(_Symbol, PERIOD_M1, 0);
+    bool marketOpen = IsMarketOpen();
+    
+    int totalBars = iBars(Symbol(), PERIOD_M1);
+    
+    // CRITICAL FIX: Validate totalBars before using as array index
+    if(totalBars <= 0) {
+        return "No M1 bar data available";
+    }
+    
+    datetime firstBarTime = iTime(Symbol(), PERIOD_M1, totalBars - 1);
+    datetime lastBarTime = iTime(Symbol(), PERIOD_M1, 0);
+    
+    // Calculate 30-min blocks
     int totalMinutes = (int)((currentTime - sessionStart) / 60);
-    int totalBlocks = totalMinutes / SESSION_BLOCK_MINUTES;
-    return StringFormat("Session: %s | Blocks: %d | Bars: %d | %s",
-        TimeToString(sessionStart, TIME_DATE|TIME_SECONDS),
-        totalBlocks, totalBars,
-        IsMarketOpen() ? "OPEN" : "CLOSED");
+    int totalBlocks = totalMinutes / 30;
+    
+    string stats = "\n";
+    stats += "====================\n";
+    stats += "   TRADING SESSION STATISTICS                                   \n";
+    stats += "====================\n";
+    stats += "   Current Time:        " + TimeToString(currentTime, TIME_DATE|TIME_SECONDS) + "                     \n";
+    stats += "   Session Start:       " + TimeToString(sessionStart, TIME_DATE|TIME_SECONDS) + "                     \n";
+    stats += "   First Bar:           " + TimeToString(firstBarTime, TIME_DATE|TIME_SECONDS) + "                     \n";
+    stats += "   Last Bar:            " + TimeToString(lastBarTime, TIME_DATE|TIME_SECONDS) + "                     \n";
+    stats += "   Total M1 Bars:       " + IntegerToString(totalBars) + "                                    \n";
+    stats += "   30-Min Blocks:       " + IntegerToString(totalBlocks) + "                                    \n";
+    stats += "   Market Status:       " + (marketOpen ? "OPEN" : "CLOSED") + "                                    \n";
+    stats += "====================\n";
+    
+    return stats;
 }
-    void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime) {
-        datetime sessionStart = FindCurrentSessionStart();
+
+//+------------------------------------------------------------------+
+//| Get all 30-minute blocks for current session                     |
+//+------------------------------------------------------------------+
+void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime)
+{
+    datetime sessionStart = FindCurrentSessionStart();
+    
+    // Round down to nearest 30-minute boundary
     MqlDateTime dt;
     TimeToStruct(sessionStart, dt);
-    dt.min = (dt.min / SESSION_BLOCK_MINUTES) * SESSION_BLOCK_MINUTES;
+    int minute = dt.min;
+    int roundedMinute = (minute / 30) * 30;
+    dt.min = roundedMinute;
     dt.sec = 0;
     datetime blockTime = StructToTime(dt);
-    int estimatedBlocks = (int)((currentTime - blockTime) / SESSION_BLOCK_SECONDS) + 2;
-    ArrayResize(blocks, estimatedBlocks);
-    int blockCount = 0;
-    while(blockTime <= currentTime) {
-        if(blockCount >= ArraySize(blocks))
-            ArrayResize(blocks, blockCount + 1, 16);
-    blocks[blockCount] = blockTime;
-    blockCount++;
-    blockTime += SESSION_BLOCK_SECONDS;
+    
+    // Generate blocks up to current time
+    ArrayResize(blocks, 0);
+    while(blockTime <= currentTime)
+    {
+        int size = ArraySize(blocks);
+        ArrayResize(blocks, size + 1);
+        blocks[size] = blockTime;
+        blockTime += 30 * 60;
     }
-    ArrayResize(blocks, blockCount);
 }
-    #endif
-    // DYNAMIC_TRADING_DAY_DETECTOR_MQH
