@@ -122,6 +122,10 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 void OnTimer()
   {
+  if(!g_initialized) {
+     RedrawAllObjects(false);
+  }
+
   // Periodic housekeeping runs here (kept lightweight by internal throttles)
   RunIncrementalObjectCleanup();
   // Keep label expiry logic; no timer kill because cleanup also depends on timer cadence

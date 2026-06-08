@@ -24,7 +24,9 @@ string GetCurrentTimeframe() {
 //+------------------------------------------------------------------+
 string GetHigherPatternTimeframeString() {
     int currentPeriod = (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period();
-    int higherMinutes = currentPeriod * 4;
+    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)currentPeriod);
+    if(currentMinutes <= 0) currentMinutes = 1;
+    int higherMinutes = currentMinutes * 4;
     return GetTimeframeStringFromMinutes(higherMinutes);
 }
 
@@ -74,7 +76,9 @@ string GetTimeframeStringFromMinutes(int minutes) {
 //+------------------------------------------------------------------+
 int GetHigherPatternTimeframePeriod() {
     int currentPeriod = (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period();
-    int higherMinutes = currentPeriod * 4;
+    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)currentPeriod);
+    if(currentMinutes <= 0) currentMinutes = 1;
+    int higherMinutes = currentMinutes * 4;
     
     // Map to ENUM_TIMEFRAMES
     if(higherMinutes == 1) return PERIOD_M1;

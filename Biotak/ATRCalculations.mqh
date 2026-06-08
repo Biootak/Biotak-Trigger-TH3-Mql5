@@ -437,28 +437,16 @@ int GetCurrentTimeframeMinutes() {
         #endif
         return 0;
     }
-    
-    switch(period) {
-        case PERIOD_M1:  return 1;
-        case PERIOD_M5:  return 5;
-        case PERIOD_M15: return 15;
-        case PERIOD_M30: return 30;
-        case PERIOD_H1:  return 60;
-        case PERIOD_H4:  return 240;
-        case PERIOD_D1:  return 1440;
-        case PERIOD_W1:  return 10080;
-        case PERIOD_MN1: return 43200;
-        default:         
-            // For custom timeframes, return period directly
-            // Validate it's reasonable (1 min to 1 month)
-            if(period >= 1 && period <= 43200) {
-                return period;
-            }
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("   GetCurrentTimeframeMinutes: Unusual period (", period, ")");
-            #endif
-            return period;
+
+    int minutes = PeriodMinutes((ENUM_TIMEFRAMES)period);
+    if(minutes > 0) {
+        return minutes;
     }
+
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("   GetCurrentTimeframeMinutes: Unusual period (", period, ")");
+    #endif
+    return 0;
 }
 
 //+------------------------------------------------------------------+

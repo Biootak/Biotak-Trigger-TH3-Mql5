@@ -67,7 +67,13 @@ int TimeDayOfWeek(datetime time) { TimeToStruct(time, g_tempDt); return g_tempDt
 int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT)
 {
     if(tf == PERIOD_CURRENT || tf == 0) tf = (ENUM_TIMEFRAMES)Period();
-    return PeriodSeconds(tf) / 60;
+    int seconds = PeriodSeconds(tf);
+    if(seconds > 0) return seconds / 60;
+
+    int rawTf = (int)tf;
+    if(rawTf > 0 && (rawTf <= 10080 || rawTf == 43200)) return rawTf;
+
+    return 0;
 }
 
 // MQL4-style iATR(symbol, timeframe, period, shift) bridge for MQL5 handles.

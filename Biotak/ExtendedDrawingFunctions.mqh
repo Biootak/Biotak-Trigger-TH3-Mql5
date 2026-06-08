@@ -39,22 +39,30 @@ bool CreateOrUpdateHLine(const string name, double price,
                           const string tooltip) {
     bool objectExists = CacheObjectExists(name);
     if(!objectExists) objectExists = (ObjectFind(0, name) >= 0);
+    double normPrice = NormalizeDouble(price, Digits);
     
     if(!objectExists) {
-        ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+        ResetLastError();
+        if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, normPrice)) {
+            int error = GetLastError();
+            _LOG_GATE_E Print("[E][DRAW] CreateOrUpdateHLine: failed to create '", name,
+                              "' at ", DoubleToString(normPrice, Digits),
+                              " | error=", error);
+            CacheRemoveObject(name);
+            return false;
+        }
         ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
         ObjectSetInteger(0, name, OBJPROP_STYLE, style);
         ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
         ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
-        CacheAddObject(name, price, clr, style, width);
+        CacheAddObject(name, normPrice, clr, style, width);
         ApplyVisibilityState(name, true);
         return true;
     } else {
         SObjectCacheEntry cachedEntry;
         bool hasCached = CacheGetObject(name, cachedEntry);
-        double normPrice = NormalizeDouble(price, Digits);
         if(!hasCached || MathAbs(hasCached ? cachedEntry.lastPrice - normPrice : 1.0) > GetCachedPoint() * 0.1) {
             ObjectSetDouble(0, name, OBJPROP_PRICE, normPrice);
         }
@@ -1488,19 +1496,19 @@ bool IsTriggerLevelsEnabled() {
 //|                                                                  |
 //+------------------------------------------------------------------+
 string GetCurrentFractalTimeframe() {
-    int minutes = Period();
+    int minutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    if(minutes <= 0) minutes = 1;
     
     // Map standard timeframes to fractal strings
-    if(minutes == 1) return "M1";
-    else if(minutes == 5) return "M4";  // Closest
-    else if(minutes == 15) return "M16"; // Closest
-    else if(minutes == 30) return "M16"; // Closest
-    else if(minutes == 60) return "H1+M4";
-    else if(minutes == 240) return "H4+M16";
-    else if(minutes == 1440) return "D2+H20+M16"; // Closest
-    else if(minutes == 10080) return "D11+H9+M4"; // Closest
-    else if(minutes == 43200) return "D45+H12+M16"; // Closest
-    else return "M1"; // Fallback
+    if(minutes <= 1) return "M1";
+    else if(minutes <= 5) return "M4";  // Closest
+    else if(minutes <= 15) return "M16"; // Closest
+    else if(minutes <= 30) return "M16"; // Closest
+    else if(minutes <= 60) return "H1+M4";
+    else if(minutes <= 240) return "H4+M16";
+    else if(minutes <= 1440) return "D2+H20+M16"; // Closest
+    else if(minutes <= 10080) return "D11+H9+M4"; // Closest
+    else return "D45+H12+M16"; // Closest
 }
 
 //+------------------------------------------------------------------+
@@ -1517,7 +1525,7 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
         double th = CalculateTimeframeTH(shiftedFractal);
         
         #ifdef ENABLE_DEBUG_LOGS
-        Print("GetTimeframeTHForPeriod: CURRENT (", Period(), "min) -> ", 
+        Print("GetTimeframeTHForPeriod: CURRENT (", PeriodMinutes((ENUM_TIMEFRAMES)Period()), "min) -> ", 
               shiftedFractal, " = ", DoubleToString(th, 4), "%");
         #endif
         
@@ -1586,7 +1594,8 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
 //|                  Sub (1/4      -                )                |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetSubTimeframe() {
-    int currentMinutes = Period();
+    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    if(currentMinutes <= 0) currentMinutes = 1;
     int subMinutes = currentMinutes / 4;
     
     // SAFETY: Minimum is M1
@@ -1634,7 +1643,8 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         case COMBO_TF_SUB:
             // User Request: Sub = 2 Fractals Lower (Current / 16)
             {
-                int currentMinutes = Period();
+                int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+                if(currentMinutes <= 0) currentMinutes = 1;
                 int subMinutes = currentMinutes / 16;
                 if(subMinutes < 1) subMinutes = 1;
                 
@@ -2225,7 +2235,8 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
 }
 
 ENUM_TIMEFRAMES GetPatternTimeframe() {
-    int currentMinutes = Period();
+    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    if(currentMinutes <= 0) currentMinutes = 1;
     int patternMinutes = currentMinutes * 4;
     
     // SAFETY: Clamp to valid range
@@ -2257,7 +2268,8 @@ ENUM_TIMEFRAMES GetPatternTimeframe() {
 //| FIXED: Proper bounds checking and logging                        |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetStructureTimeframe() {
-    int currentMinutes = Period();
+    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    if(currentMinutes <= 0) currentMinutes = 1;
     int structureMinutes = currentMinutes * 16;
     
     // SAFETY: Clamp to valid range

@@ -212,11 +212,14 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     //                                                                
     
     color finalColor = GetZoneRenderColor(request.zoneColor, clampedTransparency);
+    string visibilityGvar = "Biotak_isHidden_" + GetCachedChartIdStr();
+    bool isHidden = GlobalVariableCheck(visibilityGvar) && (bool)GlobalVariableGet(visibilityGvar);
     
     // PERFORMANCE: Check cache to skip redundant API calls
     SObjectCacheEntry cache;
     bool inCache = CacheGetObject(request.name, cache);
     bool objectExists = inCache ? cache.exists : (ObjectFind(0, request.name) >= 0);
+    bool createdObject = false;
     
     if(inCache && objectExists) {
         // Check if anything actually changed
@@ -225,8 +228,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         bool visualChanged = (cache.lastColor != finalColor || cache.lastFilled != request.filled);
         
         if(!geometryChanged && !visualChanged) {
+            ObjectSetInteger(0, request.name, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
             result.success = true;
-            return result; // Skip everything!
+            return result; // Geometry/visuals are current; visibility may still change.
         }
     }
     
@@ -241,6 +245,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             result.errorCode = error;
             return result;
         }
+        createdObject = true;
     }
     else {
         // Update geometry ONLY if changed
@@ -255,7 +260,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     }
     
     // Apply visual properties ONLY if changed
-    bool visualChanged = !inCache || (cache.lastColor != finalColor || cache.lastFilled != request.filled);
+    bool visualChanged = createdObject || !inCache || (cache.lastColor != finalColor || cache.lastFilled != request.filled);
     if(visualChanged) {
         ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColor);
         ObjectSetInteger(0, request.name, OBJPROP_BACK, true);
@@ -265,8 +270,6 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
     }
 
-    string visibilityGvar = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(visibilityGvar) && (bool)GlobalVariableGet(visibilityGvar);
     ObjectSetInteger(0, request.name, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     
     // Update cache

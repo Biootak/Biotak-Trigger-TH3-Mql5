@@ -228,7 +228,14 @@ bool CacheObjectExists(const string name) {
     if(idx < 0) {
         return false;
     }
-    return g_objectCacheHash[idx].entry.exists;
+    if(!g_objectCacheHash[idx].entry.exists) {
+        return false;
+    }
+    if(ObjectFind(0, name) < 0) {
+        g_objectCacheHash[idx].entry.exists = false;
+        return false;
+    }
+    return true;
 }
 
 bool CacheGetObject(const string name, SObjectCacheEntry &entry) {
@@ -237,6 +244,9 @@ bool CacheGetObject(const string name, SObjectCacheEntry &entry) {
         return false;
     }
     
+    if(g_objectCacheHash[idx].entry.exists && ObjectFind(0, name) < 0) {
+        g_objectCacheHash[idx].entry.exists = false;
+    }
     entry = g_objectCacheHash[idx].entry;
     return true;
 }
