@@ -103,8 +103,11 @@ void ApplyVisibilityState(const string name, const bool isLine)
 
 void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
 {
-    if(!g_visibilityChangedThisFrame && (g_visibilityFrameCounter % 10) != 0) return;
     long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    if(!g_visibilityChangedThisFrame && (g_visibilityFrameCounter % 10) != 0) {
+        long currentTf = ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES);
+        if(currentTf == tf) return;
+    }
     ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
 }
 

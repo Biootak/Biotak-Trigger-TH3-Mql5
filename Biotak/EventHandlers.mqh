@@ -725,9 +725,24 @@ void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePri
             sizes[i] = def.stepSizes[i];
         }
         
-        ExecutePipeline(def.config, data.midpointPrice, sizes, def.stepSizeCount,
-                       def.stepMode, def.classifyMode, def.lsFirst,
-                       data.maxLevelsAbove, data.maxLevelsBelow);
+        SPipelineResult result = ExecutePipeline(def.config, data.midpointPrice, sizes, def.stepSizeCount,
+                                                def.stepMode, def.classifyMode, def.lsFirst,
+                                                data.maxLevelsAbove, data.maxLevelsBelow);
+
+        if(!result.success) {
+            _LOG_GATE_W Print("[W][DRAW] DrawLevelsBasedOnMode: pipeline failed | mode=", GetStepModeName(currentMode),
+                              " | reason=", result.errorMessage,
+                              " | base=", DoubleToString(dailyClosePrice, Digits),
+                              " | center=", DoubleToString(data.midpointPrice, Digits),
+                              " | stepCount=", def.stepSizeCount);
+        } else if(result.zoneCount <= 0 && result.lineCount <= 0) {
+            _LOG_GATE_W Print("[W][DRAW] DrawLevelsBasedOnMode: pipeline produced no drawable objects | mode=",
+                              GetStepModeName(currentMode),
+                              " | base=", DoubleToString(dailyClosePrice, Digits),
+                              " | center=", DoubleToString(data.midpointPrice, Digits),
+                              " | maxAbove=", data.maxLevelsAbove,
+                              " | maxBelow=", data.maxLevelsBelow);
+        }
         
         ArrayFree(sizes);
     } else {

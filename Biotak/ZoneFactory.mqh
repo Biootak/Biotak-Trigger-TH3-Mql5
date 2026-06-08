@@ -264,6 +264,10 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         ObjectSetInteger(0, request.name, OBJPROP_RAY_RIGHT, true);
         ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
     }
+
+    string visibilityGvar = "Biotak_isHidden_" + GetCachedChartIdStr();
+    bool isHidden = GlobalVariableCheck(visibilityGvar) && (bool)GlobalVariableGet(visibilityGvar);
+    ObjectSetInteger(0, request.name, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     
     // Update cache
     CacheUpdateZone(request.name, request.topPrice, request.bottomPrice, startTime, endTime, finalColor, request.filled);

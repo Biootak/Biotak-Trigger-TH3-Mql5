@@ -222,11 +222,7 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
         ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
         ObjectSetInteger(0, lineTop, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
-        
-        // CRITICAL FIX: Hide if indicator is hidden
-        if(isHidden) {
-            ObjectSetInteger(0, lineTop, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+        ObjectSetInteger(0, lineTop, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     }
     
     // Create bottom line (dotted)
@@ -237,11 +233,7 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
         ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
         ObjectSetInteger(0, lineBottom, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
-        
-        // CRITICAL FIX: Hide if indicator is hidden
-        if(isHidden) {
-            ObjectSetInteger(0, lineBottom, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-        }
+        ObjectSetInteger(0, lineBottom, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     }
     
     return true;
