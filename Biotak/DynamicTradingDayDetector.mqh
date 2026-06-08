@@ -121,6 +121,10 @@ string GetSessionStatistics()
 void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime)
 {
     datetime sessionStart = FindCurrentSessionStart();
+    if(currentTime < sessionStart) {
+        ArrayResize(blocks, 0);
+        return;
+    }
     
     // Round down to nearest 30-minute boundary
     MqlDateTime dt;
@@ -131,13 +135,19 @@ void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime)
     dt.sec = 0;
     datetime blockTime = StructToTime(dt);
     
-    // Generate blocks up to current time
-    ArrayResize(blocks, 0);
-    while(blockTime <= currentTime)
-    {
-        int size = ArraySize(blocks);
-        ArrayResize(blocks, size + 1);
-        blocks[size] = blockTime;
+    int blockCount = (int)((currentTime - blockTime) / (30 * 60)) + 1;
+    if(blockCount <= 0) {
+        ArrayResize(blocks, 0);
+        return;
+    }
+
+    if(ArrayResize(blocks, blockCount) != blockCount) {
+        ArrayResize(blocks, 0);
+        return;
+    }
+
+    for(int i = 0; i < blockCount; i++) {
+        blocks[i] = blockTime;
         blockTime += 30 * 60;
     }
 }

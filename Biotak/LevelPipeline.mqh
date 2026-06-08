@@ -672,6 +672,13 @@ void RenderZones(
     bool triggerEnabled = IsTriggerLevelsEnabled();
     
     for(int i = 0; i < zoneCount; i++) {
+        if(!zones[i].inViewport) {
+            if(ObjectFind(0, zones[i].name) >= 0) {
+                ObjectSetInteger(0, zones[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            }
+            continue;
+        }
+
         if(config.zoneStyle == ZONE_STYLE_HIDDEN) {
             // Hidden: delete existing zone objects
             if(ObjectFind(0, zones[i].name) >= 0) {
@@ -728,6 +735,17 @@ void RenderTriggerLines(
     double currentPrice = GetCurrentPriceForLabels();
     
     for(int i = 0; i < lineCount; i++) {
+        if(!lines[i].inViewport) {
+            if(ObjectFind(0, lines[i].name) >= 0) {
+                ObjectSetInteger(0, lines[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            }
+            string labelName = lines[i].name + "_Label";
+            if(ObjectFind(0, labelName) >= 0) {
+                ObjectSetInteger(0, labelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            }
+            continue;
+        }
+
         // Factor mode: hide lines when trigger-only enabled
         if(config.hideLineWhenTriggerOnly && !lines[i].isMidpoint) {
             bool shouldShow = !triggerEnabled;

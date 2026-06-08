@@ -100,19 +100,9 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
 
 bool CreatePipDistanceLabel(const string name, const double price, const double pips, const color textColor, const string levelInfo = "") {
     if(!inpShowPipDistanceLabels) return true;
-    
+
     //                                                                
-    // CRITICAL FIX #1: Check object count BEFORE creation
-    //                                                                
-    if(!CanCreateObject()) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("  CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
-        #endif
-        return false;
-    }
-    
-    //                                                                
-    // CRITICAL FIX #2: Validate inputs
+    // CRITICAL FIX #1: Validate inputs
     //                                                                
     if(StringLen(name) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -128,14 +118,26 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
         return false;
     }
     
-    if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
-        ObjectDelete(0, name);
+    bool objectExists = (ObjectFind(0, name) >= 0);
+    if(!objectExists) {
+        if(!CanCreateObject()) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("  CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
+            #endif
+            return false;
+        }
+
         if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
             #ifdef ENABLE_DEBUG_LOGS
             int error = GetLastError();
             Print("  CreatePipDistanceLabel: Failed to create '", name, "', error=", error);
             #endif
             return false;
+        }
+    } else {
+        double currentPrice = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
+        if(MathAbs(currentPrice - price) > GetCachedPoint() * 0.1) {
+            ObjectSetDouble(0, name, OBJPROP_PRICE, price);
         }
     }
     

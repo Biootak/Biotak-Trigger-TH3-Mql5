@@ -65,6 +65,7 @@ int OnInitHandler() {
 
     // Deferred init: skip heavy historical load on recent TF switch
     bool deferHeavyInit = recentTimeframeSwitch;
+    g_deferHistoricalRefresh = deferHeavyInit;
     if(!deferHeavyInit) {
         if(!UpdateHistoricalValues()) {
             _LOG_GATE_E Print("[E][GEN] OnInit: UpdateHistoricalValues failed. Error: ", GetLastError());
@@ -296,6 +297,8 @@ bool CreateCustomPriceLine(double price, int digits, bool selected = false,
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, selected);
     ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
+    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES,
+                     IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
                   "[PIN] Custom Price: " + DoubleToString(price, digits) + " | " + tooltipSuffix);
     g_customPriceLineCreated = true;
@@ -385,6 +388,17 @@ void OnDeinitHandler(const int reason) {
 
     ReleaseATRHandle();
     EventKillTimer();
+
+    if(reason == REASON_CHARTCHANGE)
+    {
+        HideAllTHObjects();
+        CacheClear();
+        g_initialized = false;
+        g_calculatedOnce = false;
+        g_redrawTHLevelsNeeded = true;
+        DEBUG_PRINT("OnDeinit (REASON_CHARTCHANGE) - lightweight hide-only cleanup");
+        return;
+    }
 
     // PERF: ObjectDelete is safe to call on non-existent objects (returns false, no error)
     // Eliminates ObjectFind syscalls
@@ -589,6 +603,87 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     InvalidateObjectCountCache();
 }
 
+string GetActivePipelineModeName()
+{
+    switch(GetCurrentStepMode()) {
+        case SS_LS_STEP:
+            return "SSLS";
+        case COMBO_STEP:
+            return "Combo";
+        case FACTOR_STEP:
+#ifndef BUILD_LITE
+            if(inpEnableHarmonicPattern) return "Factor_Harmonic";
+#endif
+            return "Factor";
+        case TH_STEP:
+        default:
+            return "TH_Level";
+    }
+}
+
+string GetRuntimeObjectPrefix()
+{
+    return inpObjectPrefix + "_ACTIVE_";
+}
+
+void InvalidateObjectCacheByPrefix(const string objectPrefix)
+{
+    if(StringLen(objectPrefix) == 0 || g_objectCacheSize <= 0) return;
+
+    int prefixLen = StringLen(objectPrefix);
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        if(!g_objectCacheHash[i].occupied) continue;
+        if(StringLen(g_objectCacheHash[i].name) < prefixLen) continue;
+        if(StringSubstr(g_objectCacheHash[i].name, 0, prefixLen) != objectPrefix) continue;
+
+        g_objectCacheHash[i].name = "";
+        g_objectCacheHash[i].occupied = false;
+        g_objectCacheHash[i].deleted = true;
+        g_objectCacheHash[i].lastAccess = 0;
+        g_objectCacheSize--;
+        if(g_objectCacheSize == 0) break;
+    }
+}
+
+int DeleteObjectsByPrefixAndInvalidate(const string objectPrefix)
+{
+    if(StringLen(objectPrefix) == 0) return 0;
+
+    int deleted = ObjectsDeleteAll(0, objectPrefix);
+    if(deleted > 0) InvalidateObjectCacheByPrefix(objectPrefix);
+    return deleted;
+}
+
+void CleanupInactivePipelineModes(const string objectPrefix, const string activeModeName, bool clearZones = true)
+{
+    if(StringLen(objectPrefix) == 0 || StringLen(activeModeName) == 0) return;
+
+    SModeSuffixEntry entries[];
+    int entryCount = 0;
+    GetAllModeSuffixes(entries, entryCount);
+
+    g_suppressDeleteEvents = true;
+    int totalDeleted = 0;
+    for(int i = 0; i < entryCount; i++) {
+        int modeNameEnd = StringFind(entries[i].levelAbove, "_Above_");
+        string modeName = (modeNameEnd > 0) ? StringSubstr(entries[i].levelAbove, 0, modeNameEnd) : "";
+        if(modeName == "" || modeName == activeModeName) continue;
+
+        if(clearZones) {
+            totalDeleted += DeleteObjectsByPrefixAndInvalidate(objectPrefix + entries[i].zoneSuffix);
+            totalDeleted += DeleteObjectsByPrefixAndInvalidate(objectPrefix + entries[i].zoneCenter);
+        }
+
+        totalDeleted += DeleteObjectsByPrefixAndInvalidate(objectPrefix + entries[i].levelAbove);
+        totalDeleted += DeleteObjectsByPrefixAndInvalidate(objectPrefix + entries[i].levelBelow);
+        totalDeleted += DeleteObjectsByPrefixAndInvalidate(objectPrefix + entries[i].midpoint);
+        totalDeleted += DeleteObjectsByPrefixAndInvalidate(objectPrefix + modeName + "_Midpoint_");
+    }
+    g_suppressDeleteEvents = false;
+
+    if(totalDeleted > 0) InvalidateObjectCountCache();
+}
+
 //| Get adaptive level counts (matching MT5: simple single inpMaxLevels) |
 //+------------------------------------------------------------------+
 void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
@@ -777,7 +872,11 @@ void RedrawAllObjects(bool force_redraw=false)
 
     // PERF: Idle fast-path   when no work is pending, skip expensive UpdateBasePrice/ATR path.
     bool customPriceLineExists = g_customPriceLineCreated;
-    bool historicalRefreshDue = (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized);
+    bool deferredHistoricalDue = (g_deferredHistoricalRefreshAt > 0 && currentTime >= g_deferredHistoricalRefreshAt);
+    bool historicalRefreshDue = g_deferHistoricalRefresh ||
+                                deferredHistoricalDue ||
+                                (g_deferredHistoricalRefreshAt <= 0 &&
+                                 (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized));
     int currentServerMinute = TimeMinute(CacheGetFrameTime());
     bool basePriceBoundary = (currentServerMinute == 0 || currentServerMinute == 30);
     bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
@@ -861,23 +960,7 @@ void RedrawAllObjects(bool force_redraw=false)
     s_lastRedrawAttemptMs = nowMs;
     g_lastCalculation = currentTime;
 
-    // PERF: Cache objectPrefix - only rebuild when timeframe actually changes
-    static string s_cachedObjectPrefix = "";
-    static string s_cachedTimeframeStr = "";
-    string currentTFStr = GetCurrentTimeframe();
-    if(currentTFStr != s_cachedTimeframeStr) {
-        s_cachedTimeframeStr = currentTFStr;
-        s_cachedObjectPrefix = inpObjectPrefix + "_" + currentTFStr + "_";
-    }
-    string objectPrefix = s_cachedObjectPrefix;
-
-    static string s_lastPrefix = "";
-    if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {
-        ClearAllLevels(s_lastPrefix);
-        InvalidateTimeframeDependentCaches();
-        InvalidateATRCache();
-    }
-    s_lastPrefix = objectPrefix;
+    string objectPrefix = GetRuntimeObjectPrefix();
 
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastDebugLog = 0;
@@ -889,8 +972,19 @@ void RedrawAllObjects(bool force_redraw=false)
 
     g_dailyClosePriceForTH = thBasePrice;
 
-    // PERFORMANCE: Use cached historical values
-    if(currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized)
+    // PERFORMANCE: On timeframe switch, draw immediately with a safe lightweight range.
+    if(g_deferHistoricalRefresh && thBasePrice > 0)
+    {
+        g_highestHigh = thBasePrice * 1.01;
+        g_lowestLow = thBasePrice * 0.99;
+        g_initialized = true;
+        g_deferHistoricalRefresh = false;
+        g_deferredHistoricalRefreshAt = currentTime + 5;
+        g_redrawTHLevelsNeeded = true;
+    }
+    else if(deferredHistoricalDue ||
+            (g_deferredHistoricalRefreshAt <= 0 &&
+             (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized)))
     {
         if(!UpdateHistoricalValues()) {
             // FIX: If historical data is not ready, don't return early if we already have a base price
@@ -907,6 +1001,7 @@ void RedrawAllObjects(bool force_redraw=false)
         } else {
             g_initialized = true;
             g_calculatedOnce = false;
+            g_deferredHistoricalRefreshAt = 0;
             g_redrawTHLevelsNeeded = true;
         }
     }
@@ -1028,17 +1123,25 @@ void RedrawAllObjects(bool force_redraw=false)
                           "|";
 #endif
         bool levelTopologyChanged = (levelSig != s_lastLevelSig);
-        bool shouldClearLevels = g_forceClearOnNextDraw || levelTopologyChanged;
+        bool forceFullClear = g_forceClearOnNextDraw;
 
-        if(shouldClearLevels) {
+        if(forceFullClear) {
             TH3_PROF_START(LevelsClear);
             ClearAllLevels(objectPrefix, !skipZones);
             TH3_PROF_END(LevelsClear);
         }
+
         TH3_PROF_START(LevelsDrawByMode);
         DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
         TH3_PROF_END(LevelsDrawByMode);
+
+        if(!forceFullClear && levelTopologyChanged) {
+            TH3_PROF_START(LevelsClear);
+            CleanupInactivePipelineModes(objectPrefix, GetActivePipelineModeName(), !skipZones);
+            TH3_PROF_END(LevelsClear);
+        }
         s_lastLevelSig = levelSig;
+        g_forceClearOnNextDraw = false;
         TH3_PROF_END(Levels);
         g_redrawTHLevelsNeeded = false;
     }
@@ -1049,7 +1152,7 @@ void RedrawAllObjects(bool force_redraw=false)
     }
 
     CheckAlerts(objectPrefix, g_currentPrice);
-    ChartRedraw();
+    ThrottledChartRedraw(force_redraw);
 }
 
 //+------------------------------------------------------------------+
@@ -1127,9 +1230,6 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         TH3_PROF_START(RedrawCall);
         RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
         TH3_PROF_END(RedrawCall);
-
-        // FIX: ChartRedraw after RedrawAllObjects
-        ThrottledChartRedraw();
 
         if(barsChanged || s_lastBarTime == 0) {
             // PERF: Use cached object count
@@ -1999,12 +2099,19 @@ void RunIncrementalObjectCleanup()
 {
     if(g_customPriceLineDragging) return;
     datetime currentTime = TimeGMT();
-    if(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS) return;
+    bool recentlySwitchedTF = false;
+    string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
+    if(GlobalVariableCheck(tfSwitchStampGvar)) {
+        datetime lastTFSwitch = (datetime)GlobalVariableGet(tfSwitchStampGvar);
+        recentlySwitchedTF = (lastTFSwitch > 0 && currentTime - lastTFSwitch <= 30);
+    }
+    int cleanupInterval = recentlySwitchedTF ? 2 : CLEANUP_INTERVAL_SECONDS;
+    if(currentTime - g_lastObjectCleanup <= cleanupInterval) return;
 
     TH3_PROF_START(ObjectCleanup);
     int currentObjectCount = ObjectsTotal(0, -1, -1);
 
-    if(currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
+    if(recentlySwitchedTF || currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
         datetime cutoffTime = currentTime - 3600;
         string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
         int currentPrefixLen = StringLen(objectPrefix);
@@ -2031,7 +2138,7 @@ void RunIncrementalObjectCleanup()
             if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
 
             datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
-            if(objTime > 0 && objTime < cutoffTime) {
+            if(recentlySwitchedTF || (objTime > 0 && objTime < cutoffTime)) {
                 CacheRemoveObject(objName);
                 g_suppressDeleteEvents = true;
                 ObjectDelete(0, objName);

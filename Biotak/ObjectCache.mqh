@@ -85,7 +85,7 @@ int CacheFindIndex(const string name) {
     if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
     int slot = HashObjectName(name);
     
-    for(int probe = 0; probe < CACHE_MAX_PROBE; probe++) {
+    for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
         int idx = (slot + probe) % CACHE_HASH_BUCKETS;
         if(!g_objectCacheHash[idx].occupied && !g_objectCacheHash[idx].deleted) {
             return -1;  // Empty slot - object not in cache
@@ -288,7 +288,7 @@ void CacheUpdateZone(const string name, const double price1, const double price2
         if(g_objectCacheSize >= MAX_CACHE_SIZE) EvictLRUEntry();
         
         int slot = HashObjectName(name);
-        for(int probe = 0; probe < CACHE_MAX_PROBE; probe++) {
+        for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
             int insertIdx = (slot + probe) % CACHE_HASH_BUCKETS;
             if(!g_objectCacheHash[insertIdx].occupied || g_objectCacheHash[insertIdx].deleted) {
                 g_objectCacheHash[insertIdx].name = name;

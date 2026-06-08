@@ -7,16 +7,9 @@ bool UpdateHistoricalValues() {
     // Only update if necessary
     datetime currentTime = TimeCurrent();
     if(currentTime - g_lastHistoricalUpdate < 3600 && g_initialized) return true;
-
-    // OPTIMIZATION: Use dynamic arrays and ensure cleanup
-    double highArray[], lowArray[];
     
-    // MT4 approach: User has full control via input parameters
-    // inpHistoricalPeriods = 0 means use all available bars
-    // Otherwise use the specified number of periods
-    int totalBars = inpHistoricalPeriods == 0 ? 
-                   iBars(Symbol(), inpHistoricalTimeframe) : 
-                   inpHistoricalPeriods;
+    int availableBars = iBars(Symbol(), inpHistoricalTimeframe);
+    int totalBars = (inpHistoricalPeriods == 0) ? availableBars : MathMin(inpHistoricalPeriods, availableBars);
     
     if(totalBars <= 0) {
         // FIX: Don't just fail, log that we're waiting for data
@@ -28,32 +21,15 @@ bool UpdateHistoricalValues() {
         return false;
     }
 
-    // Resize arrays
-    if(ArrayResize(highArray, totalBars) != totalBars || ArrayResize(lowArray, totalBars) != totalBars) {
-        Print("UpdateHistoricalValues: Failed to resize arrays. Error: ", GetLastError());
-        ArrayFree(highArray);
-        ArrayFree(lowArray);
+    int highIndex = iHighest(Symbol(), inpHistoricalTimeframe, MODE_HIGH, totalBars, 0);
+    int lowIndex = iLowest(Symbol(), inpHistoricalTimeframe, MODE_LOW, totalBars, 0);
+    if(highIndex < 0 || lowIndex < 0) {
+        Print("UpdateHistoricalValues: Failed to locate high/low indexes. HighIdx=", highIndex, ", LowIdx=", lowIndex);
         return false;
     }
 
-    // Use single error check for data copying
-    int copiedHigh = CopyHigh(Symbol(), inpHistoricalTimeframe, 0, totalBars, highArray);
-    int copiedLow = CopyLow(Symbol(), inpHistoricalTimeframe, 0, totalBars, lowArray);
-    
-    if(copiedHigh <= 0 || copiedLow <= 0) {
-        Print("UpdateHistoricalValues: Failed to copy data. High=", copiedHigh, ", Low=", copiedLow);
-        ArrayFree(highArray);
-        ArrayFree(lowArray);
-        return false;
-    }
-
-    // Optimize max/min calculation
-    g_highestHigh = highArray[ArrayMaximum(highArray)];
-    g_lowestLow = lowArray[ArrayMinimum(lowArray)];
-    
-    // MEMORY CLEANUP: Free temporary arrays immediately after use
-    ArrayFree(highArray);
-    ArrayFree(lowArray);
+    g_highestHigh = iHigh(Symbol(), inpHistoricalTimeframe, highIndex);
+    g_lowestLow = iLow(Symbol(), inpHistoricalTimeframe, lowIndex);
     
     if(g_highestHigh <= 0 || g_lowestLow <= 0) {
         Print("UpdateHistoricalValues: Invalid high/low values");
