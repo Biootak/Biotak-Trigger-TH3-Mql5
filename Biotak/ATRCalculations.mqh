@@ -622,10 +622,14 @@ double GetATRForTimeframe(const int targetMinutes) {
         // No fallback to scaling for standard TFs to avoid inconsistencies
         result = CalculateWeightedATRForTimeframe(targetTF);
         
-        // If calculation failed (e.g. data not synchronized), return 0
-        // The UI/Caller should handle 0 as "Loading" or "N/A"
         if(result == EMPTY_VALUE || IsZero(result, EPSILON_PRICE)) {
-            result = 0.0;
+            int currentMinutes = GetCurrentTimeframeMinutes();
+            if(currentMinutes > 0) {
+                result = CalculateHybridATR(currentMinutes, targetMinutes);
+            }
+            if(result == EMPTY_VALUE || IsZero(result, EPSILON_PRICE)) {
+                result = 0.0;
+            }
         }
     }
     

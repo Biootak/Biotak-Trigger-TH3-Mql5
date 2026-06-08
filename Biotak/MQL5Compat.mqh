@@ -110,16 +110,32 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
     if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = (ENUM_TIMEFRAMES)Period();
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
+    if(!SymbolSelect(symbol, true)) {
+        LOG_E(LOG_CAT_ATR, "iATRMQL4: symbol is not selectable " + symbol);
+        return 0.0;
+    }
+
+    int bars = iBars(symbol, timeframe);
+    if(bars <= atrPeriod + shift) return 0.0;
+
     InitATRHandleCache();
 
     int handle = INVALID_HANDLE;
+    int cacheIndex = -1;
     for(int i = 0; i < g_atrHandleCacheCount; i++) {
         if(g_atrHandleCache[i].symbol == symbol &&
            g_atrHandleCache[i].timeframe == timeframe &&
            g_atrHandleCache[i].period == atrPeriod) {
             handle = g_atrHandleCache[i].handle;
+            cacheIndex = i;
             break;
         }
+    }
+
+    if(handle != INVALID_HANDLE && BarsCalculated(handle) <= 0) {
+        IndicatorRelease(handle);
+        if(cacheIndex >= 0) g_atrHandleCache[cacheIndex].handle = INVALID_HANDLE;
+        handle = INVALID_HANDLE;
     }
 
     if(handle == INVALID_HANDLE) {
@@ -146,6 +162,8 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
         g_atrHandleCache[slot].period = atrPeriod;
     }
 
+    if(BarsCalculated(handle) <= shift) return 0.0;
+
     static double s_atrBuffer[];
     static bool s_bufferReady = false;
     if(!s_bufferReady) {
@@ -154,7 +172,14 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
         s_bufferReady = true;
     }
 
-    if(CopyBuffer(handle, 0, shift, 1, s_atrBuffer) <= 0) return 0.0;
+    ResetLastError();
+    if(CopyBuffer(handle, 0, shift, 1, s_atrBuffer) <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("iATRMQL4: CopyBuffer failed for ", symbol, "/", EnumToString(timeframe),
+              " period=", atrPeriod, " shift=", shift, " error=", GetLastError());
+        #endif
+        return 0.0;
+    }
     return s_atrBuffer[0];
 }
 

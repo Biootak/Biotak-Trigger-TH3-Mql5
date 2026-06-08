@@ -360,7 +360,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL5Style;
                 lineWidth = inpStructureL5Width;
                 percentageTooltip = structurePercentages[4];
-            } else if (intervals[3] > 0 && stepCountBelow % intervals[3] == 0 && inpShowStructure && inpShowStructureL4) {
+            } else if (intervalSize > 3 && intervals[3] > 0 && stepCountBelow % intervals[3] == 0 && inpShowStructure && inpShowStructureL4) {
                 lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, Digits), quadrupleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
@@ -368,7 +368,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL4Style;
                 lineWidth = inpStructureL4Width;
                 percentageTooltip = structurePercentages[3];
-            } else if (intervals[2] > 0 && stepCountBelow % intervals[2] == 0 && inpShowStructure && inpShowStructureL3) {
+            } else if (intervalSize > 2 && intervals[2] > 0 && stepCountBelow % intervals[2] == 0 && inpShowStructure && inpShowStructureL3) {
                 lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, Digits), tripleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
@@ -376,7 +376,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL3Style;
                 lineWidth = inpStructureL3Width;
                 percentageTooltip = structurePercentages[2];
-            } else if (intervals[1] > 0 && stepCountBelow % intervals[1] == 0 && inpShowStructure && inpShowStructureL2) {
+            } else if (intervalSize > 1 && intervals[1] > 0 && stepCountBelow % intervals[1] == 0 && inpShowStructure && inpShowStructureL2) {
                 lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, Digits), doubleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
@@ -384,7 +384,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL2Style;
                 lineWidth = inpStructureL2Width;
                 percentageTooltip = structurePercentages[1];
-            } else if (intervals[0] > 0 && stepCountBelow % intervals[0] == 0 && inpShowStructure && inpShowStructureL1) {
+            } else if (intervalSize > 0 && intervals[0] > 0 && stepCountBelow % intervals[0] == 0 && inpShowStructure && inpShowStructureL1) {
                 lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, Digits), structureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
@@ -724,28 +724,35 @@ void DisplayATRLabels(const string objectPrefix) {
 }
 
 void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
+    string labelPrefix = objectPrefix + "LBL_";
     string currentTFStr = IntegerToString(GetCachedPeriod());
-    string uniquePrefix = objectPrefix + "TF" + currentTFStr + "_";
+    string legacyPrefix = objectPrefix + "TF" + currentTFStr + "_";
     string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
 
     bool shouldShow = (visible && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
-    ObjectSetInteger(0, uniquePrefix + "ATR_Title", OBJPROP_TIMEFRAMES, tf);
+    ObjectSetInteger(0, labelPrefix + "ATR_Title", OBJPROP_TIMEFRAMES, tf);
+    ObjectSetInteger(0, legacyPrefix + "ATR_Title", OBJPROP_TIMEFRAMES, tf);
 
     long targetsTF = (shouldShow && inpShowATRTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(allTimeframes); i++) {
         string tfName = allTimeframes[i];
-        ObjectSetInteger(0, uniquePrefix + "ATR_" + tfName, OBJPROP_TIMEFRAMES, tf);
-        ObjectSetInteger(0, uniquePrefix + "ATR_Steps_" + tfName, OBJPROP_TIMEFRAMES, tf);
-        ObjectSetInteger(0, uniquePrefix + "ATR_Targets_" + tfName, OBJPROP_TIMEFRAMES, targetsTF);
+        ObjectSetInteger(0, labelPrefix + "ATR_" + tfName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, labelPrefix + "ATR_Steps_" + tfName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, labelPrefix + "ATR_Targets_" + tfName, OBJPROP_TIMEFRAMES, targetsTF);
+        ObjectSetInteger(0, legacyPrefix + "ATR_" + tfName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, legacyPrefix + "ATR_Steps_" + tfName, OBJPROP_TIMEFRAMES, tf);
+        ObjectSetInteger(0, legacyPrefix + "ATR_Targets_" + tfName, OBJPROP_TIMEFRAMES, targetsTF);
     }
 }
 
 void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
+    string labelPrefix = objectPrefix + "LBL_";
     bool shouldShow = ((mode != 0) && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
+    ObjectSetInteger(0, labelPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
     ObjectSetInteger(0, objectPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
 
     bool showFractal = (mode == 1 || mode == 3);
@@ -755,6 +762,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     long fractalTargetsTF = (shouldShow && showFractal && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
+        ObjectSetInteger(0, labelPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
+        ObjectSetInteger(0, labelPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
+        ObjectSetInteger(0, labelPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTargetsTF);
         ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
         ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
         ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTargetsTF);
@@ -763,6 +773,9 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     long standardTargetsTF = (shouldShow && showStandard && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
+        ObjectSetInteger(0, labelPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
+        ObjectSetInteger(0, labelPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
+        ObjectSetInteger(0, labelPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, standardTargetsTF);
         ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
         ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
         ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, standardTargetsTF);
