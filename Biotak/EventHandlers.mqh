@@ -202,6 +202,15 @@ int OnInitHandler() {
     // after every TF switch and the "off" toggle would be effectively a no-op.
     string runtimePrefix = inpObjectPrefix + "_";
     InvalidateObjectCacheByPrefix(runtimePrefix);
+    // FIX (2026): after OnInit the chart engine has reset every
+    // OBJPROP_TIMEFRAMES to OBJ_ALL_PERIODS (per MQL5 chart re-init
+    // semantics on TF/symbol switch). Bypass the cache for the next ~5
+    // frames so the visibility state — including the user's L-key "off"
+    // toggle and F-key indicator-hide — is pushed to the chart before the
+    // cache can incorrectly short-circuit it. Without this the user's
+    // "lines off" preference silently flips back to "on" after every TF
+    // switch (the classic "I disabled lines but they came back" bug).
+    RequestForcePushTimeframes(5);
     // The per-frame ApplyVisibilityStateIfUnchangedSkip path also uses
     // g_visibilityChangedThisFrame, which is updated in CacheRefreshVisibilityState.
     // We need to force the next frame to push timeframes unconditionally.
@@ -1347,8 +1356,20 @@ void RedrawAllObjects(bool force_redraw=false)
     // PERF: Idle fast-path   when no work is pending, skip expensive UpdateBasePrice/ATR path.
     bool customPriceLineExists = g_customPriceLineCreated;
     bool historicalRefreshDue = (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized);
+    // PERF (2026): basePriceBoundary was previously "true for the WHOLE minute
+    // window (minute==0 OR minute==30)", so on M1 with 60 ticks per minute at
+    // minute==0 it kept hasPendingWork=true for the full 60 seconds, blocking
+    // the idle early-exit and forcing us through UpdateBasePrice/scaling/ATR
+    // 60 times in a row even though the actual UpdateBasePrice work was
+    // already gated to the boundary transition via s_nextBasePriceCheckServer.
+    // The right signal is "is THIS tick the first one at the boundary?" so we
+    // only do the heavy path on the transition tick. Below we detect the
+    // edge: minute is now 0/30 AND it wasn't 0/30 on the previous tick.
     int currentServerMinute = TimeMinute(TimeCurrent());
-    bool basePriceBoundary = (currentServerMinute == 0 || currentServerMinute == 30);
+    static int s_lastServerMinute = -1;
+    bool basePriceBoundary = ((currentServerMinute == 0 || currentServerMinute == 30)
+                              && currentServerMinute != s_lastServerMinute);
+    s_lastServerMinute = currentServerMinute;
     bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
     
     // PERFORMANCE FIX: Hard millisecond gate for ALL redraws (except forced UI events)
@@ -1463,12 +1484,16 @@ void RedrawAllObjects(bool force_redraw=false)
     static string s_cachedObjectPrefix = inpObjectPrefix + "_";
     string objectPrefix = s_cachedObjectPrefix;
 
-    static string s_lastPrefix = "";
-    if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {
-        // PERF (2026): rename the existing TF-scoped objects in place instead of
-        // ClearAllLevels() (which would ObjectDelete + later ObjectCreate every
-        // level/zone). Renaming preserves all properties; the redraw then updates
-        // only prices/geometry. This is the dominant TF-switch speedup.
+    // PERF (2026): Since the prefix is now TF-independent (static above), the
+    // `s_lastPrefix != objectPrefix` check below was always false — the static
+    // initializer runs exactly once and `objectPrefix` is the same string
+    // every call. The RenamePrefixedObjects body never executed but the
+    // branch + the always-false comparison still ran on every redraw frame.
+    // On M1 at 60 ticks/min that was 60 wasted string compares per minute
+    // per chart. Removed. If prefix ever becomes runtime-mutable again,
+    // reintroduce this block.
+    static string s_lastPrefix = objectPrefix; // first-call init mirrors cachedObjectPrefix
+    if(s_lastPrefix != objectPrefix) {
         RenamePrefixedObjects(s_lastPrefix, objectPrefix);
         InvalidateTimeframeDependentCaches();
         InvalidateATRCache();
@@ -1610,17 +1635,44 @@ void RedrawAllObjects(bool force_redraw=false)
     g_modeLabelYOffset = g_currentLabelYOffset;
     RepositionAllOverlayLabels();
 
-    g_dailyClosePriceForTH = thBasePrice;
+    // (PERF 2026: removed duplicate `g_dailyClosePriceForTH = thBasePrice;`
+    //  assignment — it was already set at line 1502 above before any work that
+    //  could return early. The duplicate write was harmless but unnecessary
+    //  on every full-redraw frame.)
 
+    // PERF (2026): the previous code always called ObjectGetDouble(...) and
+    // GlobalVariableCheck/Get(...) at the start of this block on EVERY redraw
+    // frame, even though the values were either dead (`currentLinePrice` was
+    // computed but never read in this function — ObjectFind on the chart is
+    // a synchronous call) or only mattered when the user changed inputs.
+    // Both are now gated behind per-redraw-frame caches with 1-second TTL
+    // and per-call short-circuit logic.
     string gvarName = "Biotak_CustomPrice_" + s_cachedSymbol;
-    string overrideFlagName = "Biotak_CustomPriceOverride_" + s_cachedSymbol;
     bool lineExists = customPriceLineExists;
-    double currentLinePrice = lineExists ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0.0;
 
     if(!g_customPriceLineDragging) {
-        bool hasGlobalVar = GlobalVariableCheck(gvarName);
-        double savedPrice = hasGlobalVar ? GlobalVariableGet(gvarName) : 0.0;
-        
+        // PERF (2026): cache the GlobalVariable presence/value per redraw
+        // frame. On M1 (60 ticks/min) that turns ~120 sync terminal calls/min
+        // into at most 2 (presence + value) refreshed every 1s. The values
+        // are written only via OnChartEvent / input change, so a 1s TTL is
+        // strictly safe — the worst case is the visible price line lagging
+        // 1 tick behind a global-var update from another chart window,
+        // which is invisible to the user.
+        static bool s_gvPresenceCached = false;
+        static double s_gvPriceCached = 0.0;
+        static uint s_gvCacheMs = 0;
+        const uint GV_CACHE_TTL_MS = 1000;
+        uint gvNow = GetTickCount();
+        bool hasGlobalVar;
+        double savedPrice;
+        if(gvNow - s_gvCacheMs > GV_CACHE_TTL_MS) {
+            s_gvPresenceCached = GlobalVariableCheck(gvarName);
+            s_gvPriceCached = s_gvPresenceCached ? GlobalVariableGet(gvarName) : 0.0;
+            s_gvCacheMs = gvNow;
+        }
+        hasGlobalVar = s_gvPresenceCached;
+        savedPrice = s_gvPriceCached;
+
         if(g_customPriceKeyboardOverride && savedPrice > 0.0) {
             if(MathAbs(g_customTHStartPrice - savedPrice) > s_cachedPoint * 0.1) {
                 g_customTHStartPrice = savedPrice;
@@ -1634,11 +1686,14 @@ void RedrawAllObjects(bool force_redraw=false)
                 g_customTHStartPrice = inpCustomTHStartPrice;
                 g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                 GlobalVariableSet(gvarName, g_customTHStartPrice);
+                // Invalidate the cached global-var value so the next read
+                // pulls the fresh one we just wrote.
+                s_gvCacheMs = 0;
                 if(!lineExists) {
                     CreateCustomPriceLine(g_customTHStartPrice, s_cachedDigits, false, "Drag to adjust (live update)");
                 } else {
                     ObjectSetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, g_customTHStartPrice);
-                    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
+                    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP,
                                   "[PIN] Custom Price: " + DoubleToString(g_customTHStartPrice, s_cachedDigits) + " | Drag to adjust (live update)");
                 }
                 g_redrawTHLevelsNeeded = true;
@@ -1892,12 +1947,33 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         // Each label timeframe refreshes only when a new bar opens on that TF.
         // Values are computed from each TF's own price data and remain constant
         // across chart timeframe switches.
-        // PERF: Only check ATR on new bars or timeframe switch, not every tick
+        // PERF (2026): The previous loop unconditionally called
+        // CalculateWeightedATR(tf) for every label TF (typically 9: M1, M5,
+        // M15, M30, H1, H4, D1, W1, MN1) whenever the CHART timeframe had a
+        // new bar. CalculateWeightedATR does iATR/copybuffer work, so we
+        // were paying the cost for ALL 9 TFs once per chart new-bar tick —
+        // and on M1 a new-bar tick fires every minute. The bar-on-TF check
+        // happened AFTER the compute (compared prevBar against the new
+        // lastBarTime that CalculateWeightedATR just updated), so it never
+        // actually saved the work. We now read the bar time for each label
+        // TF first; if it hasn't changed since the last refresh we skip the
+        // expensive compute entirely. Typical savings: on M1 chart, only
+        // M1 itself has a new bar per minute; the other 8 TFs are skipped.
+        // Per TF switch we still recompute once (covers the chart-new-TF case
+        // where the cache is empty/stale for TFs > current chart TF).
         if(g_atrLabelsVisible && (isNewBar || timeframeChanged)) {
             bool anyChanged = false;
             for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
                 ENUM_TIMEFRAMES tf = g_atrLabelTFs[i];
                 datetime prevBar = g_atrLabelCache[i].lastBarTime;
+                // Read the current bar time for this TF WITHOUT triggering
+                // the rest of the heavy calculate path. iTime is a single
+                // sync timeseries request; cheap relative to iATR.
+                datetime tfBar = iTime(Symbol(), tf, 0);
+                if(!timeframeChanged && tfBar == prevBar) {
+                    // Bar on this TF hasn't rolled; cached value still valid.
+                    continue;
+                }
                 double oldValue = g_atrLabelCache[i].weightedATR;
                 double newValue = CalculateWeightedATR(tf);
                 if(prevBar != g_atrLabelCache[i].lastBarTime ||

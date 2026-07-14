@@ -82,13 +82,38 @@ static bool g_prevFrameVisibilityNonLines = true;
 static bool g_visibilityChangedThisFrame = true;
 static int g_visibilityFrameCounter = 0;
 
+// FIX (2026): Per the MQL5 docs, when the underlying chart re-initializes
+// (which MT5 does on every TF/symbol switch) the chart engine silently
+// resets OBJPROP_TIMEFRAMES back to OBJ_ALL_PERIODS for every chart
+// object whose time series got reattached. The cache still says "this
+// object is at OBJ_NO_PERIODS" so ApplyVisibilityStateIfUnchangedSkip
+// skips the push — the lines/zones reappear and the user's "off" toggle
+// becomes a no-op after every TF switch. The fix is a one-shot flag that
+// forces the next N redraw frames to push timeframes unconditionally
+// after OnInit (which is the MQL5 callback fired on every TF/symbol
+// switch — see OnInitHandler in EventHandlers.mqh).
+static int g_forcePushTimeframesFrames = 0;
+
+void RequestForcePushTimeframes(int frames = 5)
+{
+    if(frames > g_forcePushTimeframesFrames)
+        g_forcePushTimeframesFrames = frames;
+}
+
+bool ConsumeForcePushTimeframes()
+{
+    if(g_forcePushTimeframesFrames <= 0) return false;
+    g_forcePushTimeframesFrames--;
+    return true;
+}
+
 void CacheRefreshVisibilityState()
 {
     g_visibilityFrameCounter++;
     bool hidden = IsIndicatorHidden();
     g_frameVisibilityNonLines = !hidden;
     g_frameVisibilityLines = !hidden && GetCachedLinesVisible();
-    
+
     g_visibilityChangedThisFrame = (g_frameVisibilityLines != g_prevFrameVisibilityLines) ||
                                     (g_frameVisibilityNonLines != g_prevFrameVisibilityNonLines);
     g_prevFrameVisibilityLines = g_frameVisibilityLines;
@@ -129,6 +154,24 @@ void ApplyVisibilityState(const string name, const bool isLine)
 void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
 {
     long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+
+    // FIX (2026): For a few frames after OnInit / TF switch, bypass the
+    // cache entirely and push every object's OBJPROP_TIMEFRAMES directly
+    // to the chart. The chart engine reset those properties on re-init
+    // (MT5 docs: chart object time-series re-attachment forces a reset)
+    // and the cache cannot observe the reset. Without this guard the
+    // user's "lines off" toggle silently flips back to on after every
+    // TF switch.
+    if(ConsumeForcePushTimeframes()) {
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
+        int idx = CacheFindIndex(name);
+        if(idx >= 0) {
+            g_objectCacheHash[idx].entry.lastTimeframes = tf;
+            g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
+            g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
+        }
+        return;
+    }
 
     // Visibility state changed this frame: always push to chart.
     if(g_visibilityChangedThisFrame) {

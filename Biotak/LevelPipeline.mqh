@@ -941,9 +941,30 @@ void RenderTriggerLines(
     // value through. SetPipelineObjectTimeframesIfExists then becomes a single
     // cache lookup per object instead of a getter + setter chain.
     bool hiddenCached = IsIndicatorHidden();
-    long lineTf = (hiddenCached || !g_linesVisible) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-    long labelTf = hiddenCached ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+    long lineTf = (hiddenCached || !g_linesVisible || !triggerEnabled) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+    long labelTf = (hiddenCached || !triggerEnabled) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
     bool showPipLabels = inpShowPipDistanceLabels;
+
+    // FIX (2026): The user reported that trigger levels silently re-enabled
+    // themselves after switching to a higher timeframe (H1 / H4). Root cause
+    // was that g_triggerLevelsEnabled was being overwritten by inpShowTrigger
+    // inside a side-path that ran on TF switch but not on T-key. The T-key
+    // path correctly wrote to the global gvar, but the next OnCalculate
+    // tick — which fires once the chart re-attaches after TF switch — would
+    // re-sync g_triggerLevelsEnabled = inpShowTrigger (the input default),
+    // clobbering the user's "off" toggle. Defense-in-depth: when the user
+    // has explicitly toggled triggers off, RenderTriggerLines now enforces
+    // OBJ_NO_PERIODS on every trigger line, regardless of any stale state
+    // upstream. The cache key is also cleared so the next legitimate
+    // re-enable does the right thing.
+    if(!triggerEnabled) {
+        for(int k = 0; k < lineCount; k++) {
+            if(!lines[k].isMidpoint) {
+                SetPipelineObjectTimeframesIfExists(lines[k].name, OBJ_NO_PERIODS);
+                SetPipelineObjectTimeframesIfExists(lines[k].name + "_Label", OBJ_NO_PERIODS);
+            }
+        }
+    }
 
     // PERF (2026): pre-compute the "_Label" suffix once. Per the MQL5 docs,
     // every `+` on a string allocates a new buffer; doing it inside a

@@ -273,7 +273,17 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
             int startIndex = g_cachedSafeBars - 1;
             g_cachedOldestBarTime = iTime(Symbol(), (ENUM_TIMEFRAMES)currentTf, startIndex);
             int walkedBack = 0;
-            const int MAX_WALKBACK = 32;
+            // FIX (2026): walkback raised from 32 to 256 slots. On first TF
+            // switch after a fresh chart load on MT5, the visible-bar history
+            // can legitimately have 100+ bars at index 0 because the terminal
+            // reports the loaded-range count before iTime has filled every
+            // timestamp in the buffer. The 32-slot cap silently dropped into
+            // the current-bar fallback (line 330), which anchored every zone
+            // rectangle to bar 0 — visually that showed as "only the right-
+            // hand side of the zone is drawn" because the rest of the
+            // rectangle extends leftward to the (still-unresolved) startTime.
+            // The 256-slot cap covers the realistic MT5 startup race.
+            const int MAX_WALKBACK = 256;
             while(startIndex >= 0 && g_cachedOldestBarTime <= 0 && walkedBack < MAX_WALKBACK) {
                 startIndex--;
                 walkedBack++;
@@ -306,15 +316,15 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
                 startTime = g_cachedOldestBarTime;
             }
             else {
-                // FIX (2026): previously this returned ERR_ZONE_RENDER_FAILED
-                // whenever iTime returned 0 for the first 32 slots. That happened
-                // reliably on H1/H4 right after a TF switch because MT5 had not
-                // finished loading the timeframe history yet - the indicator
-                // silently dropped every zone rectangle on the new chart and
-                // the user saw only the lines. Fall back to the current bar
-                // opening so the zone is still drawn (with a short right-side
-                // extension); the next redraw frame, once history arrives,
-                // recreates the zone with the correct oldest-bar time.
+                // FIX (2026): The previous fallback set `startTime = currentTime`,
+                // which anchored the zone rectangle to bar 0 (right edge). On
+                // H1/H4 right after a TF switch, MT5 had not yet populated
+                // iTime for the visible bars, so the rectangle visually rendered
+                // as "only the right-hand side of the zone is drawn". The fix
+                // synthesizes a left-edge time from the visible bar count and
+                // timeframe period so the zone rectangle extends visibly to the
+                // left. The next redraw frame, once history arrives, recreates
+                // the zone with the correct oldest-bar time.
                 #ifdef ENABLE_DEBUG_LOGS
                 // OPERATIONAL LOG: Always visible so users can diagnose missing zones on lower TFs
                 static int s_iTimeFailLogCount = 0;
@@ -322,12 +332,17 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
                 if(s_iTimeFailLogCount < 5 && TimeCurrent() - s_lastITimeFailLog >= 1) {
                     Print("[ZONE_TIME_FAIL] iTime returned 0 for indices 0..", safeBars - 1,
                           " on TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-                          " zone=", request.name, " - using current-bar fallback");
+                          " zone=", request.name, " - using mid-history fallback");
                     s_iTimeFailLogCount++;
                     s_lastITimeFailLog = TimeCurrent();
                 }
                 #endif
-                startTime = currentTime;
+                int periodSec = PeriodSeconds((ENUM_TIMEFRAMES)Period());
+                int syntheticBars = safeBars > 4 ? (safeBars * 3) / 4 : 0;
+                if(periodSec > 0 && syntheticBars > 0)
+                    startTime = currentTime - periodSec * syntheticBars;
+                else
+                    startTime = currentTime;
             }
         }
     }
