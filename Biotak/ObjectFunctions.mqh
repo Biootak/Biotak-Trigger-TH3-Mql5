@@ -165,11 +165,24 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
     color cachedColor;
     bool hasCachedLabel = CacheGetLabel(name, cachedText, cachedColor);
     bool objectExists = false;
+    // PERF (2026): mirror the same per-frame trust-the-cache check that
+    // CreateOrUpdateHLine already uses. The previous implementation always
+    // called ObjectFind(0, name) even on a cache hit, which is a
+    // SYNCHRONOUS chart API call ("can be time consuming" per the official
+    // MQL5 docs). With 288 labels on M1 that is 288 sync syscalls per
+    // redraw for nothing — the cache already told us the object exists.
     if(hasCachedLabel) {
-        objectExists = (ObjectFind(0, name) >= 0);
-        if(!objectExists) {
-            CacheRemoveObject(name);
-            hasCachedLabel = false;
+        int cachedIdx = CacheFindIndex(name);
+        if(cachedIdx >= 0 &&
+           g_objectCacheHash[cachedIdx].entry.lastUpdate == CacheGetFrameTime() &&
+           g_objectCacheHash[cachedIdx].entry.lastUpdate > 0) {
+            objectExists = true;
+        } else {
+            objectExists = (ObjectFind(0, name) >= 0);
+            if(!objectExists) {
+                CacheRemoveObject(name);
+                hasCachedLabel = false;
+            }
         }
     } else {
         objectExists = (ObjectFind(0, name) >= 0);

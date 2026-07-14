@@ -177,7 +177,8 @@ bool CreateOrUpdateHLine(const string name, double price,
         return true;
     } else {
         double point = GetCachedPoint();
-        if(!hasCached || MathAbs(cachedEntry.lastPrice - normPrice) > point * 0.1) {
+        bool priceChanged = (!hasCached || MathAbs(cachedEntry.lastPrice - normPrice) > point * 0.1);
+        if(priceChanged) {
             ObjectSetDouble(0, name, OBJPROP_PRICE, normPrice);
         }
         if(!hasCached || cachedEntry.lastColor != clr) {
@@ -189,8 +190,13 @@ bool CreateOrUpdateHLine(const string name, double price,
         if(!hasCached || cachedEntry.lastWidth != width) {
             ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
         }
-        // PERF: Only update tooltip if it changed (avoid redundant API call)
-        if(!hasCached || cachedEntry.lastText != tooltip) {
+        // PERF (2026): only push the tooltip when the price actually moved
+        // (the tooltip embeds the price via DoubleToString), or on the first
+        // sighting of the object. The previous implementation always called
+        // ObjectSetString(..., OBJPROP_TOOLTIP, ...) because lastText was
+        // never populated for HLINEs — 288 redundant async writes per redraw
+        // on M1 just to put the same number back on the chart.
+        if(priceChanged) {
             ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
         }
         CacheUpdateObject(name, normPrice, clr, style, width);

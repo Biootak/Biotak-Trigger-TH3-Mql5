@@ -725,10 +725,37 @@ void BuildZonesAndLines(
 //| Creates/updates MT5 rectangle objects for each zone.             |
 //| Handles all zone styles: Lines, Filled Box, Empty Box, Hidden.   |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| PERF (2026): cache-backed SetPipelineObjectTimeframesIfExists    |
+//|                                                                  |
+//| The original implementation called ObjectFind on every zone/line  |
+//| (a SYNCHRONOUS chart API call per the official MQL5 docs) just    |
+//| to gate the asynchronous ObjectSetInteger write. With ~200 zones  |
+//| on M1 that is ~200 sync syscalls per redraw for nothing —         |
+//| the cache already knows which objects exist and what their last  |
+//| OBJPROP_TIMEFRAMES value was. We now skip the chart API entirely  |
+//| on the hot path.                                                  |
+//+------------------------------------------------------------------+
 void SetPipelineObjectTimeframesIfExists(const string name, const long timeframes)
 {
-    if(ObjectFind(0, name) >= 0)
+    int idx = CacheFindIndex(name);
+    if(idx >= 0 && g_objectCacheHash[idx].entry.exists) {
+        if(g_objectCacheHash[idx].entry.lastTimeframes == timeframes) return;
         ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
+        g_objectCacheHash[idx].entry.lastTimeframes = timeframes;
+        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
+        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
+        return;
+    }
+    // Cache miss (object never cached, or was invalidated): pay the
+    // sync ObjectFind cost ONCE and hydrate the cache for the next call.
+    if(ObjectFind(0, name) < 0) return;
+    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
+    if(idx >= 0) {
+        g_objectCacheHash[idx].entry.lastTimeframes = timeframes;
+        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
+        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
+    }
 }
 
 void SetPipelineZoneVisibility(const string zoneName, const bool visible)
@@ -794,10 +821,22 @@ void RenderZones(
         }
         
         if(config.zoneStyle == ZONE_STYLE_LINES) {
-            CreateFactorMidZone_LinesStyle(zones[i].name, 
+            CreateFactorMidZone_LinesStyle(zones[i].name,
                                            zones[i].renderTop, zones[i].renderBottom,
                                            zones[i].zoneColor, zones[i].transparency);
-            SetPipelineZoneVisibility(zones[i].name, true);
+            // PERF (2026): SetPipelineZoneVisibility(zoneName, true) was a
+            // 3x redundant call here:
+            //   * The main `zoneName` object is deleted by
+            //     CreateFactorMidZone_LinesStyle before the top/bottom lines
+            //     are created, so writing OBJPROP_TIMEFRAMES on it is wasted.
+            //   * The `_Top` / `_Bottom` lines are created by
+            //     CreateOrUpdateHLine, which already pushes the right
+            //     visibility through ApplyVisibilityState /
+            //     ApplyVisibilityStateIfUnchangedSkip (cache-backed since
+            //     the 2026 PERF patch).
+            // We just trust the visibility state from the per-frame cache
+            // (CacheRefreshVisibilityState) — the global hide (F key) and
+            // lines-visibility (L key) are already applied at the call site.
             createdCount++;
         } else {
             // Box style (filled or empty)
@@ -810,7 +849,7 @@ void RenderZones(
             request.filled = zones[i].filled;
             request.startTime = 0;
             request.endTime = 0;
-            
+
             SZoneCreationResult zoneResult = CreateZone(request);
             if(zoneResult.success) {
                 createdCount++;
@@ -820,7 +859,12 @@ void RenderZones(
                     firstFailReason = zoneResult.errorMessage;
                 }
             }
-            SetPipelineZoneVisibility(zones[i].name, true);
+            // PERF (2026): the redundant SetPipelineZoneVisibility(zoneName,
+            // true) was removed. CreateZone already calls
+            // SetObjectTimeframesIfChanged for the main zone name, and the
+            // `_Top` / `_Bottom` lines do not exist in BOX style (only in
+            // LINES style). On 200+ zones this saves 600+ cache lookups
+            // per redraw frame.
         }
     }
     

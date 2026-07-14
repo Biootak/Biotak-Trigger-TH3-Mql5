@@ -248,6 +248,7 @@ input string inpATRLabelsKey = "A";        // Toggle ATR labels on/off
 input string inpTHLabelsKey = "S";          // Toggle TH labels on/off
 input string inpShowStatusKey = "W";        // Show current mode status
 input string inpResetKey = "Q";
+input string inpReloadKey = "X";           // Force re-init of the indicator (no restart needed)
 
 input group "20) ADVANCED - OBJECTS"
 input string inpObjectPrefix = "THLevels";

@@ -17,6 +17,13 @@ struct SObjectCacheEntry {
     bool lastFilled;       // Last known fill state (for zones)
     bool exists;           // True if object exists on chart
     datetime lastUpdate;   // Last update timestamp
+    long lastTimeframes;   // PERF (2026): last OBJPROP_TIMEFRAMES value.
+                           // Cached locally to avoid the synchronous
+                           // ObjectGetInteger(..., OBJPROP_TIMEFRAMES) call
+                           // on every redraw (the MQL5 docs explicitly warn
+                           // that synchronous chart API calls are time
+                           // consuming when working with a large number of
+                           // objects on a chart).
 };
 
 // Hash-based cache configuration
@@ -168,10 +175,10 @@ void EvictLRUEntry() {
     }
 }
 
-void CacheAddObject(const string name, const double price, 
+void CacheAddObject(const string name, const double price,
                     const color clr, const int style, const int width) {
     if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
-    
+
     int idx = CacheFindIndex(name);
     if(idx >= 0) {
         g_objectCacheHash[idx].entry.lastPrice = price;
@@ -181,13 +188,14 @@ void CacheAddObject(const string name, const double price,
         g_objectCacheHash[idx].entry.exists = true;
         g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
         g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
+        // PERF: keep the previously-cached timeframes (do not reset)
         return;
     }
-    
+
     if(g_objectCacheSize >= MAX_CACHE_SIZE) {
         EvictLRUEntry();
     }
-    
+
     int insertIdx = CacheFindInsertIndex(name);
     if(insertIdx < 0) {
         EvictLRUEntry();
@@ -198,13 +206,19 @@ void CacheAddObject(const string name, const double price,
         insertIdx = CacheFindInsertIndex(name);
     }
     if(insertIdx < 0) return;
-    
+
     g_objectCacheHash[insertIdx].name = name;
     g_objectCacheHash[insertIdx].entry.name = name;
     g_objectCacheHash[insertIdx].entry.lastPrice = price;
     g_objectCacheHash[insertIdx].entry.lastColor = clr;
     g_objectCacheHash[insertIdx].entry.lastStyle = style;
     g_objectCacheHash[insertIdx].entry.lastWidth = width;
+    // PERF (2026): new chart objects default to OBJ_ALL_PERIODS (visible on
+    // every timeframe). Seed the cache with that default so the very first
+    // SetObjectTimeframesIfChanged / ApplyVisibilityStateIfUnchangedSkip call
+    // can take the fast (cache-only) path and skip the synchronous
+    // ObjectGetInteger(..., OBJPROP_TIMEFRAMES) chart API call.
+    g_objectCacheHash[insertIdx].entry.lastTimeframes = OBJ_ALL_PERIODS;
     g_objectCacheHash[insertIdx].entry.exists = true;
     g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[insertIdx].occupied = true;
@@ -316,14 +330,14 @@ bool CacheGetLabel(const string name, string &text, color &clr) {
     return g_objectCacheHash[idx].entry.exists;
 }
 
-void CacheUpdateObject(const string name, const double price, 
+void CacheUpdateObject(const string name, const double price,
                        const color clr, const int style, const int width) {
     int idx = CacheFindIndex(name);
     if(idx < 0) {
         CacheAddObject(name, price, clr, style, width);
         return;
     }
-    
+
     g_objectCacheHash[idx].entry.lastPrice = price;
     g_objectCacheHash[idx].entry.lastColor = clr;
     g_objectCacheHash[idx].entry.lastStyle = style;
@@ -331,6 +345,8 @@ void CacheUpdateObject(const string name, const double price,
     g_objectCacheHash[idx].entry.exists = true;
     g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
+    // PERF: preserve lastTimeframes — visibility is owned by
+    // SetObjectTimeframesIfChanged / ApplyVisibilityStateIfUnchangedSkip.
 }
 
 void CacheUpdateZone(const string name, const double price1, const double price2,
@@ -340,7 +356,7 @@ void CacheUpdateZone(const string name, const double price1, const double price2
     if(idx < 0) {
         if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
         if(g_objectCacheSize >= MAX_CACHE_SIZE) EvictLRUEntry();
-        
+
         int insertIdx = CacheFindInsertIndex(name);
         if(insertIdx < 0) {
             EvictLRUEntry();
@@ -360,6 +376,8 @@ void CacheUpdateZone(const string name, const double price1, const double price2
         g_objectCacheHash[insertIdx].entry.lastTime2 = time2;
         g_objectCacheHash[insertIdx].entry.lastColor = clr;
         g_objectCacheHash[insertIdx].entry.lastFilled = filled;
+        // PERF (2026): new chart objects default to OBJ_ALL_PERIODS.
+        g_objectCacheHash[insertIdx].entry.lastTimeframes = OBJ_ALL_PERIODS;
         g_objectCacheHash[insertIdx].entry.exists = true;
         g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
         g_objectCacheHash[insertIdx].occupied = true;
@@ -368,7 +386,7 @@ void CacheUpdateZone(const string name, const double price1, const double price2
         g_objectCacheSize++;
         return;
     }
-    
+
     g_objectCacheHash[idx].entry.lastPrice = price1;
     g_objectCacheHash[idx].entry.lastPrice2 = price2;
     g_objectCacheHash[idx].entry.lastTime1 = time1;
@@ -378,6 +396,7 @@ void CacheUpdateZone(const string name, const double price1, const double price2
     g_objectCacheHash[idx].entry.exists = true;
     g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
+    // PERF: preserve lastTimeframes
 }
 
 void CacheUpdateLabel(const string name, const string text, const color clr) {
@@ -385,7 +404,7 @@ void CacheUpdateLabel(const string name, const string text, const color clr) {
     if(idx < 0) {
         if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
         if(g_objectCacheSize >= MAX_CACHE_SIZE) EvictLRUEntry();
-        
+
         int insertIdx = CacheFindInsertIndex(name);
         if(insertIdx < 0) {
             EvictLRUEntry();
@@ -401,6 +420,8 @@ void CacheUpdateLabel(const string name, const string text, const color clr) {
         g_objectCacheHash[insertIdx].entry.name = name;
         g_objectCacheHash[insertIdx].entry.lastText = text;
         g_objectCacheHash[insertIdx].entry.lastColor = clr;
+        // PERF (2026): new chart objects default to OBJ_ALL_PERIODS.
+        g_objectCacheHash[insertIdx].entry.lastTimeframes = OBJ_ALL_PERIODS;
         g_objectCacheHash[insertIdx].entry.exists = true;
         g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
         g_objectCacheHash[insertIdx].occupied = true;
@@ -409,12 +430,13 @@ void CacheUpdateLabel(const string name, const string text, const color clr) {
         g_objectCacheSize++;
         return;
     }
-    
+
     g_objectCacheHash[idx].entry.lastText = text;
     g_objectCacheHash[idx].entry.lastColor = clr;
     g_objectCacheHash[idx].entry.exists = true;
     g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
+    // PERF: preserve lastTimeframes
 }
 
 int CacheGetSize() {
@@ -423,24 +445,31 @@ int CacheGetSize() {
 
 void CacheRebuild() {
     CacheClear();
-    
+
     // MT4: ObjectsTotal() with chart_id parameter
     int totalObjects = ObjectsTotal(0, -1, -1);
-    
+
     for(int i = 0; i < totalObjects; i++) {
         string objName = ObjectName(0, i);
-        
+
         // Only cache TH-related objects
         if(StringLen(objName) >= 2 && StringGetCharacter(objName, 0) == 'T' && StringGetCharacter(objName, 1) == 'H') {
             double price = ObjectGetDouble(0, objName, OBJPROP_PRICE);
             color clr = (color)ObjectGetInteger(0, objName, OBJPROP_COLOR);
             int style = (int)ObjectGetInteger(0, objName, OBJPROP_STYLE);
             int width = (int)ObjectGetInteger(0, objName, OBJPROP_WIDTH);
-            
+
             CacheAddObject(objName, price, clr, style, width);
+            // PERF (2026): also cache the current OBJPROP_TIMEFRAMES so the
+            // hot path can stay on the local cache after a rebuild.
+            int idx = CacheFindIndex(objName);
+            if(idx >= 0) {
+                g_objectCacheHash[idx].entry.lastTimeframes =
+                    ObjectGetInteger(0, objName, OBJPROP_TIMEFRAMES);
+            }
         }
     }
-    
+
     _LOG_GATE_D Print("[D][SYNC] Object cache rebuilt: ", g_objectCacheSize, " objects cached from ", totalObjects, " total chart objects");
 }
 
@@ -463,15 +492,59 @@ int CacheValidate() {
 }
 
 //+------------------------------------------------------------------+
-//| PERF: Set OBJPROP_TIMEFRAMES only when changed                   |
-//| Avoids redundant chart API writes every redraw                   |
+//+------------------------------------------------------------------+
+//| PERF (2026): cache-backed SetObjectTimeframesIfChanged            |
+//|                                                                  |
+//| Old implementation made 2 SYNCHRONOUS chart API calls per object: |
+//|   1) ObjectFind(0, name)                                         |
+//|   2) ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES)                |
+//|                                                                  |
+//| Per the official MQL5 documentation                              |
+//| (https://www.mql5.com/en/docs/objects/objectsetinteger and        |
+//|  https://www.mql5.com/en/docs/objects/objectgetinteger):          |
+//|   * ObjectSetInteger uses an ASYNCHRONOUS call (just queues       |
+//|     the command, returns immediately).                            |
+//|   * ObjectGetInteger uses a SYNCHRONOUS call: the function is     |
+//|     added to the END of the chart's command queue and waits for   |
+//|     the result, "and can therefore be time consuming. This       |
+//|     feature should be taken into account when working with a     |
+//|     large number of objects on a chart."                          |
+//|                                                                  |
+//| The cached `lastTimeframes` field on SObjectCacheEntry removes    |
+//| both sync calls from the hot path. Object existence is trusted    |
+//| from the cache (the cache is the source of truth maintained by   |
+//| every other call site). We only fall back to the chart API when   |
+//| the entry is not in the cache, in which case we pay the cost     |
+//| once and then hydrate the cache for the next call.                |
 //+------------------------------------------------------------------+
 void SetObjectTimeframesIfChanged(const string name, const long timeframes)
 {
+    int idx = CacheFindIndex(name);
+
+    // Cache hit: trust the cache, no chart API calls needed.
+    if(idx >= 0 && g_objectCacheHash[idx].entry.exists) {
+        if(g_objectCacheHash[idx].entry.lastTimeframes == timeframes)
+            return;  // already on the right timeframes, skip
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
+        g_objectCacheHash[idx].entry.lastTimeframes = timeframes;
+        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
+        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
+        return;
+    }
+
+    // Cache miss: pay the sync ObjectFind + ObjectGetInteger cost
+    // ONCE so the next call takes the fast path. This branch is rare
+    // (only on the very first sighting of an object, or after
+    // CacheClear / InvalidateObjectCacheByPrefix removed it).
     if(ObjectFind(0, name) < 0) return;
     long current = ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES);
     if(current != timeframes)
         ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
+    if(idx >= 0) {
+        g_objectCacheHash[idx].entry.lastTimeframes = timeframes;
+        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
+        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
+    }
 }
 
 #endif // OBJECT_CACHE_MQH
