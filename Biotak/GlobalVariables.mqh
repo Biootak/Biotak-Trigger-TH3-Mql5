@@ -7,9 +7,7 @@ static double g_lowestLow = EMPTY_VALUE;
 static double g_currentPrice = 0.0;
 static datetime g_lastCalculation = 0;
 static datetime g_lastHistoricalUpdate = 0;
-static datetime g_deferredHistoricalRefreshAt = 0;
 static bool g_initialized = false;
-static bool g_deferHistoricalRefresh = false;
 static bool g_calculatedOnce = false;
 static bool g_labelsRelayoutNeeded = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
@@ -81,6 +79,7 @@ static uint g_lastDragRedrawTime = 0;
 
 // Suppression flag: prevents CHARTEVENT_OBJECT_DELETE cascade during programmatic deletions
 static bool g_suppressDeleteEvents = false;
+static uint g_suppressDeleteEventsUntilMs = 0;
 
 #ifndef BUILD_LITE
 // AB=CD Pattern State
@@ -152,16 +151,47 @@ string SanitizeSymbolName(const string symbol) {
     static string s_cachedResult = "";
     if(symbol == s_cachedInput && s_cachedResult != "") return s_cachedResult;
     s_cachedInput = symbol;
-    string safe = symbol;
-    // Remove all unsafe characters via loop
-    static const string unsafeChars[] = {"_","|",":","/","\\", " ",".","*","?","<",">","\"","'","-"};
-    int numChars = ArraySize(unsafeChars);
-    for(int i = 0; i < numChars; i++)
-        StringReplace(safe, unsafeChars[i], "");
-    if(StringLen(safe) == 0) safe = "UNKNOWN";
+
+    // FIX: single-pass scan over the unicode codepoints. The previous loop of
+    // StringReplace allocated a fresh string on every pass (O(n*m)). Output
+    // is byte-identical for the same unsafe-char set.
+    int len = StringLen(symbol);
+    ushort buf[];
+    ArrayResize(buf, len + 1);
+    int outIdx = 0;
+    for(int i = 0; i < len; i++) {
+        ushort c = StringGetCharacter(symbol, i);
+        bool unsafe = false;
+        switch(c) {
+            case '_':  case '|':  case ':':  case '/':  case '\\':
+            case ' ':  case '.':  case '*':  case '?':  case '<':
+            case '>':  case '"':  case '\'': case '-':
+                unsafe = true; break;
+        }
+        if(!unsafe) buf[outIdx++] = c;
+    }
+
+    string safe;
+    if(outIdx == 0) {
+        safe = "UNKNOWN";
+    } else {
+        safe = ShortArrayToString(buf, 0, outIdx);
+    }
     if(StringLen(safe) > 50) safe = StringSubstr(safe, 0, 50);
     s_cachedResult = safe;
     return safe;
+}
+
+//+------------------------------------------------------------------+
+//| Cleanup symbol-scoped GlobalVariables for a given symbol         |
+//| Called when the chart's symbol changes so stale price state      |
+//| from the previous symbol does not leak into the new symbol.      |
+//+------------------------------------------------------------------+
+void CleanupSymbolScopedGlobalVariables(const string symbol) {
+    if(StringLen(symbol) == 0) return;
+    string symbolName = SanitizeSymbolName(symbol);
+    GlobalVariableDel("Biotak_CustomPrice_" + symbolName);
+    GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
 }
 
 //+------------------------------------------------------------------+

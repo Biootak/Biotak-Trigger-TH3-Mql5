@@ -12,6 +12,12 @@
 
 #include "ObjectCache.mqh"
 
+// Minimum visible zone height (each side, in points). Mirrors the define in
+// LevelPipeline.mqh so zones are never rejected as sub-point on low TFs.
+#ifndef ZONE_MIN_HEIGHT_POINTS
+#define ZONE_MIN_HEIGHT_POINTS 2   // minimum half-height each side in points
+#endif
+
 //+------------------------------------------------------------------+
 //| Zone Factory - Centralized Zone Creation                         |
 //|        Zone -             Zone                                   |
@@ -105,13 +111,26 @@ color GetZoneRenderColor(const color sourceColor, const int transparency)
 //| - Atomic object creation (cleanup on failure)                   |
 //| - Comprehensive error context                                   |
 //+------------------------------------------------------------------+
-SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
+SZoneCreationResult CreateZone(SZoneCreationRequest &request)
 {
     SZoneCreationResult result;
     result.success = false;
     result.zoneName = request.name;
     result.errorMessage = "";
     result.errorCode = ERR_ZONE_NONE;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    // DIAGNOSTIC LOG: log first 10 CreateZone calls per run
+    static int s_createZoneCallCount = 0;
+    s_createZoneCallCount++;
+    if(s_createZoneCallCount <= 10) {
+        Print("[CREATEZONE_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " name=", request.name,
+              " top=", DoubleToString(request.topPrice, Digits),
+              " bottom=", DoubleToString(request.bottomPrice, Digits),
+              " top<=bottom=", (request.topPrice <= request.bottomPrice ? "YES" : "NO"));
+    }
+    #endif
     
     //                                                                
     // PHASE 1: VALIDATION (Fail Fast)
@@ -121,6 +140,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     if(StringLen(request.name) == 0) {
         result.errorMessage = "Zone name cannot be empty";
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("[CREATEZONE_FAIL] name empty");
+        #endif
         return result;
     }
     
@@ -130,14 +152,36 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
                                           DoubleToString(request.topPrice, Digits),
                                           DoubleToString(request.bottomPrice, Digits));
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("[CREATEZONE_FAIL] name=", request.name, " invalid prices");
+        #endif
         return result;
     }
-    
+
+    // FIX: Enforce a minimum visible zone height (in points) so zones created on
+    // lower timeframes (where the fractal step is sub-point) are not silently
+    // rejected as "top <= bottom" after NormalizeDouble. Expand symmetrically
+    // around the box center, preserving the intended price level.
+    {
+        double point = GetCachedPoint();
+        if(point <= 0) point = 1e-5;
+        double center = (request.topPrice + request.bottomPrice) * 0.5;
+        double half = (request.topPrice - request.bottomPrice) * 0.5;
+        double minHalf = point * ZONE_MIN_HEIGHT_POINTS;
+        if(half < minHalf) {
+            request.topPrice = NormalizeDouble(center + minHalf, Digits);
+            request.bottomPrice = NormalizeDouble(center - minHalf, Digits);
+        }
+    }
+
     if(request.topPrice <= request.bottomPrice) {
         result.errorMessage = StringFormat("Top price (%s) must be greater than bottom price (%s)",
                                           DoubleToString(request.topPrice, Digits),
                                           DoubleToString(request.bottomPrice, Digits));
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("[CREATEZONE_FAIL] name=", request.name, " top<=bottom");
+        #endif
         return result;
     }
     
@@ -162,7 +206,10 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // PHASE 2: TIME CALCULATION (Optimized - No slow GlobalVariables)
     //                                                                
     
-    int safeBars = Bars(Symbol(), (ENUM_TIMEFRAMES)Period());
+    // CRITICAL FIX: Use iBars() instead of Bars(). On lower timeframes Bars() can report
+    // more bars than are actually loaded, causing iTime(..., safeBars-1) to return 0 and
+    // silently failing zone creation. iBars() returns the count of actually loaded bars.
+    int safeBars = iBars(Symbol(), (ENUM_TIMEFRAMES)Period());
     datetime currentTime = (safeBars > 0) ? iTime(Symbol(), (ENUM_TIMEFRAMES)Period(), 0) : TimeCurrent();
     if(currentTime <= 0) currentTime = TimeCurrent();
     
@@ -172,18 +219,44 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     // Auto-calculate times if not provided
     if(startTime == 0) {
         if(safeBars < 1) {
-            result.errorMessage = "Not enough bars for zone creation";
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
-            return result;
+            // DIAGNOSTIC + SAFETY: On M1 with monthly history unavailable, fall back to current bar.
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("[CreateZone] safeBars < 1 on ", EnumToString((ENUM_TIMEFRAMES)Period()), " using TimeCurrent fallback");
+            #endif
+            startTime = currentTime;
         }
-        
-        int startIndex = safeBars - 1;
-        startTime = iTime(Symbol(), (ENUM_TIMEFRAMES)Period(), startIndex);
-        
-        if(startTime <= 0) {
-            result.errorMessage = StringFormat("Invalid Time[%d]", startIndex);
-            result.errorCode = ERR_ZONE_RENDER_FAILED;
-            return result;
+        else {
+            // Zones should span the entire visible history, so start from the
+            // oldest loaded bar. In the common case iTime(safeBars-1) is valid
+            // immediately, avoiding the O(safeBars) walk-back fallback.
+            int startIndex = safeBars - 1;
+            startTime = iTime(Symbol(), (ENUM_TIMEFRAMES)Period(), startIndex);
+            
+            // Fallback: if the oldest bar is not yet synced, walk forward until
+            // a valid timestamp is found.
+            while(startIndex >= 0 && startTime <= 0) {
+                startTime = iTime(Symbol(), (ENUM_TIMEFRAMES)Period(), startIndex);
+                if(startTime <= 0) startIndex--;
+            }
+            
+            if(startTime <= 0) {
+                #ifdef ENABLE_DEBUG_LOGS
+                // OPERATIONAL LOG: Always visible so users can diagnose missing zones on lower TFs
+                static int s_iTimeFailLogCount = 0;
+                static datetime s_lastITimeFailLog = 0;
+                if(s_iTimeFailLogCount < 5 && TimeCurrent() - s_lastITimeFailLog >= 1) {
+                    Print("[ZONE_TIME_FAIL] iTime returned 0 for all indices 0..", safeBars - 1,
+                          " on TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+                          " zone=", request.name);
+                    s_iTimeFailLogCount++;
+                    s_lastITimeFailLog = TimeCurrent();
+                }
+                Print("[CreateZone] iTime failed at all indices down to 0 on ", EnumToString((ENUM_TIMEFRAMES)Period()));
+                #endif
+                result.errorMessage = StringFormat("Invalid Time[%d]", startIndex);
+                result.errorCode = ERR_ZONE_RENDER_FAILED;
+                return result;
+            }
         }
     }
     
@@ -193,6 +266,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
             result.success = false;
             result.errorCode = ERR_ZONE_INVALID_CONFIG;
             result.errorMessage = "Invalid timeframe period";
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("[CREATEZONE_FAIL] name=", request.name, " invalid period");
+            #endif
             return result;
         }
         endTime = currentTime + periodSeconds * ZONE_EXTENSION_PERIODS;
@@ -204,6 +280,9 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
                                           TimeToString(startTime),
                                           TimeToString(endTime));
         result.errorCode = ERR_ZONE_RENDER_FAILED;
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("[CREATEZONE_FAIL] name=", request.name, " invalid time range");
+        #endif
         return result;
     }
     
@@ -212,13 +291,31 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     //                                                                
     
     color finalColor = GetZoneRenderColor(request.zoneColor, clampedTransparency);
-    string visibilityGvar = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(visibilityGvar) && (bool)GlobalVariableGet(visibilityGvar);
+    // FIX: Removed DeleteIndicatorObjectManaged(_Top/_Bottom) here.
+    // Deleting those border lines on every tick caused visible flicker.
+    // They are only needed when switching zone style (handled by caller).
+
+    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
+    bool isHidden = IsIndicatorHidden();
     
     // PERFORMANCE: Check cache to skip redundant API calls
     SObjectCacheEntry cache;
     bool inCache = CacheGetObject(request.name, cache);
-    bool objectExists = inCache ? cache.exists : (ObjectFind(0, request.name) >= 0);
+    // FIX: Trust the cache for the current redraw frame. Timeframe-switch and
+    // bulk-deletion paths call InvalidateObjectCacheByPrefix/CacheRemoveObject,
+    // so a cache hit within the same frame is reliable. Re-verify only on
+    // cache misses or stale entries.
+    bool objectExists = false;
+    if(inCache && cache.exists && cache.lastUpdate == CacheGetFrameTime() && cache.lastUpdate > 0) {
+        objectExists = true;
+    }
+    else {
+        objectExists = (ObjectFind(0, request.name) >= 0);
+        if(inCache && !objectExists) {
+            CacheRemoveObject(request.name);
+            inCache = false;
+        }
+    }
     bool createdObject = false;
     
     if(inCache && objectExists) {
@@ -228,7 +325,8 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         bool visualChanged = (cache.lastColor != finalColor || cache.lastFilled != request.filled);
         
         if(!geometryChanged && !visualChanged) {
-            ObjectSetInteger(0, request.name, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+            // PERF: Only rewrite timeframe when it actually changed.
+            SetObjectTimeframesIfChanged(request.name, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
             result.success = true;
             return result; // Geometry/visuals are current; visibility may still change.
         }
@@ -241,6 +339,13 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
     if(!objectExists) {
         if(!ObjectCreate(0, request.name, OBJ_RECTANGLE, 0, startTime, request.topPrice, endTime, request.bottomPrice)) {
             int error = GetLastError();
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("[CREATEZONE_FAIL] ObjectCreate FAILED name=", request.name,
+                  " TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+                  " start=", TimeToString(startTime), " end=", TimeToString(endTime),
+                  " top=", request.topPrice, " bottom=", request.bottomPrice,
+                  " err=", error);
+            #endif
             result.errorMessage = StringFormat("Failed to create zone '%s': MT4 Error %d", request.name, error);
             result.errorCode = error;
             return result;
@@ -270,7 +375,8 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
     }
 
-    ObjectSetInteger(0, request.name, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+    // PERF: Only rewrite timeframe when it actually changed.
+    SetObjectTimeframesIfChanged(request.name, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     
     // Update cache
     CacheUpdateZone(request.name, request.topPrice, request.bottomPrice, startTime, endTime, finalColor, request.filled);
@@ -283,7 +389,7 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
 //| Batch Create Zones                                               |
 //|              Zone                                                |
 //+------------------------------------------------------------------+
-int CreateZonesBatch(const SZoneCreationRequest &requests[], 
+int CreateZonesBatch(SZoneCreationRequest &requests[], 
                      SZoneCreationResult &results[])
 {
     int count = ArraySize(requests);
@@ -306,12 +412,8 @@ int CreateZonesBatch(const SZoneCreationRequest &requests[],
 bool DeleteZone(const string &zoneName)
 {
     if(StringLen(zoneName) == 0) return false;
-    
-    if(ObjectFind(0, zoneName) >= 0) {
-        return ObjectDelete(0, zoneName);
-    }
-    
-    return true; // Already deleted
+
+    return DeleteManagedZoneObjects(zoneName, true);
 }
 
 //+------------------------------------------------------------------+
@@ -329,7 +431,7 @@ int DeleteZonesByPrefix(const string &prefix)
         string name = ObjectName(0, i, -1, -1);
         
         if(StringFind(name, prefix) == 0) {
-            if(ObjectDelete(0, name)) {
+            if(DeleteIndicatorObjectManaged(name, true)) {
                 deletedCount++;
             }
         }

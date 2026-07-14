@@ -30,6 +30,30 @@
 #include "ConstantsAndEnums.mqh"
 
 //+------------------------------------------------------------------+
+//| ZONE MINIMUM HEIGHT FLOOR                                        |
+//|                                                                  |
+//| FIX: Zones below a timeframe's fractal step collapse to zero     |
+//| height (renderTop == renderBottom after NormalizeDouble) and are |
+//| silently skipped. This makes zones vanish on lower TFs (M30/M15/ |
+//| M5/M1). Enforce a minimum visible height in POINTS so zones      |
+//| always render. 2 points = 1 pip on a 4-digit symbol.             |
+//+------------------------------------------------------------------+
+#ifndef ZONE_MIN_HEIGHT_POINTS
+#define ZONE_MIN_HEIGHT_POINTS 2   // minimum half-height each side in points
+#endif
+
+// Expand a zone's half-height so the resulting box is always at least
+// ZONE_MIN_HEIGHT_POINTS points tall on each side. Keeps the center price.
+double GetMinSafeZoneHalfHeight(const double centerPrice, double halfHeight)
+{
+    double point = GetCachedPoint();
+    if(point <= 0) point = 1e-5;
+    double minHalf = point * ZONE_MIN_HEIGHT_POINTS;
+    if(halfHeight < minHalf) halfHeight = minHalf;
+    return halfHeight;
+}
+
+//+------------------------------------------------------------------+
 //| STAGE 1 OUTPUT: Raw calculated level                             |
 //+------------------------------------------------------------------+
 struct SCalculatedLevel {
@@ -205,7 +229,7 @@ int CalculateLevels(
     int safeMaxBelow = MathMin(maxLevelsBelow, MAX_SAFE_LEVELS);
     if(safeMaxAbove < 1) safeMaxAbove = 1;
     if(safeMaxBelow < 1) safeMaxBelow = 1;
-    
+
     int maxTotal = (safeMaxAbove + safeMaxBelow) * 2 + 1;
     ArrayResize(levels, maxTotal, 64);
     int count = 0;
@@ -225,10 +249,23 @@ int CalculateLevels(
     // --- Above levels ---
     int drawnAbove = 0;
     int logicalStep = 1;
+    int logicalStepAboveLast = 0;
     double cumAbove = 0;
     int maxIterations = safeMaxAbove * 2;
     int iterations = 0;
-    
+
+    // RANGE FIX: If the base price is far below the visible/historical top, skip the
+    // levels that fall entirely outside the range so the level budget is spent inside
+    // the range instead of in empty space. Only applied in UNIFORM mode where the step
+    // is constant (exact skip); CUMULATIVE keeps the plain scan to avoid over-skipping.
+    if(stepMode == LEVEL_STEP_UNIFORM && boundByHistorical && maxPrice > 0 && stepSizes[0] > 0) {
+        double gap = maxPrice - shiftedCenter;
+        if(gap > 0) {
+            int skip = (int)MathFloor(gap / stepSizes[0]);
+            if(skip > 0) logicalStep = skip + 1;  // land just inside the top of range
+        }
+    }
+
     while(drawnAbove < safeMaxAbove && iterations < maxIterations) {
         iterations++;
         double price;
@@ -240,17 +277,18 @@ int CalculateLevels(
             cumAbove += dist;
             price = shiftedCenter + cumAbove;
         }
-        
+
         // Price boundary check
         if(boundByHistorical && maxPrice > 0 && price > maxPrice) break;
-        
+
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
         levels[count].isMidpoint = false;
         levels[count].direction = 1;
         count++;
-        
+
         drawnAbove++;
+        logicalStepAboveLast = logicalStep;
         logicalStep++;
     }
     
@@ -260,7 +298,17 @@ int CalculateLevels(
     double cumBelow = 0;
     maxIterations = safeMaxBelow * 2;
     iterations = 0;
-    
+
+    // RANGE FIX (symmetric): skip levels above the visible/historical bottom when the
+    // base price is far above it. UNIFORM mode only (constant step = exact skip).
+    if(stepMode == LEVEL_STEP_UNIFORM && boundByHistorical && minPrice > 0 && stepSizes[0] > 0) {
+        double gap = shiftedCenter - minPrice;
+        if(gap > 0) {
+            int skip = (int)MathFloor(gap / stepSizes[0]);
+            if(skip > 0) logicalStep = skip + 1;  // land just inside the bottom of range
+        }
+    }
+
     while(drawnBelow < safeMaxBelow && iterations < maxIterations) {
         iterations++;
         double price;
@@ -286,8 +334,12 @@ int CalculateLevels(
         logicalStep++;
     }
     
-    // PERF: maxStep is known   drawnAbove and drawnBelow track the actual max logicalStep
-    maxStepOut = (drawnAbove > drawnBelow) ? drawnAbove : drawnBelow;
+    // maxStep must reflect the HIGHEST logicalStep actually assigned (objects are named
+    // by logicalStep and CleanupSurplusObjects deletes indices > maxStep). With the range
+    // skip offset the last logicalStep can exceed the drawn count, so derive it directly.
+    int maxLogicalAbove = (drawnAbove > 0) ? (logicalStepAboveLast) : 0;
+    int maxLogicalBelow = (drawnBelow > 0) ? (logicalStep - 1) : 0;
+    maxStepOut = (maxLogicalAbove > maxLogicalBelow) ? maxLogicalAbove : maxLogicalBelow;
     ArrayResize(levels, count);
     return count;
 }
@@ -522,7 +574,10 @@ void BuildZonesAndLines(
             neighborDist = GetCachedPoint() * 100;
         }
         double zoneHeight = neighborDist * config.zoneHeightPercent * 0.5;
-        
+        // FIX: floor to a minimum visible height so the zone never collapses
+        // below one point on lower timeframes (M30/M15/M5/M1).
+        zoneHeight = GetMinSafeZoneHalfHeight(midLevel.price, zoneHeight);
+
         zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Center_0";
         zones[zIdx].midPrice = midLevel.price;
         zones[zIdx].renderTop = NormalizeDouble(midLevel.price + zoneHeight, GetCachedDigits());
@@ -536,8 +591,10 @@ void BuildZonesAndLines(
         zones[zIdx].transparency = config.zoneTransparency;
         zones[zIdx].style = config.zoneStyle;
         zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-        zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                       zones[zIdx].renderBottom <= vpTop);
+        // CRITICAL FIX: Always create zones regardless of current viewport. The previous
+        // inViewport filter silently dropped zones on lower TFs due to stale/narrow viewport
+        // calculations. Visibility is controlled later via OBJPROP_TIMEFRAMES.
+        zones[zIdx].inViewport = true;
         zIdx++;
     }
     
@@ -572,8 +629,10 @@ void BuildZonesAndLines(
         // Zone centered on this level
         if(config.zonesEnabled) {
             double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
-            
-            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Above_" + 
+            // FIX: floor to a minimum visible height on lower timeframes
+            zoneHeight = GetMinSafeZoneHalfHeight(currentPrice, zoneHeight);
+
+            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Above_" +
                                IntegerToString(s_aboveLevels[i].logicalStep);
             zones[zIdx].midPrice = currentPrice;
             zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, GetCachedDigits());
@@ -588,8 +647,8 @@ void BuildZonesAndLines(
             zones[zIdx].transparency = config.zoneTransparency;
             zones[zIdx].style = config.zoneStyle;
             zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                                      zones[zIdx].renderBottom <= vpTop);
+            // CRITICAL FIX: Always create zones regardless of current viewport.
+            zones[zIdx].inViewport = true;
             zIdx++;
         }
         
@@ -627,8 +686,10 @@ void BuildZonesAndLines(
         // Zone centered on this level
         if(config.zonesEnabled) {
             double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
-            
-            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Below_" + 
+            // FIX: floor to a minimum visible height on lower timeframes
+            zoneHeight = GetMinSafeZoneHalfHeight(currentPrice, zoneHeight);
+
+            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Below_" +
                                IntegerToString(s_belowLevels[i].logicalStep);
             zones[zIdx].midPrice = currentPrice;
             zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, GetCachedDigits());
@@ -643,8 +704,8 @@ void BuildZonesAndLines(
             zones[zIdx].transparency = config.zoneTransparency;
             zones[zIdx].style = config.zoneStyle;
             zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                                      zones[zIdx].renderBottom <= vpTop);
+            // CRITICAL FIX: Always create zones regardless of current viewport.
+            zones[zIdx].inViewport = true;
             zIdx++;
         }
         
@@ -664,45 +725,80 @@ void BuildZonesAndLines(
 //| Creates/updates MT5 rectangle objects for each zone.             |
 //| Handles all zone styles: Lines, Filled Box, Empty Box, Hidden.   |
 //+------------------------------------------------------------------+
+void SetPipelineObjectTimeframesIfExists(const string name, const long timeframes)
+{
+    if(ObjectFind(0, name) >= 0)
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
+}
+
+void SetPipelineZoneVisibility(const string zoneName, const bool visible)
+{
+    long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    SetPipelineObjectTimeframesIfExists(zoneName, timeframes);
+    SetPipelineObjectTimeframesIfExists(zoneName + "_Top", timeframes);
+    SetPipelineObjectTimeframesIfExists(zoneName + "_Bottom", timeframes);
+}
+
 void RenderZones(
     const SZoneDefinition &zones[],
     const int zoneCount,
-    const SModeConfig &config)
+    const SModeConfig &config,
+    const double vpTop = 0,
+    const double vpBottom = 0)
 {
     bool triggerEnabled = IsTriggerLevelsEnabled();
     
+    // PERF/B (in-place shift updates): when a valid viewport is supplied, delete
+    // (not hide) zones that fall outside the visible price window. Deleting is
+    // what lets a shift change update levels in place instead of a full clear:
+    // objects no longer in view are removed here, while still-visible ones are
+    // moved/updated by CreateZone. OBJ_ALL_PERIODS is kept (never OBJ_NO_PERIODS),
+    // and redraws on scroll regenerate off-screen zones, so lower-TF visibility is
+    // preserved (objects simply reappear when scrolled into view).
+    // v2026: Disabled viewport culling for zones. On lower timeframes the tiny
+    // TH steps make zones very small; even a slight price shift or stale
+    // viewport calculation was hiding them. Zones are cheap to keep because the
+    // adaptive level cap already limits their count, and CreateZone handles
+    // sub-point heights. Keeping them always visible avoids the "disappears
+    // after a few seconds" symptom.
+    
+    // DIAGNOSTIC LOG: always print zone render summary (first 5 calls per run)
+    static int s_zoneRenderLogCount = 0;
+    int createdCount = 0;
+    int failedCount = 0;
+    int skippedCount = 0;
+    int culledCount = 0;
+    string firstFailReason = "";
+    
     for(int i = 0; i < zoneCount; i++) {
-        if(!zones[i].inViewport) {
-            if(ObjectFind(0, zones[i].name) >= 0) {
-                ObjectSetInteger(0, zones[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            }
-            continue;
-        }
-
+        // DISABLED: viewport culling for zones. It caused zones to vanish on
+        // lower timeframes when price moved slightly. Visibility is now managed
+        // solely by the global hide (F key) and OBJ_ALL_PERIODS default.
+        
         if(config.zoneStyle == ZONE_STYLE_HIDDEN) {
-            // Hidden: delete existing zone objects
-            if(ObjectFind(0, zones[i].name) >= 0) {
-                CacheRemoveObject(zones[i].name);
-                ObjectDelete(0, zones[i].name);
-            }
+            DeleteManagedZoneObjects(zones[i].name);
+            skippedCount++;
             continue;
         }
         
         // Skip trigger zones when triggers are disabled
         if(zones[i].isTrigger && !triggerEnabled) {
-            if(ObjectFind(0, zones[i].name) >= 0) {
-                CacheRemoveObject(zones[i].name);
-                ObjectDelete(0, zones[i].name);
-            }
+            DeleteManagedZoneObjects(zones[i].name);
+            skippedCount++;
             continue;
         }
         
-        if(zones[i].renderTop <= zones[i].renderBottom) continue;
+        if(zones[i].renderTop <= zones[i].renderBottom) {
+            skippedCount++;
+            continue;
+        }
         
         if(config.zoneStyle == ZONE_STYLE_LINES) {
             CreateFactorMidZone_LinesStyle(zones[i].name, 
                                            zones[i].renderTop, zones[i].renderBottom,
                                            zones[i].zoneColor, zones[i].transparency);
+            SetPipelineZoneVisibility(zones[i].name, true);
+            createdCount++;
         } else {
             // Box style (filled or empty)
             SZoneCreationRequest request;
@@ -715,8 +811,26 @@ void RenderZones(
             request.startTime = 0;
             request.endTime = 0;
             
-            CreateZone(request);
+            SZoneCreationResult zoneResult = CreateZone(request);
+            if(zoneResult.success) {
+                createdCount++;
+            } else {
+                failedCount++;
+                if(StringLen(firstFailReason) == 0) {
+                    firstFailReason = zoneResult.errorMessage;
+                }
+            }
+            SetPipelineZoneVisibility(zones[i].name, true);
         }
+    }
+    
+    // DIAGNOSTIC LOG: report zone render results (first 5 calls per run)
+    if(s_zoneRenderLogCount < 5) {
+        Print("[ZONE_RENDER_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " zones=", zoneCount, " created=", createdCount, " failed=", failedCount,
+              " skipped=", skippedCount, " culled=", culledCount, " style=", EnumToString(config.zoneStyle),
+              " firstFail=", firstFailReason);
+        s_zoneRenderLogCount++;
     }
 }
 
@@ -729,34 +843,34 @@ void RenderZones(
 void RenderTriggerLines(
     const STriggerLine &lines[],
     const int lineCount,
-    const SModeConfig &config)
+    const SModeConfig &config,
+    const double vpTop = 0,
+    const double vpBottom = 0)
 {
     bool triggerEnabled = IsTriggerLevelsEnabled();
     double currentPrice = GetCurrentPriceForLabels();
     
+    // PERF/B: hide trigger lines/label objects outside the visible price window
+    // so shift changes update in place instead of a full clear+recreate.
+    // v2026: Disabled viewport culling for trigger lines. Zooming or small
+    // price moves were flickering them out of view on lower timeframes. With
+    // adaptive level caps already limiting object count, keeping lines always
+    // visible is safe and matches the user expectation that zooming must not
+    // hide drawings.
+    // bool cullByViewport = (vpTop > vpBottom && vpTop < EMPTY_VALUE);
+    // double vpMargin = cullByViewport ? (vpTop - vpBottom) * 1.00 : 0;
+    
     for(int i = 0; i < lineCount; i++) {
-        if(!lines[i].inViewport) {
-            if(ObjectFind(0, lines[i].name) >= 0) {
-                ObjectSetInteger(0, lines[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            }
-            string labelName = lines[i].name + "_Label";
-            if(ObjectFind(0, labelName) >= 0) {
-                ObjectSetInteger(0, labelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            }
-            continue;
-        }
+        string labelName = lines[i].name + "_Label";
+        // DISABLED: viewport culling for lines. Lines now stay visible regardless
+        // of zoom or scroll position.
 
         // Factor mode: hide lines when trigger-only enabled
         if(config.hideLineWhenTriggerOnly && !lines[i].isMidpoint) {
             bool shouldShow = !triggerEnabled;
             if(!shouldShow) {
-                if(ObjectFind(0, lines[i].name) >= 0) {
-                    ObjectSetInteger(0, lines[i].name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                }
-                string labelName = lines[i].name + "_Label";
-                if(ObjectFind(0, labelName) >= 0) {
-                    ObjectSetInteger(0, labelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-                }
+                SetPipelineObjectTimeframesIfExists(lines[i].name, OBJ_NO_PERIODS);
+                SetPipelineObjectTimeframesIfExists(labelName, OBJ_NO_PERIODS);
                 continue;
             }
         }
@@ -765,6 +879,8 @@ void RenderTriggerLines(
         bool isNew = CreateOrUpdateHLine(lines[i].name, lines[i].price,
                                           lines[i].clr, lines[i].lineStyle, lines[i].lineWidth,
                                           lines[i].tooltip);
+        long lineTf = (IsIndicatorHidden() || !g_linesVisible) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+        SetPipelineObjectTimeframesIfExists(lines[i].name, lineTf);
         
         // Set mode-specific properties on new objects
         if(isNew) {
@@ -778,9 +894,10 @@ void RenderTriggerLines(
 
         // Render Pip Distance Label
         if(inpShowPipDistanceLabels) {
-            string labelName = lines[i].name + "_Label";
             double pips = MathAbs(lines[i].price - currentPrice) / GetCachedPoint() / 10.0;
             CreatePipDistanceLabel(labelName, lines[i].price, pips, lines[i].clr, lines[i].labelText);
+            long labelTf = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+            SetPipelineObjectTimeframesIfExists(labelName, labelTf);
         }
     }
 }
@@ -880,6 +997,83 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
 }
 
 //+------------------------------------------------------------------+
+//| PERF (2026): String hash set for zone/line name diff.            |
+//|                                                                  |
+//| The previous ExecutePipeline did an O(N*M) nested-loop name diff  |
+//| to figure out which previously-rendered zones/lines were no      |
+//| longer in the new kept set. With 289 zones on M1, that was       |
+//| 289*289 = 83,521 string comparisons per redraw.                  |
+//|                                                                  |
+//| We replace it with a small open-addressed hash set, sized as a   |
+//| power of two so the modulo is a cheap bitmask. Load factor is    |
+//| ~28% on M1 (289/1024) and ~58% on the heaviest timeframe, so     |
+//| the bounded linear probe stays short. Insert/lookup are amortized |
+//| O(1), so the whole diff becomes O(N+M) ≈ 600 ops on M1.          |
+//+------------------------------------------------------------------+
+#define ZONE_DIFF_HASH_SIZE 1024
+#define ZONE_DIFF_HASH_MASK (ZONE_DIFF_HASH_SIZE - 1)
+#define ZONE_DIFF_MAX_PROBE 32
+
+struct SDiffHashEntry {
+    string name;
+    bool   occupied;
+};
+
+static SDiffHashEntry g_diffHash[];
+static bool g_diffHashInit = false;
+
+void DiffHashEnsure() {
+    if(g_diffHashInit) return;
+    ArrayResize(g_diffHash, ZONE_DIFF_HASH_SIZE);
+    for(int i = 0; i < ZONE_DIFF_HASH_SIZE; i++) {
+        g_diffHash[i].name = "";
+        g_diffHash[i].occupied = false;
+    }
+    g_diffHashInit = true;
+}
+
+int DiffHashKey(const string name) {
+    // djb2 hash — cheap, well-distributed for short ASCII names.
+    uint h = 5381;
+    int len = StringLen(name);
+    for(int i = 0; i < len; i++) {
+        h = ((h << 5) + h) + (uint)(ushort)StringGetCharacter(name, i);
+    }
+    return (int)(h & ZONE_DIFF_HASH_MASK);
+}
+
+void DiffHashInsert(const string name) {
+    int key = DiffHashKey(name);
+    for(int probe = 0; probe < ZONE_DIFF_MAX_PROBE; probe++) {
+        int idx = (key + probe) & ZONE_DIFF_HASH_MASK;
+        if(!g_diffHash[idx].occupied || g_diffHash[idx].name == name) {
+            g_diffHash[idx].name = name;
+            g_diffHash[idx].occupied = true;
+            return;
+        }
+    }
+}
+
+bool DiffHashContains(const string name) {
+    int key = DiffHashKey(name);
+    for(int probe = 0; probe < ZONE_DIFF_MAX_PROBE; probe++) {
+        int idx = (key + probe) & ZONE_DIFF_HASH_MASK;
+        if(!g_diffHash[idx].occupied) return false;
+        if(g_diffHash[idx].name == name) return true;
+    }
+    return false;
+}
+
+void DiffHashClear() {
+    // PERF: just flip occupied to false. Don't bother clearing names —
+    // an empty slot is recognized by `occupied == false`, and the next
+    // insert overwrites the name in-place.
+    for(int i = 0; i < ZONE_DIFF_HASH_SIZE; i++) {
+        g_diffHash[i].occupied = false;
+    }
+}
+
+//+------------------------------------------------------------------+
 //| UNIFIED PIPELINE EXECUTOR                                        |
 //+------------------------------------------------------------------+
 SPipelineResult ExecutePipeline(
@@ -898,6 +1092,16 @@ SPipelineResult ExecutePipeline(
     result.lineCount = 0;
     result.success = false;
     result.errorMessage = "";
+    
+    // DIAGNOSTIC LOG: confirm pipeline entry
+    static int s_pipelineEntryLogCount = 0;
+    if(s_pipelineEntryLogCount < 5) {
+        Print("[PIPELINE_ENTRY] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " mode=", config.modeName,
+              " center=", DoubleToString(centerPrice, Digits),
+              " stepCount=", stepSizeCount);
+        s_pipelineEntryLogCount++;
+    }
     
     if(centerPrice <= 0) {
         result.errorMessage = "Invalid center price";
@@ -926,7 +1130,7 @@ SPipelineResult ExecutePipeline(
         result.errorMessage = "No levels calculated";
         return result;
     }
-    
+
     // Stage 2: Classify (mode-specific variant)
     SLevelClassified classified[];
     int classifiedCount = 0;
@@ -948,9 +1152,85 @@ SPipelineResult ExecutePipeline(
     BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
                        zones, result.zoneCount, lines, result.lineCount);
     
+    // DIAGNOSTIC LOG: pipeline summary (print first 5 calls per run)
+    static int s_pipelineLogCount = 0;
+    if(s_pipelineLogCount < 5) {
+        Print("[PIPELINE_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " mode=", config.modeName,
+              " raw=", rawCount, " classified=", classifiedCount,
+              " zones=", result.zoneCount, " lines=", result.lineCount,
+              " vpBottom=", DoubleToString(vpBottom, Digits),
+              " vpTop=", DoubleToString(vpTop, Digits),
+              " center=", DoubleToString(centerPrice, Digits));
+        s_pipelineLogCount++;
+    }
+    
     // Stage 5: Render and cleanup
-    RenderZones(zones, result.zoneCount, config);
-    RenderTriggerLines(lines, result.lineCount, config);
+    // PERF/B (in-place shift updates): delete objects from the previous draw that
+    // are NOT present in the current render set, so a fractal-shift change updates
+    // levels in place (move still-visible ones via CreateZone) instead of a full
+    // clear+recreate. Names shared between old and new sets are kept and moved.
+    // Tracked per-mode so Combinations/Factor modes don't delete each other's objects.
+    // NOTE: Out-of-viewport objects are kept in the set and hidden by RenderZones/
+    // RenderTriggerLines to avoid object churn on scroll.
+    bool trigEn = IsTriggerLevelsEnabled();
+
+    int slot = GetRenderedSlot(config.modeName);
+    string prevZoneNames[];
+    string prevLineNames[];
+    ArrayCopy(prevZoneNames, g_renderedNames[slot].zoneNames);
+    ArrayCopy(prevLineNames, g_renderedNames[slot].lineNames);
+
+    // Build the set of zone/line names that will exist after this draw (kept set).
+    // All valid objects are kept; viewport culling hides off-screen ones instead
+    // of deleting them, preventing churn when the user scrolls or price shifts.
+    string keepZoneNames[];
+    ArrayResize(keepZoneNames, result.zoneCount);
+    int keepZoneCount = 0;
+    for(int zi = 0; zi < result.zoneCount; zi++) {
+        if(config.zoneStyle == ZONE_STYLE_HIDDEN) continue;
+        if(zones[zi].isTrigger && !trigEn) continue;
+        if(zones[zi].renderTop <= zones[zi].renderBottom) continue;
+        keepZoneNames[keepZoneCount++] = zones[zi].name;
+    }
+    ArrayResize(keepZoneNames, keepZoneCount);
+
+    string keepLineNames[];
+    ArrayResize(keepLineNames, result.lineCount);
+    int keepLineCount = 0;
+    for(int li = 0; li < result.lineCount; li++) {
+        keepLineNames[keepLineCount++] = lines[li].name;
+    }
+    ArrayResize(keepLineNames, keepLineCount);
+
+    // PERF (2026): O(N+M) zone/line diff using the open-addressed hash set
+    // above. The previous nested-loop version was O(N*M) string compares —
+    // 83k+ comparisons on M1 alone. Now we build the kept set once and
+    // probe it in O(1) per previous name.
+    DiffHashEnsure();
+    DiffHashClear();
+    for(int kz = 0; kz < keepZoneCount; kz++) DiffHashInsert(keepZoneNames[kz]);
+    for(int kl = 0; kl < keepLineCount; kl++) DiffHashInsert(keepLineNames[kl]);
+
+    for(int pi = 0; pi < ArraySize(prevZoneNames); pi++) {
+        if(!DiffHashContains(prevZoneNames[pi]))
+            DeleteManagedZoneObjects(prevZoneNames[pi]);
+    }
+    for(int pi = 0; pi < ArraySize(prevLineNames); pi++) {
+        if(!DiffHashContains(prevLineNames[pi])) {
+            DeleteIndicatorObjectManaged(prevLineNames[pi]);
+            DeleteIndicatorObjectManaged(prevLineNames[pi] + "_Label");
+        }
+    }
+
+    RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
+    RenderTriggerLines(lines, result.lineCount, config, vpTop, vpBottom);
+
+    // Remember this draw's kept set for the next in-place diff.
+    ArrayResize(prevZoneNames, keepZoneCount);
+    for(int kz = 0; kz < keepZoneCount; kz++) prevZoneNames[kz] = keepZoneNames[kz];
+    ArrayResize(prevLineNames, keepLineCount);
+    for(int kl = 0; kl < keepLineCount; kl++) prevLineNames[kl] = keepLineNames[kl];
     
     // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
     CleanupSurplusPipeline(config, maxStep);
@@ -965,6 +1245,26 @@ SPipelineResult ExecutePipeline(
 //| All mode suffixes registered in one place.                       |
 //| Adding a new mode = add one entry here.                          |
 //+------------------------------------------------------------------+
+
+// PERF/B: per-mode registry of object names rendered in the last draw so that
+// in-place updates (fractal shift, scroll) can delete only objects no longer in
+// the current set, instead of a full clear+recreate.
+struct SModeRenderedNames {
+    string mode;
+    string zoneNames[];
+    string lineNames[];
+};
+SModeRenderedNames g_renderedNames[];
+int GetRenderedSlot(const string mode) {
+    for(int i = 0; i < ArraySize(g_renderedNames); i++) {
+        if(g_renderedNames[i].mode == mode) return i;
+    }
+    int n = ArraySize(g_renderedNames);
+    ArrayResize(g_renderedNames, n + 1);
+    g_renderedNames[n].mode = mode;
+    return n;
+}
+
 struct SModeSuffixEntry {
     string zoneSuffix;      // e.g., "SSLS_Zone_"
     string levelAbove;      // e.g., "SSLS_Above_"

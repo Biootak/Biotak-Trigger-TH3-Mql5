@@ -146,9 +146,16 @@ int EmergencyCleanupObjects()
             continue;
         }
         
-        // Get object creation time
+        // FIX: OBJPROP_TIME is 0 for OBJ_HLINE (and a few other types), so those
+        // objects were never reaped and accumulated as leaks. Fall back to
+        // OBJPROP_CREATETIME when OBJPROP_TIME is unavailable; behavior for
+        // objects with a valid OBJPROP_TIME is unchanged.
         datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
-        
+        if(objTime == 0) {
+            datetime created = (datetime)ObjectGetInteger(0, objName, OBJPROP_CREATETIME);
+            if(created > 0) objTime = created;
+        }
+
         // Delete if older than cutoff
         if(objTime > 0 && objTime < cutoffTime)
         {

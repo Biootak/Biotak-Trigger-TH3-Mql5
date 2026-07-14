@@ -16,37 +16,152 @@
 
 // Note: CalculateFactorStepSize has been moved to THCalculations.mqh
 
+// Forward declaration: Advanced Mode calculator (defined later in this file).
+// Referenced by CalculateComboStepSize() for COMBO_MODE_ADVANCED.
+double CalculateCalculatorModeStepSize(const double basePrice);
+
+//+------------------------------------------------------------------+
+//| PERF: Combo/Advanced step-size cache                             |
+//| The combo step calc calls GetStepSizeForBasisType -> CalculateTimeframeTH|
+//| (linear string search) several times on EVERY redraw. Cache the   |
+//| final result keyed on all topology/component/operator inputs that  |
+//| affect it, so a steady-state redraw skips the whole subtree.    |
+//+------------------------------------------------------------------+
+struct SComboStepCache {
+    double basePrice;
+    int   comboMode;
+    int   comboPreset;
+    int   comboTopology;
+    int   comboComp1, comboComp2, comboComp3, comboComp4;
+    int   comboOp1, comboOp2, comboOp3;
+    int   fractalShift;
+    int   aggMeanType;
+    double result;
+    bool   valid;
+};
+static SComboStepCache g_comboStepCache;
+static bool g_comboStepCacheInit = false;
+
+double GetCachedComboStepSize(const double basePrice) {
+    if(!g_comboStepCacheInit) { g_comboStepCache.valid = false; g_comboStepCacheInit = true; }
+    if(!g_comboStepCache.valid) return 0.0;
+    bool match = MathAbs(g_comboStepCache.basePrice - basePrice) < GetCachedPoint() * 0.1 &&
+                   g_comboStepCache.comboMode == (int)inpComboMode &&
+                   g_comboStepCache.comboPreset == (int)inpComboPreset &&
+                   g_comboStepCache.comboTopology == (int)inpComboTopology &&
+                   g_comboStepCache.comboComp1 == (int)inpComboComp1 &&
+                   g_comboStepCache.comboComp2 == (int)inpComboComp2 &&
+                   g_comboStepCache.comboComp3 == (int)inpComboComp3 &&
+                   g_comboStepCache.comboComp4 == (int)inpComboComp4 &&
+                   g_comboStepCache.comboOp1 == (int)inpComboOp1 &&
+                   g_comboStepCache.comboOp2 == (int)inpComboOp2 &&
+                   g_comboStepCache.comboOp3 == (int)inpComboOp3 &&
+                   g_comboStepCache.fractalShift == (int)g_fractalShift &&
+                   g_comboStepCache.aggMeanType == (int)inpAggregateMeanType;
+    return match ? g_comboStepCache.result : 0.0;
+}
+
+void StoreCachedComboStepSize(const double basePrice, const double result) {
+    g_comboStepCache.basePrice = basePrice;
+    g_comboStepCache.comboMode = (int)inpComboMode;
+    g_comboStepCache.comboPreset = (int)inpComboPreset;
+    g_comboStepCache.comboTopology = (int)inpComboTopology;
+    g_comboStepCache.comboComp1 = (int)inpComboComp1;
+    g_comboStepCache.comboComp2 = (int)inpComboComp2;
+    g_comboStepCache.comboComp3 = (int)inpComboComp3;
+    g_comboStepCache.comboComp4 = (int)inpComboComp4;
+    g_comboStepCache.comboOp1 = (int)inpComboOp1;
+    g_comboStepCache.comboOp2 = (int)inpComboOp2;
+    g_comboStepCache.comboOp3 = (int)inpComboOp3;
+    g_comboStepCache.fractalShift = (int)g_fractalShift;
+    g_comboStepCache.aggMeanType = (int)inpAggregateMeanType;
+    g_comboStepCache.result = result;
+    g_comboStepCache.valid = true;
+}
+
 //+------------------------------------------------------------------+
 //| Helper functions (ported from MT5)                                |
 //+------------------------------------------------------------------+
+bool IsDigitChar(const int ch) {
+    return (ch >= '0' && ch <= '9');
+}
+
+bool ExtractNumberAfterPrefix(const string name, const string prefix, const string suffix, int &number) {
+    int prefixLen = StringLen(prefix);
+    int nameLen = StringLen(name);
+    int suffixLen = StringLen(suffix);
+    if(nameLen < prefixLen + suffixLen) return false;
+    if(StringSubstr(name, 0, prefixLen) != prefix) return false;
+    if(suffixLen > 0 && StringSubstr(name, nameLen - suffixLen, suffixLen) != suffix) return false;
+
+    int numberEnd = nameLen - suffixLen;
+    if(numberEnd <= prefixLen) return false;
+
+    for(int i = prefixLen; i < numberEnd; i++) {
+        if(!IsDigitChar(StringGetCharacter(name, i))) return false;
+    }
+
+    number = (int)StringToInteger(StringSubstr(name, prefixLen, numberEnd - prefixLen));
+    return true;
+}
+
+void DeleteCachedObjectIfExists(const string name) {
+    CacheRemoveObject(name);
+    if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
+}
+
+void HideCachedObjectIfExists(const string name) {
+    if(ObjectFind(0, name) >= 0) ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+}
+
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = "") {
     if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) return;
-    int misses = 0;
-    for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
-        string name = prefix + IntegerToString(idx) + suffix;
-        if(ObjectFind(0, name) >= 0) {
-            CacheRemoveObject(name);
-            ObjectDelete(0, name);
-            misses = 0;
-        } else {
-            misses++;
+
+    int total = ObjectsTotal(0, -1, -1);
+    for(int i = total - 1; i >= 0; i--) {
+        string name = ObjectName(0, i, -1, -1);
+        int objectIdx = 0;
+        if(ExtractNumberAfterPrefix(name, prefix, suffix, objectIdx) && objectIdx >= startIdx) {
+            DeleteCachedObjectIfExists(name);
         }
     }
 }
 
+void CleanupSurplusZoneLineObjects(const string prefix, const int startIdx) {
+    if(g_customPriceLineDragging) return;
+    CleanupSurplusObjects(prefix, startIdx, 6, "_Top");
+    CleanupSurplusObjects(prefix, startIdx, 6, "_Bottom");
+}
+
 bool CreateOrUpdateHLine(const string name, double price, 
                           color clr, ENUM_LINE_STYLE style, int width,
-                          const string tooltip) {
-    bool objectExists = CacheObjectExists(name);
-    if(!objectExists) objectExists = (ObjectFind(0, name) >= 0);
-    double normPrice = NormalizeDouble(price, Digits);
+                          const string tooltip,
+                          const bool visibilityAsLine = true) {
+    SObjectCacheEntry cachedEntry;
+    bool hasCached = CacheGetObject(name, cachedEntry);
+    bool objectExists = false;
+    if(hasCached && cachedEntry.exists) {
+        // PERF: Trust cache within same frame to skip ObjectFind() syscall
+        if(cachedEntry.lastUpdate == CacheGetFrameTime() && cachedEntry.lastUpdate > 0) {
+            objectExists = true;
+        } else {
+            objectExists = (ObjectFind(0, name) >= 0);
+            if(!objectExists) {
+                CacheRemoveObject(name);
+                hasCached = false;
+            }
+        }
+    } else {
+        objectExists = (ObjectFind(0, name) >= 0);
+    }
+    double normPrice = NormalizeDouble(price, GetCachedDigits());
     
     if(!objectExists) {
         ResetLastError();
         if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, normPrice)) {
             int error = GetLastError();
             _LOG_GATE_E Print("[E][DRAW] CreateOrUpdateHLine: failed to create '", name,
-                              "' at ", DoubleToString(normPrice, Digits),
+                              "' at ", DoubleToString(normPrice, GetCachedDigits()),
                               " | error=", error);
             CacheRemoveObject(name);
             return false;
@@ -58,12 +173,11 @@ bool CreateOrUpdateHLine(const string name, double price,
         ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
         ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
         CacheAddObject(name, normPrice, clr, style, width);
-        ApplyVisibilityState(name, true);
+        ApplyVisibilityState(name, visibilityAsLine);
         return true;
     } else {
-        SObjectCacheEntry cachedEntry;
-        bool hasCached = CacheGetObject(name, cachedEntry);
-        if(!hasCached || MathAbs(hasCached ? cachedEntry.lastPrice - normPrice : 1.0) > GetCachedPoint() * 0.1) {
+        double point = GetCachedPoint();
+        if(!hasCached || MathAbs(cachedEntry.lastPrice - normPrice) > point * 0.1) {
             ObjectSetDouble(0, name, OBJPROP_PRICE, normPrice);
         }
         if(!hasCached || cachedEntry.lastColor != clr) {
@@ -75,30 +189,65 @@ bool CreateOrUpdateHLine(const string name, double price,
         if(!hasCached || cachedEntry.lastWidth != width) {
             ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
         }
+        // PERF: Only update tooltip if it changed (avoid redundant API call)
+        if(!hasCached || cachedEntry.lastText != tooltip) {
+            ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        }
         CacheUpdateObject(name, normPrice, clr, style, width);
-        ApplyVisibilityStateIfUnchangedSkip(name, true);
+        ApplyVisibilityStateIfUnchangedSkip(name, visibilityAsLine);
         return false;
     }
 }
 
+// PERF: Per-frame cached viewport bounds. GetViewportBounds() is called once per
+// ExecutePipeline() (which runs on every redraw), and the ChartGetDouble() syscalls
+// are relatively expensive. Cache the result per-frame so multiple callers within
+// the same redraw reuse it. Still recomputed fresh on each new frame (no stale TF data).
+static double g_cachedVpTop = 0.0;
+static double g_cachedVpBottom = 0.0;
+static datetime g_cachedVpFrame = 0;
+
 void GetViewportBounds(double &vpTop, double &vpBottom) {
-    static double s_vpTop = 0;
-    static double s_vpBottom = 0;
-    static datetime s_vpFrameTime = 0;
-    datetime frameTime = CacheGetFrameTime();
-    if(frameTime == s_vpFrameTime && s_vpTop > 0) {
-        vpTop = s_vpTop;
-        vpBottom = s_vpBottom;
+    // Return cached bounds if computed for the current frame already
+    if(g_cachedVpFrame == CacheGetFrameTime() && g_cachedVpFrame > 0) {
+        vpTop = g_cachedVpTop;
+        vpBottom = g_cachedVpBottom;
         return;
     }
+
     double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
     double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
-    double vpRange = (vpChartMax - vpChartMin) * 0.5;
-    vpTop = vpChartMax + vpRange;
-    vpBottom = vpChartMin - vpRange;
-    s_vpTop = vpTop;
-    s_vpBottom = vpBottom;
-    s_vpFrameTime = frameTime;
+    double point = GetCachedPoint();
+
+    if(vpChartMax > 0 && vpChartMin > 0 && vpChartMax > vpChartMin) {
+        double vpRange = (vpChartMax - vpChartMin) * 0.5;
+        vpTop = vpChartMax + vpRange;
+        vpBottom = vpChartMin - vpRange;
+        g_cachedVpTop = vpTop;
+        g_cachedVpBottom = vpBottom;
+        g_cachedVpFrame = CacheGetFrameTime();
+        return;
+    }
+
+    double anchor = g_currentPrice;
+    if(anchor <= 0 && g_dailyClosePriceForTH > 0 && g_dailyClosePriceForTH != EMPTY_VALUE)
+        anchor = g_dailyClosePriceForTH;
+    if(anchor <= 0) anchor = Bid;
+    if(anchor <= 0 && g_highestHigh > 0 && g_lowestLow > 0)
+        anchor = (g_highestHigh + g_lowestLow) * 0.5;
+    if(anchor <= 0) anchor = 1.0;
+
+    double fallbackRange = 0.0;
+    if(g_highestHigh > 0 && g_lowestLow > 0 && g_highestHigh > g_lowestLow)
+        fallbackRange = g_highestHigh - g_lowestLow;
+    if(fallbackRange <= point * 100.0)
+        fallbackRange = MathMax(anchor * 0.05, point * 1000.0);
+
+    vpTop = anchor + fallbackRange;
+    vpBottom = MathMax(anchor - fallbackRange, point);
+    g_cachedVpTop = vpTop;
+    g_cachedVpBottom = vpBottom;
+    g_cachedVpFrame = CacheGetFrameTime();
 }
 
 bool ValidateComboParam(bool isInvalid, const string paramName, const string paramValue, const string context = "PRESET MODE") {
@@ -137,7 +286,7 @@ bool CreateFactorMidZone(const string zoneName,
     
     // STYLE: HIDDEN - Delete and return
     if(zoneStyle == FACTOR_ZONE_HIDDEN) {
-        if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+        DeleteManagedZoneObjects(zoneName, true);
         return true;
     }
     
@@ -174,17 +323,17 @@ bool CreateFactorMidZone(const string zoneName,
     request.filled = (zoneStyle == FACTOR_ZONE_BOX_FILLED);
     request.startTime = 0;  // Auto-calculate
     request.endTime = 0;    // Auto-calculate
+
+    DeleteIndicatorObjectManaged(zoneName + "_Top", true);
+    DeleteIndicatorObjectManaged(zoneName + "_Bottom", true);
     
     SZoneCreationResult result = CreateZone(request);
     
     // CRITICAL FIX: If indicator is hidden, hide the zone immediately
     //                                             
-    // PERFORMANCE: Use cached ChartID string
+    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
     if(result.success) {
-        string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-        bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-        
-        if(isHidden) {
+        if(IsIndicatorHidden()) {
             ObjectSetInteger(0, zoneName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         }
     }
@@ -200,51 +349,44 @@ bool CreateFactorMidZone(const string zoneName,
 //| FIXED: Respects Hide state when creating line zones             |
 //+------------------------------------------------------------------+
 bool CreateFactorMidZone_LinesStyle(const string zoneName,
-                                    const double upperPrice,
-                                    const double lowerPrice,
+                                    double upperPrice,
+                                    double lowerPrice,
                                     const color zoneColor,
                                     const int transparency)
 {
     // Validate inputs
     if(StringLen(zoneName) == 0) return false;
     if(upperPrice <= 0 || lowerPrice <= 0) return false;
-    if(upperPrice <= lowerPrice) return false;
+    // FIX: if the two lines collapse to the same price on a low timeframe
+    // (step < 1 point), separate them by a minimum visible gap so the LINES
+    // zone style stays visible instead of being silently rejected.
+    if(upperPrice <= lowerPrice) {
+        double point = GetCachedPoint();
+        if(point <= 0) point = 1e-5;
+        double minHalf = point * ZONE_MIN_HEIGHT_POINTS;
+        double mid = (upperPrice + lowerPrice) * 0.5;
+        upperPrice = NormalizeDouble(mid + minHalf, Digits);
+        lowerPrice = NormalizeDouble(mid - minHalf, Digits);
+    }
     
     string lineTop = zoneName + "_Top";
     string lineBottom = zoneName + "_Bottom";
     
-    // Delete old objects
-    if(ObjectFind(0, lineTop) >= 0) ObjectDelete(0, lineTop);
-    if(ObjectFind(0, lineBottom) >= 0) ObjectDelete(0, lineBottom);
-    
-    // CRITICAL FIX: Check if indicator is hidden
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    
-    // Create top line (dotted)
-    if(ObjectCreate(0, lineTop, OBJ_HLINE, 0, 0, upperPrice)) {
-        ObjectSetInteger(0, lineTop, OBJPROP_COLOR, zoneColor);
-        ObjectSetInteger(0, lineTop, OBJPROP_STYLE, STYLE_DOT);
-        ObjectSetInteger(0, lineTop, OBJPROP_WIDTH, 1);
+    DeleteIndicatorObjectManaged(zoneName, true);
+
+    bool topOk = CreateOrUpdateHLine(lineTop, upperPrice, zoneColor, STYLE_DOT, 1, zoneName + " top", false);
+    bool bottomOk = CreateOrUpdateHLine(lineBottom, lowerPrice, zoneColor, STYLE_DOT, 1, zoneName + " bottom", false);
+
+    if(ObjectFind(0, lineTop) >= 0) {
         ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
-        ObjectSetInteger(0, lineTop, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
-        ObjectSetInteger(0, lineTop, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     }
-    
-    // Create bottom line (dotted)
-    if(ObjectCreate(0, lineBottom, OBJ_HLINE, 0, 0, lowerPrice)) {
-        ObjectSetInteger(0, lineBottom, OBJPROP_COLOR, zoneColor);
-        ObjectSetInteger(0, lineBottom, OBJPROP_STYLE, STYLE_DOT);
-        ObjectSetInteger(0, lineBottom, OBJPROP_WIDTH, 1);
+    if(ObjectFind(0, lineBottom) >= 0) {
         ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
-        ObjectSetInteger(0, lineBottom, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
-        ObjectSetInteger(0, lineBottom, OBJPROP_TIMEFRAMES, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     }
-    
-    return true;
+
+    return (topOk || ObjectFind(0, lineTop) >= 0) && (bottomOk || ObjectFind(0, lineBottom) >= 0);
 }
 
 
@@ -531,11 +673,31 @@ double GetStepSizeForBasisType(const double basePrice, const double multiplier,
 double CalculateComboStepSize(const double basePrice) {
     if(basePrice <= 0) return 0;
 
+    // PERF: Cache the whole combo/advanced step computation. On every redraw (incl.
+    // every tick-driven redraw on M1/M5) the previous code re-ran GetStepSizeForBasisType
+    // -> CalculateTimeframeTH (linear string scan over FRACTAL_TIMEFRAMES) several
+    // times. With steady inputs the cache short-circuits the entire subtree.
+    double cached = GetCachedComboStepSize(basePrice);
+    if(cached > 0) return cached;
+
+    // COMBO FIX #1: Advanced Mode must use the full calculator (topology + Comp1-4 + Op1-3).
+    // The old path below only honored Comp1/Comp2/Op1, so ADD/SUBTRACT/MIN/MAX and the
+    // 3rd/4th components had NO effect on the displayed levels. CalculateCalculatorModeStepSize
+    // is the single source of truth for Advanced Mode and is never recursive, so this is safe.
+    if(inpComboMode == COMBO_MODE_ADVANCED) {
+        double adv = CalculateCalculatorModeStepSize(basePrice);
+        if(adv > 0) StoreCachedComboStepSize(basePrice, adv);
+        return adv;
+    }
+
     SComboConfig config;
     GetComboConfiguration(basePrice, config);
 
     double step1 = GetStepSizeForBasisType(basePrice, GetStepMultiplier(config.step1), GetTimeframeByType(config.tf1));
-    if(config.activeComponents == 1) return step1;
+    if(config.activeComponents == 1) {
+        if(step1 > 0) StoreCachedComboStepSize(basePrice, step1);
+        return step1;
+    }
 
     double step2 = GetStepSizeForBasisType(basePrice, GetStepMultiplier(config.step2), GetTimeframeByType(config.tf2));
     
@@ -544,6 +706,13 @@ double CalculateComboStepSize(const double basePrice) {
         double step3 = GetStepSizeForBasisType(basePrice, GetStepMultiplier(config.step3), GetTimeframeByType(config.tf3));
         if(config.operation == COMBO_OP_MIN) result = MathMin(step1, MathMin(step2, step3));
         else if(config.operation == COMBO_OP_MAX) result = MathMax(step1, MathMax(step2, step3));
+        else if(config.operation == COMBO_OP_GEO_MEAN) {
+            // AUDIT FIX #2: real 3-value geometric mean (was silently downgraded to arithmetic average).
+            if(step1 > 0 && step2 > 0 && step3 > 0)
+                result = MathPow(step1 * step2 * step3, 1.0 / 3.0);
+            else
+                result = (step1 + step2 + step3) / 3.0; // safe fallback if any component is invalid
+        }
         else result = (step1 + step2 + step3) / 3.0;
     } else {
         result = ApplyComboOperation(step1, step2, config.operation, 0.5, 0.5);
@@ -552,7 +721,42 @@ double CalculateComboStepSize(const double basePrice) {
     #ifdef ENABLE_DEBUG_LOGS
     Print("[D][DRAW] Combo Step [", EnumToString(inpComboMode), "]: ", DoubleToString(result, Digits));
     #endif
+    if(result > 0) StoreCachedComboStepSize(basePrice, result);
     return result;
+}
+
+//+------------------------------------------------------------------+
+//| AUDIT FIX #8: Map ENUM_COMBO_OPERATOR (user-facing inputs) to     |
+//| ENUM_COMBO_OPERATION (internal config). The two enums share NO    |
+//| numeric alignment -- e.g. OP_PLUS=0 but COMBO_OP_ADD=1,           |
+//| OP_AVERAGE=4 but COMBO_OP_MIN=4. Casting directly was the root   |
+//| cause of "the combo doesn't apply the operation I picked".        |
+//|                                                                  |
+//| Returns COMBO_OP_AVERAGE for operators with no direct equivalent  |
+//| (DIVIDE, HARMONIC_MEAN, *_ALL variants, NONE) and emits a warning.|
+//+------------------------------------------------------------------+
+ENUM_COMBO_OPERATION MapOperatorToComboOperation(const ENUM_COMBO_OPERATOR op) {
+    switch(op) {
+        case OP_PLUS:                 return COMBO_OP_ADD;
+        case OP_MINUS:                return COMBO_OP_SUBTRACT;
+        case OP_MULTIPLY:             return COMBO_OP_MULTIPLY;
+        case OP_AVERAGE:              return COMBO_OP_AVERAGE;
+        case OP_GEOMETRIC_MEAN:       return COMBO_OP_GEO_MEAN;
+        case OP_GEOMETRIC_MEAN_ALL:   return COMBO_OP_GEO_MEAN;
+        case OP_ARITHMETIC_MEAN_ALL:  return COMBO_OP_AVERAGE;
+        case OP_MIN_ALL:              return COMBO_OP_MIN;
+        case OP_MAX_ALL:              return COMBO_OP_MAX;
+        case OP_DIVIDE:
+        case OP_HARMONIC_MEAN:
+        case OP_HARMONIC_MEAN_ALL:
+        case OP_NONE:
+        default:
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("   MapOperatorToComboOperation: No exact equivalent for ", EnumToString(op),
+                  " - falling back to COMBO_OP_AVERAGE");
+            #endif
+            return COMBO_OP_AVERAGE;
+    }
 }
 
 void GetComboConfiguration(const double basePrice, SComboConfig &config) {
@@ -569,7 +773,9 @@ void GetComboConfiguration(const double basePrice, SComboConfig &config) {
         config.step1 = (ENUM_COMBO_STEP_TYPE)(inpComboComp1 % 3);
         config.tf2 = (ENUM_COMBO_TIMEFRAME_TYPE)(inpComboComp2 / 3);
         config.step2 = (ENUM_COMBO_STEP_TYPE)(inpComboComp2 % 3);
-        config.operation = (ENUM_COMBO_OPERATION)inpComboOp1;
+        // AUDIT FIX #8: was (ENUM_COMBO_OPERATION)inpComboOp1 (broken cast).
+        // OP_PLUS=0 vs COMBO_OP_ADD=1, OP_AVERAGE=4 vs COMBO_OP_MIN=4, etc.
+        config.operation = MapOperatorToComboOperation(inpComboOp1);
         config.activeComponents = (inpComboComp2 != COMP_IGNORE) ? 2 : 1;
         return;
     }
@@ -617,9 +823,13 @@ void GetComboConfiguration(const double basePrice, SComboConfig &config) {
             config.operation = COMBO_OP_MAX; config.activeComponents = 3; config.isTriple = true;
             break;
         case COMBO_PRESET_AGGRESSIVE:
+            // AUDIT FIX #7: Was identical to BALANCED_MIN (min(Pattern, Trigger)).
+            // Now uses triple min(Pattern, Trigger, Sub) so it is genuinely more
+            // aggressive (smaller step) and clearly distinguishable.
             config.tf1 = COMBO_TF_PATTERN; config.step1 = COMBO_STEP_TH;
             config.tf2 = COMBO_TF_TRIGGER; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MIN; config.activeComponents = 2;
+            config.tf3 = COMBO_TF_SUB; config.step3 = COMBO_STEP_TH;
+            config.operation = COMBO_OP_MIN; config.activeComponents = 3; config.isTriple = true;
             break;
         case COMBO_PRESET_ULTRA_AGGRESSIVE:
             config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_TH;
@@ -643,24 +853,62 @@ void GetComboConfiguration(const double basePrice, SComboConfig &config) {
             config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
             break;
         case COMBO_PRESET_QT_TRIGGER_PATTERN:
+            // AUDIT FIX #2: was COMBO_OP_AVERAGE despite comment claiming "Geo Mean".
             config.tf1 = COMBO_TF_TRIGGER; config.tf2 = COMBO_TF_PATTERN;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
+            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 2;
             break;
         case COMBO_PRESET_QT_ALL_4TF:
+            // AUDIT FIX #2: switched to real geometric mean.
             config.tf1 = COMBO_TF_SUB; config.tf2 = COMBO_TF_TRIGGER; config.tf3 = COMBO_TF_PATTERN;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 3; config.isTriple = true;
+            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 3; config.isTriple = true;
             break;
         case COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE:
+            // AUDIT FIX #2: switched to real geometric mean.
             config.tf1 = COMBO_TF_TRIGGER; config.tf2 = COMBO_TF_PATTERN; config.tf3 = COMBO_TF_STRUCTURE;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 3; config.isTriple = true;
+            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 3; config.isTriple = true;
             break;
         case COMBO_PRESET_QT_PATTERN_STRUCTURE:
+            // AUDIT FIX #2: switched to real geometric mean.
             config.tf1 = COMBO_TF_PATTERN; config.tf2 = COMBO_TF_STRUCTURE;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
+            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 2;
             break;
         case COMBO_PRESET_QT_TRIGGER_ONLY:
             config.tf1 = COMBO_TF_TRIGGER; config.activeComponents = 1;
             break;
+
+        // AUDIT FIX #1: MANUAL_DUAL / MANUAL_TRIPLE must read user inputs
+        // (inpComboComp1..4, inpComboOp1..3) and behave like Advanced Mode,
+        // instead of silently falling back to the default (Pattern+Trigger AVERAGE).
+        case COMBO_PRESET_MANUAL_DUAL:
+        case COMBO_PRESET_MANUAL_TRIPLE: {
+            ENUM_COMBO_TIMEFRAME_TYPE t1 = COMBO_TF_TRIGGER, t2 = COMBO_TF_TRIGGER;
+            ENUM_COMBO_STEP_TYPE      s1 = COMBO_STEP_TH,  s2 = COMBO_STEP_TH;
+            bool have1 = GetComboComponentParams(inpComboComp1, t1, s1);
+            bool have2 = GetComboComponentParams(inpComboComp2, t2, s2);
+            config.tf1 = have1 ? t1 : COMBO_TF_TRIGGER;
+            config.step1 = have1 ? s1 : COMBO_STEP_TH;
+            config.tf2 = have2 ? t2 : COMBO_TF_TRIGGER;
+            config.step2 = have2 ? s2 : COMBO_STEP_TH;
+            // AUDIT FIX #8: use mapping function instead of broken direct cast.
+            config.operation = MapOperatorToComboOperation(inpComboOp1);
+
+            if(inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE && inpComboComp3 != COMP_IGNORE) {
+                ENUM_COMBO_TIMEFRAME_TYPE t3 = COMBO_TF_TRIGGER;
+                ENUM_COMBO_STEP_TYPE      s3 = COMBO_STEP_TH;
+                if(GetComboComponentParams(inpComboComp3, t3, s3)) {
+                    config.tf3 = t3;
+                    config.step3 = s3;
+                    config.isTriple = true;
+                    config.activeComponents = 3;
+                } else {
+                    config.activeComponents = 2;
+                }
+            } else {
+                config.activeComponents = 2;
+            }
+            break;
+        }
+
         default:
             config.tf1 = COMBO_TF_PATTERN; config.tf2 = COMBO_TF_TRIGGER;
             config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
@@ -697,6 +945,12 @@ bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item,
         case COMP_STRUCTURE_TH: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_TH; return true;
         case COMP_STRUCTURE_SS: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_SS; return true;
         case COMP_STRUCTURE_LS: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_LS; return true;
+        
+        // Control/Mid (TH * 1.75)
+        case COMP_SUB_CONTROL: outTF = COMBO_TF_SUB; outStep = COMBO_STEP_CONTROL; return true;
+        case COMP_TRIGGER_CONTROL: outTF = COMBO_TF_TRIGGER; outStep = COMBO_STEP_CONTROL; return true;
+        case COMP_PATTERN_CONTROL: outTF = COMBO_TF_PATTERN; outStep = COMBO_STEP_CONTROL; return true;
+        case COMP_STRUCTURE_CONTROL: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_CONTROL; return true;
         
         default: return false;
     }
@@ -1496,19 +1750,91 @@ bool IsTriggerLevelsEnabled() {
 //|                                                                  |
 //+------------------------------------------------------------------+
 string GetCurrentFractalTimeframe() {
-    int minutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    int minutes = GetCurrentTimeframeMinutesForTH();
     if(minutes <= 0) minutes = 1;
     
-    // Map standard timeframes to fractal strings
-    if(minutes <= 1) return "M1";
-    else if(minutes <= 5) return "M4";  // Closest
-    else if(minutes <= 15) return "M16"; // Closest
-    else if(minutes <= 30) return "M16"; // Closest
-    else if(minutes <= 60) return "H1+M4";
-    else if(minutes <= 240) return "H4+M16";
-    else if(minutes <= 1440) return "D2+H20+M16"; // Closest
-    else if(minutes <= 10080) return "D11+H9+M4"; // Closest
-    else return "D45+H12+M16"; // Closest
+    // Map standard timeframes to fractal strings (exact match to MT4)
+    if(minutes == 1)      return "M1";
+    else if(minutes == 5) return "M4";  // Closest
+    else if(minutes == 15 || minutes == 30) return "M16"; // Closest
+    else if(minutes == 60)    return "H1+M4";
+    else if(minutes == 240)   return "H4+M16";
+    else if(minutes == 1440)  return "D2+H20+M16"; // Closest
+    else if(minutes == 10080) return "D11+H9+M4"; // Closest
+    else if(minutes == 43200) return "D45+H12+M16"; // Closest
+    else return "M1"; // Fallback
+}
+
+//+------------------------------------------------------------------+
+//| Sub-minute timeframe encoding.                                   |
+//|                                                                  |
+//| MQL5 has colliding enum values between second and minute TFs:    |
+//|   PERIOD_S5  == PERIOD_M5  == 5                                  |
+//|   PERIOD_S15 == PERIOD_M15 == 15                                 |
+//|   PERIOD_S30 == PERIOD_M30 == 30                                 |
+//| So we cannot use PERIOD_S* enums (and this build's MetaEditor    |
+//| does not declare them at all). Instead we encode sub-minute      |
+//| targets in a dedicated, collision-free range: 2000 + seconds.    |
+//| GetTimeframeTHForPeriod() decodes this range directly.           |
+//+------------------------------------------------------------------+
+#ifndef TF_SEC_BASE
+#define TF_SEC_BASE 2000
+#endif
+#define TF_SEC_2   (TF_SEC_BASE + 2)
+#define TF_SEC_3   (TF_SEC_BASE + 3)
+#define TF_SEC_4   (TF_SEC_BASE + 4)
+#define TF_SEC_5   (TF_SEC_BASE + 5)
+#define TF_SEC_6   (TF_SEC_BASE + 6)
+#define TF_SEC_10  (TF_SEC_BASE + 10)
+#define TF_SEC_15  (TF_SEC_BASE + 15)
+#define TF_SEC_30  (TF_SEC_BASE + 30)
+
+//+------------------------------------------------------------------+
+//| Map an arbitrary duration in SECONDS to the closest timeframe.   |
+//|                                                                  |
+//| Sub-minute targets use the collision-free TF_SEC_* encoding      |
+//| (2000 + seconds) so they never clash with PERIOD_M* enums.       |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES MapDurationSecondsToTimeframe(const int totalSeconds) {
+    if(totalSeconds <= 2)        return (ENUM_TIMEFRAMES)TF_SEC_2;
+    else if(totalSeconds <= 3)   return (ENUM_TIMEFRAMES)TF_SEC_3;
+    else if(totalSeconds <= 4)   return (ENUM_TIMEFRAMES)TF_SEC_4;
+    else if(totalSeconds <= 5)   return (ENUM_TIMEFRAMES)TF_SEC_5;
+    else if(totalSeconds <= 6)   return (ENUM_TIMEFRAMES)TF_SEC_6;
+    else if(totalSeconds <= 10)  return (ENUM_TIMEFRAMES)TF_SEC_10;
+    else if(totalSeconds <= 15)  return (ENUM_TIMEFRAMES)TF_SEC_15;
+    else if(totalSeconds <= 30)  return (ENUM_TIMEFRAMES)TF_SEC_30;
+    else if(totalSeconds <= 60)  return PERIOD_M1;
+    else if(totalSeconds <= 300) return PERIOD_M5;    // 5 min
+    else if(totalSeconds <= 900) return PERIOD_M15;   // 15 min
+    else if(totalSeconds <= 1800) return PERIOD_M30;  // 30 min
+    else if(totalSeconds <= 3600) return PERIOD_H1;   // 1 h
+    else if(totalSeconds <= 14400) return PERIOD_H4;  // 4 h
+    else if(totalSeconds <= 86400) return PERIOD_D1;  // 1 d
+    else if(totalSeconds <= 604800) return PERIOD_W1; // 1 w
+    else return PERIOD_MN1;
+}
+
+//+------------------------------------------------------------------+
+//| TH percentage for an arbitrary duration in SECONDS.              |
+//|                                                                  |
+//| Sub-minute ( < 60s ) uses the power law that mirrors the fractal |
+//| ladder: each x4 in time = x2 in TH%, exactly like the existing   |
+//| MODIFIED_FRACTAL_PERCENTAGES array (M1=2.08%, M4=4.17%, ...).    |
+//| So for s seconds: TH% = 2.08 * sqrt(s / 60).                     |
+//|   S15 -> 2.08*sqrt(15/60)  = 1.04%                               |
+//|   S4  -> 2.08*sqrt(4/60)   = 0.54%                               |
+//| For >= 60s we reuse the existing fractal-string logic so the     |
+//| higher ladder stays identical to current behavior.               |
+//+------------------------------------------------------------------+
+double CalculateFractalTHForDurationSeconds(const int totalSeconds) {
+    if(totalSeconds <= 0) return 0;
+    if(totalSeconds < 60) {
+        // Sub-minute: power law relative to M1 (60s = 2.08%).
+        return MODIFIED_FRACTAL_PERCENTAGES[0] * MathSqrt(totalSeconds / 60.0);
+    }
+    ENUM_TIMEFRAMES tf = MapDurationSecondsToTimeframe(totalSeconds);
+    return GetTimeframeTHForPeriod(tf);
 }
 
 //+------------------------------------------------------------------+
@@ -1523,69 +1849,64 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
         // Apply Fractal Jump shift if active
         string shiftedFractal = ApplyFractalShift(currentFractal);
         double th = CalculateTimeframeTH(shiftedFractal);
-        
+
         #ifdef ENABLE_DEBUG_LOGS
-        Print("GetTimeframeTHForPeriod: CURRENT (", PeriodMinutes((ENUM_TIMEFRAMES)Period()), "min) -> ", 
+        Print("GetTimeframeTHForPeriod: CURRENT (", GetCurrentTimeframeMinutesForTH(), "min) -> ",
               shiftedFractal, " = ", DoubleToString(th, 4), "%");
         #endif
-        
+
         return th;
     }
-    
-    // Convert period to fractal timeframe string
-    string timeframeStr = "";
-    
-    // GOLD FIX: Handle all timeframes including Monthly
-    // PeriodSeconds() may return 0 for some timeframes, so use direct mapping
-    int minutes = 0;
-    
-    switch(period) {
-        case PERIOD_M1:  minutes = 1; break;
-        case PERIOD_M5:  minutes = 5; break;
-        case PERIOD_M15: minutes = 15; break;
-        case PERIOD_M30: minutes = 30; break;
-        case PERIOD_H1:  minutes = 60; break;
-        case PERIOD_H4:  minutes = 240; break;
-        case PERIOD_D1:  minutes = 1440; break;
-        case PERIOD_W1:  minutes = 10080; break;
-        case PERIOD_MN1: minutes = 43200; break;
-        default: {
-            // Fallback: try PeriodSeconds
-            int seconds = PeriodSeconds(period);
-            if(seconds > 0) {
-                minutes = seconds / 60;
-            } else {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("   GetTimeframeTHForPeriod: Unknown period=", period, ", using D45+H12+M16");
-                #endif
-                return CalculateTimeframeTH(ApplyFractalShift("D45+H12+M16"));
-            }
-            break;
-        }
+
+    // SUB-MINUTE SHORT-CIRCUIT: our collision-free encoded second timeframes
+    // (TF_SEC_BASE + seconds, e.g. 2002..2030) carry the exact second count.
+    // PeriodSeconds() returns 0 for these custom values, so decode directly.
+    int periodVal = (int)period;
+    if(periodVal >= TF_SEC_BASE && periodVal < TF_SEC_BASE + 60) {
+        int subSeconds = periodVal - TF_SEC_BASE;
+        double thSub = CalculateFractalTHForDurationSeconds(subSeconds);
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("GetTimeframeTHForPeriod: SEC-ENCODED ", period, " (", subSeconds, "s) -> SUB-MINUTE = ",
+              DoubleToString(thSub, 4), "%");
+        #endif
+        return thSub;
     }
-    
+
+    // Standard (>= 60s) path: derive seconds via PeriodSeconds().
+    int totalSeconds = PeriodSeconds(period);
+    if(totalSeconds <= 0) {
+        // PeriodSeconds() can return 0 for some periods; fall back gracefully.
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   GetTimeframeTHForPeriod: PeriodSeconds(", period, ") == 0, using D45+H12+M16");
+        #endif
+        return CalculateTimeframeTH(ApplyFractalShift("D45+H12+M16"));
+    }
+
+    // Convert period to fractal timeframe string (>= 60s path)
+    string timeframeStr = "";
+
     // Map minutes to fractal timeframe string
-    if(minutes == 1) timeframeStr = "M1";
-    else if(minutes <= 5) timeframeStr = "M4";
-    else if(minutes <= 15) timeframeStr = "M16";
-    else if(minutes <= 30) timeframeStr = "M16";
-    else if(minutes <= 60) timeframeStr = "H1+M4";
-    else if(minutes <= 240) timeframeStr = "H4+M16";
-    else if(minutes <= 1440) timeframeStr = "D2+H20+M16";
-    else if(minutes <= 10080) timeframeStr = "D11+H9+M4";
+    if(totalSeconds <= 60)       timeframeStr = "M1";
+    else if(totalSeconds <= 300) timeframeStr = "M4";
+    else if(totalSeconds <= 900) timeframeStr = "M16";
+    else if(totalSeconds <= 1800) timeframeStr = "M16";
+    else if(totalSeconds <= 3600) timeframeStr = "H1+M4";
+    else if(totalSeconds <= 14400) timeframeStr = "H4+M16";
+    else if(totalSeconds <= 86400) timeframeStr = "D2+H20+M16";
+    else if(totalSeconds <= 604800) timeframeStr = "D11+H9+M4";
     else timeframeStr = "D45+H12+M16";
-    
+
     // Apply Fractal Jump shift if active
     string shiftedTF = ApplyFractalShift(timeframeStr);
-    
+
     // Calculate TH for the timeframe
     double th = CalculateTimeframeTH(shiftedTF);
-    
+
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetTimeframeTHForPeriod: ", period, " (", minutes, "min) -> ", 
+    Print("GetTimeframeTHForPeriod: ", period, " (", totalSeconds / 60, "min) -> ",
           shiftedTF, " = ", DoubleToString(th, 4), "%");
     #endif
-    
+
     return th;
 }
 
@@ -1594,39 +1915,44 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
 //|                  Sub (1/4      -                )                |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetSubTimeframe() {
-    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    int currentMinutes = GetCurrentTimeframeMinutesForTH();
     if(currentMinutes <= 0) currentMinutes = 1;
-    int subMinutes = currentMinutes / 4;
-    
-    // SAFETY: Minimum is M1
-    if(subMinutes < 1) subMinutes = 1;
-    
-    // Map to closest standard timeframe
-    ENUM_TIMEFRAMES result;
-    if(subMinutes <= 1) result = PERIOD_M1;
-    else if(subMinutes <= 5) result = PERIOD_M5;
-    else if(subMinutes <= 15) result = PERIOD_M15;
-    else if(subMinutes <= 30) result = PERIOD_M30;
-    else if(subMinutes <= 60) result = PERIOD_H1;
-    else if(subMinutes <= 360) result = PERIOD_H4;   // Fix: 360min (D1/4) -> H4
-    else if(subMinutes <= 1440) result = PERIOD_D1;
-    else if(subMinutes <= 4320) result = PERIOD_D1;  // Fix: 2520min (W1/4) -> D1
-    else if(subMinutes <= 10080) result = PERIOD_W1;
-    else if(subMinutes <= 20000) result = PERIOD_W1; // Fix: 10800min (MN1/4) -> W1
-    else result = PERIOD_MN1;
-    
+    int subSeconds = (currentMinutes * 60) / 4;
+
+    // Map to closest timeframe (seconds-aware: sub-minute targets reach PERIOD_S*).
+    ENUM_TIMEFRAMES result = MapDurationSecondsToTimeframe(subSeconds);
+    if(result <= 0) result = PERIOD_M1;
+
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetSubTimeframe: Current=", currentMinutes, "min, Sub=", 
-          subMinutes, "min ( 4) -> ", result);
+    Print("GetSubTimeframe: Current=", currentMinutes, "min, Sub=",
+          subSeconds, "s ( 4) -> ", result);
     #endif
-    
+
     return result;
+}
+
+//+------------------------------------------------------------------+
+//| Map an arbitrary minute count to the closest standard timeframe   |
+//| (range-based, mirrors GetSubTimeframe/GetPatternTimeframe logic)  |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES MapMinutesToTimeframeRange(const int minutes) {
+    // Reuse the unified seconds-based mapper so sub-minute (second) timeframes
+    // are reachable too (e.g. 1 min / 64 -> ~1s -> PERIOD_S2).
+    return MapDurationSecondsToTimeframe(minutes * 60);
 }
 
 //+------------------------------------------------------------------+
 //| Get timeframe based on type                                       |
 //|                                                                   |
 //| GOLD FIX: Added validation and error logging                     |
+//|                                                                   |
+//| ADVANCED MODE SHIFT (user request): In Combo Advanced mode the    |
+//| whole fractal ladder is shifted down by one step so that          |
+//| Structure resolves to the CURRENT timeframe (was Current * 4):    |
+//|   Sub     = Current / 64   (was /16)                              |
+//|   Trigger = Current / 16   (was /4)                               |
+//|   Pattern = Current / 4    (was Current)                          |
+//|   Structure = Current      (was *4)                               |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
     // CRITICAL: Validate input
@@ -1634,30 +1960,50 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
         #endif
-        return (ENUM_TIMEFRAMES)Period();  // GOLD FIX: Use Period() instead of PERIOD_CURRENT (0)
+        return (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();  // Use effective period, not PERIOD_CURRENT (0)
     }
-    
+
     ENUM_TIMEFRAMES result;
-    
+
+    // ADVANCED MODE: Shift the whole fractal ladder down one step so that
+    // Structure == current timeframe. See function header for the mapping.
+    if(inpComboMode == COMBO_MODE_ADVANCED) {
+        // Work in SECONDS (not minutes) so sub-minute targets are reachable and
+        // the x4 fractal ladder is preserved exactly even below M1.
+        int curPeriod = GetCurrentTimeframePeriodForTH();
+        int curSeconds = PeriodSeconds((ENUM_TIMEFRAMES)curPeriod);
+        if(curSeconds <= 0) curSeconds = 60; // fallback: assume M1
+
+        int shiftedSeconds;
+        switch(tfType) {
+            case COMBO_TF_SUB:       shiftedSeconds = curSeconds / 64; break;
+            case COMBO_TF_TRIGGER:   shiftedSeconds = curSeconds / 16; break;
+            case COMBO_TF_PATTERN:   shiftedSeconds = curSeconds / 4;  break;
+            case COMBO_TF_STRUCTURE: shiftedSeconds = curSeconds;      break;
+            default:                 shiftedSeconds = curSeconds;      break;
+        }
+        if(shiftedSeconds < 2) shiftedSeconds = 2; // smallest supported = PERIOD_S2
+
+        result = MapDurationSecondsToTimeframe(shiftedSeconds);
+        if(result <= 0) result = (ENUM_TIMEFRAMES)curPeriod;
+
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("GetTimeframeByType[ADVANCED]: type=", tfType, " current=", curSeconds,
+              "s shifted=", shiftedSeconds, "s -> ", result);
+        #endif
+        return result;
+    }
+
     switch(tfType) {
         case COMBO_TF_SUB:
-            // User Request: Sub = 2 Fractals Lower (Current / 16)
+            // User Request: Sub = 2 Fractals Lower (Current / 16).
+            // Use seconds so sub-minute targets resolve to PERIOD_S* (not clamped to M1).
             {
-                int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+                int currentMinutes = GetCurrentTimeframeMinutesForTH();
                 if(currentMinutes <= 0) currentMinutes = 1;
-                int subMinutes = currentMinutes / 16;
-                if(subMinutes < 1) subMinutes = 1;
-                
-                // Map to closest standard timeframe (Reusing GetSubTimeframe logic style)
-                if(subMinutes <= 1) result = PERIOD_M1;
-                else if(subMinutes <= 5) result = PERIOD_M5;
-                else if(subMinutes <= 15) result = PERIOD_M15;
-                else if(subMinutes <= 30) result = PERIOD_M30;
-                else if(subMinutes <= 60) result = PERIOD_H1;
-                else if(subMinutes <= 360) result = PERIOD_H4;
-                else if(subMinutes <= 1440) result = PERIOD_D1;
-                else if(subMinutes <= 10080) result = PERIOD_W1;
-                else result = PERIOD_MN1;
+                int subSeconds = (currentMinutes * 60) / 16;
+                if(subSeconds < 2) subSeconds = 2;
+                result = MapDurationSecondsToTimeframe(subSeconds);
             }
             break;
 
@@ -1668,7 +2014,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 
         case COMBO_TF_PATTERN:
             // User Request: Pattern = Current Timeframe
-            result = (ENUM_TIMEFRAMES)Period();
+            result = (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();
             break;
 
         case COMBO_TF_STRUCTURE:
@@ -1680,7 +2026,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
             #ifdef ENABLE_DEBUG_LOGS
             Print("   GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
             #endif
-            result = (ENUM_TIMEFRAMES)Period();
+            result = (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();
             break;
     }
     
@@ -1689,7 +2035,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
         #endif
-        return (ENUM_TIMEFRAMES)Period();  // GOLD FIX: Use Period() instead of PERIOD_CURRENT (0)
+        return (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();  // Use effective period, not PERIOD_CURRENT (0)
     }
     
     return result;
@@ -1702,7 +2048,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 //+------------------------------------------------------------------+
 double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
     // CRITICAL: Validate input
-    if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_LS) {
+    if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_CONTROL) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
         #endif
@@ -1720,6 +2066,9 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
             break;
         case COMBO_STEP_LS:
             multiplier = 2.0;   // LS
+            break;
+        case COMBO_STEP_CONTROL:
+            multiplier = 1.75;  // CONTROL/MID
             break;
         default:
             #ifdef ENABLE_DEBUG_LOGS
@@ -1834,10 +2183,21 @@ double ApplyComboOperation(const double value1, const double value2,
             // Minimum: min(A, B)
             result = MathMin(value1, value2);
             break;
-            
+
         case COMBO_OP_MAX:
             // Maximum: max(A, B)
             result = MathMax(value1, value2);
+            break;
+
+        case COMBO_OP_GEO_MEAN:
+            // AUDIT FIX #2: Real geometric mean (was mislabelled in QT presets).
+            // Dual: sqrt(A * B); for triple, CalculateComboStepSize handles it
+            // separately because ApplyComboOperation only receives 2 values.
+            if(value1 <= 0 || value2 <= 0) {
+                result = 0;
+                break;
+            }
+            result = MathSqrt(value1 * value2);
             break;
             
         case COMBO_OP_WEIGHTED: {
@@ -2235,30 +2595,22 @@ void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
 }
 
 ENUM_TIMEFRAMES GetPatternTimeframe() {
-    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    int currentMinutes = GetCurrentTimeframeMinutesForTH();
     if(currentMinutes <= 0) currentMinutes = 1;
-    int patternMinutes = currentMinutes * 4;
-    
-    // SAFETY: Clamp to valid range
-    if(patternMinutes > 43200) patternMinutes = 43200; // Max = MN1
-    
-    // Map to closest standard timeframe
-    ENUM_TIMEFRAMES result;
-    if(patternMinutes <= 1) result = PERIOD_M1;
-    else if(patternMinutes <= 5) result = PERIOD_M5;
-    else if(patternMinutes <= 15) result = PERIOD_M15;
-    else if(patternMinutes <= 30) result = PERIOD_M30;
-    else if(patternMinutes <= 60) result = PERIOD_H1;
-    else if(patternMinutes <= 240) result = PERIOD_H4;
-    else if(patternMinutes <= 1440) result = PERIOD_D1;
-    else if(patternMinutes <= 10080) result = PERIOD_W1;
-    else result = PERIOD_MN1;
-    
+    int patternSeconds = (currentMinutes * 60) * 4;
+
+    // SAFETY: Clamp to valid range (MN1 ~ 2.68 years in seconds)
+    if(patternSeconds > 43200 * 60) patternSeconds = 43200 * 60; // Max = MN1
+
+    // Map to closest timeframe (seconds-aware).
+    ENUM_TIMEFRAMES result = MapDurationSecondsToTimeframe(patternSeconds);
+    if(result <= 0) result = PERIOD_MN1;
+
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetPatternTimeframe: Current=", currentMinutes, "min, Pattern=", 
-          patternMinutes, "min (4x) -> ", result);
+    Print("GetPatternTimeframe: Current=", currentMinutes, "min, Pattern=",
+          patternSeconds, "s (4x) -> ", result);
     #endif
-    
+
     return result;
 }
 
@@ -2268,30 +2620,22 @@ ENUM_TIMEFRAMES GetPatternTimeframe() {
 //| FIXED: Proper bounds checking and logging                        |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetStructureTimeframe() {
-    int currentMinutes = PeriodMinutes((ENUM_TIMEFRAMES)Period());
+    int currentMinutes = GetCurrentTimeframeMinutesForTH();
     if(currentMinutes <= 0) currentMinutes = 1;
-    int structureMinutes = currentMinutes * 16;
-    
-    // SAFETY: Clamp to valid range
-    if(structureMinutes > 43200) structureMinutes = 43200; // Max = MN1
-    
-    // Map to closest standard timeframe
-    ENUM_TIMEFRAMES result;
-    if(structureMinutes <= 1) result = PERIOD_M1;
-    else if(structureMinutes <= 5) result = PERIOD_M5;
-    else if(structureMinutes <= 15) result = PERIOD_M15;
-    else if(structureMinutes <= 30) result = PERIOD_M30;
-    else if(structureMinutes <= 60) result = PERIOD_H1;
-    else if(structureMinutes <= 240) result = PERIOD_H4;
-    else if(structureMinutes <= 1440) result = PERIOD_D1;
-    else if(structureMinutes <= 10080) result = PERIOD_W1;
-    else result = PERIOD_MN1;
-    
+    int structureSeconds = (currentMinutes * 60) * 16;
+
+    // SAFETY: Clamp to valid range (MN1 ~ 2.68 years in seconds)
+    if(structureSeconds > 43200 * 60) structureSeconds = 43200 * 60; // Max = MN1
+
+    // Map to closest timeframe (seconds-aware).
+    ENUM_TIMEFRAMES result = MapDurationSecondsToTimeframe(structureSeconds);
+    if(result <= 0) result = PERIOD_MN1;
+
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetStructureTimeframe: Current=", currentMinutes, "min, Structure=", 
-          structureMinutes, "min (16x) -> ", result);
+    Print("GetStructureTimeframe: Current=", currentMinutes, "min, Structure=",
+          structureSeconds, "s (16x) -> ", result);
     #endif
-    
+
     return result;
 }
 

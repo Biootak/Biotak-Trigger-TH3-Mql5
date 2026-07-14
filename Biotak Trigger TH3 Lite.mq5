@@ -56,9 +56,9 @@
 #include "Biotak\ATRCalculations.mqh"
 #include "Biotak\AdaptiveScaling.mqh"
 #include "Biotak\BasePriceManager.mqh"
-#include "Biotak\WaveAnalysis.mqh"
 
 #ifndef BUILD_LITE
+#include "Biotak\WaveAnalysis.mqh"
 #include "Biotak\FrequencyOptimizer.mqh"
 #include "Biotak\TH3Tool.mqh"
 #endif
@@ -108,8 +108,15 @@ void OnChartEvent(const int id,
 
 void OnTimer()
 {
+    // FIX: rate-limit the not-initialized redraw path (see main MQ5 for
+    // rationale). Once per 2s is enough; final visual state is identical.
     if(!g_initialized) {
-        RedrawAllObjects(false);
+        static datetime s_lastInitRedraw = 0;
+        datetime now = TimeCurrent();
+        if(now - s_lastInitRedraw >= 2) {
+            s_lastInitRedraw = now;
+            RedrawAllObjects(false);
+        }
     }
 
     RunIncrementalObjectCleanup();

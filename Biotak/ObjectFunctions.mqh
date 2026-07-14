@@ -34,12 +34,37 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     // OPTIMIZATION: Check if object exists first, only update properties instead of recreate
     double normalizedPrice = NormalizePrice(price);
     datetime currentTime = TimeCurrent();
+    // FIX: original formula `PeriodSeconds() * 10000` produces absurd values on
+    // D1+ (e.g. ~27 years into the future). Preserve behavior on short timeframes
+    // (where the original was already reasonable) and cap only the absurd cases.
     datetime futureTime = currentTime + PeriodSeconds((ENUM_TIMEFRAMES)Period()) * 10000;
+    datetime maxFuture = currentTime + 31536000; // 1 year cap
+    if(futureTime > maxFuture) futureTime = maxFuture;
     ENUM_OBJECT objectType = (lineObjectType == LINE_OBJECT_RAY_LINE) ? OBJ_TREND : OBJ_HLINE;
     
-    // Check if object already exists in cache
+    // Check if object already exists in cache. After CHARTCHANGE we preserve
+    // runtime objects but reset the cache, so rehydrate from chart on cache miss.
     SObjectCacheEntry cachedEntry;
     bool objectExistsInCache = CacheGetObject(name, cachedEntry);
+    bool objectExistsOnChart = false;
+    if(objectExistsInCache && cachedEntry.exists &&
+       cachedEntry.lastUpdate == CacheGetFrameTime() && cachedEntry.lastUpdate > 0) {
+        objectExistsOnChart = true;
+    }
+    else if(!objectExistsInCache && ObjectFind(0, name) >= 0) {
+        cachedEntry.name = name;
+        cachedEntry.lastPrice = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
+        cachedEntry.lastColor = (color)ObjectGetInteger(0, name, OBJPROP_COLOR);
+        cachedEntry.lastStyle = (int)ObjectGetInteger(0, name, OBJPROP_STYLE);
+        cachedEntry.lastWidth = (int)ObjectGetInteger(0, name, OBJPROP_WIDTH);
+        cachedEntry.exists = true;
+        objectExistsInCache = true;
+        objectExistsOnChart = true;
+    }
+    else if(objectExistsInCache && !objectExistsOnChart) {
+        CacheRemoveObject(name);
+        objectExistsInCache = false;
+    }
     
     if(!objectExistsInCache) {
         // Create new object
@@ -100,10 +125,20 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
 
 bool CreatePipDistanceLabel(const string name, const double price, const double pips, const color textColor, const string levelInfo = "") {
     if(!inpShowPipDistanceLabels) return true;
-
-    //                                                                
-    // CRITICAL FIX #1: Validate inputs
-    //                                                                
+    
+    //                                                                 
+    // CRITICAL FIX #1: Check object count BEFORE creation
+    //                                                                 
+    if(!CanCreateObject()) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
+        #endif
+        return false;
+    }
+    
+    //                                                                 
+    // CRITICAL FIX #2: Validate inputs
+    //                                                                 
     if(StringLen(name) == 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  CreatePipDistanceLabel: Empty label name");
@@ -117,30 +152,7 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
         #endif
         return false;
     }
-    
-    bool objectExists = (ObjectFind(0, name) >= 0);
-    if(!objectExists) {
-        if(!CanCreateObject()) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CreatePipDistanceLabel: Object limit reached, cannot create '", name, "'");
-            #endif
-            return false;
-        }
 
-        if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
-            #ifdef ENABLE_DEBUG_LOGS
-            int error = GetLastError();
-            Print("  CreatePipDistanceLabel: Failed to create '", name, "', error=", error);
-            #endif
-            return false;
-        }
-    } else {
-        double currentPrice = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
-        if(MathAbs(currentPrice - price) > GetCachedPoint() * 0.1) {
-            ObjectSetDouble(0, name, OBJPROP_PRICE, price);
-        }
-    }
-    
     // Format: "M1 +3 | 45.2 pips" or just "45.2 pips" if no levelInfo
     string labelText;
     if(StringLen(levelInfo) > 0) {
@@ -148,27 +160,46 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
     } else {
         labelText = StringFormat("%.1f pips", pips);
     }
-    
-    ObjectSetString(0, name, OBJPROP_TEXT, labelText);
-    ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
-    ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
-    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpFontSize);
-    // Visual align MT5: Use ANCHOR_LEFT (not ANCHOR_LEFT_UPPER) and don't set explicit
-    // X/YDISTANCE   these match MT5's default behavior and keep label positioning consistent.
-    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT);
-    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, name, OBJPROP_BACK, false);
-    
-    // CRITICAL FIX: Respect Hide state (F key)
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    
-    if(isHidden) {
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+
+    string cachedText;
+    color cachedColor;
+    bool hasCachedLabel = CacheGetLabel(name, cachedText, cachedColor);
+    bool objectExists = false;
+    if(hasCachedLabel) {
+        objectExists = (ObjectFind(0, name) >= 0);
+        if(!objectExists) {
+            CacheRemoveObject(name);
+            hasCachedLabel = false;
+        }
     } else {
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        objectExists = (ObjectFind(0, name) >= 0);
     }
+
+    if(!objectExists) {
+        if(!ObjectCreate(0, name, OBJ_TEXT, 0, 0, price)) {
+            #ifdef ENABLE_DEBUG_LOGS
+            int error = GetLastError();
+            Print("  CreatePipDistanceLabel: Failed to create '", name, "', error=", error);
+            #endif
+            return false;
+        }
+        ObjectSetString(0, name, OBJPROP_TEXT, labelText);
+        ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+        ObjectSetString(0, name, OBJPROP_FONT, inpFontName);
+        ObjectSetInteger(0, name, OBJPROP_FONTSIZE, inpFontSize);
+        ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_BACK, false);
+    } else {
+        if(!hasCachedLabel || cachedText != labelText)
+            ObjectSetString(0, name, OBJPROP_TEXT, labelText);
+        if(!hasCachedLabel || cachedColor != textColor)
+            ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
+        ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
+    }
+
+    CacheUpdateLabel(name, labelText, textColor);
+    ApplyVisibilityStateIfUnchangedSkip(name, false);
     
     return true;
 }

@@ -64,8 +64,7 @@ bool CreateUnifiedZone(const string zoneName,
     
     // Check style: HIDDEN
     if(config.style == FACTOR_ZONE_HIDDEN) {
-        // Delete zone if exists
-        if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+        DeleteManagedZoneObjects(zoneName, true);
         return true; // Not an error, just hidden
     }
     
@@ -120,10 +119,20 @@ bool CreateUnifiedZone(const string zoneName,
     
     // Calculate zone height (percentage of step size)
     double zoneHeight = stepSize * config.heightPercent * 0.5; // 0.5 because  height
-    
+
+    // FIX: floor to a minimum visible height (in points) so the zone never
+    // collapses to zero on lower timeframes (M30/M15/M5/M1) where the step
+    // is smaller than one point. Without this the box is rejected as
+    // upperPrice <= lowerPrice and silently never rendered.
+    {
+        double minHalf = GetCachedPoint() * ZONE_MIN_HEIGHT_POINTS;
+        if(minHalf <= 0) minHalf = 1e-5 * ZONE_MIN_HEIGHT_POINTS;
+        if(zoneHeight < minHalf) zoneHeight = minHalf;
+    }
+
     // Calculate midpoint between two levels
     double midPoint = (prevLevelPrice + currentLevelPrice) / 2.0;
-    
+
     // Calculate zone boundaries
     double upperPrice = NormalizeDouble(midPoint + zoneHeight, Digits);
     double lowerPrice = NormalizeDouble(midPoint - zoneHeight, Digits);
@@ -161,6 +170,9 @@ bool CreateUnifiedZone(const string zoneName,
     request.filled = (config.style == FACTOR_ZONE_BOX_FILLED);
     request.startTime = 0;  // Auto-calculate
     request.endTime = 0;    // Auto-calculate
+
+    DeleteIndicatorObjectManaged(zoneName + "_Top", true);
+    DeleteIndicatorObjectManaged(zoneName + "_Bottom", true);
     
     SZoneCreationResult result = CreateZone(request);
     
@@ -374,6 +386,13 @@ bool CreateZoneWithSmartFallback(const string zoneName,
     if(fixedStepSize > 0) {
         // Calculate zone with fixed step size (for consistent height)
         double zoneHeight = fixedStepSize * config.heightPercent * 0.5;
+        // FIX: floor to a minimum visible height on lower timeframes so the
+        // box never collapses to a sub-point thin zone and get silently skipped.
+        {
+            double minHalf = GetCachedPoint() * ZONE_MIN_HEIGHT_POINTS;
+            if(minHalf <= 0) minHalf = 1e-5 * ZONE_MIN_HEIGHT_POINTS;
+            if(zoneHeight < minHalf) zoneHeight = minHalf;
+        }
         double midPoint = (effectivePrevPrice + currentPrice) / 2.0;
         double upperPrice = NormalizeDouble(midPoint + zoneHeight, Digits);
         double lowerPrice = NormalizeDouble(midPoint - zoneHeight, Digits);
@@ -387,7 +406,7 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         
         // Handle HIDDEN style
         if(config.style == FACTOR_ZONE_HIDDEN) {
-            if(ObjectFind(0, zoneName) >= 0) ObjectDelete(0, zoneName);
+            DeleteManagedZoneObjects(zoneName, true);
             return true;
         }
         
@@ -401,8 +420,39 @@ bool CreateZoneWithSmartFallback(const string zoneName,
         request.filled = (config.style == FACTOR_ZONE_BOX_FILLED);
         request.startTime = 0;
         request.endTime = 0;
+
+        // FIX: Skip zones that are too thin to render (top == bottom after normalize).
+        // This can happen on M1 for symbols where TH step is smaller than 1 point.
+        if(request.topPrice <= request.bottomPrice) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("[CreateZoneWithSmartFallback] Skipping thin zone '", zoneName,
+                  "' top=", request.topPrice, " bottom=", request.bottomPrice,
+                  " height=", fixedStepSize * config.heightPercent * 0.5);
+            #endif
+            return true;
+        }
+
+        // FIX: Removed DeleteIndicatorObjectManaged(_Top/_Bottom) here.
+        // It caused flicker by deleting border lines on every redraw.
+        // Stale border lines from a previous style switch are cleaned by
+        // ClearAllLevels when topology changes.
+        // DeleteIndicatorObjectManaged(zoneName + "_Top", true);
+        // DeleteIndicatorObjectManaged(zoneName + "_Bottom", true);
         
         SZoneCreationResult result = CreateZone(request);
+        if(!result.success) {
+            // OPERATIONAL LOG: Always log first few zone failures so user can diagnose
+            // without needing a DEBUG build. Throttled to avoid log spam.
+            static int s_zoneFailureLogCount = 0;
+            static datetime s_lastZoneFailureLog = 0;
+            if(s_zoneFailureLogCount < 10 && TimeCurrent() - s_lastZoneFailureLog >= 1) {
+                Print("[ZONE_FAIL] '", zoneName, "' TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+                      " err=", result.errorCode, " msg=", result.errorMessage,
+                      " top=", request.topPrice, " bottom=", request.bottomPrice);
+                s_zoneFailureLogCount++;
+                s_lastZoneFailureLog = TimeCurrent();
+            }
+        }
         return result.success;
     }
     

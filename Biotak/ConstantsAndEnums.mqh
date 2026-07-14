@@ -134,6 +134,22 @@ enum ENUM_FACTOR_AUTO_BASIS {
 };
 
 //+------------------------------------------------------------------+
+//| Factor Display Mode - How factor value is shown and operation    |
+//|                                                                  |
+//| CLASSIC: Traditional mode - number is Factor, Step is calculated |
+//|   Input: Factor number  ->  Step = Range / (Factor x 2)          |
+//|   Display: "F: 50.00 | Step: 12.5 pips"                          |
+//|                                                                  |
+//| DIRECT: New mode - number IS the Step Size, Factor is internal   |
+//|   Input: Step Size  ->  Factor = Range / (Step x 2) (internal)   |
+//|   Display: "Step: 12.5 pips | F: 50.00"                          |
+//+------------------------------------------------------------------+
+enum ENUM_FACTOR_DISPLAY_MODE {
+    FACTOR_DISPLAY_CLASSIC = 0,  // Classic: Factor number (current behavior)
+    FACTOR_DISPLAY_DIRECT = 1    // Direct: Step Size is the primary value
+};
+
+//+------------------------------------------------------------------+
 //| Structure Base Multiplier - Valid range 2-9                      |
 //|        -                                            |
 //|                                                                  |
@@ -240,8 +256,14 @@ enum ENUM_COMBO_COMPONENT_ITEM {
     COMP_PATTERN_MEAN = 14,     // Pattern Mean: (Pattern_TH + Pattern_SS + Pattern_LS) / 3
     COMP_STRUCTURE_MEAN = 15,   // Structure Mean: (Structure_TH + Structure_SS + Structure_LS) / 3
     
+    // Control/Mid Components (TH * 1.75)
+    COMP_SUB_CONTROL = 16,      // Sub Control: Sub_TH * 1.75
+    COMP_TRIGGER_CONTROL = 17,  // Trigger Control: Trigger_TH * 1.75
+    COMP_PATTERN_CONTROL = 18,  // Pattern Control: Pattern_TH * 1.75
+    COMP_STRUCTURE_CONTROL = 19,// Structure Control: Structure_TH * 1.75
+    
     // Special
-    COMP_IGNORE = 16            // Ignore (None)
+    COMP_IGNORE = 20            // Ignore (None)
 };
 
 //+------------------------------------------------------------------+
@@ -326,7 +348,10 @@ enum ENUM_COMBO_OPERATION {
     COMBO_OP_MULTIPLY = 3,      // Multiply: A   B
     COMBO_OP_MIN = 4,           // Minimum: min(A, B) or min(A, B, C)
     COMBO_OP_MAX = 5,           // Maximum: max(A, B) or max(A, B, C)
-    COMBO_OP_WEIGHTED = 6       // Weighted: A  + B  (W1+W2=1)
+    COMBO_OP_WEIGHTED = 6,      // Weighted: A  + B  (W1+W2=1)
+    // AUDIT FIX #2: QT presets claimed "Geo Mean" but used AVERAGE (arithmetic).
+    // Added an explicit operation so the label and behavior match.
+    COMBO_OP_GEO_MEAN = 7      // Geometric Mean:  (A B)  for 2 values, (A B C)^(1/3) for 3
 };
 
 //+------------------------------------------------------------------+
@@ -355,11 +380,14 @@ enum ENUM_COMBO_MODE {
 //+------------------------------------------------------------------+
 //| Timeframe Types for Advanced Combo                               |
 //+------------------------------------------------------------------+
+// AUDIT FIX #4: Comments corrected to match GetTimeframeByType() implementation
+// (faster < current < medium < slower). Previously the comments claimed the
+// opposite (1/4x, 1x, 4x, 16x) which is inverted from what the code resolves.
 enum ENUM_COMBO_TIMEFRAME_TYPE {
-    COMBO_TF_SUB = 0,           // Sub: 1/4 current (faster)
-    COMBO_TF_TRIGGER = 1,       // Trigger: Current timeframe
-    COMBO_TF_PATTERN = 2,       // Pattern: 4x current
-    COMBO_TF_STRUCTURE = 3      // Structure: 16x current
+    COMBO_TF_SUB = 0,           // Sub: Current / 16 (smallest TF, fastest)
+    COMBO_TF_TRIGGER = 1,       // Trigger: Current / 4 (1 fractal lower)
+    COMBO_TF_PATTERN = 2,       // Pattern: Current timeframe
+    COMBO_TF_STRUCTURE = 3      // Structure: Current * 4 (1 fractal higher)
 };
 
 //+------------------------------------------------------------------+
@@ -368,7 +396,8 @@ enum ENUM_COMBO_TIMEFRAME_TYPE {
 enum ENUM_COMBO_STEP_TYPE {
     COMBO_STEP_TH = 0,          // TH: Base step (1.0  )
     COMBO_STEP_SS = 1,          // SS: Short step (1.5  )
-    COMBO_STEP_LS = 2           // LS: Long step (2.0  )
+    COMBO_STEP_LS = 2,          // LS: Long step (2.0  )
+    COMBO_STEP_CONTROL = 3      // CONTROL/MID: Control step (1.75  )
 };
 
 //+------------------------------------------------------------------+
@@ -520,6 +549,10 @@ enum ENUM_FRACTAL_JUMP_STRATEGY {
 
 // Global State Variables for Adaptive Scaling
 static int g_fractalShift = 0;          // Current fractal level shift (power of 2)
+static bool g_fractalDetermined = false; // True once the jump has been computed with valid ATR
+static string g_fractalDeterminedTF = ""; // Timeframe the current determination applies to (jump is per-TF)
+static uint g_fractalDetermineStartMs = 0; // Tick time of first determination attempt (timeout fallback)
+#define FRACTAL_DETERMINE_TIMEOUT_MS 30000 // Draw anyway (shift 0) if ATR never becomes ready
 
 //+------------------------------------------------------------------+
 //| TH3 Object Name Suffixes (Magic Numbers Elimination)            |

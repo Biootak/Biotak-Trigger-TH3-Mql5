@@ -220,21 +220,6 @@ int GetSymbolStateIndex()
     
     Print("  Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");
     return newIndex;
-    ArrayResize(g_symbolStates, g_symbolStateCount + 1);
-    g_symbolStates[g_symbolStateCount].symbol = currentSymbol;
-    g_symbolStates[g_symbolStateCount].basePriceCached = EMPTY_VALUE;
-    g_symbolStates[g_symbolStateCount].lastProcessedBlockTimestamp = 0;  // Used for log deduplication
-    g_symbolStates[g_symbolStateCount].referenceM1Power = 0.0;
-    ArrayResize(g_symbolStates[g_symbolStateCount].basePriceHistory, 0);
-    g_symbolStates[g_symbolStateCount].historyCount = 0;
-    g_symbolStates[g_symbolStateCount].lastHistoryDay = -1;
-    g_symbolStates[g_symbolStateCount].lastHistoryYear = -1;
-    g_symbolStates[g_symbolStateCount].systemInitialized = false;
-    
-    DEBUG_PRINTF("Created new state for symbol: ", currentSymbol);
-    
-    g_symbolStateCount++;
-    return g_symbolStateCount - 1;
 }
 
 // Helper functions for array access (to avoid macro expansion issues)

@@ -55,9 +55,9 @@
 #include "Biotak\ATRCalculations.mqh"
 #include "Biotak\AdaptiveScaling.mqh"
 #include "Biotak\BasePriceManager.mqh"
-#include "Biotak\WaveAnalysis.mqh"
 
 #ifndef BUILD_LITE
+#include "Biotak\WaveAnalysis.mqh"
 #include "Biotak\FrequencyOptimizer.mqh"
 #include "Biotak\TH3Tool.mqh"
 #endif
@@ -78,6 +78,15 @@
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   // DIAGNOSTIC: unconditional marker that proves this source was recompiled
+   Print("[DIAG_BUILD_MARKER_MQ5] Biotak Trigger TH3 diagnostic patch loaded | TF=",
+         EnumToString((ENUM_TIMEFRAMES)Period()),
+         " | build=",
+#ifdef DEBUG_BUILD
+         "DEBUG");
+#else
+         "PRODUCTION");
+#endif
    return OnInitHandler();
   }
 

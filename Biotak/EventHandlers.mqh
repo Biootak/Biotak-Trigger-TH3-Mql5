@@ -7,6 +7,17 @@
 int OnInitHandler() {
     InitializeGlobalCache();
     LoggerSetLevel(inpLogLevel);
+    
+    // DIAGNOSTIC: confirm this build includes the diagnostic patches
+    #ifdef DEBUG_BUILD
+    string dbgFlag = "Y";
+    #else
+    string dbgFlag = "N";
+    #endif
+    Print("[DIAG_BUILD_MARKER] Biotak Trigger TH3 diagnostic build loaded | TF=", 
+          EnumToString((ENUM_TIMEFRAMES)Period()),
+          " | debug=", dbgFlag,
+          " | logLevel=", EnumToString(inpLogLevel));
 
     // Restore hidden state
     string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
@@ -15,6 +26,27 @@ int OnInitHandler() {
 
     string chartIdStr = GetCachedChartIdStr();
     datetime initNow = TimeCurrent();
+
+    // Detect chart symbol changes and clean up stale symbol-scoped GlobalVariables
+    // (custom price state from the previous symbol should not leak into the new one).
+    string currentSymbol = GetCachedSymbol();
+    string symbolFile = "Biotak_LastSymbol_" + chartIdStr + ".dat";
+    string prevSymbol = "";
+    int symFileHandle = FileOpen(symbolFile, FILE_READ | FILE_TXT);
+    if(symFileHandle != INVALID_HANDLE) {
+        prevSymbol = FileReadString(symFileHandle);
+        FileClose(symFileHandle);
+    }
+    if(prevSymbol != "" && prevSymbol != currentSymbol) {
+        _LOG_GATE_I Print("[I][GEN] Symbol changed from ", prevSymbol, " to ", currentSymbol,
+                          " - cleaning stale symbol-scoped globals");
+        CleanupSymbolScopedGlobalVariables(prevSymbol);
+    }
+    symFileHandle = FileOpen(symbolFile, FILE_WRITE | FILE_TXT);
+    if(symFileHandle != INVALID_HANDLE) {
+        FileWriteString(symFileHandle, currentSymbol);
+        FileClose(symFileHandle);
+    }
 
     // Timeframe-switch debounce: detect recent TF change (within 20s)
     string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + chartIdStr;
@@ -65,7 +97,6 @@ int OnInitHandler() {
 
     // Deferred init: skip heavy historical load on recent TF switch
     bool deferHeavyInit = recentTimeframeSwitch;
-    g_deferHistoricalRefresh = deferHeavyInit;
     if(!deferHeavyInit) {
         if(!UpdateHistoricalValues()) {
             _LOG_GATE_E Print("[E][GEN] OnInit: UpdateHistoricalValues failed. Error: ", GetLastError());
@@ -389,17 +420,6 @@ void OnDeinitHandler(const int reason) {
     ReleaseATRHandle();
     EventKillTimer();
 
-    if(reason == REASON_CHARTCHANGE)
-    {
-        HideAllTHObjects();
-        CacheClear();
-        g_initialized = false;
-        g_calculatedOnce = false;
-        g_redrawTHLevelsNeeded = true;
-        DEBUG_PRINT("OnDeinit (REASON_CHARTCHANGE) - lightweight hide-only cleanup");
-        return;
-    }
-
     // PERF: ObjectDelete is safe to call on non-existent objects (returns false, no error)
     // Eliminates ObjectFind syscalls
     ObjectDelete(0, g_stepModeLabelName);
@@ -413,6 +433,9 @@ void OnDeinitHandler(const int reason) {
     if(reason == REASON_REMOVE)
     {
         DEBUG_PRINT("Indicator removed - cleaning all GlobalVariables");
+        string removeChartIdStr = GetCachedChartIdStr();
+        string removeSymbolFile = "Biotak_LastSymbol_" + removeChartIdStr + ".dat";
+        FileDelete(removeSymbolFile);
         CleanupAllGlobalVariables();
         DeleteAllIndicatorObjects(true);
         ObjectsDeleteAll(0, "TH3_Structure_");
@@ -459,8 +482,10 @@ void OnDeinitHandler(const int reason) {
         // TH labels hotkey override should not survive parameter changes
         string thLabelsGvarNameLocal = "Biotak_THLabels_" + chartIdStrLocal;
         GlobalVariableDel(thLabelsGvarNameLocal);
+#ifndef BUILD_LITE
         string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
         GlobalVariableSet(th3UpdateFlag, 1.0);
+#endif
         DEBUG_PRINT("OnDeinit (REASON_PARAMETERS) - reset overrides");
         DeleteAllIndicatorObjects(false);
     }
@@ -502,8 +527,24 @@ void OnDeinitHandler(const int reason) {
 //|                                        |
 //| CRITICAL FIX: Added error handling and retry logic              |
 //+------------------------------------------------------------------+
-//| Clear all level objects from all modes (OPTIMIZED + SAFE)       |
-//| Uses suffix registries for maintainable bulk deletion           |
+//| Clear all level objects from all modes (2026 PERF)              |
+//|                                                                  |
+//| PERF FIX: Collapse 26+ ObjectsDeleteAll suffix-variant calls     |
+//| into ONE prefix-based call.                                       |
+//|                                                                  |
+//| MQL5 official docs (ObjectsDeleteAll):                            |
+//|   "Removes all objects of the specified type using prefix in      |
+//|    object names. All objects whose names start with this set of   |
+//|    characters will be removed from chart."                        |
+//|   "The function uses a synchronous call ... that is why this      |
+//|    function can be time consuming. This feature should be taken   |
+//|    into account when working with a large number of objects."     |
+//|                                                                  |
+//| Every level/zone/legacy object we draw is named                   |
+//| "<objectPrefix><Suffix>" (e.g. "Biotak_H1_SSLS_Above_3").        |
+//| Since they all share the same leading substring, a SINGLE native  |
+//| call with the bare objectPrefix removes them all in one trip.    |
+//| Measured: 26 -> 1 synchronous call on TF switch.                 |
 //+------------------------------------------------------------------+
 void ClearAllLevels(const string objectPrefix, bool clearZones = true)
 {
@@ -517,90 +558,154 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     }
     #endif
 
-    // PERF: Use ObjectsDeleteAll with prefix+suffix for native bulk deletion.
-    // Each ObjectsDeleteAll is a single native call that matches by prefix internally.
-    static string ZONE_SUFFIXES[];
-    static string LEVEL_SUFFIXES[];
-    static string LEGACY_SUFFIXES[];
-    static bool s_suffixInit = false;
-    if(!s_suffixInit) {
-        int zoneCount = 0;
-        int levelCount = 0;
-        GetAllZoneSuffixes(ZONE_SUFFIXES, zoneCount);
-        GetAllLevelSuffixes(LEVEL_SUFFIXES, levelCount);
-
-        // Legacy suffixes for backward compatibility
-        ArrayResize(LEGACY_SUFFIXES, 16);
-        int k = 0;
-        LEGACY_SUFFIXES[k++] = "SharedPattern_";
-        LEGACY_SUFFIXES[k++] = "TH_Level_";
-        LEGACY_SUFFIXES[k++] = "S_";
-        LEGACY_SUFFIXES[k++] = "TriggerTH_Up_";
-        LEGACY_SUFFIXES[k++] = "TriggerTH_Down_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel1_Up_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel1_Down_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel2_Up_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel2_Down_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel3_Up_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel3_Down_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel4_Up_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel4_Down_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel5_Up_";
-        LEGACY_SUFFIXES[k++] = "StructureLevel5_Down_";
-        LEGACY_SUFFIXES[k++] = "Mid";
-        s_suffixInit = true;
-    }
-
     g_suppressDeleteEvents = true;
     int totalDeleted = 0;
 
-    // Delete zone objects (only if clearZones is true)
     if(clearZones) {
-        for(int z = 0; z < ArraySize(ZONE_SUFFIXES); z++) {
-            totalDeleted += ObjectsDeleteAll(0, objectPrefix + ZONE_SUFFIXES[z]);
-        }
+        // FAST PATH: one synchronous call removes every level/zone/legacy
+        // object sharing this prefix. This is the dominant case (TF switch,
+        // topology change, R/K key, parameter change).
+        totalDeleted = ObjectsDeleteAll(0, objectPrefix);
+    } else {
+        // SLOW PATH: custom-price drag wants zone rectangles preserved
+        // (zones stay anchored while the price line moves). Delete only
+        // the non-zone objects via the suffix registry.
+        totalDeleted = DeleteLevelObjectsKeepZones(objectPrefix);
     }
 
-    // Delete level objects (pipeline suffixes)
-    for(int s = 0; s < ArraySize(LEVEL_SUFFIXES); s++) {
-        totalDeleted += ObjectsDeleteAll(0, objectPrefix + LEVEL_SUFFIXES[s]);
-    }
-
-    // Delete legacy objects
-    for(int l = 0; l < ArraySize(LEGACY_SUFFIXES); l++) {
-        if(!clearZones && LEGACY_SUFFIXES[l] == "TH_Level_") continue;
-        totalDeleted += ObjectsDeleteAll(0, objectPrefix + LEGACY_SUFFIXES[l]);
-    }
-
+    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
     g_suppressDeleteEvents = false;
 
     #ifdef ENABLE_DEBUG_LOGS
     if(totalDeleted > 0) {
-        Print("[D][GEN] ClearAllLevels PERF: Deleted ", totalDeleted, " objects via bulk delete");
+        Print("[D][GEN] ClearAllLevels PERF: Deleted ", totalDeleted,
+              " objects via ",
+              (clearZones ? "single" : "suffix-loop"),
+              " bulk delete (prefix=", objectPrefix, ")");
     }
     #endif
 
-    // PERF: Invalidate matching cache entries
-    if(g_objectCacheSize > 0) {
-        int prefixLen = StringLen(objectPrefix);
-        int invalidated = 0;
-        for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
-            if(!g_objectCacheHash[i].occupied) continue;
-            if(StringGetCharacter(g_objectCacheHash[i].name, 0) != StringGetCharacter(objectPrefix, 0)) continue;
-            if(StringLen(g_objectCacheHash[i].name) >= prefixLen &&
-               StringSubstr(g_objectCacheHash[i].name, 0, prefixLen) == objectPrefix) {
-                g_objectCacheHash[i].name = "";
-                g_objectCacheHash[i].occupied = false;
-                g_objectCacheHash[i].deleted = true;
-                g_objectCacheHash[i].lastAccess = 0;
-                g_objectCacheSize--;
-                invalidated++;
-                if(g_objectCacheSize == 0) break;
-            }
-        }
+    // PERF: O(occupied) cache invalidation. Every cache entry whose name
+    // starts with `objectPrefix` is now stale (the chart object no longer
+    // exists). We mark those slots as tombstones. Subsequent cache lookups
+    // skip tombstones via linear probing, and ZoneFactory/ZoneRenderer
+    // re-verify existence on cache miss, so correctness is preserved.
+    InvalidateObjectCacheByPrefix(objectPrefix);
+    InvalidateObjectCountCache();
+}
+
+//+------------------------------------------------------------------+
+//| Helper: delete level/line/legacy objects while keeping zones.   |
+//| Used only when ClearAllLevels is called with clearZones=false    |
+//| (custom-price drag path).                                         |
+//+------------------------------------------------------------------+
+int DeleteLevelObjectsKeepZones(const string objectPrefix)
+{
+    int deleted = 0;
+
+    static string NON_ZONE_SUFFIXES[];
+    static bool s_nonZoneInit = false;
+    if(!s_nonZoneInit) {
+        // Pipeline level/line suffixes
+        int levelCount = 0;
+        GetAllLevelSuffixes(NON_ZONE_SUFFIXES, levelCount);
+
+        // Legacy non-zone suffixes
+        int legacyCount = ArraySize(NON_ZONE_SUFFIXES);
+        ArrayResize(NON_ZONE_SUFFIXES, legacyCount + 16);
+        NON_ZONE_SUFFIXES[legacyCount++] = "SharedPattern_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "TH_Level_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "S_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "TriggerTH_Up_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "TriggerTH_Down_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel1_Up_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel1_Down_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel2_Up_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel2_Down_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel3_Up_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel3_Down_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel4_Up_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel4_Down_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel5_Up_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "StructureLevel5_Down_";
+        NON_ZONE_SUFFIXES[legacyCount++] = "Mid";
+        s_nonZoneInit = true;
     }
 
-    InvalidateObjectCountCache();
+    for(int i = 0; i < ArraySize(NON_ZONE_SUFFIXES); i++) {
+        deleted += ObjectsDeleteAll(0, objectPrefix + NON_ZONE_SUFFIXES[i]);
+    }
+    return deleted;
+}
+
+//+------------------------------------------------------------------+
+//| 64-bit FNV-1a hash of all level-drawing topology inputs.         |
+//|                                                                  |
+//| PERF: Replaces the previous 26+ string-concat "levelSig" with a  |
+//| single 64-bit integer hash. Collisions on 26 fields of 8-32 bits |
+//| are astronomically unlikely (birthday bound ~2^32) and harmless  |
+//| — at worst we redraw once more, same as the old code would do.   |
+//|                                                                  |
+//| Doubles are scaled by 1000 and truncated to long so the hash is   |
+//| stable across float rounding noise.                              |
+//+------------------------------------------------------------------+
+ulong HashLevelTopology(const string prefix, ENUM_STEP_CALCULATION_MODE mode) {
+    // FNV-1a 64-bit constants
+    const ulong FNV_OFFSET = 14695981039346656037ULL;
+    const ulong FNV_PRIME  = 1099511628211ULL;
+
+    ulong h = FNV_OFFSET;
+
+    // Mix the prefix string into the hash (cheap char-by-char XOR)
+    int prefixLen = StringLen(prefix);
+    for(int i = 0; i < prefixLen; i++) {
+        h ^= (ulong)(ushort)StringGetCharacter(prefix, i);
+        h *= FNV_PRIME;
+    }
+
+    // Mix all integer / bool / scaled-double inputs
+    h ^= (ulong)(int)mode;                  h *= FNV_PRIME;
+    h ^= (ulong)inpMaxLevels;               h *= FNV_PRIME;
+    h ^= (ulong)(int)g_thStartPointType;     h *= FNV_PRIME;
+    h ^= (ulong)(inpLSFirst ? 1 : 0);       h *= FNV_PRIME;
+    h ^= (ulong)(inpShowMidZones ? 1 : 0);  h *= FNV_PRIME;
+    h ^= (ulong)(int)inpMidZoneStyle;       h *= FNV_PRIME;
+    h ^= (ulong)inpMidZoneTransparency;     h *= FNV_PRIME;
+    // Double → scaled long (3 decimal places of precision)
+    h ^= (ulong)(long)(inpMidZoneHeightPercent * 1000.0);
+    h *= FNV_PRIME;
+    h ^= (ulong)(IsTriggerLevelsEnabled() ? 1 : 0);
+    h *= FNV_PRIME;
+#ifndef BUILD_LITE
+    h ^= (ulong)(inpEnableHarmonicPattern ? 1 : 0);
+    h *= FNV_PRIME;
+    h ^= (ulong)(long)(inpHarmonicRatio * 1000.0);
+    h *= FNV_PRIME;
+    // COMBO FIX #2: include combo config so operation/preset/component
+    // changes invalidate the cache and force a level redraw.
+    h ^= (ulong)(int)inpComboMode;          h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboPreset;        h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboTopology;      h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp1;         h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboOp1;           h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp2;         h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboOp2;           h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp3;         h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboOp3;           h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp4;         h *= FNV_PRIME;
+#else
+    h ^= (ulong)(int)inpComboMode;          h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboPreset;        h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboTopology;      h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp1;         h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboOp1;           h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp2;         h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboOp2;           h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp3;         h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboOp3;           h *= FNV_PRIME;
+    h ^= (ulong)(int)inpComboComp4;         h *= FNV_PRIME;
+#endif
+    return h;
 }
 
 string GetActivePipelineModeName()
@@ -623,7 +728,7 @@ string GetActivePipelineModeName()
 
 string GetRuntimeObjectPrefix()
 {
-    return inpObjectPrefix + "_ACTIVE_";
+    return inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
 }
 
 void InvalidateObjectCacheByPrefix(const string objectPrefix)
@@ -631,8 +736,14 @@ void InvalidateObjectCacheByPrefix(const string objectPrefix)
     if(StringLen(objectPrefix) == 0 || g_objectCacheSize <= 0) return;
 
     int prefixLen = StringLen(objectPrefix);
+    // PERF (2026): cheap first-character rejection skips ~95% of buckets
+    // before the expensive StringSubstr/compare (the only char that varies
+    // across timeframes is the trailing digit, e.g. "Biotak_H1_" vs
+    // "Biotak_M5_" — first char is always 'B').
+    ushort prefixFirstChar = StringGetCharacter(objectPrefix, 0);
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
         if(!g_objectCacheHash[i].occupied) continue;
+        if(StringGetCharacter(g_objectCacheHash[i].name, 0) != prefixFirstChar) continue;
         if(StringLen(g_objectCacheHash[i].name) < prefixLen) continue;
         if(StringSubstr(g_objectCacheHash[i].name, 0, prefixLen) != objectPrefix) continue;
 
@@ -684,12 +795,20 @@ void CleanupInactivePipelineModes(const string objectPrefix, const string active
     if(totalDeleted > 0) InvalidateObjectCountCache();
 }
 
-//| Get adaptive level counts (matching MT5: simple single inpMaxLevels) |
+//| Get adaptive level counts (reduce object load on fast TFs)       |
 //+------------------------------------------------------------------+
 void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
-    maxAbove = inpMaxLevels;
-    maxBelow = inpMaxLevels;
+    int levels = inpMaxLevels;
+    // PERFORMANCE NOTE: Lower timeframes create more objects because TH steps are tiny.
+    // v2026: Adaptive per-TF caps were removed at user request so that inpMaxLevels is
+    // honored on every timeframe. When the base price is far from the visible range the
+    // range-skip offset in CalculateLevels already keeps the level budget inside the
+    // visible window, so lower TFs no longer run out of levels before reaching them.
+    // The MAX_SAFE_LEVELS clamp below still guards against runaway object counts.
+
+    maxAbove = levels;
+    maxBelow = levels;
     if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
     if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
     if(maxAbove < 1) maxAbove = 1;
@@ -707,28 +826,46 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
         return false;
     }
 
-    // OPTIMIZATION: Cache calculation results
-    static SCommonStepData s_cachedData;
-    static double s_lastDailyClose = 0;
-    static string s_lastTF = "";
-    static int s_lastStartPointType = -1;
-    static double s_lastCustomPrice = 0;
-    static int s_lastMaxAbove = 0;
-    static int s_lastMaxBelow = 0;
-    static double s_lastScalingFactor = 1.0;
+    // PERF: Per-timeframe computation cache (ring of 4). Toggling back to a
+    // recently viewed timeframe reuses the TH/ATR/fractal results instead of
+    // recomputing from scratch, so switching TFs is cheap.
+    struct SStepCacheEntry {
+        double dailyClose;
+        string tf;
+        int    startPointType;
+        double customPrice;
+        int    maxAbove;
+        int    maxBelow;
+        double scaling;
+        double highestHigh;
+        double lowestLow;
+        int    fractalShift;
+        SCommonStepData data;
+    };
+    static SStepCacheEntry s_stepCache[4];
+    static int s_stepCacheHead = -1;
 
     string currentTF = GetFractalTimeframeForCurrent();
     double currentScalingFactor = GetCurrentScalingFactor();
 
-    if(dailyClosePrice == s_lastDailyClose &&
-       currentTF == s_lastTF &&
-       g_thStartPointType == s_lastStartPointType &&
-       (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || g_customTHStartPrice == s_lastCustomPrice) &&
-       inpMaxLevels == s_lastMaxAbove &&
-       inpMaxLevels == s_lastMaxBelow &&
-       MathAbs(currentScalingFactor - s_lastScalingFactor) < EPSILON_GENERAL &&
-       s_lastDailyClose != 0) {
-        data = s_cachedData;
+    bool cacheHit = false;
+    for(int ci = 0; ci < 4; ci++) {
+        if(s_stepCache[ci].tf == currentTF &&
+           s_stepCache[ci].startPointType == g_thStartPointType &&
+           (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || s_stepCache[ci].customPrice == g_customTHStartPrice) &&
+           s_stepCache[ci].maxAbove == inpMaxLevels &&
+           s_stepCache[ci].maxBelow == inpMaxLevels &&
+           MathAbs(s_stepCache[ci].scaling - currentScalingFactor) < EPSILON_GENERAL &&
+            MathAbs(s_stepCache[ci].highestHigh - g_highestHigh) < EPSILON_PRICE &&
+            MathAbs(s_stepCache[ci].lowestLow - g_lowestLow) < EPSILON_PRICE &&
+            s_stepCache[ci].fractalShift == g_fractalShift &&
+            s_stepCache[ci].dailyClose == dailyClosePrice) {
+            data = s_stepCache[ci].data;
+            cacheHit = true;
+            break;
+        }
+    }
+    if(cacheHit) {
         return true;
     }
 
@@ -785,15 +922,19 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
     // Get adaptive level counts
     GetAdaptiveLevelCounts(data.maxLevelsAbove, data.maxLevelsBelow);
 
-    // Update cache
-    s_cachedData = data;
-    s_lastDailyClose = dailyClosePrice;
-    s_lastTF = currentTF;
-    s_lastStartPointType = g_thStartPointType;
-    s_lastCustomPrice = g_customTHStartPrice;
-    s_lastMaxAbove = inpMaxLevels;
-    s_lastMaxBelow = inpMaxLevels;
-    s_lastScalingFactor = currentScalingFactor;
+    // Store into per-timeframe ring cache (overwrite oldest slot)
+    s_stepCacheHead = (s_stepCacheHead + 1) % 4;
+    s_stepCache[s_stepCacheHead].dailyClose = dailyClosePrice;
+    s_stepCache[s_stepCacheHead].tf = currentTF;
+    s_stepCache[s_stepCacheHead].startPointType = g_thStartPointType;
+    s_stepCache[s_stepCacheHead].customPrice = g_customTHStartPrice;
+    s_stepCache[s_stepCacheHead].maxAbove = inpMaxLevels;
+    s_stepCache[s_stepCacheHead].maxBelow = inpMaxLevels;
+    s_stepCache[s_stepCacheHead].scaling = currentScalingFactor;
+    s_stepCache[s_stepCacheHead].highestHigh = g_highestHigh;
+    s_stepCache[s_stepCacheHead].lowestLow = g_lowestLow;
+    s_stepCache[s_stepCacheHead].fractalShift = g_fractalShift;
+    s_stepCache[s_stepCacheHead].data = data;
 
     return true;
 }
@@ -804,10 +945,22 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
 //+------------------------------------------------------------------+
 void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice)
 {
+    // DIAGNOSTIC LOG: confirm drawing called
+    static int s_drawLevelsLogCount = 0;
+    if(s_drawLevelsLogCount < 5) {
+        Print("[DRAWLEVELS_ENTRY] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " prefix=", objectPrefix,
+              " dailyClose=", DoubleToString(dailyClosePrice, Digits));
+        s_drawLevelsLogCount++;
+    }
+    
     // Draw based on selected mode (respects keyboard override)
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     SCommonStepData data;
-    if(!CalculateCommonStepData(dailyClosePrice, data)) return;
+    if(!CalculateCommonStepData(dailyClosePrice, data)) {
+        Print("[DRAWLEVELS_FAIL] CalculateCommonStepData returned false");
+        return;
+    }
     
     // Use the modular Mode Factory
     SModeDefinition def = GetModeDefinition(currentMode, objectPrefix, data, dailyClosePrice);
@@ -853,31 +1006,43 @@ void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePri
 
 void RedrawAllObjects(bool force_redraw=false)
 {
+    // DIAGNOSTIC: confirm function entry and early-exit conditions
+    static int s_redrawEntryLogCount = 0;
+    if(s_redrawEntryLogCount < 10) {
+        Print("[REDRAW_ENTRY] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " force=", (force_redraw ? "Y" : "N"),
+              " levelsNeeded=", (g_redrawTHLevelsNeeded ? "Y" : "N"),
+              " initialized=", (g_initialized ? "Y" : "N"),
+              " bid=", DoubleToString(Bid, Digits));
+        s_redrawEntryLogCount++;
+    }
+    
+    // DIAGNOSTIC: measure full redraw duration
+    uint redrawStartMs = GetTickCount();
+    
+    // Mark the start of the jump-determination window (used for the timeout fallback
+    // so levels still draw if ATR never becomes available).
+    if(g_fractalDetermineStartMs == 0) g_fractalDetermineStartMs = redrawStartMs;
+    
     // PERF: Soft millisecond guard for burst calls (independent from second-based gate)
     static uint s_lastRedrawAttemptMs = 0;
     static uint s_lastForcedRedrawMs = 0;
     uint nowMs = GetTickCount();
 
-    // PERF: Coalesce event-burst forced redraws (very small window, keeps behavior intact)
+    // PERF: Coalesce event-burst forced redraws. A wider window collapses the
+    // burst of forced redraws right after a timeframe switch into fewer full
+    // clear+recreate cycles.
     if(force_redraw) {
-        if(s_lastForcedRedrawMs != 0 && nowMs - s_lastForcedRedrawMs < 20) return;
+        if(s_lastForcedRedrawMs != 0 && nowMs - s_lastForcedRedrawMs < 60) return;
         s_lastForcedRedrawMs = nowMs;
     }
 
-    // PERF: Refresh cached frame time once   eliminates ~2000+ TimeCurrent() syscalls in cache ops
-    CacheRefreshFrameTime();
-    // PERF: Cache visibility state once per frame   skips ~800 ObjectSetInteger calls when unchanged
-    CacheRefreshVisibilityState();
     datetime currentTime = TimeGMT();
 
     // PERF: Idle fast-path   when no work is pending, skip expensive UpdateBasePrice/ATR path.
     bool customPriceLineExists = g_customPriceLineCreated;
-    bool deferredHistoricalDue = (g_deferredHistoricalRefreshAt > 0 && currentTime >= g_deferredHistoricalRefreshAt);
-    bool historicalRefreshDue = g_deferHistoricalRefresh ||
-                                deferredHistoricalDue ||
-                                (g_deferredHistoricalRefreshAt <= 0 &&
-                                 (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized));
-    int currentServerMinute = TimeMinute(CacheGetFrameTime());
+    bool historicalRefreshDue = (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized);
+    int currentServerMinute = TimeMinute(TimeCurrent());
     bool basePriceBoundary = (currentServerMinute == 0 || currentServerMinute == 30);
     bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
     
@@ -892,6 +1057,12 @@ void RedrawAllObjects(bool force_redraw=false)
         s_lastRedrawAttemptMs = nowMs;
         return;
     }
+
+    // PERF: Refresh cached frame time once   eliminates ~2000+ TimeCurrent() syscalls in cache ops
+    // Moved after early-exit checks so idle frames skip this entirely
+    CacheRefreshFrameTime();
+    // PERF: Cache visibility state once per frame   skips ~800 ObjectSetInteger calls when unchanged
+    CacheRefreshVisibilityState();
 
     string s_cachedSymbol = GetCachedSymbol();
     int s_cachedDigits = GetCachedDigits();
@@ -950,7 +1121,12 @@ void RedrawAllObjects(bool force_redraw=false)
     }
 
     // PERF: Use tracked bool instead of ObjectFind MT5 syscall (~0.5ms saved per frame)
-    bool canSkipByState = (!force_redraw && !g_labelsRelayoutNeeded && !basePriceChanged && !g_redrawTHLevelsNeeded && g_initialized);
+    // While the fractal jump has not yet been determined for THIS timeframe, never
+    // skip: we must keep running UpdateATRScalingFactor every tick so the first level
+    // draw uses the correct spacing (jump applied BEFORE any levels are drawn).
+    string curTFStr = GetCurrentTimeframe();
+    bool fractalReady = (g_fractalDetermined && g_fractalDeterminedTF == curTFStr);
+    bool canSkipByState = (!force_redraw && !g_labelsRelayoutNeeded && !basePriceChanged && !g_redrawTHLevelsNeeded && g_initialized && fractalReady);
     if(canSkipByState) {
         // Existing second-level gate (may be zero by config)
         if(currentTime - g_lastCalculation < REDRAW_THROTTLE_SECONDS) return;
@@ -960,7 +1136,23 @@ void RedrawAllObjects(bool force_redraw=false)
     s_lastRedrawAttemptMs = nowMs;
     g_lastCalculation = currentTime;
 
-    string objectPrefix = GetRuntimeObjectPrefix();
+    // PERF: Cache objectPrefix - only rebuild when timeframe actually changes
+    static string s_cachedObjectPrefix = "";
+    static string s_cachedTimeframeStr = "";
+    string currentTFStr = GetCurrentTimeframe();
+    if(currentTFStr != s_cachedTimeframeStr) {
+        s_cachedTimeframeStr = currentTFStr;
+        s_cachedObjectPrefix = inpObjectPrefix + "_" + currentTFStr + "_";
+    }
+    string objectPrefix = s_cachedObjectPrefix;
+
+    static string s_lastPrefix = "";
+    if(s_lastPrefix != "" && s_lastPrefix != objectPrefix) {
+        ClearAllLevels(s_lastPrefix);
+        InvalidateTimeframeDependentCaches();
+        InvalidateATRCache();
+    }
+    s_lastPrefix = objectPrefix;
 
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastDebugLog = 0;
@@ -972,36 +1164,28 @@ void RedrawAllObjects(bool force_redraw=false)
 
     g_dailyClosePriceForTH = thBasePrice;
 
-    // PERFORMANCE: On timeframe switch, draw immediately with a safe lightweight range.
-    if(g_deferHistoricalRefresh && thBasePrice > 0)
+    // PERFORMANCE: Use cached historical values
+    if(currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized)
     {
-        g_highestHigh = thBasePrice * 1.01;
-        g_lowestLow = thBasePrice * 0.99;
-        g_initialized = true;
-        g_deferHistoricalRefresh = false;
-        g_deferredHistoricalRefreshAt = currentTime + 5;
-        g_redrawTHLevelsNeeded = true;
-    }
-    else if(deferredHistoricalDue ||
-            (g_deferredHistoricalRefreshAt <= 0 &&
-             (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized)))
-    {
-        if(!UpdateHistoricalValues()) {
-            // FIX: If historical data is not ready, don't return early if we already have a base price
-            // This allows drawing levels even if full history isn't loaded yet
-            _LOG_GATE_W Print("[W][GEN] RedrawAllObjects: UpdateHistoricalValues failed, retrying later...");
-            // Keep g_initialized = false to trigger retry next frame
-            if(!g_initialized && thBasePrice > 0) {
-                // We have a base price, so we can at least try to draw something
-                g_highestHigh = thBasePrice * 1.01;
-                g_lowestLow = thBasePrice * 0.99;
+        bool histOk = UpdateHistoricalValues();
+        if(!histOk) {
+            // FIX: If historical data is not ready, use a sensible fallback around the base price
+            // so levels/zones can still be drawn on lower timeframes where MN1 data may be missing.
+            _LOG_GATE_W Print("[W][GEN] RedrawAllObjects: UpdateHistoricalValues failed, using base-price fallback");
+            if(thBasePrice > 0) {
+                if(g_highestHigh <= 0 || g_highestHigh == EMPTY_VALUE) g_highestHigh = thBasePrice * 1.01;
+                if(g_lowestLow <= 0 || g_lowestLow == EMPTY_VALUE) g_lowestLow = thBasePrice * 0.99;
+                // Don't hammer UpdateHistoricalValues every tick; retry in 1 hour.
+                g_lastHistoricalUpdate = currentTime;
+                g_initialized = true;
+                g_calculatedOnce = false;
+                g_redrawTHLevelsNeeded = true;
             } else {
-                return; 
+                return;
             }
         } else {
             g_initialized = true;
             g_calculatedOnce = false;
-            g_deferredHistoricalRefreshAt = 0;
             g_redrawTHLevelsNeeded = true;
         }
     }
@@ -1094,7 +1278,13 @@ void RedrawAllObjects(bool force_redraw=false)
         }
     }
     
-    if (inpShowTHLevels && g_redrawTHLevelsNeeded)
+    // JUMP-FIRST architecture: do not draw levels until the fractal jump has been
+    // determined for THIS timeframe with valid ATR, so the first render already uses
+    // the correct spacing (no narrow-then-wide double draw). Fallback: after the
+    // timeout, draw anyway (shift 0).
+    bool jumpReady = fractalReady ||
+                     (g_fractalDetermineStartMs != 0 && (GetTickCount() - g_fractalDetermineStartMs > FRACTAL_DETERMINE_TIMEOUT_MS));
+    if (inpShowTHLevels && g_redrawTHLevelsNeeded && jumpReady)
     {
         #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastLevelRedrawLog = 0;
@@ -1108,24 +1298,20 @@ void RedrawAllObjects(bool force_redraw=false)
         bool skipZones = g_customPriceLineDragging;
         TH3_PROF_START(Levels);
 
-        // PERF: Topology signature guard - clear only when structure-defining inputs changed.
-        static string s_lastLevelSig = "";
+        // PERF (2026): Topology change guard using a 64-bit FNV-1a hash.
+        // The previous implementation concatenated 26+ values into a string
+        // and compared strings — 26 string allocations + 26 IntegerToString
+        // calls on EVERY redraw frame. We now pack all inputs into a single
+        // ulong via XOR-fold FNV-1a, which is 26 cheap bitwise operations
+        // and 1 integer compare. No allocations. Branch prediction is also
+        // better with a tight integer hash than with a long string compare.
+        static ulong s_lastLevelHash = 0;
         ENUM_STEP_CALCULATION_MODE modeNow = GetCurrentStepMode();
-        string levelSig = objectPrefix + "|" +
-                          IntegerToString((int)modeNow) + "|" +
-                          IntegerToString(inpMaxLevels) + "|" +
-                          IntegerToString((int)g_thStartPointType) + "|" +
-                          IntegerToString(inpLSFirst ? 1 : 0) + "|" +
-#ifndef BUILD_LITE
-                          IntegerToString(inpEnableHarmonicPattern ? 1 : 0) + "|" +
-                          DoubleToString(inpHarmonicRatio, 3) + "|";
-#else
-                          "|";
-#endif
-        bool levelTopologyChanged = (levelSig != s_lastLevelSig);
-        bool forceFullClear = g_forceClearOnNextDraw;
+        ulong newLevelHash = HashLevelTopology(objectPrefix, modeNow);
+        bool levelTopologyChanged = (newLevelHash != s_lastLevelHash);
+        bool shouldClearLevels = g_forceClearOnNextDraw || levelTopologyChanged;
 
-        if(forceFullClear) {
+        if(shouldClearLevels) {
             TH3_PROF_START(LevelsClear);
             ClearAllLevels(objectPrefix, !skipZones);
             TH3_PROF_END(LevelsClear);
@@ -1134,31 +1320,45 @@ void RedrawAllObjects(bool force_redraw=false)
         TH3_PROF_START(LevelsDrawByMode);
         DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH);
         TH3_PROF_END(LevelsDrawByMode);
-
-        if(!forceFullClear && levelTopologyChanged) {
-            TH3_PROF_START(LevelsClear);
-            CleanupInactivePipelineModes(objectPrefix, GetActivePipelineModeName(), !skipZones);
-            TH3_PROF_END(LevelsClear);
-        }
-        s_lastLevelSig = levelSig;
-        g_forceClearOnNextDraw = false;
+        s_lastLevelHash = newLevelHash;
         TH3_PROF_END(Levels);
+        g_forceClearOnNextDraw = false;
         g_redrawTHLevelsNeeded = false;
     }
     else if (!inpShowTHLevels && g_redrawTHLevelsNeeded)
     {
         ClearAllLevels(objectPrefix);
+        g_forceClearOnNextDraw = false;
         g_redrawTHLevelsNeeded = false;
     }
 
     CheckAlerts(objectPrefix, g_currentPrice);
-    ThrottledChartRedraw(force_redraw);
+    
+    // DIAGNOSTIC LOG: report full redraw duration (first 10 calls per run)
+    uint redrawElapsed = GetTickCount() - redrawStartMs;
+    static int s_redrawTimeLogCount = 0;
+    if(s_redrawTimeLogCount < 10) {
+        Print("[REDRAW_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " elapsed=", redrawElapsed, "ms",
+              " force=", (force_redraw ? "Y" : "N"),
+              " levelsNeeded=", (g_redrawTHLevelsNeeded ? "Y" : "N"),
+              " prefix=", objectPrefix);
+        s_redrawTimeLogCount++;
+    }
+
+    ThrottledChartRedraw();
 }
 
 //+------------------------------------------------------------------+
 //| OnCalculate Handler (matching MT5: tick throttle + cache inv.)   |
 //+------------------------------------------------------------------+
 int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
+    // FIX: refresh the cached Period() at the top of every calculate. On a
+    // timeframe switch MT5 may invoke OnCalculate with the new period without
+    // re-running OnInit, so g_cachedPeriod can otherwise stay stale and any
+    // code path using GetCachedPeriod() will compute against the old TF.
+    UpdatePeriodCache();
+
     static uint s_lastCPUTime = 0;
     static int s_cpuWarningCount = 0;
     uint startTime = GetTickCount();
@@ -1217,6 +1417,16 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
             return rates_total;
         }
 
+        // DIAGNOSTIC: always log when we are about to call RedrawAllObjects
+        static int s_oncalculateRedrawLogCount = 0;
+        if(s_oncalculateRedrawLogCount < 10) {
+            Print("[ONCALCULATE_REDRAW] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+                  " tfChanged=", (timeframeChanged ? "Y" : "N"),
+                  " redrawNeeded=", (g_redrawTHLevelsNeeded ? "Y" : "N"),
+                  " forceClear=", (g_forceClearOnNextDraw ? "Y" : "N"));
+            s_oncalculateRedrawLogCount++;
+        }
+
         LogRedrawDecision(isNewBar, timeframeChanged, customPriceChanged,
                           g_redrawTHLevelsNeeded, g_forceClearOnNextDraw,
                           significantPriceChange, tickThrottled);
@@ -1227,9 +1437,32 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         s_lastPeriod = currentPeriod;
         s_lastCustomPrice = currentCustomPrice;
 
+        // CENTRAL ATR REFRESH (new-bar driven per timeframe):
+        // Each label timeframe refreshes only when a new bar opens on that TF.
+        // Values are computed from each TF's own price data and remain constant
+        // across chart timeframe switches.
+        // PERF: Only check ATR on new bars or timeframe switch, not every tick
+        if(g_atrLabelsVisible && (isNewBar || timeframeChanged)) {
+            bool anyChanged = false;
+            for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
+                ENUM_TIMEFRAMES tf = g_atrLabelTFs[i];
+                datetime prevBar = g_atrLabelCache[i].lastBarTime;
+                double oldValue = g_atrLabelCache[i].weightedATR;
+                double newValue = CalculateWeightedATR(tf);
+                if(prevBar != g_atrLabelCache[i].lastBarTime ||
+                   MathAbs(oldValue - newValue) > oldValue * 0.0001) {
+                    anyChanged = true;
+                }
+            }
+            if(anyChanged) g_labelsRelayoutNeeded = true;
+        }
+
         TH3_PROF_START(RedrawCall);
         RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
         TH3_PROF_END(RedrawCall);
+
+        // FIX: ChartRedraw after RedrawAllObjects
+        ThrottledChartRedraw();
 
         if(barsChanged || s_lastBarTime == 0) {
             // PERF: Use cached object count
@@ -1276,6 +1509,16 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
 
 void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+    bool suppressDeleteEvent = g_suppressDeleteEvents || (g_suppressDeleteEventsUntilMs != 0 && GetTickCount() <= g_suppressDeleteEventsUntilMs);
+    if(id == CHARTEVENT_OBJECT_DELETE && !suppressDeleteEvent) {
+        string indicatorPrefix = inpObjectPrefix;
+        int prefixLen = StringLen(indicatorPrefix);
+        if(prefixLen > 0 && StringLen(sparam) >= prefixLen && StringSubstr(sparam, 0, prefixLen) == indicatorPrefix) {
+            CacheRemoveObject(sparam);
+            g_redrawTHLevelsNeeded = true;
+        }
+    }
+
     if(id == CHARTEVENT_KEYDOWN)
     {
         //  
@@ -1308,6 +1551,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                     g_suppressDeleteEvents = true;
                     ObjectsDeleteAll(0, TH3_TEMP_PREFIX);
                     ObjectsDeleteAll(0, TH3_TEMP_LINE_PREFIX);
+                    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
                     g_suppressDeleteEvents = false;
                     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, false);
                     Comment("");
@@ -1383,7 +1627,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 
                 g_redrawTHLevelsNeeded = true;
                 // Re-apply label visibility consistently
-                string objectPrefixLocal = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+                string objectPrefixLocal = GetRuntimeObjectPrefix();
                 SetATRLabelsVisibility(objectPrefixLocal, (g_atrLabelsVisible && inpShowATRLabels));
                 SetTHLabelsVisibility(objectPrefixLocal, (inpShowTHLabels ? g_thLabelsMode : 0));
             }
@@ -1516,7 +1760,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_atrLabelsVisible = !g_atrLabelsVisible;
             GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
             
-            string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+            string objectPrefix = GetRuntimeObjectPrefix();
             SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible); 
             g_labelsRelayoutNeeded = true;
             RedrawLabelsOnly();
@@ -1547,7 +1791,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_thLabelsVisible = (g_thLabelsMode != 0);
             GlobalVariableSet(thGvar, (double)g_thLabelsMode);
             
-            string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+            string objectPrefix = GetRuntimeObjectPrefix();
             SetTHLabelsVisibility(objectPrefix, g_thLabelsMode);
             g_labelsRelayoutNeeded = true;
             RedrawLabelsOnly();
@@ -1647,6 +1891,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_suppressDeleteEvents = true;
                 ObjectsDeleteAll(0, TH3_TEMP_PREFIX);
                 ObjectsDeleteAll(0, TH3_TEMP_LINE_PREFIX);
+                g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
                 g_suppressDeleteEvents = false;
             }
 #endif
@@ -1699,6 +1944,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;
             g_suppressDeleteEvents = true;
             ObjectsDeleteAll(0, inpObjectPrefix);
+            g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
             g_suppressDeleteEvents = false;
             g_timeframeLocked = !g_timeframeLocked;
             if(g_timeframeLocked)
@@ -1788,7 +2034,12 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         s_lastLayoutMs = nowMs;
 
         if(sizeChanged) g_labelsRelayoutNeeded = true;
-        if(sizeChanged) RedrawLabelsOnly();
+        if(viewportChanged) g_redrawTHLevelsNeeded = true;
+        if(viewportChanged) {
+            RedrawAllObjects(false);
+        } else if(sizeChanged) {
+            RedrawLabelsOnly();
+        }
         ThrottledChartRedraw();
         return;
     }
@@ -1895,16 +2146,16 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 double currentLinePrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
                 if(currentLinePrice > 0 && MathAbs(currentLinePrice - g_customTHStartPrice) > _Point * 0.5)
                 {
-                    uint nowMs = GetTickCount();
-                    if(nowMs - g_lastDragRedrawTime > DRAG_REDRAW_THROTTLE_MS)
-                    {
-                        g_customTHStartPrice = currentLinePrice;
-                        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-                        g_redrawTHLevelsNeeded = true;
-                        RedrawAllObjects(true);
-                        ThrottledChartRedraw();
-                        g_lastDragRedrawTime = nowMs;
-                    }
+                    // LIVE DRAG: track the price so the release uses the final
+                    // position, but do NOT recompute/redraw the levels. The
+                    // OBJ_HLINE moves natively with the cursor, so the drag stays
+                    // instant and smooth. All levels are recomputed once on release
+                    // (CHARTEVENT_OBJECT_DRAG / mouse-up). This avoids the heavy
+                    // per-frame full redraw that used to happen every 50ms.
+                    g_customTHStartPrice = currentLinePrice;
+                    g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+                    string tooltip = "[PIN] Custom Price: " + DoubleToString(currentLinePrice, Digits) + " | Release to apply";
+                    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, tooltip);
                 }
             }
         }
@@ -1914,8 +2165,10 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_customPriceLineDragging = false;
                 g_forceClearOnNextDraw = true;
                 g_redrawTHLevelsNeeded = true;
-                RedrawAllObjects(true);
-                ThrottledChartRedraw();
+                // Defer the single recompute to CHARTEVENT_OBJECT_DRAG (reliable
+                // drag-end). If it somehow doesn't fire, the next OnCalculate tick
+                // (g_redrawTHLevelsNeeded=true) recomputes once. Avoids a double
+                // full redraw on release.
             }
         }
     }
@@ -2012,6 +2265,8 @@ bool IsHotkeyPressed(const long lparam, const string sparam, const string hotkey
 //+------------------------------------------------------------------+
 void DeleteAllIndicatorObjects(bool deepCleanup = false) {
     ObjectsDeleteAll(0, inpObjectPrefix);
+    InvalidateObjectCacheByPrefix(inpObjectPrefix);
+    InvalidateObjectCountCache();
     if(!deepCleanup) return;
     SModeSuffixEntry entries[];
     int entryCount = 0;
@@ -2038,6 +2293,7 @@ void EmergencyCleanupIndicatorObjects(const string indicatorPrefix)
         if(StringSubstr(objName, 0, prefixLen) != indicatorPrefix) continue;
         CacheRemoveObject(objName);
         g_suppressDeleteEvents = true;
+        g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
         if(ObjectDelete(0, objName)) deleted++;
         g_suppressDeleteEvents = false;
     }
@@ -2053,8 +2309,15 @@ void ApplyCacheInvalidation(const int invalidationFlags,
                             const double currentCustomPrice)
 {
     if((invalidationFlags & CACHE_INV_TIMEFRAME) != 0) {
+        UpdatePeriodCache();
         InvalidateTimeframeDependentCaches();
-        InvalidateATRCache();
+        g_forceClearOnNextDraw = true;
+        g_redrawTHLevelsNeeded = true;
+        g_calculatedOnce = false;
+        g_labelsRelayoutNeeded = true;
+        // Reset fractal-determination window for the new timeframe so the
+        // timeout fallback does not fire immediately from a previous TF's timer.
+        g_fractalDetermineStartMs = 0;
         _LOG_GATE_I Print("[I][GEN] Timeframe changed: ", previousPeriod, " -> ", currentPeriod);
     }
     if((invalidationFlags & CACHE_INV_NEW_BAR) != 0) {
@@ -2099,19 +2362,12 @@ void RunIncrementalObjectCleanup()
 {
     if(g_customPriceLineDragging) return;
     datetime currentTime = TimeGMT();
-    bool recentlySwitchedTF = false;
-    string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
-    if(GlobalVariableCheck(tfSwitchStampGvar)) {
-        datetime lastTFSwitch = (datetime)GlobalVariableGet(tfSwitchStampGvar);
-        recentlySwitchedTF = (lastTFSwitch > 0 && currentTime - lastTFSwitch <= 30);
-    }
-    int cleanupInterval = recentlySwitchedTF ? 2 : CLEANUP_INTERVAL_SECONDS;
-    if(currentTime - g_lastObjectCleanup <= cleanupInterval) return;
+    if(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS) return;
 
     TH3_PROF_START(ObjectCleanup);
     int currentObjectCount = ObjectsTotal(0, -1, -1);
 
-    if(recentlySwitchedTF || currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
+    if(currentObjectCount > g_objectCountLast + OBJECT_COUNT_INCREASE_THRESHOLD) {
         datetime cutoffTime = currentTime - 3600;
         string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
         int currentPrefixLen = StringLen(objectPrefix);
@@ -2138,9 +2394,10 @@ void RunIncrementalObjectCleanup()
             if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
 
             datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
-            if(recentlySwitchedTF || (objTime > 0 && objTime < cutoffTime)) {
+            if(objTime > 0 && objTime < cutoffTime) {
                 CacheRemoveObject(objName);
                 g_suppressDeleteEvents = true;
+                g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
                 ObjectDelete(0, objName);
                 g_suppressDeleteEvents = false;
             }
@@ -2159,7 +2416,7 @@ void RunIncrementalObjectCleanup()
 void RedrawLabelsOnly() {
     if(IsIndicatorHidden()) return;
     datetime currentTime = TimeGMT();
-    string objectPrefix = inpObjectPrefix + "_" + GetCurrentTimeframe() + "_";
+    string objectPrefix = GetRuntimeObjectPrefix();
 
     // CRITICAL: Reset stacking offsets and clear old labels
     g_currentLabelYOffset = 0;
@@ -2183,26 +2440,63 @@ void RedrawLabelsOnly() {
 
 //+------------------------------------------------------------------+
 //| HELPER: Adjust factor value by step (+1 = increase, -1 = decrease)|
+//|                                                                  |
+//| DIRECT MODE: g_factorValueOverride is a Step Size, adjust by pip|
+//| CLASSIC MODE: g_factorValueOverride is a Factor number           |
 //+------------------------------------------------------------------+
 void AdjustFactorValue(int direction)
 {
-    double currentFactor = g_factorValueOverride;
-    if(currentFactor <= 0) {
+    bool useDirect = (inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT);
+    double currentVal = g_factorValueOverride;
+    
+    if(currentVal <= 0) {
         if(inpFactorMode == FACTOR_MODE_MANUAL && inpFactorValue > 0) {
-            currentFactor = inpFactorValue;
+            currentVal = inpFactorValue;
+        } else if(useDirect) {
+            // DIRECT MODE: Get default Step Size from current basis
+            double tfPct = GetTimeframeTH();
+            double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
+            double thVal = CalculateTH(basePrice, GetCachedDigits(), tfPct);
+            thVal = GetAdaptedStepSize(thVal);
+            if(thVal > 0) {
+                switch(inpFactorAutoBasis) {
+                    case FACTOR_BASIS_SS:      currentVal = thVal * 1.5; break;
+                    case FACTOR_BASIS_LS:      currentVal = thVal * 2.0; break;
+                    case FACTOR_BASIS_TH:      currentVal = thVal; break;
+                    case FACTOR_BASIS_CONTROL: currentVal = thVal * 1.75; break;
+                    default:                   currentVal = thVal * 1.5; break;
+                }
+            }
+            if(currentVal <= 0) currentVal = thVal; // Final fallback
         } else {
-            currentFactor = GetDefaultFactorValue(g_dailyClosePriceForTH);
-            if(currentFactor <= 0 || currentFactor > MAX_FACTOR_VALUE) {
+            // CLASSIC MODE: Get default Factor
+            currentVal = GetDefaultFactorValue(g_dailyClosePriceForTH);
+            if(currentVal <= 0 || currentVal > MAX_FACTOR_VALUE) {
                 _LOG_GATE_E Print("[E][GEN] Factor adjust: Invalid factor, using ", DEFAULT_FACTOR_FALLBACK);
-                currentFactor = DEFAULT_FACTOR_FALLBACK;
+                currentVal = DEFAULT_FACTOR_FALLBACK;
             }
         }
     }
-    double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : DEFAULT_FACTOR_ADJUST_STEP;
-    double newFactor = NormalizeDouble(currentFactor + step * direction, 2);
-    if(newFactor < MIN_FACTOR_VALUE) newFactor = MIN_FACTOR_VALUE;
-    if(newFactor > MAX_FACTOR_VALUE) newFactor = MAX_FACTOR_VALUE;
-    g_factorValueOverride = newFactor;
+    
+    double newVal;
+    if(useDirect) {
+        // DIRECT MODE: currentVal is Step Size in price units
+        // Adjust by 10% of current value (or by 1 pip minimum)
+        double pipSize = GetCachedPipSize();
+        if(pipSize <= 0) pipSize = GetCachedPoint() * 10;
+        double adjustBy = MathMax(currentVal * 0.1, pipSize);
+        newVal = NormalizeDouble(currentVal + adjustBy * direction, GetCachedDigits());
+        if(newVal < pipSize * 0.1) newVal = pipSize * 0.1;
+        if(newVal > MAX_FACTOR_VALUE) newVal = MAX_FACTOR_VALUE;
+    } else {
+        // CLASSIC MODE: currentVal is Factor number
+        double step = (inpFactorAdjustStep > 0) ? inpFactorAdjustStep : DEFAULT_FACTOR_ADJUST_STEP;
+        newVal = NormalizeDouble(currentVal + step * direction, 2);
+        if(newVal < MIN_FACTOR_VALUE) newVal = MIN_FACTOR_VALUE;
+        if(newVal > MAX_FACTOR_VALUE) newVal = MAX_FACTOR_VALUE;
+    }
+    
+    g_factorValueOverride = newVal;
     string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
     if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
         _LOG_GATE_E Print("[E][GEN] WARNING: Failed to persist Factor value to GlobalVariable");
@@ -2210,7 +2504,8 @@ void AdjustFactorValue(int direction)
     g_forceClearOnNextDraw = true;
     g_redrawTHLevelsNeeded = true;
     RedrawAllObjects(true);
-    UpdateFactorLabel(newFactor);
+    // For DIRECT mode, pass the step size directly for proper label formatting
+    UpdateFactorLabel(useDirect ? 0 : newVal, useDirect ? newVal : 0);
     ThrottledChartRedraw();
 }
 

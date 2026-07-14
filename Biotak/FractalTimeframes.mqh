@@ -1,15 +1,20 @@
   #property strict
 
+string GetFractalTimeframeFromMinutes(const int minutes) {
+    if(minutes == 1)      return "M1";
+    if(minutes == 5)      return "M4";
+    if(minutes == 15 || minutes == 30) return "M16";
+    if(minutes == 60)     return "H1+M4";
+    if(minutes == 240)    return "H4+M16";
+    if(minutes == 1440)   return "H17+M4";
+    if(minutes == 10080)  return "D11+H9+M4";
+    if(minutes == 43200)  return "D45+H12+M16";
+    return "M1"; // Fallback for non-standard timeframes, matching MT4
+}
+
 string GetBaseFractalTimeframeForCurrent() {
-    string currentTimeframe=GetCurrentTimeframe();
-    if(currentTimeframe=="M1") return "M1";
-    if(currentTimeframe=="M5") return "M4";
-    if(currentTimeframe=="M15"||currentTimeframe=="M30") return "M16";
-    if(currentTimeframe=="H1") return "H1+M4";
-    if(currentTimeframe=="H4") return "H4+M16";
-    if(currentTimeframe=="D1") return "H17+M4";
-    if(currentTimeframe=="W1") return "D11+H9+M4";
-    if(currentTimeframe=="MN1") return "D45+H12+M16";
+    int minutes = GetCurrentTimeframeMinutesForTH();
+    if(minutes > 0) return GetFractalTimeframeFromMinutes(minutes);
     return "M1";
 }
 
@@ -238,4 +243,3 @@ string GetOverlapTimeframesInfo(int step, const int &intervals[]) {
     string tf = GetShortTimeframeName(GetTimeframeForStructureLevel(highestLevel));
     return tf;
 }
-

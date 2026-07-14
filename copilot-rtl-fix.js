@@ -501,8 +501,9 @@
     return null;
   }
 
-  function createStyleEl(cssText, styleId) {
-    const style = document.createElement('style');
+  function createStyleEl(cssText, styleId, documentRef = document) {
+    const docRef = (documentRef && typeof documentRef.createElement === 'function') ? documentRef : document;
+    const style = docRef.createElement('style');
     style.id = styleId;
     style.setAttribute('data-owner', STYLE_OWNER);
     style.textContent = cssText;
@@ -532,7 +533,12 @@
     }
     if (existing) existing.remove();
 
-    const styleEl = createStyleEl(buildStyleText(state.config.rules), styleId);
+    const docRef =
+      (root instanceof Document) ? root
+      : (root instanceof ShadowRoot && root.host && root.host.ownerDocument) ? root.host.ownerDocument
+      : (document && document);
+
+    const styleEl = createStyleEl(buildStyleText(state.config.rules), styleId, docRef);
     return appendStyleToRoot(root, styleEl);
   }
 

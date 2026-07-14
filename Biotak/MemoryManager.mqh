@@ -176,7 +176,9 @@ void PrintMemoryStatistics()
     Print("   Peak Objects: ", g_memoryStats.peakObjectCount);
     Print("   Total Created: ", g_memoryStats.totalObjectsCreated);
     Print("   Total Deleted: ", g_memoryStats.totalObjectsDeleted);
-    Print("   MT4 Limit: ", MT4_OBJECT_LIMIT);
+    // FIX: label was MT4-specific. The 64000 soft limit applies to both MT4 and
+    // MT5 (MT5's practical rendering limit is much lower; we warn well before that).
+    Print("   Object Limit (soft): ", MT4_OBJECT_LIMIT);
     Print("====================");
 }
 

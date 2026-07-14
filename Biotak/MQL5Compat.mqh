@@ -116,7 +116,13 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
     }
 
     int bars = iBars(symbol, timeframe);
-    if(bars <= atrPeriod + shift) return 0.0;
+    // FIX (2026-07-13): Relaxed the history requirement. Previously this
+    // required bars > atrPeriod + shift, which for MN1 (period 264) meant
+    // ~22 years of monthly history that most terminals never have loaded.
+    // Now we only require enough bars to read at the requested shift; if the
+    // period exceeds available bars, iATR returns empty/0 and the caller
+    // falls back to a rates-based ATR computed from whatever history exists.
+    if(bars <= shift) return 0.0;
 
     InitATRHandleCache();
 
@@ -162,7 +168,11 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
         g_atrHandleCache[slot].period = atrPeriod;
     }
 
-    if(BarsCalculated(handle) <= shift) return 0.0;
+    // FIX (2026-07-13): Only bail if the indicator has produced zero bars at
+    // all. If history is shorter than atrPeriod, BarsCalculated may be small
+    // but CopyBuffer below will still return the available value — or fail,
+    // in which case we return 0.0 and the caller uses the rates fallback.
+    if(BarsCalculated(handle) <= 0) return 0.0;
 
     static double s_atrBuffer[];
     static bool s_bufferReady = false;

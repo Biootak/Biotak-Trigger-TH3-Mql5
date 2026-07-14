@@ -23,9 +23,10 @@ bool DrawMainLevels(const string prefix) {
     
     // High line
     string highTooltip;
+    // PERF: Compute pips distance once per line (was called twice before)
+    double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
     if(s_lastHighPrice != g_highestHigh) {
-        highTooltip = inpHighLineTooltip + ": " + DoubleToString(g_highestHigh, Digits);
-        double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
+        highTooltip = inpHighLineTooltip + ": " + DoubleToString(g_highestHigh, GetCachedDigits());
         highTooltip = highTooltip + ", Distance: +/- " + DoubleToString(pipsToHigh, 1) + " pips";
         s_cachedHighTooltip = highTooltip;
         s_lastHighPrice = g_highestHigh;
@@ -34,15 +35,14 @@ bool DrawMainLevels(const string prefix) {
     }
     if(!CreateTHLineObject(prefix+"High",g_highestHigh,inpHighColor,inpHighStyle,inpHighWidth,highTooltip, inpTHLineObjectType, false)) return false;
     if(inpShowPipDistanceLabels) {
-        double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
         CreatePipDistanceLabel(prefix+"High_PipsLabel", g_highestHigh, pipsToHigh, inpHighColor);
     }
     
     // Low line
     string lowTooltip;
+    double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
     if(s_lastLowPrice != g_lowestLow) {
-        lowTooltip = inpLowLineTooltip + ": " + DoubleToString(g_lowestLow, Digits);
-        double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
+        lowTooltip = inpLowLineTooltip + ": " + DoubleToString(g_lowestLow, GetCachedDigits());
         lowTooltip = lowTooltip + ", Distance: +/- " + DoubleToString(pipsToLow, 1) + " pips";
         s_cachedLowTooltip = lowTooltip;
         s_lastLowPrice = g_lowestLow;
@@ -51,7 +51,6 @@ bool DrawMainLevels(const string prefix) {
     }
     if(!CreateTHLineObject(prefix+"Low",g_lowestLow,inpLowColor,inpLowStyle,inpLowWidth,lowTooltip, inpTHLineObjectType, false)) return false;
     if(inpShowPipDistanceLabels) {
-        double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
         CreatePipDistanceLabel(prefix+"Low_PipsLabel", g_lowestLow, pipsToLow, inpLowColor);
     }
     return true;
@@ -171,10 +170,14 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
     //                                                                
     // ZONE SUPPORT: Cleanup old zones
     //          Zone:         zone          
-    //                                                                
-    if(inpShowMidZones) {
-        ObjectsDeleteAll(0, prefix + "Zone_", -1, -1);
-    }
+    //                                                                 
+    // FIX: Removed ObjectsDeleteAll here. Zones are already managed by
+    // ClearAllLevels when topology changes, and cached by ZoneFactory.
+    // Deleting all zones on every redraw caused flicker and heavy load,
+    // especially on M1 where there are many zones.
+    // if(inpShowMidZones) {
+    //     ObjectsDeleteAll(0, prefix + "Zone_", -1, -1);
+    // }
     
     if (triggerEnabled || inpShowStructure) {
         // Get adaptive level counts based on start point type
@@ -484,7 +487,7 @@ string GetBaseTimeframeName(const string fullName) {
     return fullName;
 }
 
-bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing) {
+bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing, const bool hasData = true) {
     double point = GetCachedPoint();
     double pipSize = GetCachedPipSize();
     if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE)) return false;
@@ -501,9 +504,9 @@ bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName,
     if(!inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
         ObjectDelete(0, targetsObjName);
     }
-    string targetsText = DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
-    string mainText = timeframeName + ": " + DoubleToString(atrPips, 1);
-    string stepsText = "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
+    string targetsText = (hasData) ? (DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0)) : "";
+    string mainText = (hasData) ? (timeframeName + ": " + DoubleToString(atrPips, 1)) : (timeframeName + ": —");
+    string stepsText = (hasData) ? ("(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")") : "";
 
     // PERF: Only update text/color if changed (using Cache)
     string cachedText;
@@ -641,7 +644,7 @@ void DisplayATRLabels(const string objectPrefix) {
     string timeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
     int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
 
-    // Use TH colors for ATR
+    // Use TH colors for ATR (original colors)
     color colors[] = {
         clrBlack,        // M1
         clrBlack,        // M5
@@ -691,28 +694,33 @@ void DisplayATRLabels(const string objectPrefix) {
     int renderedCount = 0;
     for(int i = 0; i < ArraySize(timeframes); i++) {
         double atrValue = GetATRForTimeframe(tfMinutes[i]);
-        if(atrValue <= 0 || atrValue == EMPTY_VALUE) continue;
-        
+        // EXACT-ONLY: a value is only considered valid data when it is a real,
+        // non-zero ATR. Unavailable data is reported as 0 and the label renders a
+        // "—" placeholder (never a scaled estimate).
+        bool hasData = (atrValue > 0 && atrValue != EMPTY_VALUE);
         double atrPoints = atrValue / point;
         double atrPips = NormalizeDouble(atrValue / pipSize, 1);
         color labelColor = colors[i];
     
-        string mainText = inpShowTimeframeInLabels ?
-            timeframes[i] + ": " + DoubleToString(atrPips, 1) :
-            DoubleToString(atrPips, 1);
-        string stepsText = "(" + DoubleToString(atrPips * 1.5, 1) + " - " + DoubleToString(atrPips * 1.75, 1) + " - " + DoubleToString(atrPips * 2.0, 1) + ")";
-        string targetsText = DoubleToString(MathFloor(atrPips * 3.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 5.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 15.0), 0);
+        string mainText = hasData ?
+            (inpShowTimeframeInLabels ? timeframes[i] + ": " + DoubleToString(atrPips, 1)
+                                      : DoubleToString(atrPips, 1)) :
+            (inpShowTimeframeInLabels ? timeframes[i] + ": —" : "—");
+        string stepsText = hasData ?
+            "(" + DoubleToString(atrPips * 1.5, 1) + " - " + DoubleToString(atrPips * 1.75, 1) + " - " + DoubleToString(atrPips * 2.0, 1) + ")" : "";
+        string targetsText = hasData ?
+            DoubleToString(MathFloor(atrPips * 3.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 5.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 15.0), 0) : "";
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowATRTargets);
     
         if(isVerticalLayout) {
-            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing)) continue;
+            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing, hasData)) continue;
             currentYPos += lineHeight;
         } else {
             if(currentXPos + labelWidth + xStep > maxWidth) {
                 currentXPos = labelStartX;
                 currentYPos += lineHeight;
             }
-            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing)) continue;
+            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing, hasData)) continue;
             currentXPos += labelWidth + xStep;
         }
         renderedCount++;

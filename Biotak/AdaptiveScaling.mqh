@@ -70,14 +70,21 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
     if(inpAdaptiveMode == ADAPTIVE_FIXED) {
         g_smoothedScalingFactor = 1.0;
         g_atrScalingFactor = 1.0;
+        g_fractalDetermined = true;
+        g_fractalDeterminedTF = GetCurrentTimeframe();
         return false;
     }
     
     // Update frequency gate: allow updates every 5 seconds instead of every bar
     // This makes the indicator much more responsive to intraday volatility spikes.
+    // While the jump has not yet been determined for THIS timeframe, bypass the gate
+    // so we converge on the very next tick that ATR becomes available (no
+    // narrow-then-wide first draw after a timeframe switch).
+    string curTF = GetCurrentTimeframe();
+    bool determinedForThisTF = (g_fractalDetermined && g_fractalDeterminedTF == curTF);
     static datetime s_lastScalingUpdate = 0;
     datetime now = TimeCurrent();
-    if(g_scalingInitialized && (now - s_lastScalingUpdate) < 5) {
+    if(g_scalingInitialized && determinedForThisTF && (now - s_lastScalingUpdate) < 5) {
         return false; 
     }
     s_lastScalingUpdate = now;
@@ -110,6 +117,10 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
         #endif
         return false;
     }
+    
+    // ATR is valid: the jump can now be determined, so the first level draw is safe.
+    g_fractalDetermined = true;
+    g_fractalDeterminedTF = curTF;
     
     // Calculate raw scaling factor: ATR / TH
     double rawFactor = SafeDivide(weightedATR, theoreticalTH, 1.0, EPSILON_PRICE);
@@ -177,7 +188,29 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
                     }
                     targetIdx = i;
                 }
-                g_fractalShift = targetIdx - baseIdx;
+                int newShift = targetIdx - baseIdx;
+                // HYSTERESIS: Don't jump immediately. Require the new shift to be
+                // proposed at least 2 consecutive times, OR a large ATR change.
+                static int s_proposedShift = -1;
+                static int s_proposalCount = 0;
+                static double s_lastConfirmedATR = 0;
+                if(newShift == s_proposedShift) {
+                    s_proposalCount++;
+                } else {
+                    s_proposedShift = newShift;
+                    s_proposalCount = 1;
+                }
+                bool largeATRMove = (s_lastConfirmedATR > 0 && MathAbs(weightedATR - s_lastConfirmedATR) / s_lastConfirmedATR > 0.25);
+                // Apply the shift immediately on the very first determination so levels are
+                // drawn ONCE with the correct spacing (no narrow-then-wide double draw).
+                // Subsequent changes keep the 2-proposal hysteresis to avoid flicker.
+                bool firstDetermination = (s_lastConfirmedATR <= 0);
+                if(firstDetermination || s_proposalCount >= 2 || largeATRMove) {
+                    g_fractalShift = newShift;
+                    s_lastConfirmedATR = weightedATR;
+                    s_proposalCount = 0;
+                }
+                // else: keep current g_fractalShift
                 
                 #ifdef ENABLE_DEBUG_LOGS
                 // CRITICAL LOG: Now showing Pips instead of Points for clarity

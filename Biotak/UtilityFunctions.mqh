@@ -106,7 +106,13 @@ double GetMidpointPrice(ENUM_TH_START_POINT_TYPE startPointType) {
         case TH_START_POINT_CUSTOM_PRICE:
         {
             double customPrice = (g_customTHStartPrice > 0.0) ? g_customTHStartPrice : inpCustomTHStartPrice;
-            return (customPrice > 0.0) ? customPrice : (g_highestHigh + g_lowestLow) / 2.0;
+            if(customPrice > 0.0) return customPrice;
+            // No custom price set: anchor on the TH base price (current daily close)
+            // instead of the multi-year historical midpoint, so levels stay on-screen
+            // near the live chart price.
+            if(g_dailyClosePriceForTH > 0.0 && g_dailyClosePriceForTH != EMPTY_VALUE)
+                return g_dailyClosePriceForTH;
+            return Bid;
         }
         case TH_START_POINT_MIDPOINT:
         default:
@@ -198,6 +204,12 @@ double GetSharedComponentValue(ENUM_COMBO_COMPONENT_ITEM component, double struc
         case COMP_STRUCTURE_SS:    return structure * 1.5;            // Structure SS
         case COMP_STRUCTURE_LS:    return structure * 2.0;            // Structure LS
         
+        // Control/Mid components (TH * 1.75)
+        case COMP_SUB_CONTROL:     return trigger * 0.25 * 1.75;      // Sub Control
+        case COMP_TRIGGER_CONTROL: return trigger * 1.75;             // Trigger Control
+        case COMP_PATTERN_CONTROL: return pattern * 1.75;             // Pattern Control
+        case COMP_STRUCTURE_CONTROL: return structure * 1.75;         // Structure Control
+        
         case COMP_IGNORE:          return 0.0;                        // Ignore
         
         default:                   return trigger;                    // Default to Trigger TH
@@ -229,6 +241,11 @@ string GetSharedComponentName(ENUM_COMBO_COMPONENT_ITEM component) {
         case COMP_STRUCTURE_TH:    return "Structure-TH";
         case COMP_STRUCTURE_SS:    return "Structure-SS";
         case COMP_STRUCTURE_LS:    return "Structure-LS";
+        
+        case COMP_SUB_CONTROL:     return "Sub-Control";
+        case COMP_TRIGGER_CONTROL: return "Trigger-Control";
+        case COMP_PATTERN_CONTROL: return "Pattern-Control";
+        case COMP_STRUCTURE_CONTROL: return "Structure-Control";
         
         case COMP_IGNORE:          return "Ignore";
         
@@ -278,8 +295,69 @@ double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
 
         case FACTOR_STEP:
         {
-            double factorValue = (g_factorValueOverride > 0) ? g_factorValueOverride : 
-                                ((inpFactorMode == FACTOR_MODE_MANUAL) ? inpFactorValue : GetDefaultFactorValue(basePrice));
+            bool useDirect = (inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT);
+            if(useDirect) {
+                // DIRECT MODE: value IS the step size
+                if(g_factorValueOverride > 0) return g_factorValueOverride;
+                if(inpFactorMode == FACTOR_MODE_MANUAL) return inpFactorValue;
+                // Auto mode: get from basis
+                double tfPct = GetTimeframeTH();
+                double thVal = CalculateTH(basePrice, digits, tfPct);
+                thVal = GetAdaptedStepSize(thVal);
+                if(thVal <= 0) thVal = thValue;
+                switch(inpFactorAutoBasis) {
+                    case FACTOR_BASIS_SS:      return thVal * 1.5;
+                    case FACTOR_BASIS_LS:      return thVal * 2.0;
+                    case FACTOR_BASIS_TH:      return thVal;
+                    case FACTOR_BASIS_CONTROL: return thVal * 1.75;
+                    case FACTOR_BASIS_TRIGGER:
+                    {
+                        double trgPct = GetTimeframeTH();
+                        double trgVal = CalculateTH(basePrice, digits, trgPct);
+                        return GetAdaptedStepSize(trgVal);
+                    }
+                    case FACTOR_BASIS_PATTERN:
+                    {
+                        double patPct = GetPatternTH();
+                        if(patPct <= 0) patPct = GetTimeframeTH() * 4.0;
+                        double patVal = CalculateTH(basePrice, digits, patPct);
+                        return GetAdaptedStepSize(patVal);
+                    }
+                    case FACTOR_BASIS_STRUCTURE:
+                    {
+                        string strTF = GetStructureTimeframeForCurrent();
+                        double strPct = CalculateTimeframeTH(strTF);
+                        if(strPct <= 0) strPct = GetTimeframeTH() * 16.0;
+                        double strVal = CalculateTH(basePrice, digits, strPct);
+                        return GetAdaptedStepSize(strVal);
+                    }
+                    case FACTOR_BASIS_COMBO:
+                        return CalculateComboStepSize(basePrice);
+                    default:
+                        return thVal * 1.5;
+                }
+            }
+            // CLASSIC MODE
+            double factorValue;
+            if(g_factorValueOverride > 0) {
+                factorValue = g_factorValueOverride;
+            } else if(inpFactorMode == FACTOR_MODE_MANUAL) {
+                factorValue = inpFactorValue;
+            } else {
+                double range = g_highestHigh - g_lowestLow;
+                if(inpFactorAutoBasis == FACTOR_BASIS_SS) {
+                    double targetStep = thValue * 1.5;
+                    double denominator = targetStep * 2.0;
+                    factorValue = (range > 0 && denominator > 0) ? range / denominator : 50.0;
+                } else if(inpFactorAutoBasis == FACTOR_BASIS_LS) {
+                    double targetStep = thValue * 2.0;
+                    double denominator = targetStep * 2.0;
+                    factorValue = (range > 0 && denominator > 0) ? range / denominator : 50.0;
+                } else {
+                    factorValue = GetDefaultFactorValue(basePrice);
+                }
+            }
+            factorValue = NormalizeDouble(MathMax(0.01, MathMin(10000, factorValue)), 2);
             return CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
         }
 
@@ -360,8 +438,13 @@ void UpdateBasisModeLabel(ENUM_CALCULATION_BASIS basis) {
 //| Update Factor value label on chart (configurable duration)      |
 //|                                    (                      )      |
 //| Shows: "F: 2.50 | Step: 12.5 pips" with auto-hide               |
+//|                                                                  |
+//| DIRECT MODE: When directStepSize > 0, shows step size first      |
+//|   Display: "[ Step: 12.5 | F: 50.00 ]"                          |
+//| CLASSIC MODE: When directStepSize = 0, shows factor first        |
+//|   Display: "[ F: 50.00 | Step: 12.5 pips ]"                     |
 //+------------------------------------------------------------------+
-void UpdateFactorLabel(double factorValue, bool clearFirst = true) {
+void UpdateFactorLabel(double factorValue, double directStepSize = 0, bool clearFirst = true) {
     // Check if mode label display is enabled
     if(!inpShowModeChangeLabel) return;
     
@@ -372,18 +455,30 @@ void UpdateFactorLabel(double factorValue, bool clearFirst = true) {
     if(IsIndicatorHidden()) return; // Don't show mode labels when hidden
     
     // Calculate step size for display
-    double stepSize = 0;
-    string stepText = "";
+    double stepSize = directStepSize;
+    string labelText = "";
+    double pipSize = GetCachedPipSize();
     
-    if(g_highestHigh > 0 && g_lowestLow > 0 && g_highestHigh > g_lowestLow) {
-        stepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
-        
-        if(stepSize > 0) {
-            // Use centralized pip size calculation for accuracy
-            double pipSize = GetCachedPipSize();
-            double stepPips = stepSize / pipSize;
-            stepText = " | Step: " + DoubleToString(stepPips, 1) + " pips";
+    if(stepSize <= 0) {
+        // CLASSIC MODE: Calculate step from factor
+        if(g_highestHigh > 0 && g_lowestLow > 0 && g_highestHigh > g_lowestLow) {
+            stepSize = CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
         }
+    }
+    
+    if(stepSize > 0) {
+        double stepPips = stepSize / pipSize;
+        
+        if(inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT && directStepSize > 0) {
+            // DIRECT MODE: Show Step first, Factor second
+            labelText = "[ Step: " + DoubleToString(stepPips, 1) + " | F: " + DoubleToString(factorValue, 2) + " ]";
+        } else {
+            // CLASSIC MODE: Show Factor first, Step second
+            labelText = "[ F: " + DoubleToString(factorValue, 2) + " | Step: " + DoubleToString(stepPips, 1) + " pips ]";
+        }
+    } else {
+        // Fallback: show only factor value
+        labelText = "[ F: " + DoubleToString(factorValue, 2) + " ]";
     }
     
     // GOLD FIX: Check if object exists before creating
@@ -391,9 +486,8 @@ void UpdateFactorLabel(double factorValue, bool clearFirst = true) {
         ObjectCreate(0, g_factorLabelName, OBJ_LABEL, 0, 0, 0);
     }
     
-    // Set text with Factor value and Step: "F: 2.50 | Step: 12.5 pips"
-    ObjectSetString(0, g_factorLabelName, OBJPROP_TEXT, 
-        "[ F: " + DoubleToString(factorValue, 2) + stepText + " ]");
+    // Set text
+    ObjectSetString(0, g_factorLabelName, OBJPROP_TEXT, labelText);
     
     g_factorLabelCreateTime = GetTickCount();
     ApplyModeLabelStyle(g_factorLabelName, inpFactorLevelColor);
@@ -417,10 +511,8 @@ void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
     if(clearFirst) ClearAllModeLabels();
     
     // CRITICAL FIX: Don't show label if indicator is hidden
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
-    if(isHidden) return; // Don't show mode labels when hidden
+    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
+    if(IsIndicatorHidden()) return; // Don't show mode labels when hidden
     
     // Calculate step information based on current TH3 structure range
     string stepInfo = "";
@@ -493,8 +585,38 @@ void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
 void ShowAllStatusLabels() {
     ClearAllModeLabels();
     
-    UpdateStepModeLabel(false);
-    UpdateFactorLabel(g_factorValueOverride > 0 ? g_factorValueOverride : inpFactorValue, false);
+    bool useDirect = (inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT);
+    if(useDirect) {
+        // DIRECT MODE: Show factor label with direct step size
+        double overrideVal = g_factorValueOverride;
+        double factorVal = 0;
+        double stepVal = 0;
+        if(overrideVal > 0) {
+            stepVal = overrideVal;
+        } else if(inpFactorMode == FACTOR_MODE_MANUAL) {
+            stepVal = inpFactorValue;
+        } else {
+            // Auto: get from current basis via common data
+            double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
+            double tfPct = GetTimeframeTH();
+            double thVal = CalculateTH(basePrice, GetCachedDigits(), tfPct);
+            thVal = GetAdaptedStepSize(thVal);
+            switch(inpFactorAutoBasis) {
+                case FACTOR_BASIS_SS:      stepVal = thVal * 1.5; break;
+                case FACTOR_BASIS_LS:      stepVal = thVal * 2.0; break;
+                case FACTOR_BASIS_TH:      stepVal = thVal; break;
+                case FACTOR_BASIS_CONTROL: stepVal = thVal * 1.75; break;
+                default:                   stepVal = thVal * 1.5; break;
+            }
+        }
+        if(g_highestHigh > 0 && g_lowestLow > 0 && stepVal > 0) {
+            double range = g_highestHigh - g_lowestLow;
+            factorVal = range / (stepVal * 2.0);
+        }
+        UpdateFactorLabel(factorVal, stepVal, false);
+    } else {
+        UpdateFactorLabel(g_factorValueOverride > 0 ? g_factorValueOverride : inpFactorValue, 0, false);
+    }
 #ifndef BUILD_LITE
     double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
     UpdateTH3FrequencyLabel(freq, false);

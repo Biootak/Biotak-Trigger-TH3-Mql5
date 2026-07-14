@@ -12,7 +12,6 @@ bool UpdateHistoricalValues() {
     int totalBars = (inpHistoricalPeriods == 0) ? availableBars : MathMin(inpHistoricalPeriods, availableBars);
     
     if(totalBars <= 0) {
-        // FIX: Don't just fail, log that we're waiting for data
         static datetime s_lastBarsWarning = 0;
         if(currentTime - s_lastBarsWarning > 30) {
             Print("UpdateHistoricalValues: Waiting for historical data (", EnumToString(inpHistoricalTimeframe), ")...");
@@ -37,8 +36,6 @@ bool UpdateHistoricalValues() {
     }
     
     g_lastHistoricalUpdate = currentTime;
-    // g_thCache removed - matching MT5
-    
     return true;
 }
 
@@ -69,13 +66,13 @@ double GetPriceForPreviousDay(ENUM_APPLIED_PRICE priceType) {
         lastUpdate = currentTime;
     }
     
-    switch((int)priceType) {
-        case 1: return cachedPrices[1]; // Open
-        case 2: return cachedPrices[2]; // High
-        case 3: return cachedPrices[3]; // Low
-        case 4: return cachedPrices[4]; // Median
-        case 5: return cachedPrices[5]; // Typical
-        case 0: default: return cachedPrices[0]; // Close
+    switch(priceType) {
+        case PRICE_OPEN: return cachedPrices[1];
+        case PRICE_HIGH: return cachedPrices[2];
+        case PRICE_LOW: return cachedPrices[3];
+        case PRICE_MEDIAN: return cachedPrices[4];
+        case PRICE_TYPICAL: return cachedPrices[5];
+        case PRICE_CLOSE: default: return cachedPrices[0];
     }
     return EMPTY_VALUE;
 }

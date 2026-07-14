@@ -21,7 +21,7 @@ struct SObjectCacheEntry {
 
 // Hash-based cache configuration
 #define CACHE_HASH_BUCKETS 2048  // Power of 2 for fast modulo
-#define CACHE_MAX_PROBE 8        // Maximum linear probing attempts
+#define CACHE_MAX_PROBE 64       // Keep cache lookups bounded without false misses at normal load
 
 // Hash bucket structure
 struct SObjectCacheSlot {
@@ -37,9 +37,8 @@ static SObjectCacheSlot g_objectCacheHash[CACHE_HASH_BUCKETS];
 static bool g_objectCacheHashInitialized = false;
 static int g_objectCacheSize = 0;
 
-// PERF: O(1) LRU eviction tracking
-static int g_lruMinIdx = -1;
-static datetime g_lruMinTime = 0;
+// PERF: LRU eviction tracking via lastAccess scan
+// (Removed broken O(1) fast path that tracked oldest INSERT instead of oldest ACCESS.)
 
 // PERF: Cached TimeCurrent() - refreshed once per redraw frame
 static datetime g_cacheFrameTime = 0;
@@ -76,8 +75,6 @@ void InitializeObjectCacheHash() {
     
     g_objectCacheHashInitialized = true;
     g_objectCacheSize = 0;
-    g_lruMinIdx = -1;
-    g_lruMinTime = 0;
     _LOG_GATE_I Print("[I][SYNC] Object Cache Hash Initialized (", CACHE_HASH_BUCKETS, " buckets)");
 }
 
@@ -85,7 +82,7 @@ int CacheFindIndex(const string name) {
     if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
     int slot = HashObjectName(name);
     
-    for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
+    for(int probe = 0; probe < CACHE_MAX_PROBE; probe++) {
         int idx = (slot + probe) % CACHE_HASH_BUCKETS;
         if(!g_objectCacheHash[idx].occupied && !g_objectCacheHash[idx].deleted) {
             return -1;  // Empty slot - object not in cache
@@ -103,32 +100,62 @@ int CacheFindIndex(const string name) {
     return -1;
 }
 
+int CacheFindInsertIndex(const string name) {
+    if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
+    int slot = HashObjectName(name);
+    int firstDeleted = -1;
+
+    for(int probe = 0; probe < CACHE_MAX_PROBE; probe++) {
+        int idx = (slot + probe) % CACHE_HASH_BUCKETS;
+        if(g_objectCacheHash[idx].deleted && !g_objectCacheHash[idx].occupied) {
+            if(firstDeleted < 0) firstDeleted = idx;
+            continue;
+        }
+        // Avoid duplicate cache entries if the name is already present.
+        if(g_objectCacheHash[idx].occupied && g_objectCacheHash[idx].name == name) {
+            return idx;
+        }
+        if(!g_objectCacheHash[idx].occupied) {
+            return (firstDeleted >= 0) ? firstDeleted : idx;
+        }
+    }
+
+    return firstDeleted;
+}
+
 void EvictLRUEntry() {
     if(g_objectCacheSize == 0) return;
-    
-    // O(1) fast path
-    if(g_lruMinIdx >= 0 && g_lruMinIdx < CACHE_HASH_BUCKETS &&
-       g_objectCacheHash[g_lruMinIdx].occupied) {
-        int lruIdx = g_lruMinIdx;
-        _LOG_GATE_D Print("[D][SYNC] [DEL] Evicting LRU cache entry (O(1)): '", g_objectCacheHash[lruIdx].name, "'");
-        g_objectCacheHash[lruIdx].name = "";
-        g_objectCacheHash[lruIdx].occupied = false;
-        g_objectCacheHash[lruIdx].deleted = true;
-        g_objectCacheHash[lruIdx].lastAccess = 0;
-        g_objectCacheSize--;
-        g_lruMinIdx = -1;
-        g_lruMinTime = 0;
-        return;
-    }
-    
-    // Fallback: Full scan
+
+    // PERF: Use sampling instead of full 2048-bucket scan.
+    // Scanning all buckets on every eviction (rare: only when cache is full at 1600 entries)
+    // adds unnecessary latency. Sample every 8th bucket (256 probes) to find a good
+    // eviction candidate. This is O(1/8) vs O(n) and still finds a sufficiently old entry.
     int lruIdx = -1;
     datetime oldestAccess = CacheGetFrameTime() + 86400;
-    
-    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+    const int sampleStep = 8;
+
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i += sampleStep) {
         if(g_objectCacheHash[i].occupied && g_objectCacheHash[i].lastAccess < oldestAccess) {
             oldestAccess = g_objectCacheHash[i].lastAccess;
             lruIdx = i;
+        }
+    }
+    // Fallback: if sampling didn't find anything, scan a few more random-ish buckets
+    if(lruIdx < 0) {
+        for(int i = 1; i < CACHE_HASH_BUCKETS; i += 16) {
+            if(g_objectCacheHash[i].occupied && g_objectCacheHash[i].lastAccess < oldestAccess) {
+                oldestAccess = g_objectCacheHash[i].lastAccess;
+                lruIdx = i;
+            }
+        }
+    }
+    // Last resort: scan all (should rarely happen)
+    if(lruIdx < 0) {
+        for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+            if(g_objectCacheHash[i].occupied && g_objectCacheHash[i].lastAccess < oldestAccess) {
+                oldestAccess = g_objectCacheHash[i].lastAccess;
+                lruIdx = i;
+            }
         }
     }
     if(lruIdx >= 0) {
@@ -138,8 +165,6 @@ void EvictLRUEntry() {
         g_objectCacheHash[lruIdx].deleted = true;
         g_objectCacheHash[lruIdx].lastAccess = 0;
         g_objectCacheSize--;
-        g_lruMinIdx = -1;
-        g_lruMinTime = 0;
     }
 }
 
@@ -163,34 +188,29 @@ void CacheAddObject(const string name, const double price,
         EvictLRUEntry();
     }
     
-    int slot = HashObjectName(name);
-    for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
-        int insertIdx = (slot + probe) % CACHE_HASH_BUCKETS;
-        if(!g_objectCacheHash[insertIdx].occupied || g_objectCacheHash[insertIdx].deleted) {
-            g_objectCacheHash[insertIdx].name = name;
-            g_objectCacheHash[insertIdx].entry.name = name;
-            g_objectCacheHash[insertIdx].entry.lastPrice = price;
-            g_objectCacheHash[insertIdx].entry.lastColor = clr;
-            g_objectCacheHash[insertIdx].entry.lastStyle = style;
-            g_objectCacheHash[insertIdx].entry.lastWidth = width;
-            g_objectCacheHash[insertIdx].entry.exists = true;
-            g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
-            g_objectCacheHash[insertIdx].occupied = true;
-            g_objectCacheHash[insertIdx].deleted = false;
-            g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
-            g_objectCacheSize++;
-            datetime insertTime = g_objectCacheHash[insertIdx].lastAccess;
-            if(g_lruMinIdx < 0 || insertTime < g_lruMinTime) {
-                g_lruMinIdx = insertIdx;
-                g_lruMinTime = insertTime;
-            }
-            return;
-        }
+    int insertIdx = CacheFindInsertIndex(name);
+    if(insertIdx < 0) {
+        EvictLRUEntry();
+        insertIdx = CacheFindInsertIndex(name);
     }
+    if(insertIdx < 0) {
+        CacheClear();
+        insertIdx = CacheFindInsertIndex(name);
+    }
+    if(insertIdx < 0) return;
     
-    _LOG_GATE_W Print("[W][SYNC] Object cache collision - forcing LRU eviction");
-    EvictLRUEntry();
-    CacheAddObject(name, price, clr, style, width);
+    g_objectCacheHash[insertIdx].name = name;
+    g_objectCacheHash[insertIdx].entry.name = name;
+    g_objectCacheHash[insertIdx].entry.lastPrice = price;
+    g_objectCacheHash[insertIdx].entry.lastColor = clr;
+    g_objectCacheHash[insertIdx].entry.lastStyle = style;
+    g_objectCacheHash[insertIdx].entry.lastWidth = width;
+    g_objectCacheHash[insertIdx].entry.exists = true;
+    g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
+    g_objectCacheHash[insertIdx].occupied = true;
+    g_objectCacheHash[insertIdx].deleted = false;
+    g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
+    g_objectCacheSize++;
 }
 
 void CacheRemoveObject(const string name) {
@@ -207,6 +227,52 @@ void CacheRemoveObject(const string name) {
     _LOG_GATE_D Print("[D][SYNC] [DEL] Removed object from cache (size now: ", g_objectCacheSize, ")");
 }
 
+bool DeleteIndicatorObjectManaged(const string name, const bool verifyChartObject = false)
+{
+    if(StringLen(name) == 0) return false;
+
+    int cacheIdx = CacheFindIndex(name);
+    bool inCache = (cacheIdx >= 0 && g_objectCacheHash[cacheIdx].entry.exists);
+    bool existsOnChart = false;
+
+    if(inCache || verifyChartObject) {
+        existsOnChart = (ObjectFind(0, name) >= 0);
+    }
+
+    if(inCache || existsOnChart) {
+        CacheRemoveObject(name);
+    }
+
+    if(!existsOnChart) return inCache;
+
+    g_suppressDeleteEvents = true;
+    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+    bool deleted = ObjectDelete(0, name);
+    g_suppressDeleteEvents = false;
+    return deleted;
+}
+
+bool DeleteManagedZoneObjects(const string zoneName, const bool verifyChartObjects = false)
+{
+    if(StringLen(zoneName) == 0) return false;
+
+    bool foundAny = false;
+    if(DeleteIndicatorObjectManaged(zoneName, verifyChartObjects))
+        foundAny = true;
+    if(DeleteIndicatorObjectManaged(zoneName + "_Top", verifyChartObjects))
+        foundAny = true;
+    if(DeleteIndicatorObjectManaged(zoneName + "_Bottom", verifyChartObjects))
+        foundAny = true;
+    return foundAny;
+}
+
+void CacheMarkObjectMissing(const string name) {
+    int idx = CacheFindIndex(name);
+    if(idx < 0) return;
+    g_objectCacheHash[idx].entry.exists = false;
+    g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
+}
+
 void CacheClear() {
     if(!g_objectCacheHashInitialized) return;
     if(g_objectCacheSize == 0) return;
@@ -218,8 +284,6 @@ void CacheClear() {
     }
     
     g_objectCacheSize = 0;
-    g_lruMinIdx = -1;
-    g_lruMinTime = 0;
     _LOG_GATE_I Print("[I][SYNC] Object cache cleared");
 }
 
@@ -228,14 +292,7 @@ bool CacheObjectExists(const string name) {
     if(idx < 0) {
         return false;
     }
-    if(!g_objectCacheHash[idx].entry.exists) {
-        return false;
-    }
-    if(ObjectFind(0, name) < 0) {
-        g_objectCacheHash[idx].entry.exists = false;
-        return false;
-    }
-    return true;
+    return g_objectCacheHash[idx].entry.exists;
 }
 
 bool CacheGetObject(const string name, SObjectCacheEntry &entry) {
@@ -244,9 +301,6 @@ bool CacheGetObject(const string name, SObjectCacheEntry &entry) {
         return false;
     }
     
-    if(g_objectCacheHash[idx].entry.exists && ObjectFind(0, name) < 0) {
-        g_objectCacheHash[idx].entry.exists = false;
-    }
     entry = g_objectCacheHash[idx].entry;
     return true;
 }
@@ -287,27 +341,31 @@ void CacheUpdateZone(const string name, const double price1, const double price2
         if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
         if(g_objectCacheSize >= MAX_CACHE_SIZE) EvictLRUEntry();
         
-        int slot = HashObjectName(name);
-        for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
-            int insertIdx = (slot + probe) % CACHE_HASH_BUCKETS;
-            if(!g_objectCacheHash[insertIdx].occupied || g_objectCacheHash[insertIdx].deleted) {
-                g_objectCacheHash[insertIdx].name = name;
-                g_objectCacheHash[insertIdx].entry.name = name;
-                g_objectCacheHash[insertIdx].entry.lastPrice = price1;
-                g_objectCacheHash[insertIdx].entry.lastPrice2 = price2;
-                g_objectCacheHash[insertIdx].entry.lastTime1 = time1;
-                g_objectCacheHash[insertIdx].entry.lastTime2 = time2;
-                g_objectCacheHash[insertIdx].entry.lastColor = clr;
-                g_objectCacheHash[insertIdx].entry.lastFilled = filled;
-                g_objectCacheHash[insertIdx].entry.exists = true;
-                g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
-                g_objectCacheHash[insertIdx].occupied = true;
-                g_objectCacheHash[insertIdx].deleted = false;
-                g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
-                g_objectCacheSize++;
-                return;
-            }
+        int insertIdx = CacheFindInsertIndex(name);
+        if(insertIdx < 0) {
+            EvictLRUEntry();
+            insertIdx = CacheFindInsertIndex(name);
         }
+        if(insertIdx < 0) {
+            CacheClear();
+            insertIdx = CacheFindInsertIndex(name);
+        }
+        if(insertIdx < 0) return;
+
+        g_objectCacheHash[insertIdx].name = name;
+        g_objectCacheHash[insertIdx].entry.name = name;
+        g_objectCacheHash[insertIdx].entry.lastPrice = price1;
+        g_objectCacheHash[insertIdx].entry.lastPrice2 = price2;
+        g_objectCacheHash[insertIdx].entry.lastTime1 = time1;
+        g_objectCacheHash[insertIdx].entry.lastTime2 = time2;
+        g_objectCacheHash[insertIdx].entry.lastColor = clr;
+        g_objectCacheHash[insertIdx].entry.lastFilled = filled;
+        g_objectCacheHash[insertIdx].entry.exists = true;
+        g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
+        g_objectCacheHash[insertIdx].occupied = true;
+        g_objectCacheHash[insertIdx].deleted = false;
+        g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
+        g_objectCacheSize++;
         return;
     }
     
@@ -328,23 +386,27 @@ void CacheUpdateLabel(const string name, const string text, const color clr) {
         if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
         if(g_objectCacheSize >= MAX_CACHE_SIZE) EvictLRUEntry();
         
-        int slot = HashObjectName(name);
-        for(int probe = 0; probe < CACHE_HASH_BUCKETS; probe++) {
-            int insertIdx = (slot + probe) % CACHE_HASH_BUCKETS;
-            if(!g_objectCacheHash[insertIdx].occupied || g_objectCacheHash[insertIdx].deleted) {
-                g_objectCacheHash[insertIdx].name = name;
-                g_objectCacheHash[insertIdx].entry.name = name;
-                g_objectCacheHash[insertIdx].entry.lastText = text;
-                g_objectCacheHash[insertIdx].entry.lastColor = clr;
-                g_objectCacheHash[insertIdx].entry.exists = true;
-                g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
-                g_objectCacheHash[insertIdx].occupied = true;
-                g_objectCacheHash[insertIdx].deleted = false;
-                g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
-                g_objectCacheSize++;
-                return;
-            }
+        int insertIdx = CacheFindInsertIndex(name);
+        if(insertIdx < 0) {
+            EvictLRUEntry();
+            insertIdx = CacheFindInsertIndex(name);
         }
+        if(insertIdx < 0) {
+            CacheClear();
+            insertIdx = CacheFindInsertIndex(name);
+        }
+        if(insertIdx < 0) return;
+
+        g_objectCacheHash[insertIdx].name = name;
+        g_objectCacheHash[insertIdx].entry.name = name;
+        g_objectCacheHash[insertIdx].entry.lastText = text;
+        g_objectCacheHash[insertIdx].entry.lastColor = clr;
+        g_objectCacheHash[insertIdx].entry.exists = true;
+        g_objectCacheHash[insertIdx].entry.lastUpdate = CacheGetFrameTime();
+        g_objectCacheHash[insertIdx].occupied = true;
+        g_objectCacheHash[insertIdx].deleted = false;
+        g_objectCacheHash[insertIdx].lastAccess = CacheGetFrameTime();
+        g_objectCacheSize++;
         return;
     }
     
@@ -398,6 +460,18 @@ int CacheValidate() {
         _LOG_GATE_E Print("[E][SYNC] Cache validation found ", invalidCount, " invalid entries out of ", g_objectCacheSize);
     }
     return invalidCount;
+}
+
+//+------------------------------------------------------------------+
+//| PERF: Set OBJPROP_TIMEFRAMES only when changed                   |
+//| Avoids redundant chart API writes every redraw                   |
+//+------------------------------------------------------------------+
+void SetObjectTimeframesIfChanged(const string name, const long timeframes)
+{
+    if(ObjectFind(0, name) < 0) return;
+    long current = ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES);
+    if(current != timeframes)
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
 }
 
 #endif // OBJECT_CACHE_MQH

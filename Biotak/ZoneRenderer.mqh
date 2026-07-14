@@ -93,6 +93,7 @@ void ResolveZoneStyles(
     // CRITICAL:                  objectPrefix
     string safePrefix = (StringLen(objectPrefix) > 0) ? objectPrefix : "Zone_";
     
+    #ifdef ENABLE_DEBUG_LOGS
     // DIAGNOSTIC LOG: Start
     Print("====================");
     Print("   ZONE STYLE RESOLUTION DIAGNOSTIC");
@@ -102,9 +103,12 @@ void ResolveZoneStyles(
     Print("   Zone Transparency: ", config.zoneTransparency, "%");
     Print("   Object Prefix: ", safePrefix);
     Print("====================");
+    #endif
     
     if(config.showZones) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   Zone Style Assignment:");
+        #endif
         
         for(int i = 0; i < count; i++) {
             if(geometries[i].isValid && classifications[i].isActive) {
@@ -119,6 +123,7 @@ void ResolveZoneStyles(
                 outZones[zoneCount].topPrice = geometries[i].topPrice;
                 outZones[zoneCount].bottomPrice = geometries[i].bottomPrice;
                 
+                #ifdef ENABLE_DEBUG_LOGS
                 // DIAGNOSTIC LOG: Zone Style
                 Print("  Zone ", zoneCount + 1, " [Level ", i, ", Step ", levels[i].logicalStep, "]:");
                 Print("   Name: ", outZones[zoneCount].name);
@@ -126,29 +131,36 @@ void ResolveZoneStyles(
                 Print("   Top: ", DoubleToString(outZones[zoneCount].topPrice, Digits));
                 Print("   Bottom: ", DoubleToString(outZones[zoneCount].bottomPrice, Digits));
                 Print("   Type: ", classifications[i].isStructure ? "STRUCTURE" : "TRIGGER");
+                #endif
                 
                 zoneCount++;
             }
             else {
+                #ifdef ENABLE_DEBUG_LOGS
                 if(!geometries[i].isValid) {
                     Print("   Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Invalid Geometry)");
                 }
                 else if(!classifications[i].isActive) {
                     Print("   Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Inactive)");
                 }
+                #endif
             }
         }
     }
     else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   Zone Display is DISABLED (config.showZones = false)");
+        #endif
     }
     
     ArrayResize(outZones, zoneCount);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("====================");
     Print("  ResolveZoneStyles Summary:");
     Print("   Zones Prepared for Rendering: ", zoneCount);
     Print("====================");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -173,9 +185,8 @@ void RenderZones(const SZoneRenderInfo &zones[])
     
     // CRITICAL FIX: Check if indicator is hidden
     //                                          
-    // PERFORMANCE: Use cached ChartID string
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
+    bool isHidden = IsIndicatorHidden();
     
     // Performance tracking
     int zonesCreated = 0;
@@ -250,15 +261,28 @@ void RenderLines(const SLineRenderInfo &lines[])
     int count = ArraySize(lines);
     int visibleCount = 0;
     
-    // PERFORMANCE: Use cached ChartID string and move outside loop
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
+    bool isHidden = IsIndicatorHidden();
     
     for(int i = 0; i < count; i++) {
         // PERFORMANCE: Check cache to skip redundant API calls
         SObjectCacheEntry cache;
         bool inCache = CacheGetObject(lines[i].name, cache);
-        bool objectExists = inCache ? cache.exists : (ObjectFind(0, lines[i].name) >= 0);
+        // FIX: Trust the cache for the current redraw frame to avoid an
+        // ObjectFind() syscall for every line on every tick. External deletion
+        // or timeframe-switch invalidation is handled by CacheRemoveObject/
+        // InvalidateObjectCacheByPrefix, and we re-verify on cache misses.
+        bool objectExists = false;
+        if(inCache && cache.exists && cache.lastUpdate == CacheGetFrameTime() && cache.lastUpdate > 0) {
+            objectExists = true;
+        }
+        else {
+            objectExists = (ObjectFind(0, lines[i].name) >= 0);
+            if(inCache && !objectExists) {
+                CacheRemoveObject(lines[i].name);
+                inCache = false;
+            }
+        }
         
         if(!objectExists) {
             if(!ObjectCreate(0, lines[i].name, OBJ_HLINE, 0, 0, lines[i].price)) {
@@ -288,7 +312,8 @@ void RenderLines(const SLineRenderInfo &lines[])
         
         // Visibility toggle
         long tf = (isHidden || !lines[i].isVisible) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-        ObjectSetInteger(0, lines[i].name, OBJPROP_TIMEFRAMES, tf);
+        // PERF: Only rewrite timeframe when it actually changed.
+        SetObjectTimeframesIfChanged(lines[i].name, tf);
         
         if(tf == OBJ_ALL_PERIODS) visibleCount++;
         
