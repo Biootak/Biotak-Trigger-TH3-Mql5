@@ -125,6 +125,11 @@ struct STriggerLine {
     string labelText;
     bool   inViewport;      // false = skip render
     bool   isMidpoint;
+    bool   isTrigger;       // PERF (2026): true if this line corresponds to a
+                            // trigger subdivision (vs. structural). Used by
+                            // the in-memory alert cache populated in
+                            // RenderTriggerLines so CheckAlerts can avoid
+                            // synchronous ObjectGetDouble calls.
     bool   setBack;         // OBJPROP_BACK value (mode-specific)
     int    zOrder;          // OBJPROP_ZORDER value (mode-specific)
 };
@@ -574,6 +579,28 @@ void BuildZonesAndLines(
     string zoneBelowPrefix = modePrefix + "_Zone_Below_";
     string zoneCenterName  = modePrefix + "_Zone_Center_0";
 
+    // PERF (2026, TF switch hot path): pre-build the per-step IntegerToString
+    // suffixes once and reuse them for both the zone name and the line name.
+    // The legacy loop called IntegerToString(logicalStep) twice per step (once
+    // for the zone, once for the line) on every redraw - 2 string allocations
+    // per step, ~580 allocations per redraw on a 290-zone M1 chart, every
+    // single tick. The dictionary below is keyed by logicalStep and reused
+    // across calls (callers reset g_stepSuffixCacheUsed to 0 between redraws
+    // so the same logicalStep on two consecutive iterations reuses the slot).
+    const int STEP_SUFFIX_CACHE_SIZE = 1024;
+    static string s_stepSuffixCache[STEP_SUFFIX_CACHE_SIZE];
+    static int    s_stepSuffixCacheUsed = -1;
+    static bool   s_stepSuffixCacheInit = false;
+    if(!s_stepSuffixCacheInit) {
+        for(int si = 0; si < STEP_SUFFIX_CACHE_SIZE; si++) s_stepSuffixCache[si] = "";
+        s_stepSuffixCacheInit = true;
+        s_stepSuffixCacheUsed = -1;
+    }
+    // Reset the LRU-style cache at the start of each BuildZonesAndLines call:
+    // any logicalStep > currentMax can stay dirty, the only constraint is that
+    // each step's value is computed before its first lookup within this call.
+    s_stepSuffixCacheUsed = -1;
+
     int zIdx = 0, lIdx = 0;
 
     // --- MIDPOINT ZONE (step 0) ---
@@ -639,6 +666,7 @@ void BuildZonesAndLines(
         lines[lIdx].labelText = s_aboveLevels[i].labelText;
         lines[lIdx].tooltip = StringFormat("Midpoint +%s (%s)", stepStr, DoubleToString(lineMidPrice, digits));
         lines[lIdx].isMidpoint = false;
+        lines[lIdx].isTrigger  = s_aboveLevels[i].isTrigger;
         lines[lIdx].setBack = config.useObjPropBack;
         lines[lIdx].zOrder = config.zOrder;
         lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
@@ -695,6 +723,7 @@ void BuildZonesAndLines(
         lines[lIdx].labelText = s_belowLevels[i].labelText;
         lines[lIdx].tooltip = StringFormat("Midpoint -%s (%s)", stepStr, DoubleToString(lineMidPrice, digits));
         lines[lIdx].isMidpoint = false;
+        lines[lIdx].isTrigger  = s_belowLevels[i].isTrigger;
         lines[lIdx].setBack = config.useObjPropBack;
         lines[lIdx].zOrder = config.zOrder;
         lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
@@ -960,6 +989,19 @@ void RenderTriggerLines(
             }
         }
 
+        // PERF (2026): record trigger levels for the in-memory alert cache so
+        // CheckAlerts can avoid sync ObjectGetDouble calls. The pipeline
+        // classifies each line as structure or trigger; we only need the
+        // trigger lines here. The midpoint is captured separately in
+        // ExecutePipeline from the classified array (it is represented as
+        // a zone, not a trigger line).
+        if(lines[i].isTrigger && !lines[i].isMidpoint) {
+            if(lines[i].direction > 0)
+                RecordTriggerLevelUp(lines[i].logicalStep, lines[i].price);
+            else if(lines[i].direction < 0)
+                RecordTriggerLevelDown(lines[i].logicalStep, lines[i].price);
+        }
+
         // Render Pip Distance Label
         if(showPipLabels) {
             double pips = MathAbs(lines[i].price - currentPrice) / GetCachedPoint() / 10.0;
@@ -1174,6 +1216,11 @@ SPipelineResult ExecutePipeline(
         result.errorMessage = "Invalid center price";
         return result;
     }
+
+    // PERF (2026): reset the in-memory trigger level cache. DrawTHLevels
+    // does this too (legacy path) but the pipeline is the active path for
+    // every mode that uses ExecutePipeline.
+    ResetTriggerLevelCache();
     for(int s = 0; s < stepSizeCount; s++) {
         if(stepSizes[s] <= 0) {
             result.errorMessage = "Invalid step size";
@@ -1218,6 +1265,17 @@ SPipelineResult ExecutePipeline(
     STriggerLine lines[];
     BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
                        zones, result.zoneCount, lines, result.lineCount);
+
+    // PERF (2026): record the midpoint price for the in-memory alert cache.
+    // The pipeline represents the midpoint as a zone (not a trigger line), so
+    // RenderTriggerLines will not produce a midpoint entry. We capture it
+    // directly from the classified array instead - it is always step 0.
+    for(int ci = 0; ci < classifiedCount; ci++) {
+        if(classified[ci].isMidpoint) {
+            RecordMidpointLevel(classified[ci].price);
+            break;
+        }
+    }
     
     // DIAGNOSTIC LOG: pipeline summary (print first 5 calls per run)
     static int s_pipelineLogCount = 0;

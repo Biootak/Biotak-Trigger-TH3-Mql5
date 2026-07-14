@@ -52,6 +52,80 @@ static int    g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX; // Binary subdivision ind
 static datetime g_lastAlertTime = 0;
 static string g_lastAlertLevel = "";
 
+// PERF (2026): In-memory trigger level cache for CheckAlerts.
+// Populated by DrawTHLevels during each redraw so CheckAlerts can iterate
+// over a tight array instead of doing ~512 synchronous ObjectFind +
+// ObjectGetDouble chart-API calls per redraw. The trigger lines are
+// already computed in DrawTHLevels - this just records the resulting
+// (price, step) pairs once instead of re-reading them through the chart
+// engine from CheckAlerts.
+static double g_triggerUpPrices[];
+static int    g_triggerUpSteps[];
+static int    g_triggerUpCount = 0;
+static double g_triggerDownPrices[];
+static int    g_triggerDownSteps[];
+static int    g_triggerDownCount = 0;
+static double g_midpointLevelCached = 0.0;
+static bool   g_midpointLevelValid = false;
+static int    g_triggerLevelCapacity = 0;
+
+void ResetTriggerLevelCache()
+{
+   g_triggerUpCount = 0;
+   g_triggerDownCount = 0;
+   g_midpointLevelValid = false;
+}
+
+void EnsureTriggerLevelCapacity(const int need)
+{
+   if(need <= g_triggerLevelCapacity) return;
+   int newCap = MathMax(need, g_triggerLevelCapacity > 0 ? g_triggerLevelCapacity * 2 : 64);
+   ArrayResize(g_triggerUpPrices,   newCap);
+   ArrayResize(g_triggerUpSteps,    newCap);
+   ArrayResize(g_triggerDownPrices, newCap);
+   ArrayResize(g_triggerDownSteps,  newCap);
+   g_triggerLevelCapacity = newCap;
+}
+
+void RecordTriggerLevelUp(const int step, const double price)
+{
+   EnsureTriggerLevelCapacity(g_triggerUpCount + 1);
+   g_triggerUpPrices[g_triggerUpCount] = price;
+   g_triggerUpSteps[g_triggerUpCount]  = step;
+   g_triggerUpCount++;
+}
+
+void RecordTriggerLevelDown(const int step, const double price)
+{
+   EnsureTriggerLevelCapacity(g_triggerDownCount + 1);
+   g_triggerDownPrices[g_triggerDownCount] = price;
+   g_triggerDownSteps[g_triggerDownCount]  = step;
+   g_triggerDownCount++;
+}
+
+void RecordMidpointLevel(const double price)
+{
+   g_midpointLevelCached = price;
+   g_midpointLevelValid  = (price > 0);
+}
+
+int GetTriggerUpCount()   { return g_triggerUpCount;   }
+int GetTriggerDownCount() { return g_triggerDownCount; }
+bool HasMidpointLevel()   { return g_midpointLevelValid; }
+double GetMidpointLevel() { return g_midpointLevelCached; }
+
+double GetTriggerUpPrice(const int idx)
+{
+   if(idx < 0 || idx >= g_triggerUpCount) return 0.0;
+   return g_triggerUpPrices[idx];
+}
+
+double GetTriggerDownPrice(const int idx)
+{
+   if(idx < 0 || idx >= g_triggerDownCount) return 0.0;
+   return g_triggerDownPrices[idx];
+}
+
 // Timeframe Lock
 static bool g_timeframeLocked = false;
 static int g_lockedPeriod = 0;

@@ -61,7 +61,12 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         Print("DrawTHLevels: Invalid daily close price");
         return;
     }
-    
+
+    // PERF (2026): start each redraw with a clean in-memory trigger level
+    // cache. CheckAlerts iterates over this array instead of doing
+    // ~512 synchronous ObjectFind + ObjectGetDouble chart-API calls.
+    ResetTriggerLevelCache();
+
     // OPTIMIZATION: Use centralized cached values from PerformanceOptimizations.mqh
     double s_cachedPointValue = GetCachedPoint();
     int s_cachedDigits = GetCachedDigits();
@@ -163,6 +168,9 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         string cachedTFForMid = GetFractalTimeframeForCurrent();
         string midLevelInfo = StringFormat("%s Mid", GetShortTimeframeName(cachedTFForMid));
         if(inpShowPipDistanceLabels) CreatePipDistanceLabel(prefix+"Mid_PipsLabel", midpointPrice, pipsToMid, inpTriggerColor, midLevelInfo);
+        // PERF (2026): feed the in-memory alert cache so CheckAlerts does
+        // not need to do a sync ObjectGetDouble for the midpoint line.
+        RecordMidpointLevel(midpointPrice);
     }
     // OPTIMIZATION: Cache IsTriggerLevelsEnabled() result BEFORE the loops
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -184,32 +192,69 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         int maxLevelsAbove = 0;
         int maxLevelsBelow = 0;
         GetAdaptiveLevelCounts(maxLevelsAbove, maxLevelsBelow);
-        
+
         // Determine if we should check historical high/low bounds
         // Custom Price mode: Only respect level count, ignore historical bounds
         // Historical modes (High/Low/Midpoint): Respect both level count AND historical bounds
         bool checkHistoricalBounds = (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE);
-        
+
         // OPTIMIZATION: Cache GetFractalTimeframeForCurrent() and related values BEFORE the loops
         string cachedCurrentTF = GetFractalTimeframeForCurrent();
         double cachedPatternTH = GetLowerTimeframeTH(cachedCurrentTF, 1);
         double cachedTriggerTH = GetLowerTimeframeTH(cachedCurrentTF, 2);
         double cachedLongStep = timeframePercentage * 2.0;
         double cachedShortStep = timeframePercentage * 1.5;
-        
-        //                                                                
+
+        //
         // ZONE SUPPORT: Tracking variables for Structure/Trigger separation
         //          Zone:                              Structure/Trigger
-        //                                                                
+        //
         double lastDrawnPriceAbove = midpointPrice;  // Track last structure level
         double lastTriggerPriceAbove = 0;            // Track last trigger level
         int zoneCountAbove = 0;
-        
+
         double priceLevelAbove = midpointPrice + (thStepSizePoints * pointValue);
         // NO NormalizeDouble - keep full precision to match MotiveWave
         int stepCountAbove = 1;
         int levelCountAbove = 0;
-        
+
+        // PERF (2026): pre-compute the structure classification for every step
+        // we'll iterate over. The legacy loop called GetHighestStructureLevel +
+        // GetOverlapLevelsInfo + GetOverlapTimeframesInfo per iteration - each
+        // of those re-walks the 5-element intervals array, so a single step
+        // paid 3x5 = 15 modulo/compare operations + 3 array-size validations.
+        // With 288 iterations on M1 that was 4320+ ops per redraw just for the
+        // classification, on top of all the StringFormat allocations. We now
+        // do that work once per step, store the highest level + the short-TF
+        // string + the "L<n>" label string in a flat array, and look them up
+        // in O(1) inside the loop.
+        int lookupCapacity = MathMax(maxLevelsAbove, maxLevelsBelow) + 2;
+        int  lookupHighestLevel[];
+        string lookupShortTF[];
+        string lookupOverlapStr[];
+        ArrayResize(lookupHighestLevel, lookupCapacity);
+        ArrayResize(lookupShortTF,     lookupCapacity);
+        ArrayResize(lookupOverlapStr,  lookupCapacity);
+        for(int li = 0; li < lookupCapacity; li++) {
+            lookupHighestLevel[li] = GetHighestStructureLevel(li, intervals);
+            // step 0 (midpoint) gets the current fractal TF + "Mid"; non-midpoint
+            // steps get the timeframe for their highest structure level (or
+            // the current TF if they are triggers).
+            if(li == 0) {
+                lookupShortTF[li]    = GetShortTimeframeName(cachedCurrentTF);
+                lookupOverlapStr[li] = "Mid";
+            } else {
+                int hl = lookupHighestLevel[li];
+                if(hl > 0) {
+                    lookupShortTF[li]    = GetShortTimeframeName(GetTimeframeForStructureLevel(hl));
+                    lookupOverlapStr[li] = "L" + IntegerToString(hl);
+                } else {
+                    lookupShortTF[li]    = GetShortTimeframeName(cachedCurrentTF);
+                    lookupOverlapStr[li] = "";
+                }
+            }
+        }
+
         // Loop condition: Custom Price = only count, Historical = count AND bounds
         while ((checkHistoricalBounds ? (priceLevelAbove <= g_highestHigh) : true) && levelCountAbove < maxLevelsAbove) {
             string lineNameAbove, tooltipAbove, levelInfoAbove;
@@ -217,12 +262,12 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
             int lineWidth;
             double percentageTooltip = 0.0;
-            string shortCurrentTF = GetShortTimeframeName(cachedCurrentTF);
-            
-            // Build overlap info for this step
-            string overlapLevels = GetOverlapLevelsInfo(stepCountAbove, intervals);
-            string overlapTFs = GetOverlapTimeframesInfo(stepCountAbove, intervals);
-            
+            string shortCurrentTF = lookupShortTF[stepCountAbove];
+
+            // Build overlap info for this step - O(1) lookup instead of two function calls
+            string overlapLevels = lookupOverlapStr[stepCountAbove];
+            string overlapTFs = shortCurrentTF;
+
             // FIX: Use dynamic intervals from Base Multiplier instead of hardcoded values
             // Check from highest to lowest level for priority (matching Java getPathForStep)
             if (intervalSize > 4 && intervals[4] > 0 && stepCountAbove % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
@@ -285,10 +330,13 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 stepCountAbove++;
                 continue;
             }
-            
+
             double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
             tooltipAbove = FormatTooltipWithDistance(tooltipAbove, priceLevelAbove);
             CreateTHLineObject(lineNameAbove, priceLevelAbove, lineColor, lineStyle, lineWidth, tooltipAbove, inpTHLineObjectType, false);
+            // PERF (2026): record this trigger level for the in-memory alert cache
+            // so CheckAlerts can avoid the per-tick ObjectGetDouble round-trip.
+            if(triggerEnabled) RecordTriggerLevelUp(stepCountAbove, priceLevelAbove);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, lineColor, levelInfoAbove);
             
             //                                                            
@@ -301,8 +349,9 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             // CRITICAL FIX: Pass fixed step size for consistent zone height
             //                                                            
             if(inpShowMidZones) {
+                // PERF (2026): O(1) lookup from the pre-computed table.
                 // GOLD FIX: Use centralized function instead of repeated else-if
-                int highestLevel = GetHighestStructureLevel(stepCountAbove, intervals);
+                int highestLevel = lookupHighestLevel[stepCountAbove];
                 bool isStructureLevel = (highestLevel > 0 && inpShowStructure);
                 
                 string zoneName = prefix + "Zone_Above_" + IntegerToString(stepCountAbove);
@@ -347,11 +396,12 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
             int lineWidth;
             double percentageTooltip = 0.0;
-            string shortCurrentTFBelow = GetShortTimeframeName(cachedCurrentTF);
-            
-            // Build overlap info for this step
-            string overlapLevelsBelow = GetOverlapLevelsInfo(stepCountBelow, intervals);
-            string overlapTFsBelow = GetOverlapTimeframesInfo(stepCountBelow, intervals);
+            // PERF (2026): O(1) lookup from the pre-computed table built before
+            // the above loop. Replaces GetShortTimeframeName + GetOverlapLevelsInfo
+            // + GetOverlapTimeframesInfo per iteration.
+            string shortCurrentTFBelow = lookupShortTF[stepCountBelow];
+            string overlapLevelsBelow = lookupOverlapStr[stepCountBelow];
+            string overlapTFsBelow = shortCurrentTFBelow;
             
             // FIX: Use dynamic intervals from Base Multiplier instead of hardcoded values
             // Check from highest to lowest level for priority (matching Java getPathForStep)
@@ -419,6 +469,9 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             double pipsToLevelBelow = NormalizeDouble(MathAbs(priceLevelBelow - g_currentPrice) / pointValue / 10.0, 1);
             tooltipBelow = StringFormat("%s | Dist: %.1f pips", tooltipBelow, pipsToLevelBelow);
             CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
+            // PERF (2026): record this trigger level for the in-memory alert cache
+            // so CheckAlerts can avoid the per-tick ObjectGetDouble round-trip.
+            if(triggerEnabled) RecordTriggerLevelDown(stepCountBelow, priceLevelBelow);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
             
             //                                                            
@@ -431,8 +484,9 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             // CRITICAL FIX: Pass fixed step size for consistent zone height
             //                                                            
             if(inpShowMidZones) {
+                // PERF (2026): O(1) lookup from the pre-computed table.
                 // GOLD FIX: Use centralized function instead of repeated else-if
-                int highestLevel = GetHighestStructureLevel(stepCountBelow, intervals);
+                int highestLevel = lookupHighestLevel[stepCountBelow];
                 bool isStructureLevel = (highestLevel > 0 && inpShowStructure);
                 
                 string zoneName = prefix + "Zone_Below_" + IntegerToString(stepCountBelow);

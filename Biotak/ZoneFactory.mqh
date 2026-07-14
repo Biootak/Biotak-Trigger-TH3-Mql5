@@ -306,6 +306,15 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
                 startTime = g_cachedOldestBarTime;
             }
             else {
+                // FIX (2026): previously this returned ERR_ZONE_RENDER_FAILED
+                // whenever iTime returned 0 for the first 32 slots. That happened
+                // reliably on H1/H4 right after a TF switch because MT5 had not
+                // finished loading the timeframe history yet - the indicator
+                // silently dropped every zone rectangle on the new chart and
+                // the user saw only the lines. Fall back to the current bar
+                // opening so the zone is still drawn (with a short right-side
+                // extension); the next redraw frame, once history arrives,
+                // recreates the zone with the correct oldest-bar time.
                 #ifdef ENABLE_DEBUG_LOGS
                 // OPERATIONAL LOG: Always visible so users can diagnose missing zones on lower TFs
                 static int s_iTimeFailLogCount = 0;
@@ -313,15 +322,12 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
                 if(s_iTimeFailLogCount < 5 && TimeCurrent() - s_lastITimeFailLog >= 1) {
                     Print("[ZONE_TIME_FAIL] iTime returned 0 for indices 0..", safeBars - 1,
                           " on TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-                          " zone=", request.name);
+                          " zone=", request.name, " - using current-bar fallback");
                     s_iTimeFailLogCount++;
                     s_lastITimeFailLog = TimeCurrent();
                 }
-                Print("[CreateZone] iTime failed on ", EnumToString((ENUM_TIMEFRAMES)Period()));
                 #endif
-                result.errorMessage = "Invalid oldest bar time";
-                result.errorCode = ERR_ZONE_RENDER_FAILED;
-                return result;
+                startTime = currentTime;
             }
         }
     }

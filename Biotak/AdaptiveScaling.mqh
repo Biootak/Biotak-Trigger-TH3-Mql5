@@ -33,16 +33,67 @@ static double g_lastRawATR = 0.0;                 // Last ATR value (for debug)
 static double g_lastTheoreticalTH = 0.0;          // Last theoretical TH (for debug)
 
 //+------------------------------------------------------------------+
-//| Initialize Adaptive Scaling System                               |
-//| Must be called from OnInit                                       |
+//| PERF (2026): Idempotent InitializeAdaptiveScaling                |
+//|                                                                  |
+//| Root cause of the "fractal jump on TF switch" instability:       |
+//| the previous implementation reset the EMA scaling state to 1.0   |
+//| on every OnInit, and reset g_scalingInitialized to false. The    |
+//| first UpdateATRScalingFactor call after the reset then bypassed   |
+//| the EMA (it sees "not initialized") and seeded the EMA with the  |
+//| raw factor for the NEW timeframe - a value that can be wildly    |
+//| different from the previous TF's smoothed value. The user saw   |
+//| a hard "jump" instead of a smooth transition.                    |
+//|                                                                  |
+//| Fix: make the function idempotent. The state persists across     |
+//| OnInit/OnDeinit cycles (static locals survive a chart's         |
+//| OnDeinit -> OnInit pair in the same indicator process). We only  |
+//| do a full reset on the very first call per indicator instance.  |
+//| On a TF switch the EMA keeps smoothing across the transition,   |
+//| and the user sees a gradual change - or no visible change at all |
+//| if ATR for the new TF happens to be close to the EMA's value.   |
+//|                                                                  |
+//| The "first init" flag is per-process. If the user wants a true  |
+//| reset (e.g. after changing inpAdaptiveMode to a wildly different|
+//| value), they can remove+re-add the indicator or restart the     |
+//| terminal - both clear the static and trigger the full reset.    |
+//| Or they can call ForceResetAdaptiveScaling() explicitly.        |
 //+------------------------------------------------------------------+
+static bool g_scalingFirstInitDone = false;
+
 void InitializeAdaptiveScaling() {
+    if(g_scalingFirstInitDone) {
+        // Subsequent init (TF switch, parameter change): keep the EMA state.
+        // The next UpdateATRScalingFactor call will see g_scalingInitialized=true
+        // and apply normal EMA smoothing, which absorbs the ATR change across
+        // TFs gradually instead of jumping. This is the key fix for the
+        // "wants to redraw from scratch on every TF switch" complaint.
+        return;
+    }
     g_atrScalingFactor = 1.0;
     g_smoothedScalingFactor = 1.0;
     g_lastScalingBarCount = -1;
     g_scalingInitialized = false;
     g_lastRawATR = 0.0;
     g_lastTheoreticalTH = 0.0;
+    g_scalingFirstInitDone = true;
+}
+
+//+------------------------------------------------------------------+
+//| PERF (2026): Force-reset the adaptive scaling state.            |
+//|                                                                  |
+//| Use cases:                                                       |
+//|  - User changed inpAdaptiveMode to a wildly different value     |
+//|    (e.g. ADAPTIVE_FIXED -> ADAPTIVE_ATR with smoothing=2)       |
+//|  - Symbol change: the previous scaling was for the old symbol   |
+//|  - User pressed the reset hotkey and wants a clean slate        |
+//|                                                                  |
+//| After this call, the next UpdateATRScalingFactor will seed the  |
+//| EMA with the new raw factor (one-frame jump), which is what the  |
+//| user explicitly asked for.                                      |
+//+------------------------------------------------------------------+
+void ForceResetAdaptiveScaling() {
+    g_scalingFirstInitDone = false;
+    InitializeAdaptiveScaling();
 }
 
 //+------------------------------------------------------------------+
@@ -194,6 +245,21 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
                 static int s_proposedShift = -1;
                 static int s_proposalCount = 0;
                 static double s_lastConfirmedATR = 0;
+                // PERF (2026): also track the TF of the last confirmed shift. The
+                // large-ATR-move bypass (25% threshold) was designed for same-TF
+                // volatility spikes, but on a TF switch the ATR change is STRUCTURAL
+                // (M5 ATR vs M15 ATR is typically 2-10x), not a volatility spike. If
+                // we let the bypass fire on every TF switch, the shift is applied
+                // immediately and the user sees a hard "jump" - the very thing the
+                // hysteresis was designed to prevent. With TF tracking we treat a TF
+                // change as a normal proposal: it still has to clear 2 consecutive
+                // confirmations. The first call after a TF switch resets the
+                // proposal count to 1, and the shift is held for ~5-15s while ATR
+                // settles into its new regime. The user sees the OLD shift's
+                // spacing for those few seconds - which is exactly the stability
+                // they want.
+                static string s_lastConfirmedTF = "";
+                bool tfChangedSinceLastConfirm = (s_lastConfirmedTF != "" && s_lastConfirmedTF != curTF);
                 if(newShift == s_proposedShift) {
                     s_proposalCount++;
                 } else {
@@ -204,10 +270,14 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
                 // Apply the shift immediately on the very first determination so levels are
                 // drawn ONCE with the correct spacing (no narrow-then-wide double draw).
                 // Subsequent changes keep the 2-proposal hysteresis to avoid flicker.
+                // On a TF switch, the large-ATR-move bypass is DISABLED - the ATR delta
+                // is structural (different period), not a volatility spike, so the
+                // hysteresis must take its normal course.
                 bool firstDetermination = (s_lastConfirmedATR <= 0);
-                if(firstDetermination || s_proposalCount >= 2 || largeATRMove) {
+                if(firstDetermination || s_proposalCount >= 2 || (largeATRMove && !tfChangedSinceLastConfirm)) {
                     g_fractalShift = newShift;
                     s_lastConfirmedATR = weightedATR;
+                    s_lastConfirmedTF = curTF;
                     s_proposalCount = 0;
                 }
                 // else: keep current g_fractalShift

@@ -57,6 +57,9 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         cachedEntry.lastColor = (color)ObjectGetInteger(0, name, OBJPROP_COLOR);
         cachedEntry.lastStyle = (int)ObjectGetInteger(0, name, OBJPROP_STYLE);
         cachedEntry.lastWidth = (int)ObjectGetInteger(0, name, OBJPROP_WIDTH);
+        // PERF (2026): hydrate the tooltip too so the very first
+        // diff can take the cache-only path.
+        cachedEntry.lastTooltip = ObjectGetString(0, name, OBJPROP_TOOLTIP);
         cachedEntry.exists = true;
         objectExistsInCache = true;
         objectExistsOnChart = true;
@@ -65,7 +68,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
         CacheRemoveObject(name);
         objectExistsInCache = false;
     }
-    
+
     if(!objectExistsInCache) {
         // Create new object
         if(!ObjectCreate(0, name, objectType, 0, currentTime, normalizedPrice, (objectType == OBJ_TREND ? futureTime : (datetime)0), normalizedPrice)) {
@@ -85,23 +88,27 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
             }
         }
     }
-    
+
     // Set properties only if they changed
     if(!objectExistsInCache || cachedEntry.lastColor != lineColor)
         ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
-    
+
     if(!objectExistsInCache || cachedEntry.lastStyle != (int)style)
         ObjectSetInteger(0, name, OBJPROP_STYLE, style);
-    
+
     if(!objectExistsInCache || cachedEntry.lastWidth != width)
         ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
-    
-    // TOOLTIP PERF: String comparison is faster than syscall
-    // Note: Tooltip isn't in SObjectCacheEntry, but we can assume if price/color/style/width didn't change, 
-    // tooltip likely didn't change enough to matter, or we can just update it.
-    // For now, let's just update it since it's a single string call.
-    ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
-    
+
+    // PERF (2026): only push OBJPROP_TOOLTIP to the chart when it actually
+    // changed. The previous implementation always issued the syscall - with
+    // ~288 line objects per redraw on M1 that was 288 ObjectSetString
+    // chart-engine calls per frame for identical strings.
+    bool tooltipChanged = !objectExistsInCache || cachedEntry.lastTooltip != tooltip;
+    if(tooltipChanged) {
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        CacheUpdateTooltip(name, tooltip);
+    }
+
     if(!objectExistsInCache) {
         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, isSelectable);
         ObjectSetInteger(0, name, OBJPROP_BACK, false);

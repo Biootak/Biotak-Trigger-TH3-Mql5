@@ -14,6 +14,11 @@ struct SObjectCacheEntry {
     int lastStyle;         // Last known line style
     int lastWidth;         // Last known line width
     string lastText;       // Last known text (for labels)
+    string lastTooltip;    // PERF (2026): last OBJPROP_TOOLTIP value for lines.
+                           // Avoids a synchronous ObjectSetString chart call
+                           // when the tooltip string is unchanged. With ~288
+                           // line objects per redraw on M1 this saves 288
+                           // chart-engine syscalls per full redraw.
     bool lastFilled;       // Last known fill state (for zones)
     bool exists;           // True if object exists on chart
     datetime lastUpdate;   // Last update timestamp
@@ -213,6 +218,9 @@ void CacheAddObject(const string name, const double price,
     g_objectCacheHash[insertIdx].entry.lastColor = clr;
     g_objectCacheHash[insertIdx].entry.lastStyle = style;
     g_objectCacheHash[insertIdx].entry.lastWidth = width;
+    // PERF (2026): seed an empty tooltip so CreateTHLineObject's diff can
+    // always compare against the cached value without a null-handling branch.
+    g_objectCacheHash[insertIdx].entry.lastTooltip = "";
     // PERF (2026): new chart objects default to OBJ_ALL_PERIODS (visible on
     // every timeframe). Seed the cache with that default so the very first
     // SetObjectTimeframesIfChanged / ApplyVisibilityStateIfUnchangedSkip call
@@ -349,6 +357,20 @@ void CacheUpdateObject(const string name, const double price,
     // SetObjectTimeframesIfChanged / ApplyVisibilityStateIfUnchangedSkip.
 }
 
+void CacheUpdateTooltip(const string name, const string tooltip) {
+    int idx = CacheFindIndex(name);
+    if(idx < 0) return;
+    g_objectCacheHash[idx].entry.lastTooltip  = tooltip;
+    g_objectCacheHash[idx].entry.lastUpdate   = CacheGetFrameTime();
+    g_objectCacheHash[idx].lastAccess        = CacheGetFrameTime();
+}
+
+string CacheGetTooltip(const string name) {
+    int idx = CacheFindIndex(name);
+    if(idx < 0) return "";
+    return g_objectCacheHash[idx].entry.lastTooltip;
+}
+
 void CacheUpdateZone(const string name, const double price1, const double price2,
                       const datetime time1, const datetime time2,
                       const color clr, const bool filled) {
@@ -466,6 +488,10 @@ void CacheRebuild() {
             if(idx >= 0) {
                 g_objectCacheHash[idx].entry.lastTimeframes =
                     ObjectGetInteger(0, objName, OBJPROP_TIMEFRAMES);
+                // PERF (2026): hydrate the tooltip so the first diff after a
+                // rebuild takes the fast (cache-only) path.
+                g_objectCacheHash[idx].entry.lastTooltip =
+                    ObjectGetString(0, objName, OBJPROP_TOOLTIP);
             }
         }
     }
