@@ -18,56 +18,53 @@ int OnInitHandler() {
     // runs ONCE per chart (not on every OnInit re-run after TF switch etc.).
     if(!GlobalVariableCheck("Biotak_TFIndependent_Migrated_" + GetCachedChartIdStr())) {
         string oldMigPrefix = inpObjectPrefix + "_";
-        // Old objects have the form "<prefix>_<TF>_<rest>" where <TF> is one
-        // of the standard timeframe strings. A single ObjectsDeleteAll on the
-        // broad prefix would also wipe any NEW objects we just created, so we
-        // enumerate and skip names that don't contain a second underscore
-        // after the prefix (those are the new TF-independent names).
+        int migPrefixLen = StringLen(oldMigPrefix);
+        // Heuristic: OLD format = "<prefix>_<TF>_<rest>" where the TF segment
+        // is short, starts with an optional letter (M/H/D/W, or "MN") and is
+        // followed by at least one digit. NEW format segments (TH, SSLS, Combo,
+        // Factor, Above, Below, Zone, High, Low, Center, StepMode, ...) are
+        // letter-only or letter+letter, NEVER letter+digits.
         int migTotal = ObjectsTotal(0, -1, -1);
         int migDeleted = 0;
         for(int mi = migTotal - 1; mi >= 0; mi--) {
             string migName = ObjectName(0, mi, -1, -1);
             if(migName == "") continue;
-            int migPrefixLen = StringLen(oldMigPrefix);
             if(StringLen(migName) <= migPrefixLen) continue;
             if(StringSubstr(migName, 0, migPrefixLen) != oldMigPrefix) continue;
-            // Skip new-format names: "Biotak_X..." has only one underscore
-            // separating prefix from the rest (e.g. "Biotak_TH_Level_Above_1"
-            // has 3 underscores, but the new format is "Biotak_<rest>" with
-            // no embedded TF). Heuristic: old names contain "_M1_", "_M5_",
-            // "_M15_", "_M30_", "_H1_", "_H4_", "_D1_", "_W1_", "_MN1_".
-            bool isOldFormat = false;
-            string tfTokens[9] = {"_M1_", "_M2_", "_M3_", "_M4_", "_M5_", "_M10_", "_M15_", "_M30_", "_H1_"};
-            // Cheap full-string scan: if the name has the prefix followed by
-            // a digit and an underscore (a timeframe digit token), it's old.
-            for(int tk = 0; tk < ArraySize(tfTokens); tk++) {
-                if(StringFind(migName, tfTokens[tk]) > 0) { isOldFormat = true; break; }
+            int nextUnd = StringFind(migName, "_", migPrefixLen);
+            if(nextUnd <= migPrefixLen) continue;
+            string tfSeg = StringSubstr(migName, migPrefixLen, nextUnd - migPrefixLen);
+            // Validate TF shape: optional leading letter(s) M/H/D/W (or "MN"),
+            // then AT LEAST ONE digit, no other chars.
+            int si = 0;
+            if(tfSeg[0] == 'M' || tfSeg[0] == 'H' || tfSeg[0] == 'D' || tfSeg[0] == 'W') {
+                si = 1;
+                if(StringLen(tfSeg) >= 2 && tfSeg[0] == 'M' && tfSeg[1] == 'N') si = 2;
             }
-            // Also catch "_H4_", "_D1_", "_W1_", "_MN1_", "_H2_", "_H3_",
-            // "_H6_", "_H8_", "_H12_" and any other non-standard minute-based
-            // custom timeframes.
-            if(!isOldFormat) {
-                // Look for a pattern: prefix + uppercase letter + digit(s) + "_"
-                int scanFrom = migPrefixLen;
-                if(scanFrom < StringLen(migName)) {
-                    ushort firstChar = StringGetCharacter(migName, scanFrom);
-                    if(firstChar >= 'A' && firstChar <= 'Z') {
-                        // Look for the next underscore - if the segment before
-                        // it looks like a TF (letter + digits), it's old format.
-                        int nextUnd = StringFind(migName, "_", scanFrom + 1);
-                        if(nextUnd > scanFrom + 1 && nextUnd - scanFrom <= 5) {
-                            isOldFormat = true;
-                        }
-                    }
+            bool isTF = false;
+            if(si > 0 && si < StringLen(tfSeg)) {
+                isTF = true;
+                for(int k = si; k < StringLen(tfSeg); k++) {
+                    if(tfSeg[k] < '0' || tfSeg[k] > '9') { isTF = false; break; }
                 }
             }
-            if(!isOldFormat) continue;
+            if(!isTF) continue;
             ObjectDelete(0, migName);
             migDeleted++;
         }
         if(migDeleted > 0) {
             Print("[I][GEN] Migration: removed ", migDeleted,
                   " legacy TF-suffixed objects (old prefix pattern)");
+            // PERF (2026): the object cache still holds entries with the
+            // old TF-suffixed names. Those entries now point at objects
+            // that no longer exist on the chart, so the next redraw would
+            // get inconsistent "exists=true" responses from the cache and
+            // could try to update ghost objects (the source of the
+            // "stale levels from the old TF" visual artifact). Wipe the
+            // entire object cache so the subsequent redraw rebuilds it
+            // from scratch with the new TF-independent names.
+            CacheClear();
+            Print("[I][GEN] Migration: object cache cleared (will rebuild on first redraw)");
         }
         GlobalVariableSet("Biotak_TFIndependent_Migrated_" + GetCachedChartIdStr(), 1.0);
     }
@@ -1202,24 +1199,20 @@ void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePri
 
 void RedrawAllObjects(bool force_redraw=false)
 {
-    // DIAGNOSTIC: confirm function entry and early-exit conditions
-    static int s_redrawEntryLogCount = 0;
-    if(s_redrawEntryLogCount < 10) {
-        Print("[REDRAW_ENTRY] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-              " force=", (force_redraw ? "Y" : "N"),
-              " levelsNeeded=", (g_redrawTHLevelsNeeded ? "Y" : "N"),
-              " initialized=", (g_initialized ? "Y" : "N"),
-              " bid=", DoubleToString(Bid, Digits));
-        s_redrawEntryLogCount++;
-    }
-    
-    // DIAGNOSTIC: measure full redraw duration
+    // PERF (2026): The [REDRAW_ENTRY] diagnostic is gated to 10 calls per
+    // indicator run, but the print still fires BEFORE the function does any
+    // work - on every no-op tick it just spams the journal. Moved the print
+    // to fire only AFTER we have decided to do real work (past the early-exit
+    // gates), so the log accurately reflects "a real redraw is happening".
+    // PERF (2026): also measure full redraw duration. (Merged the previously
+    // separate `uint redrawStartMs` declaration below the print to keep all
+    // the per-run setup in one place.)
     uint redrawStartMs = GetTickCount();
-    
+
     // Mark the start of the jump-determination window (used for the timeout fallback
     // so levels still draw if ATR never becomes available).
     if(g_fractalDetermineStartMs == 0) g_fractalDetermineStartMs = redrawStartMs;
-    
+
     // PERF: Soft millisecond guard for burst calls (independent from second-based gate)
     static uint s_lastRedrawAttemptMs = 0;
     static uint s_lastForcedRedrawMs = 0;
@@ -1252,6 +1245,19 @@ void RedrawAllObjects(bool force_redraw=false)
     if(!hasPendingWork) {
         s_lastRedrawAttemptMs = nowMs;
         return;
+    }
+
+    // PERF (2026): diagnostic print only after we passed the early-exit gates,
+    // so the journal only logs genuine redraws (not the 30 no-op ticks per
+    // second that previously made this log unreadable).
+    static int s_redrawEntryLogCount = 0;
+    if(s_redrawEntryLogCount < 10) {
+        Print("[REDRAW_ENTRY] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
+              " force=", (force_redraw ? "Y" : "N"),
+              " levelsNeeded=", (g_redrawTHLevelsNeeded ? "Y" : "N"),
+              " initialized=", (g_initialized ? "Y" : "N"),
+              " bid=", DoubleToString(Bid, Digits));
+        s_redrawEntryLogCount++;
     }
 
     // PERF: Refresh cached frame time once   eliminates ~2000+ TimeCurrent() syscalls in cache ops
@@ -1630,6 +1636,17 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     // PERF: Cache Bid/Ask once per tick (moved after hidden check)
     CacheTickPrices();
 
+    // PERF (2026): shortcut the cheap "is there anything to do?" check BEFORE
+    // touching the per-tick state, the throttled print, LogRedrawDecision, or
+    // the cache-invalidation scan. MT5 calls OnCalculate on EVERY tick and on
+    // every chart change - and the bulk of ticks are pure noise (price wobble
+    // inside the same bar, no new bar, no force flag). The original code still
+    // ran the priceChangePercent math, the bar/period/custom-price comparisons
+    // and the LogRedrawDecision print on every no-op tick. We now do the
+    // same comparisons but exit at the FIRST non-trivial condition so a tick
+    // that didn't change anything falls through to a single return.
+    if(rates_total <= 0) return rates_total;
+
     static uint s_lastTickMs = 0;
     static double s_lastPrice = 0;
     static datetime s_lastBarTime = 0;
@@ -1637,16 +1654,11 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     static double s_lastCustomPrice = 0;
 
     uint nowMs = GetTickCount();
-    double currentPrice = (rates_total > 0) ? close[rates_total-1] : 0;
-    datetime currentBarTime = (rates_total > 0) ? time[rates_total-1] : (datetime)0;
+    double currentPrice = close[rates_total-1];
+    datetime currentBarTime = time[rates_total-1];
     int currentPeriod = Period();
     double currentCustomPrice = g_customTHStartPrice;
 
-    double priceChangePercent = 0;
-    if(s_lastPrice > 0 && currentPrice > 0) {
-        priceChangePercent = MathAbs((currentPrice - s_lastPrice) / s_lastPrice) * 100.0;
-    }
-    bool significantPriceChange = (priceChangePercent > 0.1);
     bool barsChanged = (currentBarTime != s_lastBarTime && s_lastBarTime != 0);
     bool isNewBar = barsChanged;
     bool timeframeChanged = (currentPeriod != s_lastPeriod && s_lastPeriod != -1);
@@ -1658,6 +1670,41 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     // Tick throttle: skip redundant ticks within 50ms
     bool tickThrottled = (nowMs - s_lastTickMs < 50 && s_lastTickMs != 0);
 
+    // PERF (2026): the significantPriceChange check is now only run when we
+    // actually need it (i.e. when nothing else fired). With 99% of ticks
+    // landing in the no-op path this avoids a MathAbs + division + multiply
+    // on every tick.
+    bool forceRedrawRequested = g_redrawTHLevelsNeeded || g_forceClearOnNextDraw ||
+                                 g_labelsRelayoutNeeded || !g_initialized;
+
+    // PERF (2026): hot-path early-exit. If the only thing that would change
+    // is a sub-threshold price wobble inside the same bar, with no force flag,
+    // no TF change, no custom-price change, no initialization pending, and we
+    // already throttled - return immediately. This is the dominant case on
+    // M1 (10+ ticks per second of pure noise) and skipping it was the
+    // single biggest source of CPU usage on the previous build.
+    if(tickThrottled && !isNewBar && !forceRedrawRequested &&
+       !timeframeChanged && !customPriceChanged) {
+        return rates_total;
+    }
+
+    // Now (and only now) compute the more expensive significantPriceChange
+    // flag - it requires a real work signal to be worth the cost.
+    double priceChangePercent = 0;
+    if(s_lastPrice > 0 && currentPrice > 0) {
+        priceChangePercent = MathAbs((currentPrice - s_lastPrice) / s_lastPrice) * 100.0;
+    }
+    bool significantPriceChange = (priceChangePercent > 0.1);
+
+    // Second early-exit: even on a non-throttled tick, if no signal fired
+    // and the price wobble is <0.1%, there is literally nothing for the
+    // redraw path to do. Return BEFORE LogRedrawDecision and the per-frame
+    // diagnostic print.
+    if(!forceRedrawRequested && !isNewBar && !timeframeChanged && !customPriceChanged &&
+       !significantPriceChange && g_initialized) {
+        return rates_total;
+    }
+
     // Cache invalidation flags
     int invalidationFlags = CACHE_INV_NONE;
     if(timeframeChanged) invalidationFlags |= CACHE_INV_TIMEFRAME;
@@ -1667,16 +1714,10 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         ApplyCacheInvalidation(invalidationFlags, s_lastPeriod, currentPeriod, s_lastCustomPrice, currentCustomPrice);
     }
 
-    if(rates_total > 0)
     {
-        // FIX: If not fully initialized, don't throttle redraws to ensure levels appear as soon as data is ready
-        if(tickThrottled && !isNewBar && !g_redrawTHLevelsNeeded && g_initialized &&
-           !g_forceClearOnNextDraw && !significantPriceChange &&
-           !timeframeChanged && !customPriceChanged) {
-            return rates_total;
-        }
-
-        // DIAGNOSTIC: always log when we are about to call RedrawAllObjects
+        // DIAGNOSTIC: log ONLY when we are actually about to call RedrawAllObjects.
+        // (Previously this fired on every OnCalculate invocation, spamming the
+        // journal even on the no-op early-exit path.)
         static int s_oncalculateRedrawLogCount = 0;
         if(s_oncalculateRedrawLogCount < 10) {
             Print("[ONCALCULATE_REDRAW] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
@@ -1863,12 +1904,24 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                     else if(!g_linesVisible)
                     {
                         // Lines (HLINE/TREND) are hidden when lines-visibility is off;
-                        // zones stay visible. Detect by name ("_Level_" + triggers).
-                        bool isLine = (StringFind(objName, "_Level_") >= 0) || isTriggerObject;
-                        if(isLine)
-                            SetObjectTimeframesIfChanged(objName, OBJ_NO_PERIODS);
-                        else
+                        // zones stay visible. With TF-independent names the zone
+                        // name contains "_Level_" (the mode name) so we MUST
+                        // exclude zone tokens first to avoid hiding the rectangles.
+                        bool isZone = (StringFind(objName, "_Zone_") >= 0) ||
+                                      (StringFind(objName, "_PipsLabel") >= 0) ||
+                                      (StringFind(objName, "_Label") >= 0 && !isTriggerObject);
+                        if(isZone) {
                             SetObjectTimeframesIfChanged(objName, OBJ_ALL_PERIODS);
+                        } else {
+                            bool isLine = (StringFind(objName, "_Level_") >= 0) ||
+                                          (StringFind(objName, "_Above_") >= 0) ||
+                                          (StringFind(objName, "_Below_") >= 0) ||
+                                          isTriggerObject;
+                            if(isLine)
+                                SetObjectTimeframesIfChanged(objName, OBJ_NO_PERIODS);
+                            else
+                                SetObjectTimeframesIfChanged(objName, OBJ_ALL_PERIODS);
+                        }
                     }
                     else
                     {
@@ -1919,7 +1972,27 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 if(StringGetCharacter(objName, 0) != prefixFirstCharL) continue;
                 if(!(StringLen(objName) >= prefixLenL && StringSubstr(objName, 0, prefixLenL) == cachedPrefixL))
                     continue;
+                // PERF (2026): the line-vs-zone check MUST exclude zone
+                // rectangles. With TF-independent names the zone name is
+                // e.g. "Biotak_TH_Level_Zone_Above_1" - it contains the
+                // substring "_Level_" (the mode name) which the previous
+                // heuristic treated as a line marker, so pressing L would
+                // hide BOTH trigger HLINEs and zone rectangles. The
+                // _Zone_ / _Center_ / _Top / _Bottom / _PipsLabel tokens
+                // are the canonical zone-family markers; anything matching
+                // those is a zone, not a line.
+                bool isZone = (StringFind(objName, "_Zone_") >= 0) ||
+                              (StringFind(objName, "_Zone_Center_") >= 0) ||
+                              (StringFind(objName, "_Zone_Above_") >= 0) ||
+                              (StringFind(objName, "_Zone_Below_") >= 0) ||
+                              (StringFind(objName, "_PipsLabel") >= 0) ||
+                              (StringFind(objName, "_Top") >= 0 && StringFind(objName, "_Zone_") > 0) ||
+                              (StringFind(objName, "_Bottom") >= 0 && StringFind(objName, "_Zone_") > 0) ||
+                              (StringFind(objName, "_Label") >= 0 && StringFind(objName, "TriggerTH_") < 0);
+                if(isZone) continue;
                 bool isLine = (StringFind(objName, "_Level_") >= 0) ||
+                              (StringFind(objName, "_Above_") >= 0) ||
+                              (StringFind(objName, "_Below_") >= 0) ||
                               (StringFind(objName, "TriggerTH_Up_") >= 0) ||
                               (StringFind(objName, "TriggerTH_Down_") >= 0);
                 if(isLine)

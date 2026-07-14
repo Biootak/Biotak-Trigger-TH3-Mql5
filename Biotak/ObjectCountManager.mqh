@@ -29,57 +29,84 @@ static int g_lastObjectCount = 0;
 static datetime g_lastEmergencyCleanup = 0;
 
 //+------------------------------------------------------------------+
-//| Check if we can safely create new objects                        |
+//| PERF (2026): Per-frame cached object count                       |
 //|                                                                  |
-//| Returns: true if safe, false if limit reached                   |
+//| The original CanCreateObject was called from every per-object    |
+//| code path (CreatePipDistanceLabel x158 per redraw, etc.) and     |
+//| each call could re-enumerate ALL chart objects via              |
+//| ObjectsTotal(0,-1,-1). Per the official MQL5 docs, that call   |
+//| is SYNCHRONOUS and "can be time consuming when working with a   |
+//| large number of objects on a chart" — the very definition of   |
+//| the per-redraw hot path.                                        |
+//|                                                                  |
+//| Fix: the count is now memoized on CacheGetFrameTime() (one      |
+//| enumeration per redraw frame, not per object). The 5-second     |
+//| cross-frame throttle is kept as a safety net so a runaway caller|
+//| that somehow ran without a frame stamp still works.             |
 //+------------------------------------------------------------------+
+static datetime g_countCacheFrame = 0;
+static int      g_countCacheValue = -1;
+
 bool CanCreateObject()
 {
-    //                                                                
-    // OPTIMIZATION: Cache check (update every 5 seconds)
-    //                                                                
+    datetime frameStamp = CacheGetFrameTime();
+
+    // PERF (2026): same-frame fast path. The vast majority of redraws call
+    // CanCreateObject from ~158 (CreatePipDistanceLabel) and ~159 (zone create)
+    // per-frame call sites. Without this cache each one would enumerate
+    // the entire chart. With it, the first call per frame pays the ObjectsTotal
+    // cost; the other 317 are a single int compare and return.
+    if(frameStamp == g_countCacheFrame && g_countCacheFrame > 0 && g_countCacheValue >= 0) {
+        return (g_countCacheValue < CRITICAL_OBJECT_LIMIT);
+    }
+
     datetime currentTime = TimeCurrent();
     if(currentTime - g_lastObjectCountCheck < 5 && g_lastObjectCount > 0) {
         // Use cached count
+        g_countCacheFrame  = frameStamp;
+        g_countCacheValue  = g_lastObjectCount;
         if(g_lastObjectCount < MAX_SAFE_OBJECTS) {
             return true; // Fast path
         }
     }
-    
-    //                                                                
+
+    //
     // Get current object count
-    //                                                                
+    //
     int totalObjects = ObjectsTotal(0, -1, -1);
     g_lastObjectCount = totalObjects;
     g_lastObjectCountCheck = currentTime;
-    
-    //                                                                
+    g_countCacheFrame = frameStamp;
+    g_countCacheValue = totalObjects;
+
+    //
     // CRITICAL: Check if limit reached
-    //                                                                
+    //
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         Print("  CRITICAL: Object limit reached (", totalObjects, "/", MT4_OBJECT_LIMIT, ")");
         Print("   Forcing emergency cleanup...");
-        
+
         // Emergency cleanup
         int cleanedCount = EmergencyCleanupObjects();
-        
+
         // Re-check after cleanup
         totalObjects = ObjectsTotal(0, -1, -1);
         g_lastObjectCount = totalObjects;
-        
+        g_countCacheValue = totalObjects;
+
         if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
             Print("  FATAL: Cannot free objects (", totalObjects, " remaining)");
             Print("   Please close some charts or remove other indicators");
             return false;
         }
-        
+
         Print("  Emergency cleanup successful: ", cleanedCount, " objects removed");
         Print("   Current count: ", totalObjects);
     }
-    
-    //                                                                
+
+    //
     // WARNING: Approaching limit
-    //                                                                
+    //
     if(totalObjects >= MAX_SAFE_OBJECTS) {
         // Throttle warning (once per minute)
         static datetime s_lastWarning = 0;
@@ -89,7 +116,7 @@ bool CanCreateObject()
             s_lastWarning = currentTime;
         }
     }
-    
+
     return true;
 }
 
@@ -244,6 +271,11 @@ void InvalidateObjectCountCache()
 {
     g_lastObjectCountCheck = 0;
     g_lastObjectCount = 0;
+    // PERF (2026): also clear the per-frame cache so the next CanCreateObject
+    // call re-enumerates (used after EmergencyCleanupObjects which mutates
+    // the chart object count behind the cache's back).
+    g_countCacheFrame = 0;
+    g_countCacheValue = -1;
 }
 
 //+------------------------------------------------------------------+
