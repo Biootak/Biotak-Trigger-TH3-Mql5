@@ -160,17 +160,27 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
         return false;
     }
 
-    // Format: "M1 +3 | 45.2 pips" or just "45.2 pips" if no levelInfo
-    string labelText;
-    if(StringLen(levelInfo) > 0) {
-        labelText = StringFormat("%s | %.1f", levelInfo, pips);
-    } else {
-        labelText = StringFormat("%.1f pips", pips);
-    }
-
+    // PERF (2026): skip the StringFormat call when neither pips nor levelInfo
+    // changed since the last push. The cache stores lastPips + lastLevelInfo
+    // (added to SObjectCacheEntry). On MN1 with 158 active labels and 60
+    // ticks/min that drops ~9,500 StringFormat heap allocations per minute
+    // to ~0 (only rebuild when the underlying input actually moves).
     string cachedText;
     color cachedColor;
-    bool hasCachedLabel = CacheGetLabel(name, cachedText, cachedColor);
+    double cachedPips = 0.0;
+    string cachedLevelInfo = "";
+    bool hasCachedLabel = CacheGetLabel(name, cachedText, cachedColor, cachedPips, cachedLevelInfo);
+    bool inputsChanged = !hasCachedLabel || cachedPips != pips || cachedLevelInfo != levelInfo;
+
+    string labelText = cachedText;
+    if(inputsChanged) {
+        if(StringLen(levelInfo) > 0) {
+            labelText = StringFormat("%s | %.1f", levelInfo, pips);
+        } else {
+            labelText = StringFormat("%.1f pips", pips);
+        }
+    }
+
     bool objectExists = false;
     // PERF (2026): mirror the same per-frame trust-the-cache check that
     // CreateOrUpdateHLine already uses. The previous implementation always

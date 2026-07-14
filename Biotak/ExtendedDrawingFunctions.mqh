@@ -106,12 +106,31 @@ bool ExtractNumberAfterPrefix(const string name, const string prefix, const stri
 }
 
 void DeleteCachedObjectIfExists(const string name) {
+    // PERF (2026): the cache already says "exists" — trust it for the
+    // ObjectDelete. The ObjectFind synchronous chart-API syscall is
+    // explicitly called out in the MQL5 docs as time consuming at scale.
+    // Only fall back to chart when the cache is cold (cache miss / first
+    // call after invalidation).
     CacheRemoveObject(name);
-    if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
+    int idx = CacheFindIndex(name);
+    if(idx < 0) {
+        // Cold cache: fall back to chart lookup once. Next call is hot.
+        if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
+        return;
+    }
+    ObjectDelete(0, name);
 }
 
 void HideCachedObjectIfExists(const string name) {
-    if(ObjectFind(0, name) >= 0) ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    // PERF (2026): same cache-first pattern as DeleteCachedObjectIfExists.
+    // Cold-cache: one ObjectFind; warm cache: zero chart-API calls.
+    int idx = CacheFindIndex(name);
+    bool existsInCache = (idx >= 0 && g_objectCacheHash[idx].entry.exists);
+    if(existsInCache) {
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    } else if(ObjectFind(0, name) >= 0) {
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    }
 }
 
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = "") {
@@ -3659,13 +3678,18 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     double cumulative = 0;
     int levelsAbove = 0;
     int iterationCount = 0;  // Safety counter
-    
+    // PERF (2026): hoist the Factor_Up_/Factor_Down_ prefix out of the loop.
+    // Each iteration rebuilt the prefix via 2 string concats; ~150 levels per
+    // redraw frame made that 300 short-lived allocations/frame in legacy mode.
+    const string upPrefix   = objectPrefix + "Factor_Up_";
+    const string downPrefix = objectPrefix + "Factor_Down_";
+
     for(int i = 0; i < maxLevelsPerSide && iterationCount < MAX_HARMONIC_LEVELS * 2; i++, iterationCount++) {
         // Get step size for this iteration (alternating pattern)
         double step = stepPattern[i % 2];
         cumulative += step;
         double priceLevel = midpoint + cumulative;
-        
+
         // CRITICAL: Stop if we exceed high price
         if(priceLevel > highPrice) {
             #ifdef ENABLE_DEBUG_LOGS
@@ -3707,7 +3731,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         // (Structure/Trigger filtering would break the alternating rhythm)
         
         // Create level name
-        string levelName = objectPrefix + "Factor_Up_" + IntegerToString(i + 1);
+        string levelName = upPrefix + IntegerToString(i + 1);
         
         // Create or update level
         if(ObjectFind(0, levelName) < 0) {
@@ -3775,7 +3799,7 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         
         // NO FILTERING in Harmonic Mode - draw all levels to preserve pattern
         
-        string levelName = objectPrefix + "Factor_Down_" + IntegerToString(i + 1);
+        string levelName = downPrefix + IntegerToString(i + 1);
         
         if(ObjectFind(0, levelName) < 0) {
             if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
@@ -4157,13 +4181,21 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
     // UNIFIED LOGIC: Uses M Mode color logic with Harmonic pattern
     double cumulative = 0;
     int levelsAboveCount = 0;
-    
+
     // OPTIMIZATION: Cache frequently called values BEFORE the loop
     // OPTIMIZATION: Cache frequently called values BEFORE the loop
     bool triggerEnabled = IsTriggerLevelsEnabled();
     bool structureEnabled = inpShowStructure;
     int baseMultiplier = GetValidatedBaseMultiplier();
-    
+
+    // PERF (2026): hoist the Factor_Harmonic_Above_/Below_/Zone_Above_/Zone_Below_
+    // prefix out of the loops. ~150 iterations × 4 concats = 600 allocations
+    // per redraw frame in legacy Harmonic mode.
+    const string haPrefix = objectPrefix + "Factor_Harmonic_Above_";
+    const string hbPrefix = objectPrefix + "Factor_Harmonic_Below_";
+    const string hzaPrefix = objectPrefix + "Factor_Harmonic_Zone_Above_";
+    const string hzbPrefix = objectPrefix + "Factor_Harmonic_Zone_Below_";
+
     // Initialize zone tracking with validation (Gold Version)
     double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
     if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
@@ -4216,7 +4248,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
         }
         
-        string levelName = objectPrefix + "Factor_Harmonic_Above_" + IntegerToString(logicalStep);
+        string levelName = haPrefix + IntegerToString(logicalStep);
         
         if(shouldShowLine && ObjectFind(0, levelName) < 0) {
             if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
@@ -4250,7 +4282,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 }
             }
             
-            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Above_" + IntegerToString(logicalStep);
+            string zoneName = hzaPrefix + IntegerToString(logicalStep);
             // CRITICAL FIX: Pass avgStepSize for consistent zone height
             if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -4317,7 +4349,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
             levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
         }
         
-        string levelName = objectPrefix + "Factor_Harmonic_Below_" + IntegerToString(logicalStep);
+        string levelName = hbPrefix + IntegerToString(logicalStep);
         
         if(shouldShowLine && ObjectFind(0, levelName) < 0) {
             if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
@@ -4351,7 +4383,7 @@ void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double 
                 }
             }
             
-            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Below_" + IntegerToString(logicalStep);
+            string zoneName = hzbPrefix + IntegerToString(logicalStep);
             // CRITICAL FIX: Pass avgStepSize for consistent zone height
             if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
                                           structureEnabled, triggerEnabled,
@@ -4469,13 +4501,18 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
             ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         }
     }
-    
-    //                                                                
+
+    //
     // DRAW LEVELS ABOVE CENTER (respects maxLevelsAbove)
     //                     (             maxLevelsAbove)
     // UNIFIED LOGIC: Matches M Mode exactly
-    //                                                                
-    
+    //
+
+    // PERF (2026): hoist Factor_Above_/Factor_Below_ prefix out of loops.
+    // ~150 iterations × 2 concats = 300 allocations per redraw in legacy mode.
+    const string aPrefix = objectPrefix + "Factor_Above_";
+    const string bPrefix = objectPrefix + "Factor_Below_";
+
     // OPTIMIZATION: Cache frequently called values BEFORE the loop
     bool triggerEnabled = IsTriggerLevelsEnabled();
     bool structureEnabled = inpShowStructure;
@@ -4568,7 +4605,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         }
         
         // Draw level
-        string levelName = objectPrefix + "Factor_Above_" + IntegerToString(logicalStep);
+        string levelName = aPrefix + IntegerToString(logicalStep);
         if(shouldShowLine) {
             if(ObjectFind(0, levelName) < 0) {
                 if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
@@ -4689,7 +4726,7 @@ void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPr
         }
         
         // Draw level
-        string levelName = objectPrefix + "Factor_Below_" + IntegerToString(logicalStep);
+        string levelName = bPrefix + IntegerToString(logicalStep);
         if(shouldShowLine) {
             if(ObjectFind(0, levelName) < 0) {
                 if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {

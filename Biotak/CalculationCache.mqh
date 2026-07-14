@@ -67,11 +67,21 @@ double GetCachedTHCalculation(double basePrice, double percentage, int digits) {
     if(!g_thCalcCache.valid) {
         return 0.0;
     }
-    double normalizedPrice = NormalizeDouble(basePrice, digits);
-    double normalizedPercentage = NormalizeDouble(percentage, 6);
-    double priceEpsilon = GetDynamicEpsilonForPrice(normalizedPrice);
-    bool priceMatch = MathAbs(normalizedPrice - g_thCalcCache.basePrice) < priceEpsilon;
-    bool percentageMatch = MathAbs(normalizedPercentage - g_thCalcCache.percentage) < EPSILON_PERCENTAGE;
+    // PERF (2026): align price and percentage precisions on the key. The
+    // previous code normalized price to `digits` and percentage to 6, but
+    // compared them through different epsilon scales (priceEpsilon vs
+    // EPSILON_PERCENTAGE). When percentage changed by less than EPSILON_PERCENTAGE
+    // but the price-side math shifted by <priceEpsilon, the cache reported a
+    // miss every tick because the per-side normalized values drifted. Align
+    // both sides on the same internal representation (8 decimals) so a hit
+    // is detected deterministically.
+    const int KEY_SCALE = 8;
+    double normalizedPrice = NormalizeDouble(basePrice, KEY_SCALE);
+    double normalizedPercentage = NormalizeDouble(percentage, KEY_SCALE);
+    bool priceMatch = MathAbs(normalizedPrice - NormalizeDouble(g_thCalcCache.basePrice, KEY_SCALE))
+                      < GetDynamicEpsilonForPrice(normalizedPrice);
+    bool percentageMatch = MathAbs(normalizedPercentage - NormalizeDouble(g_thCalcCache.percentage, KEY_SCALE))
+                           < EPSILON_PERCENTAGE;
     bool digitsMatch = (digits == g_thCalcCache.digits);
     if(priceMatch && percentageMatch && digitsMatch) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -87,8 +97,11 @@ double GetCachedTHCalculation(double basePrice, double percentage, int digits) {
 }
 
 void StoreTHCalculation(double basePrice, double percentage, int digits, double result) {
-    g_thCalcCache.basePrice = NormalizeDouble(basePrice, digits);
-    g_thCalcCache.percentage = NormalizeDouble(percentage, 6);
+    // PERF (2026): mirror the key precision used in GetCachedTHCalculation so
+    // the round-trip succeeds on the same tick (see comment in getter).
+    const int KEY_SCALE = 8;
+    g_thCalcCache.basePrice = NormalizeDouble(basePrice, KEY_SCALE);
+    g_thCalcCache.percentage = NormalizeDouble(percentage, KEY_SCALE);
     g_thCalcCache.digits = digits;
     g_thCalcCache.result = result;
     g_thCalcCache.lastUpdate = TimeCurrent();

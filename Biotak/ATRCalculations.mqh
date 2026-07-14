@@ -308,9 +308,9 @@ double CalculateSimpleATR(const int period) {
         #endif
         return 0.0;
     }
-    
+
     // Use GetEffectiveBars() to respect timeframe lock
-    //            GetEffectiveBars()                             
+    //            GetEffectiveBars()
     int barsAvailable = GetEffectiveBars();
     if(barsAvailable <= period) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -318,21 +318,43 @@ double CalculateSimpleATR(const int period) {
         #endif
         return 0.0;
     }
-    
+
+    // PERF (2026): batch iHigh/iLow/iClose/iOpen via a single CopyRates.
+    // The previous implementation called CalculateTrueRange() once per bar,
+    // which in turn made 3-4 sync timeseries syscalls (iHigh, iLow, iOpen
+    // or iClose) per bar. Over a period of e.g. 14 bars that's 42-56 sync
+    // timeseries requests per ATR call - and CalculateATRBatch calls this
+    // for 6 different periods, so the cost compounded. One CopyRates pulls
+    // all OHLC at once; the inner loop becomes pure math.
+    MqlRates rates[];
+    ArraySetAsSeries(rates, true);
+    ENUM_TIMEFRAMES effectiveTF = (ENUM_TIMEFRAMES)GetEffectiveTimeframe();
+    int copied = CopyRates(Symbol(), effectiveTF, 0, period + 1, rates);
+    if(copied < period + 1) return 0.0;
+
     double sumTR = 0.0;
     int validBars = 0;
-    
-    // Calculate ATR from most recent bars (index 0 = current bar)
-    for(int i = 0; i < period && i < barsAvailable; i++) {
-        double tr = CalculateTrueRange(i);
-        
-        // AUDIT FIX: Use IsZero for comparison
+    for(int i = 0; i < period; i++) {
+        double high  = rates[i].high;
+        double low   = rates[i].low;
+        double prevClose = rates[i + 1].close;
+        if(!IsValidPrice(high, EPSILON_PRICE) ||
+           !IsValidPrice(low, EPSILON_PRICE) ||
+           !IsValidPrice(prevClose, EPSILON_PRICE)) {
+            continue;
+        }
+        if(IsLess(high, low, EPSILON_PRICE)) {
+            continue;
+        }
+        double tr = MathMax(high - low,
+                            MathMax(MathAbs(high - prevClose),
+                                    MathAbs(low - prevClose)));
         if(!IsZero(tr, EPSILON_PRICE)) {
             sumTR += tr;
             validBars++;
         }
     }
-    
+
     // AUDIT FIX: Use SafeDivide
     return SafeDivide(sumTR, (double)validBars, 0.0, EPSILON_GENERAL);
 }

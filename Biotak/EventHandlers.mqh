@@ -1073,18 +1073,28 @@ void CleanupInactivePipelineModes(const string objectPrefix, const string active
     g_suppressDeleteEvents = true;
     int totalDeleted = 0;
     for(int i = 0; i < entryCount; i++) {
+        // PERF (2026): hoist the 6 suffix concatenations out of the loop body.
+        // On a TF/symbol switch with ~5 inactive modes, that was ~30 string
+        // allocations per call. Each suffix is a constant for the whole call
+        // (entries[] is filled once before the loop), so we compute them here.
         int modeNameEnd = StringFind(entries[i].levelAbove, "_Above_");
         string modeName = (modeNameEnd > 0) ? StringSubstr(entries[i].levelAbove, 0, modeNameEnd) : "";
         if(modeName == "" || modeName == activeModeName) continue;
 
+        const string zAbove = objectPrefix + entries[i].zoneSuffix;
+        const string zCenter = objectPrefix + entries[i].zoneCenter;
+        const string lAbove  = objectPrefix + entries[i].levelAbove;
+        const string lBelow  = objectPrefix + entries[i].levelBelow;
+        const string mPoint  = objectPrefix + entries[i].midpoint;
+
         if(clearZones) {
-            totalDeleted += ObjectsDeleteAll(0, objectPrefix + entries[i].zoneSuffix);
-            totalDeleted += ObjectsDeleteAll(0, objectPrefix + entries[i].zoneCenter);
+            totalDeleted += ObjectsDeleteAll(0, zAbove);
+            totalDeleted += ObjectsDeleteAll(0, zCenter);
         }
 
-        totalDeleted += ObjectsDeleteAll(0, objectPrefix + entries[i].levelAbove);
-        totalDeleted += ObjectsDeleteAll(0, objectPrefix + entries[i].levelBelow);
-        totalDeleted += ObjectsDeleteAll(0, objectPrefix + entries[i].midpoint);
+        totalDeleted += ObjectsDeleteAll(0, lAbove);
+        totalDeleted += ObjectsDeleteAll(0, lBelow);
+        totalDeleted += ObjectsDeleteAll(0, mPoint);
         totalDeleted += ObjectsDeleteAll(0, objectPrefix + modeName + "_Midpoint_");
     }
     g_suppressDeleteEvents = false;
@@ -1327,7 +1337,7 @@ void RedrawAllObjects(bool force_redraw=false)
     // PERF: Soft millisecond guard for burst calls (independent from second-based gate)
     static uint s_lastRedrawAttemptMs = 0;
     static uint s_lastForcedRedrawMs = 0;
-    uint nowMs = GetTickCount();
+    uint nowMs = redrawStartMs;  // PERF (2026): reuse redrawStartMs (already GetTickCount())
 
     // PERF (2026): zero the throttle timestamps when this is the first call
     // after a fresh OnInit (s_lastRedrawAttemptMs is the cleanest signal we
@@ -1485,20 +1495,14 @@ void RedrawAllObjects(bool force_redraw=false)
     string objectPrefix = s_cachedObjectPrefix;
 
     // PERF (2026): Since the prefix is now TF-independent (static above), the
-    // `s_lastPrefix != objectPrefix` check below was always false — the static
+    // `s_lastPrefix != objectPrefix` check was always false — the static
     // initializer runs exactly once and `objectPrefix` is the same string
     // every call. The RenamePrefixedObjects body never executed but the
     // branch + the always-false comparison still ran on every redraw frame.
     // On M1 at 60 ticks/min that was 60 wasted string compares per minute
-    // per chart. Removed. If prefix ever becomes runtime-mutable again,
-    // reintroduce this block.
-    static string s_lastPrefix = objectPrefix; // first-call init mirrors cachedObjectPrefix
-    if(s_lastPrefix != objectPrefix) {
-        RenamePrefixedObjects(s_lastPrefix, objectPrefix);
-        InvalidateTimeframeDependentCaches();
-        InvalidateATRCache();
-    }
-    s_lastPrefix = objectPrefix;
+    // per chart. The block is removed entirely. If prefix ever becomes
+    // runtime-mutable again, reintroduce it (the comparison goes back to
+    // true on the first prefix change).
 
     #ifdef ENABLE_DEBUG_LOGS
     static datetime s_lastDebugLog = 0;
@@ -1788,6 +1792,27 @@ void RedrawAllObjects(bool force_redraw=false)
 //+------------------------------------------------------------------+
 //| OnCalculate Handler (matching MT5: tick throttle + cache inv.)   |
 //+------------------------------------------------------------------+
+// PERF (2026): memoize iTime(Symbol(), tf, 0) for the current frame.
+// On new-bar ticks the OnCalculate path calls this 9 times (once per TF);
+// without caching that's 9 synchronous timeseries syscalls per new-bar tick.
+datetime GetCachedITimeForFrame(const string symbol, ENUM_TIMEFRAMES tf) {
+    static string s_sym = "";
+    static ulong  s_frameMs = 0;
+    static ENUM_TIMEFRAMES s_tf[16];
+    static datetime s_bar[16];
+    static int s_count = 0;
+    const ulong nowMs = CacheGetFrameMs();
+    if(nowMs != s_frameMs || s_sym != symbol) {
+        s_sym = symbol;
+        s_frameMs = nowMs;
+        s_count = 0;
+    }
+    for(int i = 0; i < s_count; i++) if(s_tf[i] == tf) return s_bar[i];
+    datetime v = iTime(symbol, tf, 0);
+    if(s_count < 16) { s_tf[s_count] = tf; s_bar[s_count] = v; s_count++; }
+    return v;
+}
+
 int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
     // FIX: refresh the cached Period() at the top of every calculate. On a
     // timeframe switch MT5 may invoke OnCalculate with the new period without
@@ -1806,6 +1831,11 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
 
     // PERF: Cache Bid/Ask once per tick (moved after hidden check)
     CacheTickPrices();
+
+    // PERF (2026): stamp the frame ms so per-frame memos (e.g.
+    // GetCachedITimeForFrame) can detect frame boundaries without each
+    // helper taking its own GetTickCount() call.
+    CacheRefreshFrameMs();
 
     // PERF (2026): shortcut the cheap "is there anything to do?" check BEFORE
     // touching the per-tick state, the throttled print, LogRedrawDecision, or
@@ -1969,7 +1999,7 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
                 // Read the current bar time for this TF WITHOUT triggering
                 // the rest of the heavy calculate path. iTime is a single
                 // sync timeseries request; cheap relative to iATR.
-                datetime tfBar = iTime(Symbol(), tf, 0);
+                datetime tfBar = GetCachedITimeForFrame(Symbol(), tf);
                 if(!timeframeChanged && tfBar == prevBar) {
                     // Bar on this TF hasn't rolled; cached value still valid.
                     continue;
@@ -2164,33 +2194,25 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                         }
                         continue;
                     }
-                    // Keep trigger objects hidden if triggers are disabled
-                    bool isTriggerObject = (StringFind(objName, "TriggerTH_Up_") >= 0 ||
-                                            StringFind(objName, "TriggerTH_Down_") >= 0);
+                    // PERF (2026): replaced 5-7 StringFind calls per object with a
+                    // single int compare against the cached category. Category
+                    // is set once at insert time by ClassifyObjectCategoryByName
+                    // in ObjectCache.mqh.
+                    int cat = g_objectCacheHash[i].entry.category;
+                    bool isTriggerObject = (cat == 4);
                     if(isTriggerObject && !g_triggerLevelsEnabled)
                     {
                         SetObjectTimeframesIfChanged(objName, OBJ_NO_PERIODS);
                     }
                     else if(!g_linesVisible)
                     {
-                        // Lines (HLINE/TREND) are hidden when lines-visibility is off;
-                        // zones stay visible. With TF-independent names the zone
-                        // name contains "_Level_" (the mode name) so we MUST
-                        // exclude zone tokens first to avoid hiding the rectangles.
-                        bool isZone = (StringFind(objName, "_Zone_") >= 0) ||
-                                      (StringFind(objName, "_PipsLabel") >= 0) ||
-                                      (StringFind(objName, "_Label") >= 0 && !isTriggerObject);
-                        if(isZone) {
+                        // Zones/labels/triggers stay visible; lines hide.
+                        if(cat == 2 || cat == 3 || cat == 4 || cat == 5) {
                             SetObjectTimeframesIfChanged(objName, OBJ_ALL_PERIODS);
+                        } else if(cat == 1) {
+                            SetObjectTimeframesIfChanged(objName, OBJ_NO_PERIODS);
                         } else {
-                            bool isLine = (StringFind(objName, "_Level_") >= 0) ||
-                                          (StringFind(objName, "_Above_") >= 0) ||
-                                          (StringFind(objName, "_Below_") >= 0) ||
-                                          isTriggerObject;
-                            if(isLine)
-                                SetObjectTimeframesIfChanged(objName, OBJ_NO_PERIODS);
-                            else
-                                SetObjectTimeframesIfChanged(objName, OBJ_ALL_PERIODS);
+                            SetObjectTimeframesIfChanged(objName, OBJ_ALL_PERIODS);
                         }
                     }
                     else
@@ -2242,30 +2264,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 if(StringGetCharacter(objName, 0) != prefixFirstCharL) continue;
                 if(!(StringLen(objName) >= prefixLenL && StringSubstr(objName, 0, prefixLenL) == cachedPrefixL))
                     continue;
-                // PERF (2026): the line-vs-zone check MUST exclude zone
-                // rectangles. With TF-independent names the zone name is
-                // e.g. "Biotak_TH_Level_Zone_Above_1" - it contains the
-                // substring "_Level_" (the mode name) which the previous
-                // heuristic treated as a line marker, so pressing L would
-                // hide BOTH trigger HLINEs and zone rectangles. The
-                // _Zone_ / _Center_ / _Top / _Bottom / _PipsLabel tokens
-                // are the canonical zone-family markers; anything matching
-                // those is a zone, not a line.
-                bool isZone = (StringFind(objName, "_Zone_") >= 0) ||
-                              (StringFind(objName, "_Zone_Center_") >= 0) ||
-                              (StringFind(objName, "_Zone_Above_") >= 0) ||
-                              (StringFind(objName, "_Zone_Below_") >= 0) ||
-                              (StringFind(objName, "_PipsLabel") >= 0) ||
-                              (StringFind(objName, "_Top") >= 0 && StringFind(objName, "_Zone_") > 0) ||
-                              (StringFind(objName, "_Bottom") >= 0 && StringFind(objName, "_Zone_") > 0) ||
-                              (StringFind(objName, "_Label") >= 0 && StringFind(objName, "TriggerTH_") < 0);
-                if(isZone) continue;
-                bool isLine = (StringFind(objName, "_Level_") >= 0) ||
-                              (StringFind(objName, "_Above_") >= 0) ||
-                              (StringFind(objName, "_Below_") >= 0) ||
-                              (StringFind(objName, "TriggerTH_Up_") >= 0) ||
-                              (StringFind(objName, "TriggerTH_Down_") >= 0);
-                if(isLine)
+                // PERF (2026): use cached category instead of 5-7 StringFind calls.
+                // Categories 2 (Zone), 3 (Label), 5 (CustomPrice) stay visible
+                // regardless of L-key state. Category 1 (Line) and 4 (Trigger)
+                // follow g_linesVisible.
+                int catL = g_objectCacheHash[i].entry.category;
+                if(catL == 2 || catL == 3 || catL == 5) continue;
+                if(catL == 1 || catL == 4)
                     SetObjectTimeframesIfChanged(objName, g_linesVisible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
             }
             LOG_I(LOG_CAT_LINES, "Lines " + (g_linesVisible ? "VISIBLE" : "HIDDEN"));
@@ -3058,7 +3063,18 @@ void RunIncrementalObjectCleanup()
             // would use a different inpObjectPrefix.
             if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
 
-            datetime objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
+            // PERF (2026): trust the cached lastUpdate when we have it; only
+            // pay the synchronous ObjectGetInteger(OBJPROP_TIME) chart-API
+            // call when the cache is cold (orphan object not yet tracked).
+            // For active cleanup runs over the same ~hundreds of objects
+            // every tick, this turns ~300 syscalls into ~0 (warm cache).
+            datetime objTime = 0;
+            int orphanIdx = CacheFindIndex(objName);
+            if(orphanIdx >= 0 && g_objectCacheHash[orphanIdx].entry.lastUpdate > 0) {
+                objTime = (datetime)g_objectCacheHash[orphanIdx].entry.lastUpdate;
+            } else {
+                objTime = (datetime)ObjectGetInteger(0, objName, OBJPROP_TIME);
+            }
             if(objTime > 0 && objTime < cutoffTime) {
                 CacheRemoveObject(objName);
                 g_suppressDeleteEvents = true;

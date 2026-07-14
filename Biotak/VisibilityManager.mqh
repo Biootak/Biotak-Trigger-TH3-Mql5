@@ -192,21 +192,9 @@ void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
         return;  // already on the right timeframes, skip chart API
     }
 
-    // Cache miss / object not tracked: keep the old fallback (every 10th
-    // frame we still pay the ObjectGetInteger cost to re-hydrate) so
-    // a freshly added but not-yet-cached object still gets its timeframe
-    // updated at least once per 10 frames.
-    if((g_visibilityFrameCounter % 10) == 0) {
-        long currentTf = ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES);
-        if(currentTf == tf) {
-            if(idx >= 0) {
-                g_objectCacheHash[idx].entry.lastTimeframes = tf;
-                g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-                g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-            }
-            return;
-        }
-    }
+    // PERF (2026): removed 1-in-10 ObjectGetInteger(OBJPROP_TIMEFRAMES) fallback.
+    // Cache tracks lastTimeframes via SetObjectTimeframesIfChanged; cache is
+    // the source of truth. On miss we just write through.
     ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
     if(idx >= 0) {
         g_objectCacheHash[idx].entry.lastTimeframes = tf;

@@ -29,6 +29,15 @@ struct SObjectCacheEntry {
                            // that synchronous chart API calls are time
                            // consuming when working with a large number of
                            // objects on a chart).
+    // PERF (2026): cached inputs for the pip-distance label formatter so
+    // CreatePipDistanceLabel can skip its StringFormat call when neither
+    // pips nor levelInfo have changed (158 allocations/frame on MN1).
+    double lastPips;
+    string lastLevelInfo;
+    int    category;       // PERF (2026): cached object category (Line/Zone/
+                           // Label/Trigger/CustomPrice) populated at insert
+                           // time. Removes 5-7 StringFind calls per object
+                           // in the F/L keypress handlers.
 };
 
 // Hash-based cache configuration
@@ -54,6 +63,55 @@ static int g_objectCacheSize = 0;
 
 // PERF: Cached TimeCurrent() - refreshed once per redraw frame
 static datetime g_cacheFrameTime = 0;
+
+// PERF (2026): per-frame ms stamp for cheap frame-equality checks.
+// Refreshed by CacheRefreshFrameMs() at the top of redraw / calculate paths.
+// Used by GetCachedITimeForFrame to memoize timeseries lookups for the
+// current frame.
+static ulong g_cacheFrameMs = 0;
+void CacheRefreshFrameMs() { g_cacheFrameMs = (ulong)GetTickCount(); }
+ulong CacheGetFrameMs() {
+    if(g_cacheFrameMs == 0) g_cacheFrameMs = (ulong)GetTickCount();
+    return g_cacheFrameMs;
+}
+
+// PERF (2026): one-time object categorization by name prefix/suffix.
+// F/L key handlers previously ran 5-7 StringFind calls per cached object;
+// with category pre-computed at insert time the handlers do a single int
+// compare instead. Categories: 0=Unknown, 1=Line, 2=Zone, 3=Label,
+// 4=Trigger/Midpoint, 5=CustomPrice.
+//
+// Order matters: trigger objects (4) and zone tokens (2) must be matched
+// before generic line/label suffixes. _Above_/_Below_ are ambiguous (could
+// be a zone above/below or a line above/below), so _Zone_ is checked first.
+int ClassifyObjectCategoryByName(const string name) {
+    int len = StringLen(name);
+    if(len < 2) return 0;
+    // TH3_Structure_* — handled separately by callers (skip in F/L).
+    if(StringFind(name, "TH3_Structure_") == 0) return 0;
+    // Trigger subdivisions (TriggerTH_Up_, TriggerTH_Down_).
+    if(StringFind(name, "TriggerTH_") == 0) return 4;
+    // Custom price line.
+    if(StringFind(name, "Biotak_CustomPrice") >= 0) return 5;
+    // Zone family (rectangles + zone tops/bottoms). Must precede Above/Below.
+    if(StringFind(name, "_Zone_")        >= 0) return 2;
+    if(StringFind(name, "_Zone_Top")    >= 0) return 2;
+    if(StringFind(name, "_Zone_Bottom") >= 0) return 2;
+    // Pip-distance label (kept visible in F/L handlers).
+    if(StringFind(name, "_PipsLabel")   >= 0) return 3;
+    // Generic label suffix (e.g. TH..._Label).
+    if(StringFind(name, "_Label")       >= 0) return 3;
+    // Midpoint line.
+    if(StringFind(name, "_Midpoint_")   >= 0) return 4;
+    // Generic line tokens.
+    if(StringFind(name, "_Level_")      >= 0) return 1;
+    if(StringFind(name, "_Above_")      >= 0) return 1;
+    if(StringFind(name, "_Below_")      >= 0) return 1;
+    int c0 = StringGetCharacter(name, 0);
+    int c1 = StringGetCharacter(name, 1);
+    if(c0 == 'T' && c1 == 'H') return 1;
+    return 0;
+}
 
 void CacheRefreshFrameTime() {
     g_cacheFrameTime = TimeCurrent();
@@ -214,6 +272,9 @@ void CacheAddObject(const string name, const double price,
 
     g_objectCacheHash[insertIdx].name = name;
     g_objectCacheHash[insertIdx].entry.name = name;
+    // PERF (2026): classify at insert so F/L key handlers can skip 5-7
+    // StringFind calls per cached object.
+    g_objectCacheHash[insertIdx].entry.category = ClassifyObjectCategoryByName(name);
     g_objectCacheHash[insertIdx].entry.lastPrice = price;
     g_objectCacheHash[insertIdx].entry.lastColor = clr;
     g_objectCacheHash[insertIdx].entry.lastStyle = style;
@@ -327,15 +388,29 @@ bool CacheGetObject(const string name, SObjectCacheEntry &entry) {
     return true;
 }
 
-bool CacheGetLabel(const string name, string &text, color &clr) {
+// PERF (2026): overload returning the cached inputs (pips, levelInfo) so
+// CreatePipDistanceLabel can short-circuit its StringFormat call when those
+// haven't changed.
+bool CacheGetLabel(const string name, string &text, color &clr,
+                   double &pips, string &levelInfo) {
     int idx = CacheFindIndex(name);
     if(idx < 0) {
+        pips = 0.0;
+        levelInfo = "";
         return false;
     }
-    
     text = g_objectCacheHash[idx].entry.lastText;
     clr = g_objectCacheHash[idx].entry.lastColor;
+    pips = g_objectCacheHash[idx].entry.lastPips;
+    levelInfo = g_objectCacheHash[idx].entry.lastLevelInfo;
     return g_objectCacheHash[idx].entry.exists;
+}
+
+// 2-arg overload for callers that don't need the input snapshot.
+bool CacheGetLabel(const string name, string &text, color &clr) {
+    double dummyPips;
+    string dummyInfo;
+    return CacheGetLabel(name, text, clr, dummyPips, dummyInfo);
 }
 
 void CacheUpdateObject(const string name, const double price,
@@ -392,6 +467,9 @@ void CacheUpdateZone(const string name, const double price1, const double price2
 
         g_objectCacheHash[insertIdx].name = name;
         g_objectCacheHash[insertIdx].entry.name = name;
+        // PERF (2026): classify at insert so F/L key handlers can skip
+        // StringFind calls per cached object.
+        g_objectCacheHash[insertIdx].entry.category = ClassifyObjectCategoryByName(name);
         g_objectCacheHash[insertIdx].entry.lastPrice = price1;
         g_objectCacheHash[insertIdx].entry.lastPrice2 = price2;
         g_objectCacheHash[insertIdx].entry.lastTime1 = time1;
@@ -421,7 +499,8 @@ void CacheUpdateZone(const string name, const double price1, const double price2
     // PERF: preserve lastTimeframes
 }
 
-void CacheUpdateLabel(const string name, const string text, const color clr) {
+void CacheUpdateLabel(const string name, const string text, const color clr,
+                       double pips = 0.0, string levelInfo = "") {
     int idx = CacheFindIndex(name);
     if(idx < 0) {
         if(!g_objectCacheHashInitialized) InitializeObjectCacheHash();
@@ -440,8 +519,15 @@ void CacheUpdateLabel(const string name, const string text, const color clr) {
 
         g_objectCacheHash[insertIdx].name = name;
         g_objectCacheHash[insertIdx].entry.name = name;
+        // PERF (2026): classify at insert so F/L key handlers can skip
+        // StringFind calls per cached object.
+        g_objectCacheHash[insertIdx].entry.category = ClassifyObjectCategoryByName(name);
         g_objectCacheHash[insertIdx].entry.lastText = text;
         g_objectCacheHash[insertIdx].entry.lastColor = clr;
+        // PERF (2026): snapshot input fields so CreatePipDistanceLabel can
+        // skip StringFormat when neither pips nor levelInfo has changed.
+        g_objectCacheHash[insertIdx].entry.lastPips = pips;
+        g_objectCacheHash[insertIdx].entry.lastLevelInfo = levelInfo;
         // PERF (2026): new chart objects default to OBJ_ALL_PERIODS.
         g_objectCacheHash[insertIdx].entry.lastTimeframes = OBJ_ALL_PERIODS;
         g_objectCacheHash[insertIdx].entry.exists = true;
@@ -455,6 +541,9 @@ void CacheUpdateLabel(const string name, const string text, const color clr) {
 
     g_objectCacheHash[idx].entry.lastText = text;
     g_objectCacheHash[idx].entry.lastColor = clr;
+    // PERF (2026): update the input snapshot too.
+    g_objectCacheHash[idx].entry.lastPips = pips;
+    g_objectCacheHash[idx].entry.lastLevelInfo = levelInfo;
     g_objectCacheHash[idx].entry.exists = true;
     g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();

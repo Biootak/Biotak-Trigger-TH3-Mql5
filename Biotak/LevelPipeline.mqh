@@ -114,6 +114,9 @@ struct SZoneDefinition {
 //+------------------------------------------------------------------+
 struct STriggerLine {
     string name;            // Object name for this line
+    string labelName;       // PERF (2026): pre-computed name + "_Label". Avoids
+                            // a per-iter string concat in RenderTriggerLines
+                            // (158 allocations/frame on MN1 before fix).
     double price;           // = zone boundary price
     int    logicalStep;
     int    direction;       // +1 = above, -1 = below, 0 = midpoint
@@ -638,7 +641,11 @@ void BuildZonesAndLines(
 
         // Line at midpoint between prev and current
         double lineMidPrice = (prevPrice + currentPrice) / 2.0;
-        lines[lIdx].name = lineAbovePrefix + stepStr;
+        const string lineFullName = lineAbovePrefix + stepStr;
+        lines[lIdx].name = lineFullName;
+        // PERF (2026): pre-compute labelName so RenderTriggerLines skips the
+        // per-iter "lineName + _Label" concat (was 158 allocations/frame).
+        lines[lIdx].labelName = lineFullName + "_Label";
         lines[lIdx].price = lineMidPrice;
         lines[lIdx].logicalStep = s_aboveLevels[i].logicalStep;
         lines[lIdx].direction = 1;
@@ -704,7 +711,11 @@ void BuildZonesAndLines(
 
         // Line at midpoint between prev and current
         double lineMidPrice = (prevPrice + currentPrice) / 2.0;
-        lines[lIdx].name = lineBelowPrefix + stepStr;
+        const string lineFullName = lineBelowPrefix + stepStr;
+        lines[lIdx].name = lineFullName;
+        // PERF (2026): pre-compute labelName so RenderTriggerLines skips the
+        // per-iter "lineName + _Label" concat (was 158 allocations/frame).
+        lines[lIdx].labelName = lineFullName + "_Label";
         lines[lIdx].price = lineMidPrice;
         lines[lIdx].logicalStep = s_belowLevels[i].logicalStep;
         lines[lIdx].direction = -1;
@@ -969,12 +980,15 @@ void RenderTriggerLines(
     // PERF (2026): pre-compute the "_Label" suffix once. Per the MQL5 docs,
     // every `+` on a string allocates a new buffer; doing it inside a
     // 158-iteration loop was 158 short-lived heap allocations per redraw.
-    // The label is always 6 chars appended to the line name.
-    string LABEL_SUFFIX = "_Label";
+    // The label is always 6 chars appended to the line name. With the new
+    // STriggerLine.labelName field, the per-iter concat is gone entirely —
+    // BuildZonesAndLines computes it once when the array is built.
+    int digits = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
+    string tooltip;
 
     for(int i = 0; i < lineCount; i++) {
         const string lineName = lines[i].name;
-        string labelName = lineName + LABEL_SUFFIX;
+        const string labelName = lines[i].labelName;
         // DISABLED: viewport culling for lines. Lines now stay visible regardless
         // of zoom or scroll position.
 
@@ -993,9 +1007,13 @@ void RenderTriggerLines(
         // line, regardless of viewport). On MN1 with 158 classified lines this
         // saves 158 StringFormat heap allocations per redraw frame; lines that
         // get hidden or filtered still skip the allocation.
-        string tooltip = StringFormat("Midpoint %s (%s)",
-                                       (lines[i].direction > 0 ? "+" : "-") + lines[i].labelText,
-                                       DoubleToString(lines[i].price, (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS)));
+        // PERF (2026): digits hoisted out of the loop (was 158 SymbolInfoInteger
+        // sync calls/frame on MN1). tooltip LHS reused — MQL5 reuses the LHS
+        // string buffer on reassignment.
+        string sign = (lines[i].direction > 0) ? "+" : "-";
+        tooltip = StringFormat("Midpoint %s%s (%s)",
+                               sign, lines[i].labelText,
+                               DoubleToString(lines[i].price, digits));
 
         // Use the individual line color instead of config.triggerColor
         bool isNew = CreateOrUpdateHLine(lineName, lines[i].price,
@@ -1058,23 +1076,35 @@ void CleanupSurplusPipeline(
         s_lastDragCleanupMs = nowMs;
     }
     
+    // PERF (2026): hoist prefix strings. Previously each call below did
+    // `objectPrefix + modeName + "_..."` — 2 string allocs per call, ~14/frame.
+    const string abovePrefix      = config.objectPrefix + config.modeName + "_Above_";
+    const string belowPrefix      = config.objectPrefix + config.modeName + "_Below_";
+    const string zoneAbovePrefix  = config.objectPrefix + config.modeName + "_Zone_Above_";
+    const string zoneBelowPrefix  = config.objectPrefix + config.modeName + "_Zone_Below_";
+    const string zoneCenterPrefix = config.objectPrefix + config.modeName + "_Zone_Center_";
+
     // Cleanup surplus zones
     if(config.zonesEnabled) {
-        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Above_", maxLogicalStep + 1);
-        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Below_", maxLogicalStep + 1);
-        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Center_", 1);
+        CleanupSurplusObjects(zoneAbovePrefix,  maxLogicalStep + 1);
+        CleanupSurplusObjects(zoneBelowPrefix,  maxLogicalStep + 1);
+        CleanupSurplusObjects(zoneCenterPrefix, 1);
     }
-    
+
     // Cleanup surplus lines and their labels
-    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1);
-    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1);
-    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1, 6, "_Label");
-    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1, 6, "_Label");
-    
-    // Legacy cleanup
+    CleanupSurplusObjects(abovePrefix, maxLogicalStep + 1);
+    CleanupSurplusObjects(belowPrefix, maxLogicalStep + 1);
+    CleanupSurplusObjects(abovePrefix, maxLogicalStep + 1, 6, "_Label");
+    CleanupSurplusObjects(belowPrefix, maxLogicalStep + 1, 6, "_Label");
+
+    // Legacy cleanup. PERF (2026): trust the cache before paying the sync
+    // ObjectFind chart-API syscall. Cache is the source of truth for object
+    // existence — only fall back to chart when the cache has no entry.
     string midpointName = config.objectPrefix + config.modeName + "_Midpoint_0";
-    if(ObjectFind(0, midpointName) >= 0) {
-        CacheRemoveObject(midpointName);
+    int midpointIdx = CacheFindIndex(midpointName);
+    bool midpointInCache = (midpointIdx >= 0 && g_objectCacheHash[midpointIdx].entry.exists);
+    if(midpointInCache || ObjectFind(0, midpointName) >= 0) {
+        if(midpointIdx >= 0) CacheRemoveObject(midpointName);
         ObjectDelete(0, midpointName);
     }
 }

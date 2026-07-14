@@ -283,7 +283,11 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
             // hand side of the zone is drawn" because the rest of the
             // rectangle extends leftward to the (still-unresolved) startTime.
             // The 256-slot cap covers the realistic MT5 startup race.
-            const int MAX_WALKBACK = 256;
+            // PERF (2026): cap walkback at 32. On TF chart switch MT5 returns
+            // 0 from iTime for visible-bar history not yet loaded; walking 256
+            // slots is 256 sync timeseries syscalls. The synthetic fallback
+            // below handles the unresolved case identically and is bounded.
+            const int MAX_WALKBACK = 32;
             while(startIndex >= 0 && g_cachedOldestBarTime <= 0 && walkedBack < MAX_WALKBACK) {
                 startIndex--;
                 walkedBack++;
