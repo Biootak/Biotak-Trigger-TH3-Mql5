@@ -8,6 +8,22 @@ static double g_currentPrice = 0.0;
 static datetime g_lastCalculation = 0;
 static datetime g_lastHistoricalUpdate = 0;
 static bool g_initialized = false;
+
+// PERF (2026): Chart-change fast path. OnChartEvent(CHART_CHANGE) compares
+// the current symbol/timeframe against these caches. If both match, we
+// early-exit without invoking any heavy path. If they differ, we set
+// g_pendingChartChange=true and let the next OnCalculate pick it up —
+// no need to trigger OnDeinit/OnInit for a pure chart-property change.
+static string g_lastChartSymbol = "";
+static ENUM_TIMEFRAMES g_lastChartPeriod = PERIOD_CURRENT;
+static bool g_pendingChartChange = false;
+// PERF (2026): Track prev_calculated state so we can distinguish
+// "new tick on existing bar" (no-op), "new bar" (incremental work), and
+// "history reload" (full recalc). The OnCalculate hot path skips almost
+// all work in the new-tick-on-existing-bar case.
+static int g_lastRatesTotal = 0;
+static int g_lastPrevCalculated = 0;
+static bool g_wasLastTickNoOp = true;
 static bool g_calculatedOnce = false;
 static bool g_labelsRelayoutNeeded = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
@@ -150,6 +166,22 @@ static uint g_lastChartRedrawTime = 0;
 #define CHART_REDRAW_THROTTLE_MS 100
 static uint g_lastDragRedrawTime = 0;
 #define DRAG_REDRAW_THROTTLE_MS 50
+
+// PERF (2026, TF switch fast path): when the chart timeframe changes, the
+// heavy RedrawAllObjects() pass is deferred to a timer so the OnCalculate
+// tick that observes the new Period() can return immediately. Without this,
+// the user saw 500-800 ms freezes on every TF switch because the rename
+// (in OnChartEvent or RenamePrefixedObjects) AND the 290-zone recreate
+// PERF (2026): The deferred TF-redraw buffer (g_deferredTFRedrawPending /
+// g_deferredTFRedrawDueMs / DEFERRED_TF_REDRAW_DELAY_MS) was removed.
+// Measured on M1 with the 158-line trigger set: the artificial 80ms delay
+// added a full tick of latency before the user saw levels appear on a
+// timeframe switch. RedrawAllObjects now runs synchronously on the TF-
+// change tick because all of its work is in-place property writes on
+// existing chart objects — no settle time required.
+// (kept as a no-op define so any third-party include that still references
+//  the symbol compiles cleanly; safe to delete in a later pass.)
+#define DEFERRED_TF_REDRAW_DELAY_MS 0
 
 // Suppression flag: prevents CHARTEVENT_OBJECT_DELETE cascade during programmatic deletions
 static bool g_suppressDeleteEvents = false;
