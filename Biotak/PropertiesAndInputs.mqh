@@ -31,15 +31,18 @@ input bool inpShowFractalTHs = false;
 input bool inpShowStandardTHs = false;
 input bool inpShowATRLabels = false;              // Show ATR Labels
 input bool inpShowATRTargets = true;             // Show ATR Targets
-input int inpMaxTHLevelsAbove = 1000;            // MT4-only: max levels above (fallback)
-input int inpMaxTHLevelsBelow = 1000;            // MT4-only: max levels below (fallback)
+input int inpMaxTHLevelsAbove = 100;            // Levels to draw ABOVE midpoint (range 1-2000)
+input int inpMaxTHLevelsBelow = 100;            // Levels to draw BELOW midpoint (range 1-2000)
 
 input group "02) DISPLAY - TEXT & FONT"
 input string inpFontName = "Arial Bold";         // Font Name (matches MT5)
 input int inpFontSize = 8;                       // Font Size
 
 input group "03) CALCULATION - CORE"
-input int inpMaxLevels = 144;                                    // Max Levels
+// FIX (2026, J): removed `inpMaxLevels` (legacy duplicate of
+// inpMaxTHLevelsAbove/inpMaxTHLevelsBelow). Use those two inputs for the
+// per-side cap. Internal code that previously read inpMaxLevels now reads
+// MathMax(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow).
 input ENUM_CALCULATION_BASIS inpCalculationBasis = CALC_BASIS_TH; // MT4-only: kept for compat
 input ENUM_STEP_CALCULATION_MODE inpStepCalculationMode = TH_STEP;
 input ENUM_TH_START_POINT_TYPE inpTHStartPointType = TH_START_POINT_CUSTOM_PRICE;

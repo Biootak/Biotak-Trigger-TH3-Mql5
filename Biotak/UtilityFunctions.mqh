@@ -913,17 +913,29 @@ void ApplyModeLabelStyle(const string name, const color textColor, const int yOf
 //| Unified repositioning for ALL overlay labels                     |
 //| Call after g_modeLabelYOffset changes to keep layout consistent  |
 //+------------------------------------------------------------------+
+// PERF (2026, E): cache-first overlay label check. The previous code did
+// 4 × ObjectFind + 4 × ObjectGetInteger(OBJPROP_COLOR) per call, and this
+// function is invoked from the heavy redraw path on every full redraw
+// (MT5 calls it from EventHandlers.mqh ~1665 regardless of needLabels).
+// We trust the cache for existence and pull the color from the cache too.
 void RepositionAllOverlayLabels() {
-    if(ObjectFind(0, g_stepModeLabelName) >= 0)
-        ApplyModeLabelStyle(g_stepModeLabelName, (color)ObjectGetInteger(0, g_stepModeLabelName, OBJPROP_COLOR));
-    if(ObjectFind(0, g_factorLabelName) >= 0)
-        ApplyModeLabelStyle(g_factorLabelName, (color)ObjectGetInteger(0, g_factorLabelName, OBJPROP_COLOR));
+    int idx;
+    color cachedColor;
+    string names[4];
+    int nameCount = 0;
+    names[nameCount++] = g_stepModeLabelName;
+    names[nameCount++] = g_factorLabelName;
 #ifndef BUILD_LITE
-    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
-        ApplyModeLabelStyle(g_th3FreqLabelName, (color)ObjectGetInteger(0, g_th3FreqLabelName, OBJPROP_COLOR));
+    names[nameCount++] = g_th3FreqLabelName;
 #endif
-    if(ObjectFind(0, g_lockStatusLabelName) >= 0)
-        ApplyModeLabelStyle(g_lockStatusLabelName, (color)ObjectGetInteger(0, g_lockStatusLabelName, OBJPROP_COLOR));
+    names[nameCount++] = g_lockStatusLabelName;
+
+    for(int n = 0; n < nameCount; n++) {
+        idx = CacheFindIndex(names[n]);
+        if(idx < 0 || !g_objectCacheHash[idx].entry.exists) continue;
+        cachedColor = g_objectCacheHash[idx].entry.lastColor;
+        ApplyModeLabelStyle(names[n], cachedColor);
+    }
 
     UpdateLockStatusLabel(false);
 #ifndef BUILD_LITE

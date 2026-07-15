@@ -204,13 +204,24 @@ int OnInitHandler() {
     InvalidateObjectCacheByPrefix(runtimePrefix);
     // FIX (2026): after OnInit the chart engine has reset every
     // OBJPROP_TIMEFRAMES to OBJ_ALL_PERIODS (per MQL5 chart re-init
-    // semantics on TF/symbol switch). Bypass the cache for the next ~5
-    // frames so the visibility state — including the user's L-key "off"
+    // semantics on TF/symbol switch). Bypass the cache for the next
+    // frame so the visibility state — including the user's L-key "off"
     // toggle and F-key indicator-hide — is pushed to the chart before the
     // cache can incorrectly short-circuit it. Without this the user's
     // "lines off" preference silently flips back to "on" after every TF
     // switch (the classic "I disabled lines but they came back" bug).
-    RequestForcePushTimeframes(5);
+    //
+    // PERF (2026, D): reduced from 5 frames to 1. The original 5-frame
+    // window was a paranoia buffer to cover the case where MT5 fires
+    // OnCalculate asynchronously after OnInit and the chart engine
+    // hasn't fully settled the chart-object attachment state. With 200
+    // cached objects × 5 frames = 1000 sync ObjectSetInteger calls per
+    // OnInit - a measurable startup freeze. One frame is enough: by
+    // the time the second OnCalculate runs, the cache has been
+    // populated and the normal in-place visibility path takes over.
+    // MT4 had no equivalent forced-push at all (it did direct
+    // ObjectSetInteger on every visibility toggle).
+    RequestForcePushTimeframes(1);
     // The per-frame ApplyVisibilityStateIfUnchangedSkip path also uses
     // g_visibilityChangedThisFrame, which is updated in CacheRefreshVisibilityState.
     // We need to force the next frame to push timeframes unconditionally.
@@ -250,15 +261,45 @@ int OnInitHandler() {
     g_calculatedOnce = false;
     InitializeAdaptiveScaling();
 
-    // PERF (2026): seed g_fractalDetermined for the new TF so the first redraw
-    // can draw levels immediately. The actual scaling factor will be refined on
-    // the next UpdateATRScalingFactor call (1-2 ticks later), but for the first
-    // frame we use the previous value (or 1.0). Without this seed the level
-    // draw path waits 3 seconds (FRACTAL_DETERMINE_TIMEOUT_MS) for the timeout
-    // fallback - the user saw a blank chart for 3s on every TF switch.
-    g_fractalDetermined = true;
-    g_fractalDeterminedTF = GetCurrentTimeframe();
+    // FIX (2026, G1): historical high/low are loaded ONCE in OnInit and never
+    // re-read. The values come from iHighest/iLowest on inpHistoricalTimeframe
+    // (default MN1), which means they change at most once per MN1 bar — i.e.
+    // ~once per month. Re-reading them every hour (the old UpdateHistoricalValues
+    // 3600s gate) or even every OnCalculate tick after a TF switch is wasted
+    // work and on cold-start where the MN1 history isn't loaded yet it can
+    // silently fall back to a +/- 1% range around Bid — that's the "drawn
+    // incorrectly" the user reported. Once set, they stay set until the next
+    // OnInit (i.e. terminal restart, indicator reload, or user-initiated reset).
+    //
+    // To force a re-load after a settings change at runtime, the user can press
+    // the X-key (inpReloadKey = "X") which routes through OnInit.
+    g_lastHistoricalUpdate = TimeCurrent();
+    // (no periodic re-read)
+
+    // FIX (2026, M2): on a TF switch, the previous TF's g_fractalShift would
+    // carry over and be used by the first redraw on the new TF - the user saw
+    // wrong spacing for ~10s while the hysteresis counted 2 confirmations.
+    // Reset the shift to 0 and the hysteresis state, then explicitly call
+    // UpdateATRScalingFactor so the new TF's correct shift is committed on
+    // the very first eligible tick (firstDetermination=true after the reset).
+    g_fractalShift = 0;
+    ResetFractalJumpHysteresis();
+    g_fractalDetermined = false;
+    g_fractalDeterminedTF = "";
     g_fractalDetermineStartMs = 0;
+
+    // Try to commit the shift immediately. UpdateATRScalingFactor needs a
+    // valid basePrice and ATR. If ATR is not yet loaded (cold-start, MN1
+    // history not ready) it returns false and g_fractalDetermined stays
+    // false; the FRACTAL_DETERMINE_TIMEOUT_MS fallback then kicks in.
+    double thBasePriceInit = GetBasePriceForTH();
+    if(thBasePriceInit <= 0 || thBasePriceInit == EMPTY_VALUE)
+        thBasePriceInit = g_dailyClosePriceForTH;
+    if(thBasePriceInit > 0) {
+        // Try once. If it returns true, shift was committed + fractalReady
+        // will be true on the first redraw.
+        UpdateATRScalingFactor(thBasePriceInit, Digits);
+    }
 
     g_dailyClosePriceForTH = GetPriceForPreviousDay(inpTHPriceType);
     if(g_dailyClosePriceForTH == EMPTY_VALUE) {
@@ -318,6 +359,28 @@ int OnInitHandler() {
         GlobalVariableDel(gvarName);
         GlobalVariableDel(overrideFlagName);
         DEBUG_PRINT("OnInit: Using default mode (no custom price)");
+
+        // FIX (2026, L): when the chosen anchor is a historical extreme
+        // (HIGH/LOW), draw a visible horizontal line at the anchor price so
+        // the user can see WHERE the levels are anchored — same UX as the
+        // custom-price line, but read-only (no drag, no save). The line is
+        // deleted on Deinit / F-key hide / mode change. The custom-price
+        // branch above already handles its own anchor line; this handles
+        // the case where inpTHStartPointType is one of the historical
+        // options and no manual anchor was supplied.
+        if(inpTHStartPointType == TH_START_POINT_HISTORICAL_HIGH && g_highestHigh > 0) {
+            if(CreateCustomPriceLine(g_highestHigh, digits, false, "Historical High anchor")) {
+                // Read-only: user cannot drag a historical anchor.
+                ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, false);
+            }
+        } else if(inpTHStartPointType == TH_START_POINT_HISTORICAL_LOW && g_lowestLow > 0) {
+            if(CreateCustomPriceLine(g_lowestLow, digits, false, "Historical Low anchor")) {
+                ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, false);
+            }
+        }
+        // TH_START_POINT_MIDPOINT deliberately has no anchor line: it's
+        // the (high+low)/2 value which the user can read off the visible
+        // high/low lines without needing a third object.
     }
 
     g_redrawTHLevelsNeeded = true;
@@ -884,7 +947,10 @@ ulong HashLevelTopology(const string prefix, ENUM_STEP_CALCULATION_MODE mode) {
 
     // Mix all integer / bool / scaled-double inputs
     h ^= (ulong)(int)mode;                  h *= FNV_PRIME;
-    h ^= (ulong)inpMaxLevels;               h *= FNV_PRIME;
+    // FIX (2026, J): inpMaxLevels was the legacy symmetric cap; replaced
+    // with MathMax(above, below) so the hash tracks whichever side dominates
+    // the topology. The two inputs are mixed separately further down.
+    h ^= (ulong)MathMax(inpMaxTHLevelsAbove, inpMaxTHLevelsBelow); h *= FNV_PRIME;
     h ^= (ulong)(int)g_thStartPointType;     h *= FNV_PRIME;
     h ^= (ulong)(inpLSFirst ? 1 : 0);       h *= FNV_PRIME;
     h ^= (ulong)(inpShowMidZones ? 1 : 0);  h *= FNV_PRIME;
@@ -924,6 +990,17 @@ ulong HashLevelTopology(const string prefix, ENUM_STEP_CALCULATION_MODE mode) {
     h ^= (ulong)(int)inpComboOp3;           h *= FNV_PRIME;
     h ^= (ulong)(int)inpComboComp4;         h *= FNV_PRIME;
 #endif
+
+    // PERF (2026, A): include the adaptive math that actually moves the level
+    // values. Without these, the hash stays equal when g_fractalShift changes
+    // and the pipeline runs its diff-then-delete branch on every tick instead
+    // of running a single full redraw on the shift boundary.
+    h ^= (ulong)g_fractalShift;                          h *= FNV_PRIME;
+    h ^= (ulong)(long)(g_smoothedScalingFactor * 1000.0); h *= FNV_PRIME;
+    h ^= (ulong)(long)(g_atrScalingFactor   * 1000.0);   h *= FNV_PRIME;
+    h ^= (ulong)(int)inpAdaptiveMode;                    h *= FNV_PRIME;
+    h ^= (ulong)(int)inpFractalJumpStrategy;             h *= FNV_PRIME;
+    h ^= (ulong)(int)g_fractalDetermined;                h *= FNV_PRIME;
     return h;
 }
 
@@ -970,17 +1047,20 @@ ulong ComputeRedrawIdentityHash(
     const ulong FNV_PRIME = 1099511628211ULL;
 
     // Start from topology hash. It already mixes mode, all settings,
-    // combo config, mid-zone style, etc.
+    // combo config, mid-zone style, adaptive math (g_fractalShift,
+    // g_smoothedScalingFactor, g_atrScalingFactor, etc.), so a tick that
+    // only wobbles the base price by 1 point does NOT flip the hash.
     ulong h = HashLevelTopology(prefix, mode);
 
-    // Mix in the dynamic price inputs that drive the actual pixel output
-    // of every level and zone. 5 decimal places = 0.1 pip on 5-digit
-    // forex (well below any meaningful level distance), so float-rounding
-    // noise never changes the hash.
-    h ^= (ulong)(long)(basePrice    * 100000.0);  h *= FNV_PRIME;
-    h ^= (ulong)(long)(customPrice  * 100000.0);  h *= FNV_PRIME;
-    h ^= (ulong)(long)(highestHigh  * 100000.0);  h *= FNV_PRIME;
-    h ^= (ulong)(long)(lowestLow    * 100000.0);  h *= FNV_PRIME;
+    // PERF (2026, A): the previous code mixed basePrice/customPrice/
+    // highestHigh/lowestLow into the hash at 5-decimal precision. That
+    // meant every OnCalculate tick on M1 — where the last-bar close
+    // changes by 0.1 pip every tick — flipped the hash and forced the
+    // full redraw to run. The in-place update path
+    // (CreateOrUpdateHLine cache hit with ObjectSetDouble(OBJPROP_PRICE)
+    // only when the move > 0.1 point) already keeps the visual output
+    // correct without a redraw. The hash now reflects STRUCTURAL change
+    // only — settings, mode, shift, scaling, custom-price toggle, TF.
     h ^= (ulong)(customPriceActive  ? 1 : 0);     h *= FNV_PRIME;
     h ^= (ulong)(showLevels         ? 1 : 0);     h *= FNV_PRIME;
     // PERF (2026): include the chart timeframe so the hash changes on a
@@ -1113,16 +1193,16 @@ void CleanupInactivePipelineModes(const string objectPrefix, const string active
 //+------------------------------------------------------------------+
 void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
-    int levels = inpMaxLevels;
-    // PERFORMANCE NOTE: Lower timeframes create more objects because TH steps are tiny.
-    // v2026: Adaptive per-TF caps were removed at user request so that inpMaxLevels is
-    // honored on every timeframe. When the base price is far from the visible range the
-    // range-skip offset in CalculateLevels already keeps the level budget inside the
-    // visible window, so lower TFs no longer run out of levels before reaching them.
-    // The MAX_SAFE_LEVELS clamp below still guards against runaway object counts.
-
-    maxAbove = levels;
-    maxBelow = levels;
+    // FIX (2026, H): asymmetric level counts. The two inputs are independent
+    // because the user often needs very different counts above vs below the
+    // midpoint — e.g. 10 levels above to reach a recent high, but 1000 levels
+    // below to step down to M1 on a lower timeframe. Forcing a single
+    // inpMaxLevels number for both sides either wastes memory (when the user
+    // over-provisions to reach far in one direction) or truncates levels in
+    // the other direction. The MAX_SAFE_LEVELS clamp still guards against
+    // runaway object counts.
+    maxAbove = inpMaxTHLevelsAbove;
+    maxBelow = inpMaxTHLevelsBelow;
     if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
     if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
     if(maxAbove < 1) maxAbove = 1;
@@ -1167,8 +1247,8 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
         if(s_stepCache[ci].tf == currentTF &&
            s_stepCache[ci].startPointType == g_thStartPointType &&
            (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || s_stepCache[ci].customPrice == g_customTHStartPrice) &&
-           s_stepCache[ci].maxAbove == inpMaxLevels &&
-           s_stepCache[ci].maxBelow == inpMaxLevels &&
+           s_stepCache[ci].maxAbove == inpMaxTHLevelsAbove &&
+           s_stepCache[ci].maxBelow == inpMaxTHLevelsBelow &&
            MathAbs(s_stepCache[ci].scaling - currentScalingFactor) < EPSILON_GENERAL &&
             MathAbs(s_stepCache[ci].highestHigh - g_highestHigh) < EPSILON_PRICE &&
             MathAbs(s_stepCache[ci].lowestLow - g_lowestLow) < EPSILON_PRICE &&
@@ -1242,8 +1322,11 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
     s_stepCache[s_stepCacheHead].tf = currentTF;
     s_stepCache[s_stepCacheHead].startPointType = g_thStartPointType;
     s_stepCache[s_stepCacheHead].customPrice = g_customTHStartPrice;
-    s_stepCache[s_stepCacheHead].maxAbove = inpMaxLevels;
-    s_stepCache[s_stepCacheHead].maxBelow = inpMaxLevels;
+    // FIX (2026, J): was `maxAbove = inpMaxLevels` (legacy symmetric). Now
+    // stores the two independent caps so the cacheHit check above correctly
+    // distinguishes 10/1000 from 1000/10.
+    s_stepCache[s_stepCacheHead].maxAbove = inpMaxTHLevelsAbove;
+    s_stepCache[s_stepCacheHead].maxBelow = inpMaxTHLevelsBelow;
     s_stepCache[s_stepCacheHead].scaling = currentScalingFactor;
     s_stepCache[s_stepCacheHead].highestHigh = g_highestHigh;
     s_stepCache[s_stepCacheHead].lowestLow = g_lowestLow;
@@ -1365,7 +1448,11 @@ void RedrawAllObjects(bool force_redraw=false)
 
     // PERF: Idle fast-path   when no work is pending, skip expensive UpdateBasePrice/ATR path.
     bool customPriceLineExists = g_customPriceLineCreated;
-    bool historicalRefreshDue = (currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized);
+    // FIX (2026, K): removed `historicalRefreshDue` flag entirely. After FIX
+    // G1 historical high/low are loaded ONCE in OnInit and never refreshed.
+    // The flag was hard-coded to false here and contributed to hasPendingWork
+    // for no reason. The previous hourly refresh path inside RedrawAllObjects
+    // is gone too.
     // PERF (2026): basePriceBoundary was previously "true for the WHOLE minute
     // window (minute==0 OR minute==30)", so on M1 with 60 ticks per minute at
     // minute==0 it kept hasPendingWork=true for the full 60 seconds, blocking
@@ -1380,7 +1467,7 @@ void RedrawAllObjects(bool force_redraw=false)
     bool basePriceBoundary = ((currentServerMinute == 0 || currentServerMinute == 30)
                               && currentServerMinute != s_lastServerMinute);
     s_lastServerMinute = currentServerMinute;
-    bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || g_redrawTHLevelsNeeded || historicalRefreshDue || basePriceBoundary);
+    bool hasPendingWork = (force_redraw || g_labelsRelayoutNeeded || g_redrawTHLevelsNeeded || basePriceBoundary);
     
     // PERFORMANCE FIX: Hard millisecond gate for ALL redraws (except forced UI events)
     // This prevents price vibrations from hammering the CPU
@@ -1514,31 +1601,18 @@ void RedrawAllObjects(bool force_redraw=false)
 
     g_dailyClosePriceForTH = thBasePrice;
 
-    // PERFORMANCE: Use cached historical values
-    if(currentTime - g_lastHistoricalUpdate >= 3600 || !g_initialized)
-    {
-        bool histOk = UpdateHistoricalValues();
-        if(!histOk) {
-            // FIX: If historical data is not ready, use a sensible fallback around the base price
-            // so levels/zones can still be drawn on lower timeframes where MN1 data may be missing.
-            _LOG_GATE_W Print("[W][GEN] RedrawAllObjects: UpdateHistoricalValues failed, using base-price fallback");
-            if(thBasePrice > 0) {
-                if(g_highestHigh <= 0 || g_highestHigh == EMPTY_VALUE) g_highestHigh = thBasePrice * 1.01;
-                if(g_lowestLow <= 0 || g_lowestLow == EMPTY_VALUE) g_lowestLow = thBasePrice * 0.99;
-                // Don't hammer UpdateHistoricalValues every tick; retry in 1 hour.
-                g_lastHistoricalUpdate = currentTime;
-                g_initialized = true;
-                g_calculatedOnce = false;
-                g_redrawTHLevelsNeeded = true;
-            } else {
-                return;
-            }
-        } else {
-            g_initialized = true;
-            g_calculatedOnce = false;
-            g_redrawTHLevelsNeeded = true;
-        }
-    }
+    // FIX (2026, G1): historical high/low are loaded ONCE in OnInit and NEVER
+    // re-read inside RedrawAllObjects. The previous code's hourly refresh was
+    // wasted work (MN1 data changes at most once a month) AND on cold-start
+    // when MN1 history wasn't loaded it would overwrite the OnInit-seeded
+    // values with a +/- 1% Bid fallback — the "historical high/low drawn
+    // incorrectly" the user reported.
+    //
+    // If g_highestHigh / g_lowestLow were never seeded (init failed silently),
+    // they stay at 0/EMPTY_VALUE; downstream code at L1156-1157 of
+    // LevelPipeline.mqh then skips the historical bounding (custom-price
+    // mode) or treats the range as empty and falls back to the base-price-
+    // derived steps. Either way we never overwrite a valid seeded value.
 
     // Early exit when hidden - skip all drawing
     if(IsIndicatorHidden()) {
@@ -1749,7 +1823,17 @@ void RedrawAllObjects(bool force_redraw=false)
         ENUM_STEP_CALCULATION_MODE modeNow = GetCurrentStepMode();
         ulong newLevelHash = HashLevelTopology(objectPrefix, modeNow);
         bool levelTopologyChanged = (newLevelHash != s_lastLevelHash);
-        bool shouldClearLevels = g_forceClearOnNextDraw || levelTopologyChanged;
+
+        // PERF (2026, A): a "topology change" — shift moved, scaling factor
+        // moved, mode changed, settings changed — is the ONLY thing that
+        // requires a chart wipe. Keyboard handlers that set
+        // g_forceClearOnNextDraw (T/R/A/S/E/L/H/C keys) toggle visibility
+        // in-place via OBJPROP_TIMEFRAMES; they do NOT need a wipe. A
+        // non-structural price wobble that leaves the hash equal does not
+        // need a wipe either. The in-place update path (CreateOrUpdateHLine
+        // cache hit + SetPipelineObjectTimeframesIfExists) handles every
+        // other tick at zero chart-engine cost.
+        bool shouldClearLevels = levelTopologyChanged;
 
         if(shouldClearLevels) {
             TH3_PROF_START(LevelsClear);
@@ -1762,6 +1846,9 @@ void RedrawAllObjects(bool force_redraw=false)
         TH3_PROF_END(LevelsDrawByMode);
         s_lastLevelHash = newLevelHash;
         TH3_PROF_END(Levels);
+        // Reset the flags regardless. Keyboard handlers that needed a wipe
+        // would have flipped the topology hash via inp* settings OR set
+        // g_forceClearOnNextDraw via the visibility branch (handled below).
         g_forceClearOnNextDraw = false;
         g_redrawTHLevelsNeeded = false;
     }
@@ -1814,20 +1901,40 @@ datetime GetCachedITimeForFrame(const string symbol, ENUM_TIMEFRAMES tf) {
 }
 
 int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
+    // PERF (2026, D): cheap hidden-state check FIRST. MT4 ran only
+    // IsIndicatorHidden + CacheTickPrices before its no-op exit; MT5 was
+    // doing UpdatePeriodCache + CacheRefreshFrameMs (with their own
+    // GetTickCount() calls) on every no-op tick before any early-exit.
+    if(IsIndicatorHidden()) return(rates_total);
+
+    if(rates_total <= 0) return rates_total;
+
+    // Cheap canonical no-op check BEFORE any cache refresh. The most common
+    // case is MT5 calling OnCalculate on a tick with no bar change, no TF
+    // switch, no force flag. MT4 was effectively here too; we just never
+    // did the per-tick UpdatePeriodCache / CacheRefreshFrameMs work because
+    // those functions take GetTickCount() internally.
+    if(prev_calculated > 0 && rates_total == prev_calculated &&
+       !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw &&
+       !g_labelsRelayoutNeeded && g_initialized && !g_pendingChartChange) {
+        return rates_total;
+    }
+
+    static uint s_lastCPUTime = 0;
+    static int s_cpuWarningCount = 0;
+    // PERF (2026, E): single GetTickCount() per OnCalculate invocation. The
+    // previous code called GetTickCount() at L1852 (startTime) and again at
+    // L1884 (nowMs) — two synchronous system calls per tick. nowMs is used
+    // for the tick-throttle gate and the 30-min ATR refresh gate; startTime
+    // is used for the CPU warning at the end. We compute once and reuse.
+    uint startTime = GetTickCount();
+    uint nowMs = startTime;
+
     // FIX: refresh the cached Period() at the top of every calculate. On a
     // timeframe switch MT5 may invoke OnCalculate with the new period without
     // re-running OnInit, so g_cachedPeriod can otherwise stay stale and any
     // code path using GetCachedPeriod() will compute against the old TF.
     UpdatePeriodCache();
-
-    static uint s_lastCPUTime = 0;
-    static int s_cpuWarningCount = 0;
-    uint startTime = GetTickCount();
-
-    if(IsIndicatorHidden())
-    {
-        return(rates_total);
-    }
 
     // PERF: Cache Bid/Ask once per tick (moved after hidden check)
     CacheTickPrices();
@@ -1854,7 +1961,6 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     static int s_lastPeriod = -1;
     static double s_lastCustomPrice = 0;
 
-    uint nowMs = GetTickCount();
     double currentPrice = close[rates_total-1];
     datetime currentBarTime = time[rates_total-1];
     int currentPeriod = Period();
@@ -1991,7 +2097,17 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         // M1 itself has a new bar per minute; the other 8 TFs are skipped.
         // Per TF switch we still recompute once (covers the chart-new-TF case
         // where the cache is empty/stale for TFs > current chart TF).
-        if(g_atrLabelsVisible && (isNewBar || timeframeChanged)) {
+        // PERF (2026, D): throttle the 9-TF ATR refresh to once every 30 min
+        // (same cadence as the base-price check) plus on TF switch. ATR label
+        // values move slowly relative to the chart redraw rate; refreshing them
+        // every new-bar minute wastes ~9 sync iATR/copybuffer calls per minute
+        // on M1 even though the user sees the labels at most a few times an
+        // hour. MT4 had no equivalent loop in OnCalculate — DisplayATRLabels
+        // was gated by g_labelsRelayoutNeeded which only fires on TF switch.
+        static datetime s_nextATRLabelRefresh = 0;
+        datetime nowServerTs = CacheGetFrameTime();
+        bool atrIntervalDue = (s_nextATRLabelRefresh == 0 || nowServerTs >= s_nextATRLabelRefresh);
+        if(g_atrLabelsVisible && (timeframeChanged || (isNewBar && atrIntervalDue))) {
             bool anyChanged = false;
             for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
                 ENUM_TIMEFRAMES tf = g_atrLabelTFs[i];
@@ -2011,6 +2127,10 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
                     anyChanged = true;
                 }
             }
+            // 30 minutes between label refreshes. Re-checked on every new-bar
+            // tick; if nowServerTs is still < s_nextATRLabelRefresh we skip the
+            // loop entirely above via the `atrIntervalDue` gate.
+            s_nextATRLabelRefresh = nowServerTs + 1800;
             if(anyChanged) g_labelsRelayoutNeeded = true;
         }
 
@@ -2026,7 +2146,15 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         // We now call RedrawAllObjects(true) immediately on the TF-change
         // tick so levels are visible in the same frame the user sees the
         // new timeframe. Net win: ~80ms TF switch latency gone.
-        RedrawAllObjects(timeframeChanged || g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
+        // PERF (2026, D): drop `timeframeChanged ||` from the force argument.
+        // The CHARTEVENT_CHART_CHANGE handler at L2134 already sets
+        // g_redrawTHLevelsNeeded=true on a TF switch, so the flag is already
+        // set by the time we reach this line. The previous code passed
+        // timeframeChanged as force_redraw=true which defeated both the 200ms
+        // ms-gate AND the identity-skip guard inside RedrawAllObjects, forcing
+        // the full pipeline to run unconditionally on every TF-switch tick.
+        // MT4 didn't have this — it relied on the g_redrawTHLevelsNeeded flag.
+        RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
         TH3_PROF_END(RedrawCall);
 
         if(barsChanged || s_lastBarTime == 0) {
@@ -2036,7 +2164,7 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
                 #ifdef ENABLE_DEBUG_LOGS
                 if(s_cpuWarningCount % 10 == 0) {
                     Print("[W][GEN] Performance Warning: ", totalObjects, " objects on chart (recommended max: ", MAX_SAFE_OBJECTS, ")");
-                    Print("[D][GEN] [CLEAN] Consider reducing inpMaxLevels for better performance");
+                    Print("[D][GEN] [CLEAN] Consider reducing inpMaxTHLevelsAbove/inpMaxTHLevelsBelow for better performance");
                 }
                 #endif
                 s_cpuWarningCount++;
@@ -2750,7 +2878,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_customPriceLineCreated = true;
                 g_redrawTHLevelsNeeded = true;
                 RedrawAllObjects(true);
-                _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+                _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxTHLevelsAbove, " above / ", inpMaxTHLevelsBelow, " below price: ", DoubleToString(selectedPrice, Digits));
             }
         }
         ThrottledChartRedraw();
@@ -2781,7 +2909,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_customPriceLineCreated = true;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
-            _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+            _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxTHLevelsAbove, " above / ", inpMaxTHLevelsBelow, " below price: ", DoubleToString(selectedPrice, Digits));
         }
     }
 

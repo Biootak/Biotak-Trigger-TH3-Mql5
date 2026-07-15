@@ -136,11 +136,40 @@ void HideCachedObjectIfExists(const string name) {
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = "") {
     if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) return;
 
-    int total = ObjectsTotal(0, -1, -1);
-    for(int i = total - 1; i >= 0; i--) {
-        string name = ObjectName(0, i, -1, -1);
+    // PERF (2026, E): the previous implementation did
+    //   int total = ObjectsTotal(0, -1, -1);
+    //   for(int i = total - 1; i >= 0; i--) {
+    //       string name = ObjectName(0, i, -1, -1);
+    //       ...
+    //   }
+    // which is one ObjectName() synchronous chart-API call per chart object
+    // per cleanup call. CleanupSurplusPipeline invokes CleanupSurplusObjects
+    // 7 times per redraw (zone above/below/center + line above/below + 2x
+    // label), so on M1 with ~300 chart objects that is ~2,100 ObjectName
+    // synchronous syscalls per redraw for what is almost always "delete
+    // nothing".
+    //
+    // The SObjectCacheEntry already tracks every object we created (and
+    // re-hydrated from chart on cold cache). Iterating the cache hash
+    // avoids the chart-API entirely. We still call DeleteCachedObjectIfExists
+    // which is cache-first and only falls back to ObjectFind on cold cache.
+    int prefixLen = StringLen(prefix);
+    int suffixLen = StringLen(suffix);
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        if(!g_objectCacheHash[i].occupied) continue;
+        if(!g_objectCacheHash[i].entry.exists) continue;
+        const string name = g_objectCacheHash[i].name;
+        if(StringLen(name) < prefixLen) continue;
+        if(StringSubstr(name, 0, prefixLen) != prefix) continue;
+        // Strip suffix from the right side to compare the bare name.
+        const int nameLen = StringLen(name);
+        string bareName = name;
+        if(suffixLen > 0 && nameLen >= suffixLen &&
+           StringSubstr(name, nameLen - suffixLen, suffixLen) == suffix) {
+            bareName = StringSubstr(name, 0, nameLen - suffixLen);
+        }
         int objectIdx = 0;
-        if(ExtractNumberAfterPrefix(name, prefix, suffix, objectIdx) && objectIdx >= startIdx) {
+        if(ExtractNumberAfterPrefix(bareName, prefix, "", objectIdx) && objectIdx >= startIdx) {
             DeleteCachedObjectIfExists(name);
         }
     }
@@ -349,9 +378,15 @@ bool CreateFactorMidZone(const string zoneName,
     request.startTime = 0;  // Auto-calculate
     request.endTime = 0;    // Auto-calculate
 
-    DeleteIndicatorObjectManaged(zoneName + "_Top", true);
-    DeleteIndicatorObjectManaged(zoneName + "_Bottom", true);
-    
+    // PERF (2026): the previous code did `DeleteIndicatorObjectManaged(_Top)` and
+    // `DeleteIndicatorObjectManaged(_Bottom)` here. In BOX style, _Top/_Bottom
+    // lines do not exist (only the rectangle does), so this was deleting nothing
+    // but paying two synchronous ObjectFind + ObjectDelete chart-API syscalls per
+    // zone per redraw. Worse, if the user switched from LINES to BOX mid-session,
+    // this would delete the LINES-style _Top/_Bottom objects incorrectly.
+    // CreateZone is already in-place via the cache, so the delete was always
+    // dead code. Removed.
+
     SZoneCreationResult result = CreateZone(request);
     
     // CRITICAL FIX: If indicator is hidden, hide the zone immediately
@@ -396,22 +431,40 @@ bool CreateFactorMidZone_LinesStyle(const string zoneName,
     
     string lineTop = zoneName + "_Top";
     string lineBottom = zoneName + "_Bottom";
-    
-    DeleteIndicatorObjectManaged(zoneName, true);
+
+    // PERF (2026): removed `DeleteIndicatorObjectManaged(zoneName, true)` here.
+    // In LINES style the zoneName itself is never created (only `_Top` and
+    // `_Bottom` HLINEs are), so the delete was always a no-op that paid the
+    // synchronous ObjectFind cost. CreateOrUpdateHLine is already in-place
+    // via the cache, so when the user toggles LINES style back and forth the
+    // existing _Top/_Bottom objects are simply updated in place.
 
     bool topOk = CreateOrUpdateHLine(lineTop, upperPrice, zoneColor, STYLE_DOT, 1, zoneName + " top", false);
     bool bottomOk = CreateOrUpdateHLine(lineBottom, lowerPrice, zoneColor, STYLE_DOT, 1, zoneName + " bottom", false);
 
-    if(ObjectFind(0, lineTop) >= 0) {
-        ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
-        ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
+    // PERF (2026, E): set OBJPROP_BACK / OBJPROP_ZORDER ONLY when the cache
+    // entry was created in this frame (lastUpdate == current frame time).
+    // These are style properties that MQL5 retains forever after the first
+    // set, so we don't need to re-set them on every redraw. The cache tells
+    // us "freshly created" cheaply; the previous code did an ObjectFind for
+    // every line every redraw to discover the same fact.
+    ulong frameMs = CacheGetFrameMs();
+    if(topOk) {
+        int topIdx = CacheFindIndex(lineTop);
+        if(topIdx >= 0 && (ulong)g_objectCacheHash[topIdx].entry.lastUpdate == frameMs) {
+            ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
+            ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
+        }
     }
-    if(ObjectFind(0, lineBottom) >= 0) {
-        ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
-        ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
+    if(bottomOk) {
+        int botIdx = CacheFindIndex(lineBottom);
+        if(botIdx >= 0 && (ulong)g_objectCacheHash[botIdx].entry.lastUpdate == frameMs) {
+            ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
+            ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
+        }
     }
 
-    return (topOk || ObjectFind(0, lineTop) >= 0) && (bottomOk || ObjectFind(0, lineBottom) >= 0);
+    return topOk && bottomOk;
 }
 
 

@@ -97,6 +97,35 @@ void ForceResetAdaptiveScaling() {
 }
 
 //+------------------------------------------------------------------+
+//| PERF (2026, M): Fractal jump hysteresis state (file-scope).      |
+//|                                                                  |
+//| These were originally function-scope statics inside              |
+//| UpdateATRScalingFactor. They are now at file-scope so            |
+//| ResetFractalJumpHysteresis() can clear them on a TF switch.     |
+//| Without that, the hysteresis would carry over across TFs and     |
+//| block the first eligible correction for ~10 seconds.            |
+//|                                                                  |
+//|  g_s_proposedShift       - candidate shift from last call        |
+//|  g_s_proposalCount       - consecutive confirmations             |
+//|  g_s_lastConfirmedATR    - ATR at the last accepted shift commit |
+//|  g_s_lastConfirmedTF     - TF of the last accepted shift commit  |
+//|  g_resetHysteresisPending - set by reset, consumed by next call  |
+//+------------------------------------------------------------------+
+static int g_s_proposedShift = -1;
+static int g_s_proposalCount = 0;
+static double g_s_lastConfirmedATR = 0;
+static string g_s_lastConfirmedTF = "";
+static bool g_resetHysteresisPending = false;
+
+// FIX (2026, M): expose the hysteresis reset so OnInit can call it on
+// TF switch. The next UpdateATRScalingFactor sees the pending flag,
+// clears the statics, and treats the call as a first determination
+// (s_lastConfirmedATR=0 -> firstDetermination=true -> immediate shift).
+void ResetFractalJumpHysteresis() {
+    g_resetHysteresisPending = true;
+}
+
+//+------------------------------------------------------------------+
 //| Calculate EMA Alpha from period                                  |
 //|   = 2 / (period + 1)                                            |
 //+------------------------------------------------------------------+
@@ -241,44 +270,45 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
                 }
                 int newShift = targetIdx - baseIdx;
                 // HYSTERESIS: Don't jump immediately. Require the new shift to be
-                // proposed at least 2 consecutive times, OR a large ATR change.
-                static int s_proposedShift = -1;
-                static int s_proposalCount = 0;
-                static double s_lastConfirmedATR = 0;
-                // PERF (2026): also track the TF of the last confirmed shift. The
-                // large-ATR-move bypass (25% threshold) was designed for same-TF
-                // volatility spikes, but on a TF switch the ATR change is STRUCTURAL
-                // (M5 ATR vs M15 ATR is typically 2-10x), not a volatility spike. If
-                // we let the bypass fire on every TF switch, the shift is applied
-                // immediately and the user sees a hard "jump" - the very thing the
-                // hysteresis was designed to prevent. With TF tracking we treat a TF
-                // change as a normal proposal: it still has to clear 2 consecutive
-                // confirmations. The first call after a TF switch resets the
-                // proposal count to 1, and the shift is held for ~5-15s while ATR
-                // settles into its new regime. The user sees the OLD shift's
-                // spacing for those few seconds - which is exactly the stability
-                // they want.
-                static string s_lastConfirmedTF = "";
-                bool tfChangedSinceLastConfirm = (s_lastConfirmedTF != "" && s_lastConfirmedTF != curTF);
-                if(newShift == s_proposedShift) {
-                    s_proposalCount++;
-                } else {
-                    s_proposedShift = newShift;
-                    s_proposalCount = 1;
+                // proposed at least 2 consecutive times, OR a large ATR change,
+                // OR a TF change (handled by ResetFractalJumpHysteresis from
+                // OnInit which clears the statics AND bypasses the gating below).
+
+                // FIX (2026, M): consume any pending hysteresis reset from a
+                // previous TF switch. Setting s_lastConfirmedATR=0 forces
+                // firstDetermination=true on this call, which commits the
+                // shift immediately. The user sees the correct spacing for the
+                // new TF on the very first eligible redraw - no ~10s wait.
+                if(g_resetHysteresisPending) {
+                    g_s_proposedShift = -1;
+                    g_s_proposalCount = 0;
+                    g_s_lastConfirmedATR = 0;
+                    g_s_lastConfirmedTF = "";
+                    g_resetHysteresisPending = false;
                 }
-                bool largeATRMove = (s_lastConfirmedATR > 0 && MathAbs(weightedATR - s_lastConfirmedATR) / s_lastConfirmedATR > 0.25);
-                // Apply the shift immediately on the very first determination so levels are
-                // drawn ONCE with the correct spacing (no narrow-then-wide double draw).
-                // Subsequent changes keep the 2-proposal hysteresis to avoid flicker.
-                // On a TF switch, the large-ATR-move bypass is DISABLED - the ATR delta
-                // is structural (different period), not a volatility spike, so the
-                // hysteresis must take its normal course.
-                bool firstDetermination = (s_lastConfirmedATR <= 0);
-                if(firstDetermination || s_proposalCount >= 2 || (largeATRMove && !tfChangedSinceLastConfirm)) {
+
+                bool tfChangedSinceLastConfirm = (g_s_lastConfirmedTF != "" && g_s_lastConfirmedTF != curTF);
+                if(newShift == g_s_proposedShift) {
+                    g_s_proposalCount++;
+                } else {
+                    g_s_proposedShift = newShift;
+                    g_s_proposalCount = 1;
+                }
+                bool largeATRMove = (g_s_lastConfirmedATR > 0 && MathAbs(weightedATR - g_s_lastConfirmedATR) / g_s_lastConfirmedATR > 0.25);
+                // FIX (2026, M): firstDetermination now includes the case where
+                // a TF switch just occurred (tfChangedSinceLastConfirm && we have
+                // a valid ATR). This commits the new TF's correct shift on the
+                // first eligible call, eliminating the ~10s of wrong spacing
+                // after every TF switch.
+                bool firstDetermination = (g_s_lastConfirmedATR <= 0);
+                bool tfSwitchWithFreshATR = tfChangedSinceLastConfirm && (weightedATR > 0);
+                if(firstDetermination || g_s_proposalCount >= 2 ||
+                   (largeATRMove && !tfChangedSinceLastConfirm) ||
+                   tfSwitchWithFreshATR) {
                     g_fractalShift = newShift;
-                    s_lastConfirmedATR = weightedATR;
-                    s_lastConfirmedTF = curTF;
-                    s_proposalCount = 0;
+                    g_s_lastConfirmedATR = weightedATR;
+                    g_s_lastConfirmedTF = curTF;
+                    g_s_proposalCount = 0;
                 }
                 // else: keep current g_fractalShift
                 

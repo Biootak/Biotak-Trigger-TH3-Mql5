@@ -1354,15 +1354,48 @@ SPipelineResult ExecutePipeline(
     // RenderTriggerLines to avoid object churn on scroll.
     bool trigEn = IsTriggerLevelsEnabled();
 
+    // PERF (2026, D): only run the diff-then-delete loop when something that
+    // affects the SET of zone/line NAMES has changed (mode, level count,
+    // step count, trigger enable, zonesEnabled toggle). When this hash is
+    // unchanged from the previous run, the prev and keep sets are identical
+    // and the delete loops would only find that nothing has to be deleted -
+    // ~316 ObjectFind+Delete syscalls per redraw for nothing. MT4 has no
+    // equivalent loop; the equivalent MT4 path simply re-rendered and let
+    // the cache-backed update flow (CreateZone/CreateOrUpdateHLine) keep
+    // the objects in place. We do the same here.
+    //
+    // FIX (2026, F): centerPrice MUST NOT be in this hash. centerPrice changes
+    // tick-by-tick on M1 (last-bar close wobble). If it were in the hash, the
+    // diff loop would run on every tick, AND CleanupSurplusPipeline would
+    // run on every tick (defeating the gate), AND the keep-set array would
+    // be rebuilt on every tick. centerPrice affects GEOMETRY (the prices of
+    // each line/zone) not the SET of names — that's exactly what the cache
+    // hit path in CreateZone / CreateOrUpdateHLine handles in-place.
+    const ulong FNV_PRIME = 1099511628211ULL;
+    ulong setHash = 14695981039346656037ULL;
+    setHash ^= (ulong)(int)config.zoneStyle;         setHash *= FNV_PRIME;
+    setHash ^= (ulong)(int)stepMode;                  setHash *= FNV_PRIME;
+    setHash ^= (ulong)(int)classifyMode;              setHash *= FNV_PRIME;
+    setHash ^= (ulong)result.zoneCount;               setHash *= FNV_PRIME;
+    setHash ^= (ulong)result.lineCount;               setHash *= FNV_PRIME;
+    setHash ^= (ulong)stepSizeCount;                  setHash *= FNV_PRIME;
+    setHash ^= (ulong)maxLevelsAbove;                 setHash *= FNV_PRIME;
+    setHash ^= (ulong)maxLevelsBelow;                 setHash *= FNV_PRIME;
+    setHash ^= (ulong)(trigEn ? 1 : 0);               setHash *= FNV_PRIME;
+    setHash ^= (ulong)(config.zonesEnabled ? 1 : 0);  setHash *= FNV_PRIME;
+
     int slot = GetRenderedSlot(config.modeName);
     string prevZoneNames[];
     string prevLineNames[];
     ArrayCopy(prevZoneNames, g_renderedNames[slot].zoneNames);
     ArrayCopy(prevLineNames, g_renderedNames[slot].lineNames);
 
-    // Build the set of zone/line names that will exist after this draw (kept set).
-    // All valid objects are kept; viewport culling hides off-screen ones instead
-    // of deleting them, preventing churn when the user scrolls or price shifts.
+    static ulong s_lastSetHash[8] = {0,0,0,0,0,0,0,0};
+    bool setChanged = (setHash != s_lastSetHash[slot]);
+
+    // Build the keep-set unconditionally — RenderZones/RenderTriggerLines
+    // need it regardless of whether the diff loop runs, and computing it
+    // is cheap relative to the chart-API calls we save.
     string keepZoneNames[];
     ArrayResize(keepZoneNames, result.zoneCount);
     int keepZoneCount = 0;
@@ -1382,38 +1415,52 @@ SPipelineResult ExecutePipeline(
     }
     ArrayResize(keepLineNames, keepLineCount);
 
-    // PERF (2026): O(N+M) zone/line diff using the open-addressed hash set
-    // above. The previous nested-loop version was O(N*M) string compares —
-    // 83k+ comparisons on M1 alone. Now we build the kept set once and
-    // probe it in O(1) per previous name.
-    DiffHashEnsure();
-    DiffHashClear();
-    for(int kz = 0; kz < keepZoneCount; kz++) DiffHashInsert(keepZoneNames[kz]);
-    for(int kl = 0; kl < keepLineCount; kl++) DiffHashInsert(keepLineNames[kl]);
+    if(setChanged) {
+        // O(N+M) zone/line diff using the open-addressed hash set.
+        DiffHashEnsure();
+        DiffHashClear();
+        for(int kz = 0; kz < keepZoneCount; kz++) DiffHashInsert(keepZoneNames[kz]);
+        for(int kl = 0; kl < keepLineCount; kl++) DiffHashInsert(keepLineNames[kl]);
 
-    for(int pi = 0; pi < ArraySize(prevZoneNames); pi++) {
-        if(!DiffHashContains(prevZoneNames[pi]))
-            DeleteManagedZoneObjects(prevZoneNames[pi]);
-    }
-    for(int pi = 0; pi < ArraySize(prevLineNames); pi++) {
-        if(!DiffHashContains(prevLineNames[pi])) {
-            DeleteIndicatorObjectManaged(prevLineNames[pi]);
-            DeleteIndicatorObjectManaged(prevLineNames[pi] + "_Label");
+        for(int pi = 0; pi < ArraySize(prevZoneNames); pi++) {
+            if(!DiffHashContains(prevZoneNames[pi]))
+                DeleteManagedZoneObjects(prevZoneNames[pi]);
         }
+        for(int pi = 0; pi < ArraySize(prevLineNames); pi++) {
+            if(!DiffHashContains(prevLineNames[pi])) {
+                DeleteIndicatorObjectManaged(prevLineNames[pi]);
+                DeleteIndicatorObjectManaged(prevLineNames[pi] + "_Label");
+            }
+        }
+
+        s_lastSetHash[slot] = setHash;
     }
 
     RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
     RenderTriggerLines(lines, result.lineCount, config, vpTop, vpBottom);
 
-    // Remember this draw's kept set for the next in-place diff.
-    ArrayResize(prevZoneNames, keepZoneCount);
-    for(int kz = 0; kz < keepZoneCount; kz++) prevZoneNames[kz] = keepZoneNames[kz];
-    ArrayResize(prevLineNames, keepLineCount);
-    for(int kl = 0; kl < keepLineCount; kl++) prevLineNames[kl] = keepLineNames[kl];
-    
-    // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
-    CleanupSurplusPipeline(config, maxStep);
-    
+    // FIX (2026, F): CleanupSurplusPipeline runs on every structural change
+    // (mode swap, level count change, trig toggle). When setChanged is true,
+    // the maxStep may have shifted and old objects past startIdx need to be
+    // deleted. The previous gate `s_lastSetHash[slot] != setHash` was always
+    // false because the assignment happens inside the setChanged block above
+    // (which already exited). CleanupSurplusPipeline has its own cache-iterated
+    // scan now (E1), so even when it runs every frame the cost is bounded.
+    if(setChanged) {
+        CleanupSurplusPipeline(config, maxStep);
+
+        // FIX (2026, F): write the keep-set back to g_renderedNames[slot] so
+        // the NEXT call has a populated prev set. The previous code updated
+        // only the local prevZoneNames copy, so g_renderedNames[slot] stayed
+        // empty across calls and the diff loop was comparing an empty prev
+        // against the full keep set every time — never finding anything to
+        // delete, but doing the full hash build + probe work each frame.
+        ArrayResize(g_renderedNames[slot].zoneNames, keepZoneCount);
+        for(int kz = 0; kz < keepZoneCount; kz++) g_renderedNames[slot].zoneNames[kz] = keepZoneNames[kz];
+        ArrayResize(g_renderedNames[slot].lineNames, keepLineCount);
+        for(int kl = 0; kl < keepLineCount; kl++) g_renderedNames[slot].lineNames[kl] = keepLineNames[kl];
+    }
+
     result.success = true;
     return result;
 }
