@@ -90,7 +90,20 @@ int ClassifyObjectCategoryByName(const string name) {
     // TH3_Structure_* — handled separately by callers (skip in F/L).
     if(StringFind(name, "TH3_Structure_") == 0) return 0;
     // Trigger subdivisions (TriggerTH_Up_, TriggerTH_Down_).
-    if(StringFind(name, "TriggerTH_") == 0) return 4;
+    // FIX (T-hotkey, 2026): the actual trigger object names are
+    //   "<prefix>TH_Level_TriggerTH_Up_<step>"
+    //   "<prefix>TH_Level_TriggerTH_Down_<step>"
+    // i.e. the "TriggerTH_" token sits in the MIDDLE of the name, never at
+    // position 0. The previous `== 0` check therefore always failed and
+    // every trigger line fell through to the generic `_Level_` branch
+    // below, returning category 1 (Line) instead of 4 (Trigger). The T-key
+    // handler filters by `category == 4` to isolate trigger objects, so the
+    // misclassification silently broke the T toggle — pressing T updated
+    // the global var but flipped zero objects. Use `>= 0` so the trigger
+    // token matches anywhere in the name. "TriggerTH_" only appears in
+    // trigger line names; no other category uses this substring, so the
+    // broader match is safe.
+    if(StringFind(name, "TriggerTH_") >= 0) return 4;
     // Custom price line.
     if(StringFind(name, "Biotak_CustomPrice") >= 0) return 5;
     // Zone family (rectangles + zone tops/bottoms). Must precede Above/Below.

@@ -918,9 +918,15 @@ void ApplyModeLabelStyle(const string name, const color textColor, const int yOf
 // function is invoked from the heavy redraw path on every full redraw
 // (MT5 calls it from EventHandlers.mqh ~1665 regardless of needLabels).
 // We trust the cache for existence and pull the color from the cache too.
+//
+// FIX (LBL-DISSOLVE, 2026): after a TF/symbol switch the cache is wiped
+// (InvalidateObjectCacheByPrefix in OnInit) but the chart engine preserved
+// the 5 overlay objects across OnDeinit/OnInit. The cache-first path would
+// skip those preserved labels entirely, leaving them at stale (x, y)
+// positions. We now: (a) check the cache fast path, (b) fall back to a
+// single ObjectFind per missing label and re-insert into the cache so the
+// next call is fast again.
 void RepositionAllOverlayLabels() {
-    int idx;
-    color cachedColor;
     string names[4];
     int nameCount = 0;
     names[nameCount++] = g_stepModeLabelName;
@@ -931,9 +937,24 @@ void RepositionAllOverlayLabels() {
     names[nameCount++] = g_lockStatusLabelName;
 
     for(int n = 0; n < nameCount; n++) {
-        idx = CacheFindIndex(names[n]);
-        if(idx < 0 || !g_objectCacheHash[idx].entry.exists) continue;
-        cachedColor = g_objectCacheHash[idx].entry.lastColor;
+        int idx = CacheFindIndex(names[n]);
+        bool exists;
+        color cachedColor;
+        if(idx >= 0 && g_objectCacheHash[idx].entry.exists) {
+            exists = true;
+            cachedColor = g_objectCacheHash[idx].entry.lastColor;
+        } else {
+            // Cache miss after OnInit (LBL-DISSOLVE): the chart preserved
+            // the object but the cache was invalidated. One ObjectFind +
+            // color read + cache insert; subsequent calls take the fast path.
+            exists = (ObjectFind(0, names[n]) >= 0);
+            if(!exists) continue;
+            cachedColor = (color)ObjectGetInteger(0, names[n], OBJPROP_COLOR);
+            // OBJ_LABEL objects have no price/style/width but the cache
+            // entry needs *some* value; pass 0 for the unused fields and
+            // let the per-label text update path overwrite lastColor later.
+            CacheAddObject(names[n], 0.0, cachedColor, 0, 0);
+        }
         ApplyModeLabelStyle(names[n], cachedColor);
     }
 

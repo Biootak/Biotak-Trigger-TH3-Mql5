@@ -683,12 +683,23 @@ void ClearAllLabels(const string objectPrefix) {
     }
 }
 
-void DisplayATRLabels(const string objectPrefix) {
+void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) {
+    // FIX (LBL-3, 2026): the function now owns the Y-offset lifecycle.
+    // Before, the caller was responsible for resetting g_currentLabelYOffset=0
+    // before invoking us, and we mutated the global as we drew. Two callers
+    // (RedrawAllObjects, RedrawLabelsOnly) both did `= 0`; the deinit cleanup
+    // path did NOT, leaking a stale offset into the next session — which is
+    // what caused ATR labels to appear lower (and eventually off-screen) every
+    // time the indicator reloaded. We now reset here and accept the caller's
+    // requested starting offset as a parameter (defaults to 0 for top-of-chart
+    // labels; the TH labels below pass their own accumulator).
+    g_currentLabelYOffset = in_startYOffset;
+
     if(!g_atrLabelsVisible) {
         ClearAllLabels(objectPrefix);
         return;
     }
-    
+
     double point = GetCachedPoint();
     double pipSize = GetCachedPipSize();
     int digits = GetCachedDigits();
@@ -992,7 +1003,15 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
 }
 
 void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-    if(!g_thLabelsVisible || (g_thLabelsMode != 1 && g_thLabelsMode != 3)) return;
+    // FIX (2026, clear-on-hidden): previously the early-out only `return`ed
+    // without clearing. After a TF switch the user could be left with stale
+    // fractal-TH labels if g_thLabelsVisible had flipped between renders.
+    // Now we explicitly ClearAllLabels so the chart doesn't accumulate ghost
+    // OBJ_LABEL objects across switches.
+    if(!g_thLabelsVisible || (g_thLabelsMode != 1 && g_thLabelsMode != 3)) {
+        ClearAllLabels(objectPrefix);
+        return;
+    }
     
     double point = GetCachedPoint();
     int digits = GetCachedDigits();
@@ -1062,7 +1081,11 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
 }
 
 void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-    if(!g_thLabelsVisible || (g_thLabelsMode != 2 && g_thLabelsMode != 3)) return;
+    // FIX (2026, clear-on-hidden): same rationale as DisplayFractalTHs above.
+    if(!g_thLabelsVisible || (g_thLabelsMode != 2 && g_thLabelsMode != 3)) {
+        ClearAllLabels(objectPrefix);
+        return;
+    }
 
     double point = GetCachedPoint();
     int digits = GetCachedDigits();

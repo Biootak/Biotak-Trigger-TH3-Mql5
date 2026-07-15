@@ -595,9 +595,17 @@ int GetMaxATRPeriodForTimeframe(const ENUM_TIMEFRAMES tf) {
 }
 
 //+------------------------------------------------------------------+
-//| Build a deduped, capped (period, weight) set for a timeframe     |
-//| The base 6 periods are clamped to the TF cap; collapsed periods  |
-//| merge their weights. Longest period is capped as above.          |
+//| Build a (period, weight) set for a timeframe                      |
+//| The base 6 periods are clamped to the TF cap; each base slot     |
+//| stays DISTINCT in the output (no merging) so the weighted sum    |
+//| uses all 6 weights individually, matching Java OptimizedCalculations|
+//| where every base period contributes independently.                |
+//| When clamping causes duplicate period values (e.g. D1 caps 66/    |
+//| 132/264 all to 21) the slots still represent separate weights    |
+//| for the same lookback — mathematically equivalent to merging but  |
+//| preserves the explicit per-slot structure for clarity and so the |
+//| pro-rating fix in CalculateWeightedATRFromRates can scale each   |
+//| weight by its own completeness.                                  |
 //+------------------------------------------------------------------+
 void GetATRPeriodWeightsForTimeframe(const ENUM_TIMEFRAMES tf, int &outPeriods[], int &outWeights[], int &outCount) {
     int maxP = GetMaxATRPeriodForTimeframe(tf);
@@ -613,20 +621,11 @@ void GetATRPeriodWeightsForTimeframe(const ENUM_TIMEFRAMES tf, int &outPeriods[]
     for(int i = 0; i < 6; i++) {
         int p = MathMin(basePeriods[i], maxP);
         if(p < 2) p = 2;
-        // Merge into an already-added period (clamping can collapse periods)
-        bool found = false;
-        for(int j = 0; j < outCount; j++) {
-            if(outPeriods[j] == p) {
-                outWeights[j] += baseWeights[i];
-                found = true;
-                break;
-            }
-        }
-        if(!found) {
-            outPeriods[outCount] = p;
-            outWeights[outCount] = baseWeights[i];
-            outCount++;
-        }
+        // Keep every base slot distinct. Duplicate period values are
+        // intentional when the cap is lower than several base periods.
+        outPeriods[outCount] = p;
+        outWeights[outCount] = baseWeights[i];
+        outCount++;
     }
 }
 double GetATRForTimeframe(const int targetMinutes) {
@@ -940,7 +939,9 @@ double CalculateWeightedATRFromRates(const MqlRates &rates[], const int count, c
     GetATRPeriodWeightsForTimeframe(tf, periods, weights, count_p);
 
     double atrValues[6];
+    double atrCompleteness[6];
     ArrayInitialize(atrValues, 0.0);
+    ArrayInitialize(atrCompleteness, 0.0);
 
     for(int p = 0; p < count_p; p++) {
         int period = periods[p];
@@ -969,15 +970,31 @@ double CalculateWeightedATRFromRates(const MqlRates &rates[], const int count, c
             valid++;
         }
 
-        atrValues[p] = (valid >= period / 2) ? SafeDivide(sum, (double)valid, 0.0, EPSILON_GENERAL) : 0.0;
+        // PRO-RATE (2026): require at least 50% of the requested lookback so we
+        // don't accept a single-bar "average", but instead of dropping the slot
+        // entirely we scale its weight by completeness. On cold-start W1/MN1
+        // where only ~13 bars exist, a 264-cap slot is at completeness=13/264≈5%
+        // — that's below the 50% floor so it stays excluded, but for a 5-cap
+        // slot with 3 bars (completeness=60%) we contribute 60% of its weight.
+        // This matches the spirit of Java's OptimizedCalculations while
+        // preventing zero-bias on cold starts.
+        double completeness = (period > 0) ? (double)valid / (double)period : 0.0;
+        if(valid >= period / 2 && valid > 0) {
+            atrValues[p] = SafeDivide(sum, (double)valid, 0.0, EPSILON_GENERAL);
+            atrCompleteness[p] = completeness;
+        } else {
+            atrValues[p] = 0.0;
+            atrCompleteness[p] = 0.0;
+        }
     }
 
     double weightedSum = 0.0;
     int totalWeight = 0;
     for(int i = 0; i < count_p; i++) {
-        if(!IsZero(atrValues[i], EPSILON_PRICE)) {
-            weightedSum += atrValues[i] * weights[i];
-            totalWeight += weights[i];
+        if(!IsZero(atrValues[i], EPSILON_PRICE) && atrCompleteness[i] > 0.0) {
+            double effWeight = weights[i] * atrCompleteness[i];
+            weightedSum += atrValues[i] * effWeight;
+            totalWeight += effWeight;
         }
     }
 
@@ -986,39 +1003,36 @@ double CalculateWeightedATRFromRates(const MqlRates &rates[], const int count, c
 
 //+------------------------------------------------------------------+
 //| Refresh ATR for a single timeframe from its own price history    |
-//| v2026: CopyRates-based, no indicator handles                     |
+//| v2026.1: Simple-average-from-rates is PRIMARY (matches Java     |
+//| OptimizedCalculations.calculateATROptimized). Wilder's iATR is    |
+//| the FALLBACK when rates are insufficient for the longest capped  |
+//| period (rare; cold-start on W1/MN1 before history download).     |
 //+------------------------------------------------------------------+
 double RefreshATRForTimeframe(const ENUM_TIMEFRAMES tf) {
     EnsureTimeframeHistory(tf);
 
-    // PRIMARY: use standard Wilder's ATR (iATR). This gives correct values
-    // on W1/MN1 and avoids issues with incomplete current bars.
-    double wilderValue = CalculateWeightedATRWilders(tf);
-    if(wilderValue > 0) return wilderValue;
-
-    // FALLBACK: if iATR cannot return any value (insufficient history for the
-    // longest period), compute a weighted ATR from whatever rates ARE available.
-    // CalculateWeightedATRFromRates already handles partial history per period,
-    // so even a handful of W1/MN1 bars yields a non-zero estimate instead of 0.
+    // PRIMARY: simple-average from the TF's own price history.
+    // CalculateWeightedATRFromRates already handles partial history per
+    // period with the pro-rated completeness fix above, so even a
+    // handful of W1/MN1 bars yields a non-zero estimate instead of 0.
     MqlRates rates[];
     int maxBars = iBars(Symbol(), tf);
     if(maxBars < 1) maxBars = ATR_PERIOD_6 + 1;
-    // Request as many bars as exist, but never more than the per-TF capped
-    // period needs (e.g. MN1 only needs ~13 monthly bars) to keep copies small.
     int maxP = GetMaxATRPeriodForTimeframe(tf);
     int needed = MathMax(ATR_PERIOD_1 + 2, MathMin(maxBars, maxP + 1));
     int copied = CopyRates(Symbol(), tf, 0, needed, rates);
-    if(copied <= 1) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[ATR] RefreshATRForTimeframe: no usable history for ", EnumToString(tf),
-              " (", copied, "/", needed, ")");
-        #endif
-        return 0.0;
+    if(copied > 1) {
+        double value = CalculateWeightedATRFromRates(rates, copied, tf);
+        ArrayFree(rates);
+        if(value > 0) return value;
     }
-
-    double value = CalculateWeightedATRFromRates(rates, copied, tf);
     ArrayFree(rates);
-    return value;
+
+    // FALLBACK: Wilder's iATR if rates cannot produce any non-zero value
+    // (extremely cold start where the longest capped period still has no
+    // history). iATR's Wilder smoothing is acceptable here as a last
+    // resort; the label will still be valid, just not byte-exact with Java.
+    return CalculateWeightedATRWilders(tf);
 }
 
 //+------------------------------------------------------------------+

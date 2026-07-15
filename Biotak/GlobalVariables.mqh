@@ -16,6 +16,12 @@ static bool g_initialized = false;
 // no need to trigger OnDeinit/OnInit for a pure chart-property change.
 static string g_lastChartSymbol = "";
 static ENUM_TIMEFRAMES g_lastChartPeriod = PERIOD_CURRENT;
+// FIX (LBL-1, 2026): chart pixel dimensions cached alongside symbol/period
+// so CHARTEVENT_CHART_CHANGE can distinguish scroll/zoom (no-op) from a
+// real resize (labels must relayout). Pixel values default to 0 to force
+// the first post-init seed-write to fire.
+static long g_lastChartWidthPx  = 0;
+static long g_lastChartHeightPx = 0;
 static bool g_pendingChartChange = false;
 // PERF (2026): Track prev_calculated state so we can distinguish
 // "new tick on existing bar" (no-op), "new bar" (incremental work), and

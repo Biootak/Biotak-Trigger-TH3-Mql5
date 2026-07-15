@@ -221,7 +221,24 @@ int OnInitHandler() {
     // populated and the normal in-place visibility path takes over.
     // MT4 had no equivalent forced-push at all (it did direct
     // ObjectSetInteger on every visibility toggle).
-    RequestForcePushTimeframes(1);
+    // FIX (TF switch lag, 2026, C): only request force-push when the user's
+    // visibility state diverges from the chart engine's default reset.
+    // MQL5 resets every OBJPROP_TIMEFRAMES back to OBJ_ALL_PERIODS on chart
+    // re-init (TF/symbol switch). If the user is at the default visibility
+    // (lines visible, indicator not hidden, g_thLabelsMode default), then
+    // the chart engine's reset MATCHES the desired state and the cache is
+    // still authoritative — no force-push needed, saving ~200 sync
+    // ObjectSetInteger calls per TF switch.
+    //
+    // We must still force-push when:
+    //   - g_linesVisible == false  (user pressed L to hide lines)
+    //   - g_thLabelsMode != 0      (user enabled ATR/TH labels)
+    //   - shouldBeHidden == true   (user pressed F to hide indicator)
+    // because the chart reset to OBJ_ALL_PERIODS would silently re-show
+    // objects the user explicitly hid.
+    if(!g_linesVisible || g_thLabelsMode != 0 || shouldBeHidden) {
+        RequestForcePushTimeframes(1);
+    }
     // The per-frame ApplyVisibilityStateIfUnchangedSkip path also uses
     // g_visibilityChangedThisFrame, which is updated in CacheRefreshVisibilityState.
     // We need to force the next frame to push timeframes unconditionally.
@@ -258,7 +275,24 @@ int OnInitHandler() {
         }
     }
     g_initialized = true;
-    g_calculatedOnce = false;
+    // FIX (2026, TF switch continuity): with the OnDeinit state preservation
+    // fix, OnInit runs after a TF switch WITHOUT the cache + state having
+    // been wiped. g_calculatedOnce stays true across the OnDeinit/OnInit
+    // pair so the rename-in-place fast path works and we don't re-issue
+    // ClearAllLabels + DisplayATRLabels on every TF toggle. The label
+    // relayout is still requested via g_labelsRelayoutNeeded by the
+    // CHARTEVENT_CHART_CHANGE handler when the chart pixel size changes,
+    // and the price-geometry recalc runs unconditionally because
+    // g_redrawTHLevelsNeeded is set in both OnDeinit and OnInit.
+    //
+    // For non-TF-switch re-inits (terminal restart, indicator reload,
+    // settings change → REASON_PARAMETERS → re-OnInit) we keep the
+    // historical `g_calculatedOnce = false` reset: there the OnDeinit
+    // path DID clear state (preserveStateForReinit=false), so the labels
+    // do need to be redrawn from scratch.
+    if(!recentTimeframeSwitch) {
+        g_calculatedOnce = false;
+    }
     InitializeAdaptiveScaling();
 
     // FIX (2026, G1): historical high/low are loaded ONCE in OnInit and never
@@ -520,6 +554,196 @@ int OnInitHandler() {
         g_redrawTHLevelsNeeded = true;
     }
 
+    // FIX (TF switch lag, 2026): seed the chart-change caches to the CURRENT
+    // chart state before returning. Without this, the CHARTEVENT_CHART_CHANGE
+    // that fires right after OnInit (MQL5 fires one for every TF/symbol switch
+    // and chart re-init) compares ChartSymbol(0)/ChartPeriod(0) against
+    // g_lastChartSymbol/g_lastChartPeriod which still hold the PRE-switch
+    // values (these statics persist across OnInit/OnDeinit on the same chart).
+    // The mismatch sets g_pendingChartChange=true and forces a SECOND full
+    // RedrawAllObjects right after the first one (already triggered by
+    // g_redrawTHLevelsNeeded=true above). That second redraw runs the entire
+    // pipeline again — 290-zone wipe+recreate, label pass, identity hash,
+    // alerts — adding 100-500ms of lag to every TF switch with zero visual
+    // benefit (the first redraw already produced the correct output).
+    //
+    // With this seed, the immediate post-init CHART_CHANGE takes the
+    // "same symbol AND same period" early-return at OnChartEventHandler
+    // (the compare at L2224), so g_pendingChartChange stays false and only
+    // the first OnCalculate redraw runs.
+    // FIX (2026, force relayout after restore): when the user has labels
+    // visible (g_atrLabelsVisible or g_thLabelsVisible restored to true
+    // from GlobalVariable), we MUST mark the labels for relayout on the
+    // next redraw. Without this, the relayout depends on either:
+    //   - a new-bar tick (which on M1/M5 is up to 5 minutes, on MN1 a month)
+    //   - the 30-min ATR-refresh interval
+    //   - the CHARTEVENT_CHART_CHANGE pixel-size gate (only fires on resize)
+    //   - the recentTimeframeSwitch detector (20s window — fast TF toggles miss it)
+    // So labels could keep showing the PREVIOUS TF's values for up to 30 min
+    // after a switch. Setting g_labelsRelayoutNeeded=true here guarantees the
+    // very next RedrawAllObjects re-runs Display* with the new TF's values.
+    // Per the no-clear-on-relayout fix in RedrawAllObjects (the Display*
+    // functions do in-place ObjectSetInteger updates for existing OBJ_LABEL
+    // objects), this is a pure value refresh — no ObjectDelete flicker.
+    bool labelsVisibleAfterRestore = (g_atrLabelsVisible || g_thLabelsVisible);
+    if(labelsVisibleAfterRestore) {
+        g_labelsRelayoutNeeded = true;
+    }
+
+    // FIX (2026, TF switch label refresh): the central ATR refresh loop in
+    // OnCalculate sets g_labelsRelayoutNeeded=true on a new-bar tick OR when
+    // the 30-min ATR-refresh interval is due. On a TF switch neither of those
+    // is guaranteed to fire on the first tick (M1 = up to 1 minute, MN1 =
+    // up to 1 month), so we explicitly request a label value refresh here.
+    // Per the no-clear-on-relayout fix further down, this triggers an
+    // in-place update of all ATR/TH labels without any ObjectDelete call,
+    // so the existing OBJ_LABEL objects just get their text and pixel
+    // positions refreshed for the new chart TF. No flicker.
+    if(recentTimeframeSwitch) {
+        g_labelsRelayoutNeeded = true;
+    }
+
+    // FIX (LBL-2, 2026): MT5 resets every OBJPROP_TIMEFRAMES back to
+    // OBJ_ALL_PERIODS when the chart engine re-initializes (TF switch,
+    // symbol switch, OnDeinit/OnInit cycle). Our cache invalidation above
+    // marks those properties as unknown, but the next visibility push still
+    // needs to fire. We force-push ATR label visibility here using the same
+    // SetATRLabelsVisibility helper the hotkey toggle uses, so the user's
+    // "labels on/off" preference is correctly re-applied regardless of what
+    // the chart engine did to the property during the reset.
+    //
+    // BUG (2026, LBL-2 hotkey path): the previous condition was
+    //   if(inpShowATRLabels && g_atrLabelsVisible && !shouldBeHidden) ...
+    // which skipped the force-push when the user enabled labels via the A
+    // hotkey WITHOUT having checked the input property. In that case
+    // g_atrLabelsVisible=true (restored from GlobalVariable) but
+    // inpShowATRLabels=false, so the first if-branch was skipped and the
+    // else-if-branch (!g_atrLabelsVisible) was also skipped. The result:
+    // labels vanished on every TF/symbol switch for hotkey-only users.
+    // Fix: drive visibility off the runtime state (g_atrLabelsVisible +
+    // shouldBeHidden), not off the input property. Both callers converge
+    // on the same SetATRLabelsVisibility call.
+    {
+        bool atrShouldShow = (g_atrLabelsVisible && !shouldBeHidden);
+        SetATRLabelsVisibility(inpObjectPrefix, atrShouldShow);
+    }
+    // FIX (2026, TH labels TF switch): mirror the ATR force-push for TH
+    // labels. Previously OnInit had no TH visibility force-push at all,
+    // so after a TF switch the user's S-key "TH labels on" preference was
+    // silently reset to OBJ_ALL_PERIODS by the chart engine and the labels
+    // either disappeared (if user had been hiding them) or appeared where
+    // they didn't want them. Drive off the runtime state too — same
+    // hotkey-vs-input bug fix as the ATR branch above.
+    {
+        int thMode = (shouldBeHidden || !g_thLabelsVisible) ? 0 : g_thLabelsMode;
+        SetTHLabelsVisibility(inpObjectPrefix, thMode);
+    }
+
+    // FIX (LBL-DISSOLVE follow-up, 2026): the 5 special overlay objects
+    // (StepMode / Factor / TH3Freq / LockStatus labels + CustomPrice line)
+    // are PRESERVED across REASON_CHARTCHANGE in OnDeinitHandler. After the
+    // chart re-init the engine has reset their OBJPROP_TIMEFRAMES back to
+    // OBJ_ALL_PERIODS — without an explicit push the user's hidden state
+    // (L key, F key, lock-off) is lost. The general InvalidateObjectCache
+    // + RequestForcePushTimeframes(1) above will eventually cover the
+    // OBJECT-CACHE-MANAGED objects, but these 5 special names live outside
+    // that cache (they have fixed global names, never inserted via
+    // CacheInsert). Push their timeframes here directly.
+    //
+    // For the auto-hide mode labels (StepMode / Factor / TH3Freq) we also
+    // enforce the inpModeLabelDuration timer: if the timer expired during
+    // the OnDeinit gap, delete the label now. The CreateTime statics
+    // survive OnDeinit/OnInit (they're static, not instance), so we can
+    // compare against them. For LockStatus we re-evaluate visibility based
+    // on the current g_timeframeLocked state. For CustomPrice we keep the
+    // line if there's a saved custom price global var for this symbol.
+    {
+        long overlayTF = shouldBeHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+        // Auto-hide mode labels: enforce timer.
+        // inpModeLabelDuration == 0 means "permanent", so always restore.
+        // > 0 means seconds; if (now - createTime) >= duration the label
+        // should be gone — but during the switch gap we got a fresh "now",
+        // so a label that was about to expire is now stale.
+        if(inpModeLabelDuration > 0) {
+            uint nowMs = GetTickCount();
+            uint durMs = (uint)inpModeLabelDuration * 1000;
+            if(g_stepModeLabelCreateTime > 0 &&
+               (nowMs - g_stepModeLabelCreateTime) >= durMs) {
+                ObjectDelete(0, g_stepModeLabelName);
+                g_stepModeLabelCreateTime = 0;
+            }
+            if(g_factorLabelCreateTime > 0 &&
+               (nowMs - g_factorLabelCreateTime) >= durMs) {
+                ObjectDelete(0, g_factorLabelName);
+                g_factorLabelCreateTime = 0;
+            }
+#ifndef BUILD_LITE
+            if(g_th3FreqLabelCreateTime > 0 &&
+               (nowMs - g_th3FreqLabelCreateTime) >= durMs) {
+                ObjectDelete(0, g_th3FreqLabelName);
+                g_th3FreqLabelCreateTime = 0;
+            }
+#endif
+        }
+        // Push timeframes for the (still-existing) overlay labels.
+        if(ObjectFind(0, g_stepModeLabelName) >= 0)
+            ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, overlayTF);
+        if(ObjectFind(0, g_factorLabelName) >= 0)
+            ObjectSetInteger(0, g_factorLabelName, OBJPROP_TIMEFRAMES, overlayTF);
+#ifndef BUILD_LITE
+        if(ObjectFind(0, g_th3FreqLabelName) >= 0)
+            ObjectSetInteger(0, g_th3FreqLabelName, OBJPROP_TIMEFRAMES, overlayTF);
+#endif
+        // LockStatus: re-evaluate against current lock state. The user could
+        // have toggled the K key during the OnDeinit/OnInit gap (rare but
+        // possible). If lock is now off, the preserved label is stale and
+        // must be removed. If lock is on, refresh the text in case the
+        // locked period changed during the gap. If we're hidden via F, just
+        // push timeframes off — HideAllTHObjects/ShowAll path will toggle it.
+        if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
+            if(!g_timeframeLocked) {
+                // Lock released during the gap. Label no longer relevant;
+                // delete it and reset its create-time so it doesn't reappear
+                // via RepositionAllOverlayLabels on the next redraw.
+                ObjectDelete(0, g_lockStatusLabelName);
+                g_lockStatusLabelCreateTime = 0;
+            } else {
+                ObjectSetInteger(0, g_lockStatusLabelName, OBJPROP_TIMEFRAMES, overlayTF);
+                if(!shouldBeHidden) {
+                    UpdateLockStatusLabel(false);  // refresh text in case locked period changed
+                }
+            }
+        }
+        // CustomPrice line: keep it ONLY if the user has an active custom
+        // price configured. Otherwise the previous TF's line was already
+        // deleted by OnDeinit for non-CHARTCHANGE reasons, so a stale line
+        // here means a real bug — clean it up.
+        if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0) {
+            string cpGvarName = "Biotak_CustomPrice_" + GetCachedSymbol();
+            bool hasCustomPrice =
+                (g_customTHStartPrice > 0.0) ||
+                (inpCustomTHStartPrice > 0.0) ||
+                GlobalVariableCheck(cpGvarName);
+            if(hasCustomPrice) {
+                ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_TIMEFRAMES, overlayTF);
+                g_customPriceLineCreated = true;
+            } else {
+                // Stale line from a prior config that no longer applies.
+                ObjectDelete(0, g_customPriceHorizontalLineName);
+                g_customPriceLineCreated = false;
+            }
+        }
+    }
+
+    g_lastChartSymbol = ChartSymbol(0);
+    g_lastChartPeriod = (ENUM_TIMEFRAMES)ChartPeriod(0);
+    // LBL-1 closure: seed chart pixel dimensions too so the very first
+    // CHARTEVENT_CHART_CHANGE that arrives right after OnInit (MQL5 fires
+    // one for every TF/symbol switch) does not trigger a phantom relayout
+    // by comparing stale (0) cache values against real dimensions.
+    g_lastChartWidthPx  = ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+    g_lastChartHeightPx = ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+
     return INIT_SUCCEEDED;
 }
 
@@ -635,15 +859,47 @@ void OnDeinitHandler(const int reason) {
     ReleaseATRHandle();
     EventKillTimer();
 
-    // PERF: ObjectDelete is safe to call on non-existent objects (returns false, no error)
-    // Eliminates ObjectFind syscalls
-    ObjectDelete(0, g_stepModeLabelName);
-    ObjectDelete(0, g_factorLabelName);
+    // FIX (LBL-DISSOLVE, 2026): On TF/symbol switch (REASON_CHARTCHANGE) the
+    // 5 special overlay labels + custom-price line MUST be PRESERVED across
+    // the OnDeinit/OnInit cycle. Previously they were ObjectDelete'd here
+    // unconditionally — the chart then re-initialized and RedrawAllObjects
+    // only recreates ATR/TH labels, never the special overlays. Net effect:
+    // every TF switch made StepMode / Factor / TH3Freq / LockStatus /
+    // CustomPrice vanish, and they only reappeared when the user pressed
+    // the matching hotkey (S / 1-2 / 3-4 / K). The same rename-in-place
+    // pattern that keeps HLINEs continuous through a TF switch (see the
+    // comment block at L837) applies here: the labels are TF-independent
+    // OBJ_LABEL/OBJ_HLINE objects keyed by chart-scoped name, so the chart
+    // engine's reset is purely a property one — the objects themselves
+    // survive. We delete them ONLY on full REMOVE or PARAMETERS (settings
+    // change), never on REASON_CHARTCHANGE.
+    //
+    // Notes:
+    //   - g_*LabelCreateTime statics persist across OnInit, so the OnTimer
+    //     auto-hide path (inpModeLabelDuration > 0) still works correctly
+    //     for the labels that were temporarily shown.
+    //   - The chart engine resets OBJPROP_TIMEFRAMES on re-init, but
+    //     OnInitHandler force-pushes timeframes for one frame and the
+    //     cache invalidation (InvalidateObjectCacheByPrefix + RequestForcePushTimeframes)
+    //     restores the user's hidden/visible state for the next redraw.
+    //   - RepositionAllOverlayLabels runs at the end of RedrawAllObjects
+    //     and re-applies OBJPROP_XDISTANCE/YDISTANCE (needed because the
+    //     chart pixel dimensions may have changed and labels can sit at
+    //     stale offsets).
+    if(reason == REASON_CHARTCHANGE) {
+        // TF/symbol switch: keep all overlay objects. Do NOT touch them.
+        DEBUG_PRINT("OnDeinit (REASON_CHARTCHANGE) - preserving overlay labels and custom price line");
+    } else {
+        // REMOVE / PARAMETERS / other: full cleanup, objects will be
+        // recreated from scratch by RedrawAllObjects or left gone.
+        ObjectDelete(0, g_stepModeLabelName);
+        ObjectDelete(0, g_factorLabelName);
 #ifndef BUILD_LITE
-    ObjectDelete(0, g_th3FreqLabelName);
+        ObjectDelete(0, g_th3FreqLabelName);
 #endif
-    ObjectDelete(0, g_lockStatusLabelName);
-    ObjectDelete(0, g_customPriceHorizontalLineName);
+        ObjectDelete(0, g_lockStatusLabelName);
+        ObjectDelete(0, g_customPriceHorizontalLineName);
+    }
 
     if(reason == REASON_REMOVE)
     {
@@ -736,15 +992,57 @@ void OnDeinitHandler(const int reason) {
     CleanupATRCache();
     CleanupObjectCountManager();
     CleanupPerformanceOptimizations();
-    CacheClear();
-    g_initialized = false;
-    g_calculatedOnce = false;
-    g_redrawTHLevelsNeeded = true;
-    g_highestHigh = EMPTY_VALUE;
-    g_lowestLow = EMPTY_VALUE;
-    g_currentPrice = 0.0;
-    g_lastCalculation = 0;
-    g_lastHistoricalUpdate = 0;
+    // FIX (2026, CHARTCHANGE state preservation):
+    // The REASON_CHARTCHANGE branch above (L766-L779) documents the
+    // "rename-in-place" architecture: a TF/symbol switch reuses the
+    // existing object set and the next RedrawAllObjects updates prices
+    // in place. But the unconditional resets below were defeating that
+    // promise:
+    //   CacheClear()         wiped the per-object identity cache
+    //   g_calculatedOnce=false forced needLabels=true on next redraw
+    //   g_redrawTHLevelsNeeded=true forced the heavy label path
+    // Effect: every TF/symbol switch triggered a full ClearAllLabels +
+    // re-create of every ATR/TH label + every level/zone object — the
+    // visible "wipe and redraw" the user reported on scroll/zoom and TF
+    // toggling, and the labels-going-invisible on first frame after the
+    // switch.
+    //
+    // Fix: scope those resets to reasons that genuinely destroy the chart
+    // state (REASON_REMOVE, REASON_PARAMETERS, REASON_CLOSE, REASON_TEMPLATE,
+    // REASON_INITFAILED, REASON_CHARTCLOSE, REASON_ACCOUNT). For
+    // REASON_CHARTCHANGE (TF/symbol toggle) we keep the cache and the
+    // "labels already drawn once" flag so the rename-in-place path can
+    // proceed without a redundant ClearAllLabels.
+    bool preserveStateForReinit = (reason == REASON_CHARTCHANGE);
+    if(!preserveStateForReinit) {
+        DEBUG_PRINT("Clearing caches and resetting state (full teardown)");
+        CacheClear();
+        g_initialized = false;
+        g_calculatedOnce = false;
+        g_redrawTHLevelsNeeded = true;
+        g_highestHigh = EMPTY_VALUE;
+        g_lowestLow = EMPTY_VALUE;
+        g_currentPrice = 0.0;
+        g_lastCalculation = 0;
+        g_lastHistoricalUpdate = 0;
+    } else {
+        DEBUG_PRINT("REASON_CHARTCHANGE: preserving cache + g_calculatedOnce for rename-in-place");
+        // CHARTCHANGE-specific: we still want g_redrawTHLevelsNeeded to
+        // trigger ONE full geometry recalc on the new TF (the price step,
+        // fractal shift and base price all depend on TF), but we keep
+        // g_calculatedOnce=true so the label-redraw branch is skipped
+        // and the existing OBJ_LABEL objects stay alive across the
+        // switch. The identity-hash will differ (period changed) so the
+        // skipHeavyWork gate at L1710 will not short-circuit the price
+        // update — labels stay where they are, only price geometry moves.
+        g_redrawTHLevelsNeeded = true;
+        // Seed the chart pixel cache so the first CHARTEVENT_CHART_CHANGE
+        // after this OnDeinit/OnInit pair does not fire a phantom
+        // relayout (L2299 compares against the new values). The actual
+        // reseed happens in OnInit at L585+; this is just a belt-and-braces.
+        g_lastChartWidthPx  = 0;
+        g_lastChartHeightPx = 0;
+    }
     g_dailyClosePriceForTH = EMPTY_VALUE;
     g_objectCountLast = 0;
     g_lastObjectCleanup = 0;
@@ -1689,18 +1987,72 @@ void RedrawAllObjects(bool force_redraw=false)
         {
             g_dailyClosePriceForTH = thBasePrice;
         }
-        
-        // CRITICAL: Reset stacking offsets and clear old labels for clean layout
-        g_currentLabelYOffset = 0;  // Reset top label stacking offset
-        g_currentLabelYOffsetBottom = 0;  // Reset bottom label stacking offset
-        ClearAllLabels(objectPrefix);
 
+        // FIX (2026, no-clear on relayout): previously this block called
+        // ClearAllLabels(objectPrefix) unconditionally on every needLabels
+        // pass. With the OnDeinit state-preservation fix, a TF/symbol
+        // switch now sets g_labelsRelayoutNeeded=true (via the central ATR
+        // refresh loop detecting value changes), which made this Clear fire
+        // on every TF toggle — deleting all 24 ATR labels + ~30 TH labels
+        // and recreating them one tick later. The visible flicker the user
+        // reported was this: the OBJ_LABEL objects disappeared for one
+        // redraw frame and reappeared with new text.
+        //
+        // CreateATRLabelSimple already handles the create-or-update case
+        // correctly (ObjectFind check + per-label cache for text/color
+        // delta; positions are reapplied every call). The same applies to
+        // DisplayFractalTHs and DisplayStandardTHs. So we ONLY clear on
+        // the very first redraw (g_calculatedOnce=false) where we cannot
+        // trust any pre-existing label state. On relayout passes we let
+        // the Display* functions update in place.
+        //
+        // Explicit-clear callers (which genuinely need a clean slate) are:
+        //   - RedrawLabelsOnly()      → A/S hotkey toggles
+        //   - OnDeinit REASON_PARAMETERS → settings dialog
+        //   - OnDeinit REASON_REMOVE      → indicator remove
+        //   - DisplayATRLabels itself when g_atrLabelsVisible=false
+        bool isFirstLabelsDraw = !g_calculatedOnce;
+        if(isFirstLabelsDraw) {
+            ClearAllLabels(objectPrefix);
+            // FIX (2026, bottom offset reset on first draw): DisplayFractalTHs
+            // and DisplayStandardTHs BOTH mutate g_currentLabelYOffsetBottom
+            // (they're stacked sections that share one accumulator). If we
+            // don't reset it on the first draw, the labels will progressively
+            // creep off-screen on each relayout pass — a bug the user sees as
+            // "TH labels drift down after every TF switch". The first-draw
+            // guard (NOT a per-relayout reset) preserves the design from the
+            // LBL-3 fix: DisplayATRLabels resets its own top offset, the
+            // caller owns the bottom offset for the lifetime of one draw cycle.
+            g_currentLabelYOffsetBottom = 0;
+        }
+
+        // FIX (2026, unconditional display* calls): drop the
+        // if(g_atrLabelsVisible) / if(g_thLabelsMode != 0) guards that
+        // used to skip the Display* calls. The guards meant that when
+        // g_atrLabelsVisible (or g_thLabelsVisible) flipped between
+        // renders, the Display* function never ran and the previous
+        // labels were never cleared — leaving ghost labels on screen
+        // after a TF switch that reset visibility state. The Display*
+        // functions now own their own clear-or-draw decision internally:
+        //   - DisplayATRLabels clears when g_atrLabelsVisible=false (L698)
+        //   - DisplayFractalTHs/StandardTHs clear when not in mode (new)
+        //
+        // This means the relayout pass on every TF switch now:
+        //   1. Removes any stale OBJ_LABEL objects the previous TF left
+        //   2. Creates fresh ones for the new TF's values
+        // with no ObjectDelete flicker on the visible chart.
         TH3_PROF_START(Labels);
-        if(g_atrLabelsVisible) DisplayATRLabels(objectPrefix);
+        DisplayATRLabels(objectPrefix);
         bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
         bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
-        if(g_thLabelsMode != 0 && showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-        if(g_thLabelsMode != 0 && showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        if(showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        // FIX (2026, consume the relayout flag): after a relayout-driven
+        // draw, clear the flag so subsequent frames don't redundantly
+        // re-run the (relatively expensive) label rebuild on every tick.
+        // The next flag-set will come from the central ATR refresh loop
+        // when ATR values actually change.
+        g_labelsRelayoutNeeded = false;
         TH3_PROF_END(Labels);
 
         if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
@@ -2213,15 +2565,36 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     if(id == CHARTEVENT_CHART_CHANGE) {
         string curSym = ChartSymbol(0);
         ENUM_TIMEFRAMES curPer = (ENUM_TIMEFRAMES)ChartPeriod(0);
+        // FIX (LBL-1, 2026): also detect chart pixel size changes. Scroll and
+        // zoom leave symbol+period unchanged, but a window resize or maximize/
+        // minimize changes the pixel dimensions. Labels are positioned with
+        // OBJPROP_XDISTANCE/YDISTANCE (pixel coordinates from the corner),
+        // so a narrower window pushes right-edge labels off-screen and the
+        // user perceives them as vanished. Without this detection the early-
+        // return below skips the relayout that would re-place them.
+        long curW = ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+        long curH = ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
         // First call after init: seed the caches and let normal path run.
         if(g_lastChartSymbol == "" || g_lastChartPeriod == PERIOD_CURRENT) {
             g_lastChartSymbol = curSym;
             g_lastChartPeriod = curPer;
+            g_lastChartWidthPx  = curW;
+            g_lastChartHeightPx = curH;
             return;  // No state change yet; RedrawAllObjects will run on next tick.
         }
-        // Same symbol AND same period → no work needed. Bail out before the
-        // keyboard/mouse event branch below, which is expensive on resize.
+        // Same symbol AND same period → check pixel dimensions. If size
+        // changed (resize, maximize, fullscreen toggle), request a relayout
+        // so labels re-place into the new viewport. Scroll/zoom alone do
+        // NOT change pixel size, so they take the fast-path early-return.
         if(curSym == g_lastChartSymbol && curPer == g_lastChartPeriod) {
+            if(curW == g_lastChartWidthPx && curH == g_lastChartHeightPx) {
+                return;  // scroll/zoom only; no relayout needed
+            }
+            // Size changed: schedule a label relayout on the next redraw.
+            g_lastChartWidthPx  = curW;
+            g_lastChartHeightPx = curH;
+            g_labelsRelayoutNeeded = true;
+            g_pendingChartChange = true;
             return;
         }
         // Real chart change. Set a dirty flag for the next OnCalculate pass.
@@ -2231,6 +2604,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // transition. We only need to ensure the next redraw runs.
         g_lastChartSymbol = curSym;
         g_lastChartPeriod = curPer;
+        g_lastChartWidthPx  = curW;
+        g_lastChartHeightPx = curH;
         g_pendingChartChange = true;
         g_redrawTHLevelsNeeded = true;
         // No return: let any other handlers (e.g. visibility cache refresh)
@@ -2249,9 +2624,30 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 
     if(id == CHARTEVENT_KEYDOWN)
     {
-        //  
+        // FIX (2026, hotkey debounce): MQL5 fires CHARTEVENT_KEYDOWN on every
+        // OS-level key repeat while the user holds the key down. Without this
+        // guard, holding A or S cycles the toggle 5-10 times per second and
+        // makes the labels appear to "auto flip on/off". Same for L, T, E, C.
+        // Per the official MQL5 docs the keydown event has no repeat flag, so
+        // the canonical fix is to track (lparam, GetTickCount()) and suppress
+        // repeats within HOTKEY_DEBOUNCE_MS. 150ms = ~6 presses/sec ceiling,
+        // well above the fastest intentional tap rate (~10/sec) but below the
+        // ~30/sec OS auto-repeat rate that fires on every key hold.
+        #define HOTKEY_DEBOUNCE_MS 150
+        static int   s_lastHotkeyCode = 0;
+        static uint  s_lastHotkeyMs   = 0;
+        uint hotkeyNowMs = GetTickCount();
+        if((int)lparam == s_lastHotkeyCode &&
+           s_lastHotkeyCode != 0 &&
+           (hotkeyNowMs - s_lastHotkeyMs) < HOTKEY_DEBOUNCE_MS) {
+            return;  // suppressed repeat
+        }
+        s_lastHotkeyCode = (int)lparam;
+        s_lastHotkeyMs   = hotkeyNowMs;
+
+        //
         // F key   Hide/Show All Objects (fast visibility toggle)
-        //  
+        //
         if(IsHotkeyPressed(lparam, sparam, inpHideKey))
         {
             string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
@@ -2392,14 +2788,15 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 if(StringGetCharacter(objName, 0) != prefixFirstCharL) continue;
                 if(!(StringLen(objName) >= prefixLenL && StringSubstr(objName, 0, prefixLenL) == cachedPrefixL))
                     continue;
-                // PERF (2026): use cached category instead of 5-7 StringFind calls.
-                // Categories 2 (Zone), 3 (Label), 5 (CustomPrice) stay visible
-                // regardless of L-key state. Category 1 (Line) and 4 (Trigger)
-                // follow g_linesVisible.
+                // FIX (2026, hotkey isolation): L key now controls ONLY lines (cat 1).
+                // Previously cat==4 (trigger zones) was inside this branch and the
+                // L toggle silently flipped trigger zones on/off, leaving T as a
+                // state-desync trap (T says ON, screen shows OFF after L press).
+                // Trigger visibility is owned exclusively by the T-key handler.
                 int catL = g_objectCacheHash[i].entry.category;
-                if(catL == 2 || catL == 3 || catL == 5) continue;
-                if(catL == 1 || catL == 4)
+                if(catL == 1) {
                     SetObjectTimeframesIfChanged(objName, g_linesVisible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+                }
             }
             LOG_I(LOG_CAT_LINES, "Lines " + (g_linesVisible ? "VISIBLE" : "HIDDEN"));
             ThrottledChartRedraw();
@@ -2466,24 +2863,76 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             }
         }
 
-        //  
+        //
         // T key   Toggle Trigger Levels
-        //  
+        //
+        // FIX (2026, hotkey isolation): T key now flips ONLY trigger objects
+        // in-place via the object cache. Previously it set
+        // g_forceClearOnNextDraw + g_redrawTHLevelsNeeded + RedrawAllObjects(true),
+        // which wiped and recreated the ENTIRE 290-zone pipeline on every press
+        // (200-400ms freeze) and was the main source of the visible flicker that
+        // made the user think T was wired to L. With in-place toggle the press is
+        // sub-1ms and the rest of the chart (lines, zones, labels) is untouched.
+        //
+        // FIX (T-hotkey live, 2026): trust the cached category, but ALSO do a
+        // direct name-substring check for "TriggerTH_". Why the belt-and-braces:
+        // ClassifyObjectCategoryByName historically matched "TriggerTH_" only
+        // when it appeared at position 0 in the name, but the actual trigger
+        // object names look like "<prefix>TH_Level_TriggerTH_Up_<step>" — the
+        // "TriggerTH_" token sits in the middle, never at position 0. Every
+        // existing cached entry therefore had category=1 (Line), and the T
+        // keypress toggled zero objects. The classifier was fixed to match
+        // "TriggerTH_" anywhere in the name, but cached entries inserted
+        // before that fix keep their stale category=1 until they're evicted
+        // or the cache is rebuilt. The inline StringFind guarantees the T key
+        // works regardless of cache state, on every press, with no rebuild
+        // dependency. Cost: one extra substring search per cached object per
+        // T press — negligible vs. the ObjectSetInteger cost.
         if(IsHotkeyPressed(lparam, sparam, inpTriggerLevelsKey))
         {
             g_triggerLevelsEnabled = !g_triggerLevelsEnabled;
             string triggerGvarName = "Biotak_TriggerLevels_" + GetCachedChartIdStr();
-            GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled);
-            if(g_triggerLevelsEnabled) {
-                LOG_I(LOG_CAT_KEYS, "Trigger Levels: ON");
-            } else {
-                LOG_I(LOG_CAT_KEYS, "Trigger Levels: OFF");
+            GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled ? 1.0 : 0.0);
+            LOG_I(LOG_CAT_KEYS, "Trigger Levels: " + (g_triggerLevelsEnabled ? "ON" : "OFF"));
+
+            long trigTf = g_triggerLevelsEnabled ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+            string cachedPrefixT = inpObjectPrefix;
+            int prefixLenT = StringLen(cachedPrefixT);
+            ushort prefixFirstCharT = StringGetCharacter(cachedPrefixT, 0);
+            for(int ti = 0; ti < CACHE_HASH_BUCKETS; ti++) {
+                if(!g_objectCacheHash[ti].occupied) continue;
+                string tn = g_objectCacheHash[ti].name;
+                if(StringGetCharacter(tn, 0) != prefixFirstCharT) continue;
+                if(!(StringLen(tn) >= prefixLenT && StringSubstr(tn, 0, prefixLenT) == cachedPrefixT))
+                    continue;
+                // Match by EITHER the (now-correct) cached category OR a direct
+                // name substring. The substring fallback is what makes this
+                // work for cached entries with stale category=1 from older
+                // builds. Midpoint lines are also cat==4 but their names
+                // contain "_Midpoint_" — they're toggled intentionally by T
+                // along with triggers (the user wants the trigger family
+                // hidden together).
+                if(g_objectCacheHash[ti].entry.category == 4 ||
+                   StringFind(tn, "TriggerTH_") >= 0)
+                    SetObjectTimeframesIfChanged(tn, trigTf);
             }
-            g_forceClearOnNextDraw = true;
+            // FIX (2026): the manual OBJPROP_TIMEFRAMES toggle above changes the
+            // chart state but only takes visible effect after a repaint. The
+            // trigger-family lines are NOT re-synchronized by DrawTHLevels when
+            // trigger is OFF (the loop skips them), so unlike the L key there is
+            // no second chance for the next redraw to apply the state. Without a
+            // pending-work flag the redraw pipeline early-returns (no
+            // ChartRedraw) and the screen keeps showing the old levels until a
+            // TF switch forces a full redraw. Setting g_redrawTHLevelsNeeded
+            // keeps the object-cache lastTimeframes consistent with the chart
+            // for any subsequent full redraw, and the direct ChartRedraw()
+            // (bypassing the 100ms throttle, like the F key) repaints the chart
+            // IMMEDIATELY so the toggle is applied in-place with no perceptible
+            // lag. We deliberately avoid relying on the throttled redraw here:
+            // it can be skipped when a redraw just fired, which was the original
+            // "must change TF" symptom.
             g_redrawTHLevelsNeeded = true;
-            if(!g_customPriceLineDragging)
-                RedrawAllObjects(true);
-            ThrottledChartRedraw();
+            ChartRedraw();
             return;
         }
 
@@ -3227,8 +3676,10 @@ void RedrawLabelsOnly() {
     datetime currentTime = TimeGMT();
     string objectPrefix = GetRuntimeObjectPrefix();
 
-    // CRITICAL: Reset stacking offsets and clear old labels
-    g_currentLabelYOffset = 0;
+    // Reset bottom stacking offset only. The top offset (ATR) is owned by
+    // DisplayATRLabels itself (LBL-3); resetting it here would race with the
+    // function's internal write and was the source of the off-by-N offset
+    // bug after indicator reload.
     g_currentLabelYOffsetBottom = 0;
     ClearAllLabels(objectPrefix);
 
