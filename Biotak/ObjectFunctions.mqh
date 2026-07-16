@@ -1,4 +1,4 @@
-﻿  #property strict
+  #property strict
 
 bool CreateTHLineObject(const string name, const double price, const color lineColor, const ENUM_LINE_STYLE style, const int width, const string tooltip, ENUM_LINE_OBJECT_TYPE lineObjectType, bool isSelectable = false) {
     //                                                                
@@ -226,6 +226,15 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
         if(!hasCachedLabel || cachedColor != textColor)
             ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
         ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
+        // FIX (2026, pip-distance label visibility on TF switch): the
+        // existing-object branch never refreshed OBJPROP_TIMEFRAMES, so on
+        // a TF switch the label could inherit a stale OBJ_NO_PERIODS from
+        // a previous visibility flip and the small "X.X pips" label next
+        // to each TH level would silently disappear. Force a visible TF
+        // binding whenever the label is alive so a TF switch can never
+        // hide it.
+        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES,
+                         IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     }
 
     CacheUpdateLabel(name, labelText, textColor);

@@ -2024,6 +2024,17 @@ void RedrawAllObjects(bool force_redraw=false)
             // LBL-3 fix: DisplayATRLabels resets its own top offset, the
             // caller owns the bottom offset for the lifetime of one draw cycle.
             g_currentLabelYOffsetBottom = 0;
+        } else {
+            // FIX (TF-switch / relayout drift, 2026): every subsequent
+            // relayout pass (g_labelsRelayoutNeeded=true) must also start
+            // from a clean bottom offset, otherwise DisplayFractalTHs +
+            // DisplayStandardTHs keep adding to a stale value and the TH
+            // title and labels drift up on every redraw. This is the
+            // "TH labels move up after a TF switch" symptom reported by
+            // users. The accumulator is local to one draw cycle, so
+            // resetting it here is safe and matches what RedrawLabelsOnly
+            // already does on the hotkey path.
+            g_currentLabelYOffsetBottom = 0;
         }
 
         // FIX (2026, unconditional display* calls): drop the

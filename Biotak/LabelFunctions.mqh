@@ -1037,12 +1037,28 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
+    // FIX (2026, TH title setter mismatch): CORNER and ANCHOR are integer
+    // properties in MQL5 (ENUM_BASE_CORNER and ENUM_ANCHOR_POINT). The
+    // original code routed them through ObjectSetString, which the
+    // compiler accepts on small files but rejects as `error 262 cannot
+    // convert enum` once the rest of the module reaches the size where
+    // MQL5's overload resolution tightens. The ATR title (L743-L744) has
+    // always used ObjectSetInteger — align the TH title with that.
     ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight));
+    // FIX (2026, TH title overlap + drift): each data label block is up to
+    // 3 rows tall (targets / steps / main) when `inpShowTHTargets` is true,
+    // so the title row must sit ABOVE the targets row, not on top of it.
+    // Place the title at the bare `titleYPos` (matching the ATR title at
+    // L748) and let the first data row start at `titleYPos + singleLineHeight`
+    // (L1028). The previous formula added an extra singleLineHeight on every
+    // relayout pass, which is what produced the "TH labels move up" symptom
+    // and made the title overlap the targets row of the first data label in
+    // vertical layout.
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
 
     int titleWidth = (int)CalculateTextWidth("TH:");
@@ -1107,8 +1123,21 @@ void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH,
         ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
         ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, ""); // Clear default "Label" text
     }
-    // Title already set in DisplayFractalTHs if BOTH mode, but we update Y position here
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight));
+    // FIX (2026, TH title overlap + drift in Standard mode): mirror the
+    // title position fix from DisplayFractalTHs — place the title at the
+    // bare `titleYPos` so it sits exactly above the first data row,
+    // matching the ATR layout and the Fractal TH layout. The previous
+    // formula `titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight)`
+    // pushed the title an extra row up on every relayout pass, causing
+    // the "labels move up" symptom and overlapping the first data row
+    // in vertical layout.
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos);
+    // FIX (2026, TH title visibility in Standard mode): DisplayFractalTHs
+    // already pushes OBJPROP_TIMEFRAMES on the title; DisplayStandardTHs
+    // used to skip that, so on a TF switch in pure Standard mode the title
+    // could inherit OBJ_NO_PERIODS from a previous visibility flip and
+    // never come back. Re-apply the timeframe binding here too.
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
 
     int titleWidth = (int)CalculateTextWidth("TH:");
     int labelStartX = GetLabelStartX(startXPos, titleWidth, horizontalPadding, isVerticalLayout);
