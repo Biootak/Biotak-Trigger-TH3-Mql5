@@ -9,14 +9,14 @@ int OnInitHandler() {
     LoggerSetLevel(inpLogLevel);
 
     // PERF (2026): one-time migration from the old TF-suffixed prefix
-    // (e.g. "Biotak_M5_") to the new TF-independent prefix ("Biotak_").
+    // (e.g. "TH3v1_M5_") to the new TF-independent prefix ("TH3v1_").
     // Any leftover objects from a previous version would otherwise persist
     // on the chart as duplicates of the new objects, and the cleanup path
     // would not be able to tell them apart. Delete the OLD TF-suffixed
     // objects on first run with this build; the subsequent redraw creates
     // the new objects from scratch. Gated on a GlobalVariable so this only
     // runs ONCE per chart (not on every OnInit re-run after TF switch etc.).
-    if(!GlobalVariableCheck("Biotak_TFIndependent_Migrated_" + GetCachedChartIdStr())) {
+    if(!GlobalVariableCheck("TH3v1_TFIndependent_Migrated_" + GetCachedChartIdStr())) {
         string oldMigPrefix = inpObjectPrefix + "_";
         int migPrefixLen = StringLen(oldMigPrefix);
         // Heuristic: OLD format = "<prefix>_<TF>_<rest>" where the TF segment
@@ -66,7 +66,7 @@ int OnInitHandler() {
             CacheClear();
             Print("[I][GEN] Migration: object cache cleared (will rebuild on first redraw)");
         }
-        GlobalVariableSet("Biotak_TFIndependent_Migrated_" + GetCachedChartIdStr(), 1.0);
+        GlobalVariableSet("TH3v1_TFIndependent_Migrated_" + GetCachedChartIdStr(), 1.0);
     }
 
     // DIAGNOSTIC: confirm this build includes the diagnostic patches
@@ -81,7 +81,7 @@ int OnInitHandler() {
           " | logLevel=", EnumToString(inpLogLevel));
 
     // Restore hidden state
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+    string gvar_name = "TH3v1_isHidden_" + GetCachedChartIdStr();
     bool shouldBeHidden = RestoreBoolGlobalVar(gvar_name, false);
     DEBUG_PRINTF("OnInit: shouldBeHidden=", shouldBeHidden);
 
@@ -99,7 +99,7 @@ int OnInitHandler() {
     // iterates the known symbol-scoped gvar name pattern, so it doesn't need the
     // exact previous symbol - the hash is enough to detect "did the symbol change?".
     string currentSymbol = GetCachedSymbol();
-    string symbolCacheGvarName = "Biotak_LastSymbolHash_" + chartIdStr;
+    string symbolCacheGvarName = "TH3v1_LastSymbolHash_" + chartIdStr;
     // FNV-1a 32-bit hash of the symbol name.
     uint curSymHash = 2166136261u;
     for(int si = 0; si < StringLen(currentSymbol); si++) {
@@ -121,7 +121,7 @@ int OnInitHandler() {
     GlobalVariableSet(symbolCacheGvarName, (double)curSymHash);
 
     // Timeframe-switch debounce: detect recent TF change (within 20s)
-    string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + chartIdStr;
+    string tfSwitchStampGvar = "TH3v1_LastTFSwitch_" + chartIdStr;
     bool recentTimeframeSwitch = false;
     if(GlobalVariableCheck(tfSwitchStampGvar)) {
         datetime lastTFSwitch = (datetime)GlobalVariableGet(tfSwitchStampGvar);
@@ -130,8 +130,8 @@ int OnInitHandler() {
     }
 
     // Restore toggle states (early, before validation)
-    g_triggerLevelsEnabled = RestoreBoolGlobalVar("Biotak_TriggerLevels_" + chartIdStr, inpShowTrigger);
-    g_linesVisible = RestoreBoolGlobalVar("Biotak_LinesVisible_" + chartIdStr, inpShowLines);
+    g_triggerLevelsEnabled = RestoreBoolGlobalVar("TH3v1_TriggerLevels_" + chartIdStr, inpShowTrigger);
+    g_linesVisible = RestoreBoolGlobalVar("TH3v1_LinesVisible_" + chartIdStr, inpShowLines);
 
     // BUG (2026): per-frame visibility caches MUST be invalidated here.
     // GetCachedLinesVisible() reads g_linesVisibleCached, which is a separate
@@ -149,10 +149,10 @@ int OnInitHandler() {
     InvalidateAllVisibilityCaches();
 
     // Restore ATR labels visibility (Default to OFF on first load)
-    g_atrLabelsVisible = RestoreBoolGlobalVar("Biotak_ATRLabels_" + chartIdStr, false);
+    g_atrLabelsVisible = RestoreBoolGlobalVar("TH3v1_ATRLabels_" + chartIdStr, false);
 
     // Restore TH labels mode (Default to OFF on first load: 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH)
-    string thLabelsGvarName = "Biotak_THLabels_" + chartIdStr;
+    string thLabelsGvarName = "TH3v1_THLabels_" + chartIdStr;
     if(GlobalVariableCheck(thLabelsGvarName)) {
         double gvarValue = GlobalVariableGet(thLabelsGvarName);
         bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
@@ -175,6 +175,12 @@ int OnInitHandler() {
 
     int validationResult = ValidateInputs();
     if(validationResult != INIT_SUCCEEDED) return validationResult;
+
+    // PERF-ISOLATION: Snapshot chart state we are about to change so we can
+    // restore it on REMOVE. Otherwise the grid/event flags stay modified for
+    // every other program on this chart after the indicator is detached.
+    g_savedGridState = (bool)ChartGetInteger(0, CHART_SHOW_GRID);
+    g_savedMouseMoveState = (bool)ChartGetInteger(0, CHART_EVENT_MOUSE_MOVE);
 
     ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
@@ -342,8 +348,8 @@ int OnInitHandler() {
     }
 
     string symbolName = GetCachedSymbol();
-    string gvarName = "Biotak_CustomPrice_" + symbolName;
-    string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+    string gvarName = "TH3v1_CustomPrice_" + symbolName;
+    string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
     int digits = Digits;
 
     // Validate custom price input
@@ -420,7 +426,7 @@ int OnInitHandler() {
     g_redrawTHLevelsNeeded = true;
 
     // Base price init debounce: skip if recently initialized during TF switch
-    string baseInitStampGvar = "Biotak_BaseInit_" + chartIdStr;
+    string baseInitStampGvar = "TH3v1_BaseInit_" + chartIdStr;
     bool shouldInitBasePrice = true;
     if(deferHeavyInit && GlobalVariableCheck(baseInitStampGvar)) {
         datetime lastBaseInit = (datetime)GlobalVariableGet(baseInitStampGvar);
@@ -435,17 +441,17 @@ int OnInitHandler() {
     }
 
     // Restore timeframe lock state
-    string lockFlagName = "Biotak_LockTF_" + chartIdStr;
+    string lockFlagName = "TH3v1_LockTF_" + chartIdStr;
     if(GlobalVariableCheck(lockFlagName)) {
         g_timeframeLocked = (bool)GlobalVariableGet(lockFlagName);
     }
-    string lockPeriodName = "Biotak_LockTFPeriod_" + chartIdStr;
+    string lockPeriodName = "TH3v1_LockTFPeriod_" + chartIdStr;
     if(GlobalVariableCheck(lockPeriodName)) {
         g_lockedPeriod = (int)GlobalVariableGet(lockPeriodName);
     }
 
     // Restore step mode with range validation (0..3)
-    string stepModeGvarName = "Biotak_StepMode_" + chartIdStr;
+    string stepModeGvarName = "TH3v1_StepMode_" + chartIdStr;
     if(GlobalVariableCheck(stepModeGvarName)) {
         int tempMode = (int)GlobalVariableGet(stepModeGvarName);
         if(tempMode >= 0 && tempMode <= 3) {
@@ -458,7 +464,7 @@ int OnInitHandler() {
     }
 
     // Restore factor with validation (0 < val <= MAX_SAFE_FACTOR)
-    string factorGvarName = "Biotak_Factor_" + chartIdStr;
+    string factorGvarName = "TH3v1_Factor_" + chartIdStr;
     if(GlobalVariableCheck(factorGvarName)) {
         double val = GlobalVariableGet(factorGvarName);
         if(val > 0 && val <= MAX_SAFE_FACTOR) {
@@ -481,7 +487,7 @@ int OnInitHandler() {
 
 #ifndef BUILD_LITE
     // Restore TH3 frequency with dynamic max validation (binary subdivision)
-    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
+    string freqGvarName = "TH3v1_TH3Freq_" + chartIdStr;
     if(GlobalVariableCheck(freqGvarName)) {
         double restoredFreq = GlobalVariableGet(freqGvarName);
         double maxFreq = GetFrequencyByIndex(MAX_TH3_FREQ_INDEX);
@@ -492,7 +498,7 @@ int OnInitHandler() {
             GlobalVariableDel(freqGvarName);
         }
     }
-    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
+    string indexGvarName = "TH3v1_TH3FreqIdx_" + chartIdStr;
     if(GlobalVariableCheck(indexGvarName)) {
         int restoredIndex = (int)GlobalVariableGet(indexGvarName);
         if(restoredIndex >= MIN_TH3_FREQ_INDEX && restoredIndex <= MAX_TH3_FREQ_INDEX) {
@@ -518,10 +524,12 @@ int OnInitHandler() {
 
     InitializeATRCache();
 
-    // ATR warmup debounce: skip if recently warmed up (within 90s)
-    if(inpShowATRLabels && !shouldBeHidden) {
+    // ATR warmup debounce: drive from the restored runtime state, not the
+    // input default. Otherwise hotkey-enabled ATR labels disappear after a
+    // timeframe switch because the cache warmup is skipped.
+    if(g_atrLabelsVisible && !shouldBeHidden) {
         datetime nowWarmup = TimeCurrent();
-        string warmupGvar = "Biotak_ATRWarmup_" + chartIdStr;
+        string warmupGvar = "TH3v1_ATRWarmup_" + chartIdStr;
         datetime lastWarmup = 0;
         if(GlobalVariableCheck(warmupGvar)) {
             lastWarmup = (datetime)GlobalVariableGet(warmupGvar);
@@ -536,7 +544,7 @@ int OnInitHandler() {
 
 #ifndef BUILD_LITE
     // Check if TH3 objects need update (after settings change)
-    string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
+    string th3UpdateFlag = "TH3v1_TH3_NeedsUpdate_" + chartIdStr;
     if(GlobalVariableCheck(th3UpdateFlag) && GlobalVariableGet(th3UpdateFlag) > 0) {
         UpdateAllTH3Objects();
         GlobalVariableDel(th3UpdateFlag);
@@ -719,7 +727,7 @@ int OnInitHandler() {
         // deleted by OnDeinit for non-CHARTCHANGE reasons, so a stale line
         // here means a real bug — clean it up.
         if(ObjectFind(0, g_customPriceHorizontalLineName) >= 0) {
-            string cpGvarName = "Biotak_CustomPrice_" + GetCachedSymbol();
+            string cpGvarName = "TH3v1_CustomPrice_" + GetCachedSymbol();
             bool hasCustomPrice =
                 (g_customTHStartPrice > 0.0) ||
                 (inpCustomTHStartPrice > 0.0) ||
@@ -830,8 +838,8 @@ void CleanupCustomPriceObjects(bool resetGlobalVars = false, bool forceDelete = 
     if (resetGlobalVars) {
         // OPTIMIZATION: Use Symbol() directly here since this is cleanup code (not in a loop)
         string symbolName = GetCachedSymbol();
-        string gvarName = "Biotak_CustomPrice_" + symbolName;
-        string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+        string gvarName = "TH3v1_CustomPrice_" + symbolName;
+        string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
         // Direct delete (safe if not found)
         GlobalVariableDel(gvarName);
 
@@ -851,7 +859,7 @@ void OnDeinitHandler(const int reason) {
     DEBUG_PRINT("Starting cleanup");
     // Save TF-switch timestamp for deferred init debounce
     if(reason == REASON_CHARTCHANGE || reason == REASON_PARAMETERS) {
-        string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
+        string tfSwitchStampGvar = "TH3v1_LastTFSwitch_" + GetCachedChartIdStr();
         datetime nowSwitch = TimeCurrent();
         if(nowSwitch > 0) GlobalVariableSet(tfSwitchStampGvar, (double)nowSwitch);
     }
@@ -904,6 +912,10 @@ void OnDeinitHandler(const int reason) {
     if(reason == REASON_REMOVE)
     {
         DEBUG_PRINT("Indicator removed - cleaning all GlobalVariables");
+        // Restore chart properties we modified in OnInit so other programs
+        // on this chart are not left with grid off / mouse-move toggled.
+        ChartSetInteger(0, CHART_SHOW_GRID, g_savedGridState);
+        ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, g_savedMouseMoveState);
         string removeChartIdStr = GetCachedChartIdStr();
         string removeSymbolFile = "Biotak_LastSymbol_" + removeChartIdStr + ".dat";
         FileDelete(removeSymbolFile);
@@ -940,21 +952,21 @@ void OnDeinitHandler(const int reason) {
 
         string symbolName = GetCachedSymbol();
         string chartIdStrLocal = GetCachedChartIdStr();
-        string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+        string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
         GlobalVariableSet(overrideFlagName, 0.0);
-        string factorGvarName = "Biotak_Factor_" + chartIdStrLocal;
+        string factorGvarName = "TH3v1_Factor_" + chartIdStrLocal;
         GlobalVariableDel(factorGvarName);
         g_factorValueOverride = 0.0;
-        string linesGvarName = "Biotak_LinesVisible_" + chartIdStrLocal;
+        string linesGvarName = "TH3v1_LinesVisible_" + chartIdStrLocal;
         GlobalVariableDel(linesGvarName);
         // ATR labels hotkey override should not survive parameter changes
-        string atrLabelsGvarName = "Biotak_ATRLabels_" + chartIdStrLocal;
+        string atrLabelsGvarName = "TH3v1_ATRLabels_" + chartIdStrLocal;
         GlobalVariableDel(atrLabelsGvarName);
         // TH labels hotkey override should not survive parameter changes
-        string thLabelsGvarNameLocal = "Biotak_THLabels_" + chartIdStrLocal;
+        string thLabelsGvarNameLocal = "TH3v1_THLabels_" + chartIdStrLocal;
         GlobalVariableDel(thLabelsGvarNameLocal);
 #ifndef BUILD_LITE
-        string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStrLocal;
+        string th3UpdateFlag = "TH3v1_TH3_NeedsUpdate_" + chartIdStrLocal;
         GlobalVariableSet(th3UpdateFlag, 1.0);
 #endif
         DEBUG_PRINT("OnDeinit (REASON_PARAMETERS) - reset overrides");
@@ -1068,7 +1080,7 @@ void OnDeinitHandler(const int reason) {
 //|    into account when working with a large number of objects."     |
 //|                                                                  |
 //| Every level/zone/legacy object we draw is named                   |
-//| "<objectPrefix><Suffix>" (e.g. "Biotak_H1_SSLS_Above_3").        |
+//| "<objectPrefix><Suffix>" (e.g. "TH3v1_H1_SSLS_Above_3").        |
 //| Since they all share the same leading substring, a SINGLE native  |
 //| call with the bare objectPrefix removes them all in one trip.    |
 //| Measured: 26 -> 1 synchronous call on TF switch.                 |
@@ -1413,8 +1425,8 @@ void InvalidateObjectCacheByPrefix(const string objectPrefix)
     int prefixLen = StringLen(objectPrefix);
     // PERF (2026): cheap first-character rejection skips ~95% of buckets
     // before the expensive StringSubstr/compare (the only char that varies
-    // across timeframes is the trailing digit, e.g. "Biotak_H1_" vs
-    // "Biotak_M5_" — first char is always 'B').
+    // across timeframes is the trailing digit, e.g. "TH3v1_H1_" vs
+    // "TH3v1_M5_" — first char is always 'B').
     ushort prefixFirstChar = StringGetCharacter(objectPrefix, 0);
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
         if(!g_objectCacheHash[i].occupied) continue;
@@ -2087,7 +2099,7 @@ void RedrawAllObjects(bool force_redraw=false)
     // a synchronous call) or only mattered when the user changed inputs.
     // Both are now gated behind per-redraw-frame caches with 1-second TTL
     // and per-call short-circuit logic.
-    string gvarName = "Biotak_CustomPrice_" + s_cachedSymbol;
+    string gvarName = "TH3v1_CustomPrice_" + s_cachedSymbol;
     bool lineExists = customPriceLineExists;
 
     if(!g_customPriceLineDragging) {
@@ -2622,6 +2634,14 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         g_lastChartHeightPx = curH;
         g_pendingChartChange = true;
         g_redrawTHLevelsNeeded = true;
+        // FIX (2026): labels MUST refresh on every TF/symbol switch.
+        // g_calculatedOnce is preserved across the OnDeinit/OnInit pair
+        // (REASON_CHARTCHANGE), so the `!g_calculatedOnce` branch in
+        // RedrawAllObjects would NOT trigger a label redraw here. Without
+        // forcing this flag, ATR/TH labels stay invisible or show the
+        // PREVIOUS TF's values after the switch. This guarantees the
+        // very next RedrawAllObjects re-runs Display* with the new TF.
+        g_labelsRelayoutNeeded = true;
         g_visibilityFrameCounter++;
         CacheRefreshVisibilityState();
         return;
@@ -2665,7 +2685,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //
         if(IsHotkeyPressed(lparam, sparam, inpHideKey))
         {
-            string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+            string gvar_name = "TH3v1_isHidden_" + GetCachedChartIdStr();
             double currentState = 0.0;
             if(GlobalVariableCheck(gvar_name)) {
                 currentState = GlobalVariableGet(gvar_name);
@@ -2719,10 +2739,11 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                     if(StringGetCharacter(objName, 0) != prefixFirstCharF) continue;
                     if(!(StringLen(objName) >= prefixLenF && StringSubstr(objName, 0, prefixLenF) == cachedPrefixF))
                         continue;
-                    // Keep ATR objects hidden if ATR labels are disabled
+                    // Keep ATR objects hidden if ATR labels are disabled in the
+                    // runtime state, regardless of the input default.
                     bool isATRObject = (StringFind(objName, "ATR_") >= 0);
                     if(isATRObject) {
-                        bool atrShouldShow = (g_atrLabelsVisible && inpShowATRLabels);
+                        bool atrShouldShow = g_atrLabelsVisible;
                         if(!atrShouldShow) {
                             SetObjectTimeframesIfChanged(objName, OBJ_NO_PERIODS);
                         } else {
@@ -2773,8 +2794,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_redrawTHLevelsNeeded = true;
                 // Re-apply label visibility consistently
                 string objectPrefixLocal = GetRuntimeObjectPrefix();
-                SetATRLabelsVisibility(objectPrefixLocal, (g_atrLabelsVisible && inpShowATRLabels));
-                SetTHLabelsVisibility(objectPrefixLocal, (inpShowTHLabels ? g_thLabelsMode : 0));
+                SetATRLabelsVisibility(objectPrefixLocal, g_atrLabelsVisible);
+                SetTHLabelsVisibility(objectPrefixLocal, g_thLabelsVisible ? g_thLabelsMode : 0);
             }
             // Direct ChartRedraw for F key (ThrottledChartRedraw skips when hidden)
             ChartRedraw();
@@ -2788,7 +2809,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         {
             g_linesVisible = !g_linesVisible;
             UpdateLinesVisibleCache(g_linesVisible);
-            string gvar_name = "Biotak_LinesVisible_" + GetCachedChartIdStr();
+            string gvar_name = "TH3v1_LinesVisible_" + GetCachedChartIdStr();
             GlobalVariableSet(gvar_name, g_linesVisible ? 1.0 : 0.0);
             // PERF (2026): iterate the object cache (our objects only) and resolve
             // line-vs-zone by name, eliminating the ObjectsTotal() scan AND the
@@ -2843,8 +2864,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_customPriceKeyboardOverride = true;
             g_customTHStartPrice = currentPrice;
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            GlobalVariableSet("Biotak_CustomPriceOverride_" + GetCachedSymbol(), 1.0);
-            GlobalVariableSet("Biotak_CustomPrice_" + GetCachedSymbol(), currentPrice);
+            GlobalVariableSet("TH3v1_CustomPriceOverride_" + GetCachedSymbol(), 1.0);
+            GlobalVariableSet("TH3v1_CustomPrice_" + GetCachedSymbol(), currentPrice);
             g_customPriceLineCreated = true;
             g_redrawTHLevelsNeeded = true;
             _LOG_GATE_D Print("[D][GEN] [PIN] Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
@@ -2858,8 +2879,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         if(lparam == 27)
         {
             string symbolName = GetCachedSymbol();
-            string gvarName = "Biotak_CustomPrice_" + symbolName;
-            string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+            string gvarName = "TH3v1_CustomPrice_" + symbolName;
+            string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
             bool customPriceActive = GlobalVariableCheck(gvarName);
             if(g_waitingForCustomPriceClick || customPriceActive || g_customPriceKeyboardOverride)
             {
@@ -2904,7 +2925,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         if(IsHotkeyPressed(lparam, sparam, inpTriggerLevelsKey))
         {
             g_triggerLevelsEnabled = !g_triggerLevelsEnabled;
-            string triggerGvarName = "Biotak_TriggerLevels_" + GetCachedChartIdStr();
+            string triggerGvarName = "TH3v1_TriggerLevels_" + GetCachedChartIdStr();
             GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled ? 1.0 : 0.0);
             LOG_I(LOG_CAT_KEYS, "Trigger Levels: " + (g_triggerLevelsEnabled ? "ON" : "OFF"));
 
@@ -2954,7 +2975,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //  
         if(IsHotkeyPressed(lparam, sparam, inpATRLabelsKey))
         {
-            string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
+            string atrGvarNameKey = "TH3v1_ATRLabels_" + GetCachedChartIdStr();
             g_atrLabelsVisible = !g_atrLabelsVisible;
             GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
             
@@ -2972,7 +2993,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //  
         if(IsHotkeyPressed(lparam, sparam, inpTHLabelsKey))
         {
-            string thGvar = "Biotak_THLabels_" + GetCachedChartIdStr();
+            string thGvar = "TH3v1_THLabels_" + GetCachedChartIdStr();
             
             // Cycle: FRACTAL (1) -> BOTH (3) [if enabled] -> OFF (0)
             if(g_thLabelsMode == 1) {
@@ -3021,7 +3042,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
             ENUM_STEP_CALCULATION_MODE newMode = (ENUM_STEP_CALCULATION_MODE)(((int)currentMode + 1) % 4);
             g_stepModeOverride = (int)newMode;
-            string stepModeGvarName = "Biotak_StepMode_" + GetCachedChartIdStr();
+            string stepModeGvarName = "TH3v1_StepMode_" + GetCachedChartIdStr();
             GlobalVariableSet(stepModeGvarName, g_stepModeOverride);
             LOG_IP1(LOG_CAT_KEYS, "Step Mode changed to: ", IntegerToString(g_stepModeOverride));
             g_forceClearOnNextDraw = true;
@@ -3140,24 +3161,24 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_customTHStartPrice = inpCustomTHStartPrice;
             string chartIdStr = GetCachedChartIdStr();
             string symbolName = GetCachedSymbol();
-            GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
-            GlobalVariableDel("Biotak_Factor_" + chartIdStr);
-            GlobalVariableDel("Biotak_LockTF_" + chartIdStr);
-            GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
-            GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
-            GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
-            GlobalVariableDel("Biotak_ATRLabels_" + chartIdStr);
-            GlobalVariableDel("Biotak_THLabels_" + chartIdStr);
-            GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
+            GlobalVariableDel("TH3v1_StepMode_" + chartIdStr);
+            GlobalVariableDel("TH3v1_Factor_" + chartIdStr);
+            GlobalVariableDel("TH3v1_LockTF_" + chartIdStr);
+            GlobalVariableDel("TH3v1_LockTFPeriod_" + chartIdStr);
+            GlobalVariableDel("TH3v1_TriggerLevels_" + chartIdStr);
+            GlobalVariableDel("TH3v1_LinesVisible_" + chartIdStr);
+            GlobalVariableDel("TH3v1_ATRLabels_" + chartIdStr);
+            GlobalVariableDel("TH3v1_THLabels_" + chartIdStr);
+            GlobalVariableDel("TH3v1_CustomPriceOverride_" + symbolName);
 #ifndef BUILD_LITE
-            GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
-            GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
+            GlobalVariableDel("TH3v1_TH3Freq_" + chartIdStr);
+            GlobalVariableDel("TH3v1_TH3FreqIdx_" + chartIdStr);
 #endif
             if(inpCustomTHStartPrice > 0.0) {
-                GlobalVariableSet("Biotak_CustomPrice_" + symbolName, inpCustomTHStartPrice);
+                GlobalVariableSet("TH3v1_CustomPrice_" + symbolName, inpCustomTHStartPrice);
                 CreateCustomPriceLine(inpCustomTHStartPrice, Digits);
             } else {
-                if(GlobalVariableCheck("Biotak_CustomPrice_" + symbolName)) GlobalVariableDel("Biotak_CustomPrice_" + symbolName);
+                if(GlobalVariableCheck("TH3v1_CustomPrice_" + symbolName)) GlobalVariableDel("TH3v1_CustomPrice_" + symbolName);
                 ObjectDelete(0, g_customPriceHorizontalLineName);
                 g_customPriceLineCreated = false;
             }
@@ -3194,9 +3215,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             }
             UpdateLockStatusLabel();
             string lockChartIdStr = GetCachedChartIdStr();
-            string lockFlagName = "Biotak_LockTF_" + lockChartIdStr;
+            string lockFlagName = "TH3v1_LockTF_" + lockChartIdStr;
             GlobalVariableSet(lockFlagName, g_timeframeLocked);
-            string lockPeriodName = "Biotak_LockTFPeriod_" + lockChartIdStr;
+            string lockPeriodName = "TH3v1_LockTFPeriod_" + lockChartIdStr;
             GlobalVariableSet(lockPeriodName, g_lockedPeriod);
             g_forceClearOnNextDraw = true;
             g_calculatedOnce = false;
@@ -3265,8 +3286,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                 g_customTHStartPrice = selectedPrice;
                 g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
                 string symbolName = GetCachedSymbol();
-                string gvarName = "Biotak_CustomPrice_" + symbolName;
-                string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+                string gvarName = "TH3v1_CustomPrice_" + symbolName;
+                string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
                 GlobalVariableSet(gvarName, selectedPrice);
                 GlobalVariableSet(overrideFlagName, 1.0);
                 ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
@@ -3296,8 +3317,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_customTHStartPrice = selectedPrice;
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
             string symbolName = GetCachedSymbol();
-            string gvarName = "Biotak_CustomPrice_" + symbolName;
-            string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+            string gvarName = "TH3v1_CustomPrice_" + symbolName;
+            string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
             GlobalVariableSet(gvarName, selectedPrice);
             GlobalVariableSet(overrideFlagName, 1.0);
             ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, "[PIN] Custom Price: " + DoubleToString(selectedPrice, Digits) + " | Drag to adjust (live update)");
@@ -3363,8 +3384,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
         g_customPriceKeyboardOverride = true;
         string symbolName = GetCachedSymbol();
-        string gvarName = "Biotak_CustomPrice_" + symbolName;
-        string overrideFlagName = "Biotak_CustomPriceOverride_" + symbolName;
+        string gvarName = "TH3v1_CustomPrice_" + symbolName;
+        string overrideFlagName = "TH3v1_CustomPriceOverride_" + symbolName;
         GlobalVariableSet(gvarName, draggedPrice);
         GlobalVariableSet(overrideFlagName, 1.0);
         if (g_waitingForCustomPriceClick) {
@@ -3501,8 +3522,26 @@ void ApplyCacheInvalidation(const int invalidationFlags,
         // Instead we let RedrawAllObjects rename the existing objects in place
         // (RenamePrefixedObjects) and update their prices/geometry. We still mark
         // the levels for a redraw so prices refresh for the new timeframe.
+        //
+        // FIX (2026, LBL-FLICKER): the previous version of this block also set
+        //   g_calculatedOnce = false
+        // here, which the needLabels gate in RedrawAllObjects interprets as
+        // "first draw → ClearAllLabels + recreate every LBL_ object". The
+        // OnDeinit REASON_CHARTCHANGE branch and the OnInit recent-switch
+        // branch BOTH preserve g_calculatedOnce=true on a TF switch so the
+        // rename-in-place path can take the in-place update branch (no clear,
+        // no flicker). This ApplyCacheInvalidation call fired on the FIRST
+        // OnCalculate after OnInit and silently re-set the flag to false,
+        // defeating the preservation. Net effect: every TF switch visibly
+        // wiped the 24 ATR + 30 TH labels for one redraw frame and the user
+        // reported them as "disappear after TF switch". The fresh-init case
+        // (terminal startup, REASON_REMOVE) is already handled by the
+        // `if(!recentTimeframeSwitch) g_calculatedOnce = false;` branch in
+        // OnInit (L293-L295), which runs BEFORE the first OnCalculate and
+        // therefore runs BEFORE this function. We do not need to repeat the
+        // reset here - doing so contradicts the comment above and breaks
+        // the rename-in-place contract that L997-L1047 of OnDeinit promises.
         g_redrawTHLevelsNeeded = true;
-        g_calculatedOnce = false;
         g_labelsRelayoutNeeded = true;
         // Reset fractal-determination window for the new timeframe so the
         // timeout fallback does not fire immediately from a previous TF's timer.
@@ -3704,7 +3743,7 @@ void AdjustFactorValue(int direction)
     }
     
     g_factorValueOverride = newVal;
-    string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
+    string factorGvarName = "TH3v1_Factor_" + GetCachedChartIdStr();
     if(!GlobalVariableSet(factorGvarName, g_factorValueOverride)) {
         _LOG_GATE_E Print("[E][GEN] WARNING: Failed to persist Factor value to GlobalVariable");
     }
@@ -3715,4 +3754,3 @@ void AdjustFactorValue(int direction)
     UpdateFactorLabel(useDirect ? 0 : newVal, useDirect ? newVal : 0);
     ThrottledChartRedraw();
 }
-

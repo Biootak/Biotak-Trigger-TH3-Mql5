@@ -1103,7 +1103,9 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
 //| v2026: Uses the per-timeframe bar-based cache; no global bridge. |
 //+------------------------------------------------------------------+
 void WarmupATRMultiTFCache() {
-    if(!inpShowATRLabels) return;
+    // Use the restored runtime state so hotkey-enabled ATR labels keep their
+    // per-timeframe data warm across OnDeinit/OnInit cycles on TF switches.
+    if(!g_atrLabelsVisible) return;
     if(!g_atrLabelCacheInitialized) InitATRLabelCache();
     for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
         CalculateWeightedATR(g_atrLabelTFs[i]);

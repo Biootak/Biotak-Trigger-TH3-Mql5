@@ -87,9 +87,6 @@ static int g_symbolStateCount = 0;
 #define MAX_SYMBOL_STATES 100              // Maximum symbols to track
 #define SYMBOL_STATE_LRU_THRESHOLD 50      // Trigger LRU eviction above this count
 #define SYMBOL_STATE_INACTIVE_HOURS 24     // Only evict states inactive for 24+ hours
-#define LOCK_TIMEOUT_SECONDS 2             // Stale lock timeout
-#define LOCK_MAX_ATTEMPTS 5                // Maximum lock acquisition attempts
-#define LOCK_RETRY_DELAY_MS 20             // Delay between lock attempts
 
 // Cached symbol state index (performance: 50+ calls/tick   1 call/tick)
 static int _g_cachedStateIdx = -1;
@@ -126,44 +123,13 @@ int GetSymbolStateIndex()
     }
     
     //                                                                
-    // CRITICAL FIX #2: Enhanced Lock with Stale Detection
+    // NOTE: The previous global-variable lock + Sleep() loop was REMOVED.
+    // Indicators on one symbol share a SINGLE thread; an infinite/blocking
+    // action in one indicator halts all other indicators on that symbol.
+    // GlobalVariables are terminal-wide shared memory, so a cross-program
+    // lock here also risked deadlocking EAs/scripts. MQL5 already serializes
+    // event handlers per-symbol, so this array access is safe without a lock.
     //                                                                
-    string lockName = "Biotak_StateAccess_Lock_" + currentSymbol;
-    string lockTimeName = lockName + "_Time";
-    
-    // Check for stale lock
-    if(GlobalVariableCheck(lockTimeName)) {
-        datetime lockTime = (datetime)GlobalVariableGet(lockTimeName);
-        if(TimeCurrent() - lockTime > LOCK_TIMEOUT_SECONDS) {
-            Print("   Stale lock detected (", TimeCurrent() - lockTime, "s old), forcing release");
-            GlobalVariableDel(lockName);
-            GlobalVariableDel(lockTimeName);
-        }
-    }
-    
-    // Try to acquire lock
-    bool lockAcquired = false;
-    for(int attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++)
-    {
-        if(!GlobalVariableCheck(lockName))
-        {
-            GlobalVariableSet(lockName, 1.0);
-            GlobalVariableSet(lockTimeName, (double)TimeCurrent());
-            GlobalVariableTemp(lockName);
-            GlobalVariableTemp(lockTimeName);
-            lockAcquired = true;
-            break;
-        }
-        Sleep(LOCK_RETRY_DELAY_MS);
-    }
-    
-    if(!lockAcquired)
-    {
-        Print("  CRITICAL: GetSymbolStateIndex failed to acquire lock after ", LOCK_MAX_ATTEMPTS, " attempts");
-        Print("   Symbol: ", currentSymbol, " - falling back to slot 0 to stay safe");
-        // FIX (C1): return safe slot 0 instead of -1
-        return 0;
-    }
     
     //                                                                
     // CRITICAL FIX #3: Bounds-Checked Search
@@ -185,10 +151,6 @@ int GetSymbolStateIndex()
             break;
         }
     }
-    
-    // Release lock
-    GlobalVariableDel(lockName);
-    GlobalVariableDel(lockTimeName);
     
     if(resultIndex >= 0)
     {

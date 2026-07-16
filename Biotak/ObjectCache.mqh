@@ -1,4 +1,4 @@
-ï»¿  #ifndef OBJECT_CACHE_MQH
+  #ifndef OBJECT_CACHE_MQH
 #define OBJECT_CACHE_MQH
 
 #property copyright "Biotak"
@@ -87,7 +87,7 @@ ulong CacheGetFrameMs() {
 int ClassifyObjectCategoryByName(const string name) {
     int len = StringLen(name);
     if(len < 2) return 0;
-    // TH3_Structure_* â€” handled separately by callers (skip in F/L).
+    // TH3_Structure_* — handled separately by callers (skip in F/L).
     if(StringFind(name, "TH3_Structure_") == 0) return 0;
     // Trigger subdivisions (TriggerTH_Up_, TriggerTH_Down_).
     // FIX (T-hotkey, 2026): the actual trigger object names are
@@ -98,14 +98,14 @@ int ClassifyObjectCategoryByName(const string name) {
     // every trigger line fell through to the generic `_Level_` branch
     // below, returning category 1 (Line) instead of 4 (Trigger). The T-key
     // handler filters by `category == 4` to isolate trigger objects, so the
-    // misclassification silently broke the T toggle â€” pressing T updated
+    // misclassification silently broke the T toggle — pressing T updated
     // the global var but flipped zero objects. Use `>= 0` so the trigger
     // token matches anywhere in the name. "TriggerTH_" only appears in
     // trigger line names; no other category uses this substring, so the
     // broader match is safe.
     if(StringFind(name, "TriggerTH_") >= 0) return 4;
     // Custom price line.
-    if(StringFind(name, "Biotak_CustomPrice") >= 0) return 5;
+    if(StringFind(name, "TH3v1_CustomPrice") >= 0) return 5;
     // Zone family (rectangles + zone tops/bottoms). Must precede Above/Below.
     if(StringFind(name, "_Zone_")        >= 0) return 2;
     if(StringFind(name, "_Zone_Top")    >= 0) return 2;
@@ -441,7 +441,7 @@ void CacheUpdateObject(const string name, const double price,
     g_objectCacheHash[idx].entry.exists = true;
     g_objectCacheHash[idx].entry.lastUpdate = CacheGetFrameTime();
     g_objectCacheHash[idx].lastAccess = CacheGetFrameTime();
-    // PERF: preserve lastTimeframes â€” visibility is owned by
+    // PERF: preserve lastTimeframes — visibility is owned by
     // SetObjectTimeframesIfChanged / ApplyVisibilityStateIfUnchangedSkip.
 }
 

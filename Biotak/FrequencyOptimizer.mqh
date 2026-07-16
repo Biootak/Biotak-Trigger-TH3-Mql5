@@ -1,4 +1,4 @@
-﻿  //+------------------------------------------------------------------+
+  //+------------------------------------------------------------------+
 //| FrequencyOptimizer.mqh - Spectral Resonance Frequency Engine     |
 //| v5.1: + Gann Square Root Price Harmony scoring                   |
 //| Theory: The best frequency makes ALL steps (1,3,5,7) land on    |
@@ -1179,8 +1179,8 @@ void ApplyOptimalFrequency(const FrequencyResult &result) {
 
     // Persist
     string chartIdStr = GetCachedChartIdStr();
-    GlobalVariableSet("Biotak_TH3Freq_" + chartIdStr, g_th3FreqOverride);
-    GlobalVariableSet("Biotak_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
+    GlobalVariableSet("TH3v1_TH3Freq_" + chartIdStr, g_th3FreqOverride);
+    GlobalVariableSet("TH3v1_TH3FreqIdx_" + chartIdStr, (double)g_th3FreqIndex);
 }
 
 #endif // FREQUENCY_OPTIMIZER_MQH

@@ -151,11 +151,11 @@ double GetTriggerDownPrice(const int idx)
 // Timeframe Lock
 static bool g_timeframeLocked = false;
 static int g_lockedPeriod = 0;
-static string g_lockStatusLabelName = "Biotak_LockStatus_Label";
-static string g_stepModeLabelName = "Biotak_StepMode_Label";
-static string g_factorLabelName = "Biotak_Factor_Label";
+static string g_lockStatusLabelName = "TH3v1_LockStatus_Label";
+static string g_stepModeLabelName = "TH3v1_StepMode_Label";
+static string g_factorLabelName = "TH3v1_Factor_Label";
 #ifndef BUILD_LITE
-static string g_th3FreqLabelName = "Biotak_TH3Freq_Label";
+static string g_th3FreqLabelName = "TH3v1_TH3Freq_Label";
 #endif
 
 // Independent label expiry timestamps (tick count)
@@ -169,6 +169,11 @@ static uint g_resetCommentCreateTime = 0;  // For "[ RESET ]" comment auto-clear
 
 // ChartRedraw Throttling
 static uint g_lastChartRedrawTime = 0;
+
+// Chart state snapshot (so we restore grid/mouse-move on REMOVE, not leave
+// the chart modified for other programs sharing this chart)
+static bool g_savedGridState = true;
+static bool g_savedMouseMoveState = true;
 #define CHART_REDRAW_THROTTLE_MS 100
 static uint g_lastDragRedrawTime = 0;
 #define DRAG_REDRAW_THROTTLE_MS 50
@@ -239,7 +244,7 @@ bool g_isHiddenCached = false;
 uint g_isHiddenCacheTime = 0;
 
 void RefreshIsHiddenCache() {
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+    string gvar_name = "TH3v1_isHidden_" + GetCachedChartIdStr();
     if(!GlobalVariableCheck(gvar_name))
         g_isHiddenCached = false;
     else
@@ -302,8 +307,8 @@ string SanitizeSymbolName(const string symbol) {
 void CleanupSymbolScopedGlobalVariables(const string symbol) {
     if(StringLen(symbol) == 0) return;
     string symbolName = SanitizeSymbolName(symbol);
-    GlobalVariableDel("Biotak_CustomPrice_" + symbolName);
-    GlobalVariableDel("Biotak_CustomPriceOverride_" + symbolName);
+    GlobalVariableDel("TH3v1_CustomPrice_" + symbolName);
+    GlobalVariableDel("TH3v1_CustomPriceOverride_" + symbolName);
 }
 
 //+------------------------------------------------------------------+
@@ -314,19 +319,19 @@ void CleanupAllGlobalVariables() {
     string symbolName = SanitizeSymbolName(GetCachedSymbol());
     string gvars[];
     ArrayResize(gvars, 13);
-    gvars[0]  = "Biotak_isHidden_" + chartIdStr;
-    gvars[1]  = "Biotak_CustomPrice_" + symbolName;
-    gvars[2]  = "Biotak_LockTF_" + chartIdStr;
-    gvars[3]  = "Biotak_LockTFPeriod_" + chartIdStr;
-    gvars[4]  = "Biotak_TriggerLevels_" + chartIdStr;
-    gvars[5]  = "Biotak_CustomPriceOverride_" + symbolName;
-    gvars[6]  = "Biotak_StepMode_" + chartIdStr;
-    gvars[7]  = "Biotak_Factor_" + chartIdStr;
-    gvars[8]  = "Biotak_TH3Freq_" + chartIdStr;
-    gvars[9]  = "Biotak_TH3FreqIdx_" + chartIdStr;
-    gvars[10] = "Biotak_LinesVisible_" + chartIdStr;
-    gvars[11] = "Biotak_ATRLabels_" + chartIdStr;
-    gvars[12] = "Biotak_THLabels_" + chartIdStr;
+    gvars[0]  = "TH3v1_isHidden_" + chartIdStr;
+    gvars[1]  = "TH3v1_CustomPrice_" + symbolName;
+    gvars[2]  = "TH3v1_LockTF_" + chartIdStr;
+    gvars[3]  = "TH3v1_LockTFPeriod_" + chartIdStr;
+    gvars[4]  = "TH3v1_TriggerLevels_" + chartIdStr;
+    gvars[5]  = "TH3v1_CustomPriceOverride_" + symbolName;
+    gvars[6]  = "TH3v1_StepMode_" + chartIdStr;
+    gvars[7]  = "TH3v1_Factor_" + chartIdStr;
+    gvars[8]  = "TH3v1_TH3Freq_" + chartIdStr;
+    gvars[9]  = "TH3v1_TH3FreqIdx_" + chartIdStr;
+    gvars[10] = "TH3v1_LinesVisible_" + chartIdStr;
+    gvars[11] = "TH3v1_ATRLabels_" + chartIdStr;
+    gvars[12] = "TH3v1_THLabels_" + chartIdStr;
     for(int i = 0; i < ArraySize(gvars); i++) {
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }

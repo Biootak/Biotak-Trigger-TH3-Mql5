@@ -847,11 +847,31 @@ void RenderZones(
     int culledCount = 0;
     string firstFailReason = "";
     
+    // PERF (2026): viewport culling for ZONES (safe variant). A zone rectangle
+    // is only hidden when it is COMPLETELY outside the visible price window
+    // (its whole body is above vpTop or below vpBottom). A zone straddling the
+    // edge is always drawn — this avoids the old "zones vanish after a few
+    // seconds" bug that came from deleting partial-overlap zones. We HIDE
+    // (OBJ_NO_PERIODS) rather than delete, so scrolling back shows them
+    // instantly with no recreate churn. vpTop/vpBottom are 0 during init, in
+    // which case we skip culling entirely and draw all zones.
+    bool canCullZones = (vpTop > vpBottom && vpTop > 0 && vpBottom > 0);
+
     for(int i = 0; i < zoneCount; i++) {
         // DISABLED: viewport culling for zones. It caused zones to vanish on
         // lower timeframes when price moved slightly. Visibility is now managed
         // solely by the global hide (F key) and OBJ_ALL_PERIODS default.
-        
+
+        // PERF (2026): hide zones whose entire rectangle is outside the visible
+        // window. renderTop > vpTop means the whole zone sits above the view;
+        // renderBottom < vpBottom means it sits fully below. Straddling zones
+        // (renderBottom <= vpTop AND renderTop >= vpBottom) are drawn normally.
+        if(canCullZones && (zones[i].renderTop > vpTop || zones[i].renderBottom < vpBottom)) {
+            SetPipelineZoneVisibility(zones[i].name, false);
+            skippedCount++;
+            continue;
+        }
+
         if(config.zoneStyle == ZONE_STYLE_HIDDEN) {
             DeleteManagedZoneObjects(zones[i].name);
             skippedCount++;
@@ -986,11 +1006,40 @@ void RenderTriggerLines(
     int digits = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
     string tooltip;
 
+    // PERF (2026): viewport culling for HLINEs. An OBJ_HLINE is an infinite
+    // horizontal line — when its price is outside the visible chart window
+    // [vpBottom, vpTop] the user can never see it, yet the previous code
+    // created/updated every line on every redraw (up to 2x MAX_SAFE_LEVELS
+    // objects). We HIDE (OBJ_NO_PERIODS) out-of-view lines instead of
+    // creating/updating them. Unlike the old deleted-cull, the object is kept
+    // on the chart, so scrolling back into view just re-binds OBJ_ALL_PERIODS
+    // (the normal lineTf branch below) with no re-create churn and no "lines
+    // vanished" symptom. Zones are intentionally NOT culled — a rectangle can
+    // straddle the viewport edge and must stay fully visible.
+    // vpTop/vpBottom are 0 when ExecutePipeline did not supply a real viewport
+    // (e.g. during init); in that case skip culling and draw everything.
+    bool canCull = (vpTop > vpBottom && vpTop > 0 && vpBottom > 0);
+
     for(int i = 0; i < lineCount; i++) {
         const string lineName = lines[i].name;
         const string labelName = lines[i].labelName;
-        // DISABLED: viewport culling for lines. Lines now stay visible regardless
-        // of zoom or scroll position.
+
+        // PERF (2026): hide (not delete) lines whose price is outside the
+        // visible window. This avoids the chart-engine cost of maintaining
+        // thousands of off-screen HLINEs while keeping them ready to re-show
+        // on scroll. We still push the trigger-level cache so alerts keep
+        // working for off-screen trigger lines.
+        if(canCull && (lines[i].price < vpBottom || lines[i].price > vpTop)) {
+            SetPipelineObjectTimeframesIfExists(lineName, OBJ_NO_PERIODS);
+            SetPipelineObjectTimeframesIfExists(labelName, OBJ_NO_PERIODS);
+            if(lines[i].isTrigger && !lines[i].isMidpoint) {
+                if(lines[i].direction > 0)
+                    RecordTriggerLevelUp(lines[i].logicalStep, lines[i].price);
+                else if(lines[i].direction < 0)
+                    RecordTriggerLevelDown(lines[i].logicalStep, lines[i].price);
+            }
+            continue;
+        }
 
         // Factor mode: hide lines when trigger-only enabled
         if(config.hideLineWhenTriggerOnly && !lines[i].isMidpoint) {

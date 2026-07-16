@@ -2269,8 +2269,8 @@ bool AutoSelectBestFrequency(string patternName)
     //     GlobalVariable
     // PERFORMANCE: Use cached ChartID string
     string chartIdStr = GetCachedChartIdStr();
-    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
+    string freqGvarName = "TH3v1_TH3Freq_" + chartIdStr;
+    string indexGvarName = "TH3v1_TH3FreqIdx_" + chartIdStr;
     GlobalVariableSet(freqGvarName, bestFreq);
     GlobalVariableSet(indexGvarName, bestIndex);
     
@@ -3002,8 +3002,8 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                     //     GlobalVariable
                     // PERFORMANCE: Use cached ChartID string
                     string chartIdStr = GetCachedChartIdStr();
-                    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-                    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
+                    string freqGvarName = "TH3v1_TH3Freq_" + chartIdStr;
+                    string indexGvarName = "TH3v1_TH3FreqIdx_" + chartIdStr;
                     GlobalVariableSet(freqGvarName, g_th3FreqOverride);
                     GlobalVariableSet(indexGvarName, g_th3FreqIndex);
                     
