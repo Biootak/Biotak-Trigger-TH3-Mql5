@@ -1,4 +1,4 @@
-﻿  #ifndef HISTORICAL_DATA_FUNCTIONS_MQH
+  #ifndef HISTORICAL_DATA_FUNCTIONS_MQH
 #define HISTORICAL_DATA_FUNCTIONS_MQH
 
 #property strict
@@ -7,9 +7,17 @@ bool UpdateHistoricalValues() {
     // Only update if necessary
     datetime currentTime = TimeCurrent();
     if(currentTime - g_lastHistoricalUpdate < 3600 && g_initialized) return true;
-    
+
+    // FIX (M13): when inpHistoricalPeriods == 0 the user is asking for "all
+    // available bars" which on M1/M5 brokers can be 100k+ bars. Copying that
+    // many bars + running iHighest/iLowest over them is a multi-second stall
+    // on every chart change. Cap with a hard ceiling that still covers a
+    // trading week on the smallest timeframe (M1) with margin.
+    const int MAX_HISTORICAL_BARS = 20000;
     int availableBars = iBars(Symbol(), inpHistoricalTimeframe);
-    int totalBars = (inpHistoricalPeriods == 0) ? availableBars : MathMin(inpHistoricalPeriods, availableBars);
+    int totalBars = (inpHistoricalPeriods == 0)
+                    ? MathMin(availableBars, MAX_HISTORICAL_BARS)
+                    : MathMin(inpHistoricalPeriods, MathMin(availableBars, MAX_HISTORICAL_BARS));
     
     if(totalBars <= 0) {
         static datetime s_lastBarsWarning = 0;

@@ -1,4 +1,4 @@
-﻿  //+------------------------------------------------------------------+
+  //+------------------------------------------------------------------+
 //| BasePriceManager.mqh                                              |
 //| Base Price Management with 30-minute block updates                |
 //| Matches MotiveWave/Java implementation exactly                    |
@@ -110,13 +110,19 @@ int GetSymbolStateIndex()
         Print("  CRITICAL: Corrupted symbol state count (", g_symbolStateCount, ")");
         g_symbolStateCount = 0;
         ArrayResize(g_symbolStates, 0);
-        return -1;
+        // FIX (C1): ensure slot 0 exists and return it instead of -1 so the
+        // legacy g_xxx macros cannot underflow g_symbolStates[].
+        ArrayResize(g_symbolStates, 1);
+        g_symbolStates[0].symbol = currentSymbol;
+        g_symbolStateCount = 1;
+        return 0;
     }
     
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
         Print("  CRITICAL: Symbol state limit reached (", MAX_SYMBOL_STATES, ")");
         Print("   Cannot track more symbols. Consider increasing MAX_SYMBOL_STATES.");
-        return -1;
+        // FIX (C1): return existing safe slot 0 instead of -1
+        return 0;
     }
     
     //                                                                
@@ -154,8 +160,9 @@ int GetSymbolStateIndex()
     if(!lockAcquired)
     {
         Print("  CRITICAL: GetSymbolStateIndex failed to acquire lock after ", LOCK_MAX_ATTEMPTS, " attempts");
-        Print("   Symbol: ", currentSymbol, " - Aborting to prevent race condition");
-        return -1; // CRITICAL FIX: Return error instead of proceeding
+        Print("   Symbol: ", currentSymbol, " - falling back to slot 0 to stay safe");
+        // FIX (C1): return safe slot 0 instead of -1
+        return 0;
     }
     
     //                                                                
@@ -193,7 +200,13 @@ int GetSymbolStateIndex()
     //                                                                
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
         Print("  Cannot create new state - limit reached");
-        return -1;
+        // FIX (C1): ensure slot 0 exists and return it
+        if(ArraySize(g_symbolStates) == 0) {
+            ArrayResize(g_symbolStates, 1);
+            g_symbolStates[0].symbol = currentSymbol;
+            g_symbolStateCount = 1;
+        }
+        return 0;
     }
     
     // Create new state for this symbol
@@ -202,7 +215,13 @@ int GetSymbolStateIndex()
     // Safe resize with validation
     if(ArrayResize(g_symbolStates, newIndex + 1) != newIndex + 1) {
         Print("  CRITICAL: Failed to resize symbol states array");
-        return -1;
+        // FIX (C1): ensure slot 0 exists and return it
+        if(ArraySize(g_symbolStates) == 0) {
+            ArrayResize(g_symbolStates, 1);
+            g_symbolStates[0].symbol = currentSymbol;
+            g_symbolStateCount = 1;
+        }
+        return 0;
     }
     
     // Initialize new state
@@ -223,35 +242,47 @@ int GetSymbolStateIndex()
 }
 
 // Helper functions for array access (to avoid macro expansion issues)
+// CRITICAL FIX (C1): every helper now checks stateIdx and historyCount against
+// the live array bounds before touching g_symbolStates[]. A -1 return from
+// GetSymbolStateIndex() (lock failure, MAX_SYMBOL_STATES hit, resize failure)
+// previously crashed the terminal by indexing g_symbolStates[-1].
 string GetHistoryEntry(int index)
 {
     int stateIdx = GetSymbolStateIndex();
-    if(index >= 0 && index < g_symbolStates[stateIdx].historyCount)
-    {
-        return g_symbolStates[stateIdx].basePriceHistory[index];
-    }
-    return "";
+    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return "";
+    int historySize = ArraySize(g_symbolStates[stateIdx].basePriceHistory);
+    int count = g_symbolStates[stateIdx].historyCount;
+    if(index < 0 || index >= count || index >= historySize) return "";
+    return g_symbolStates[stateIdx].basePriceHistory[index];
 }
 
 void SetHistoryEntry(int index, string value)
 {
     int stateIdx = GetSymbolStateIndex();
-    if(index >= 0 && index < ArraySize(g_symbolStates[stateIdx].basePriceHistory))
-    {
-        g_symbolStates[stateIdx].basePriceHistory[index] = value;
-    }
+    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return;
+    int historySize = ArraySize(g_symbolStates[stateIdx].basePriceHistory);
+    if(index < 0 || index >= historySize) return;
+    g_symbolStates[stateIdx].basePriceHistory[index] = value;
 }
 
 void ResizeHistory(int newSize)
 {
     int stateIdx = GetSymbolStateIndex();
+    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, newSize);
 }
 
 void GetHistoryArray(string &output[])
 {
     int stateIdx = GetSymbolStateIndex();
+    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) {
+        ArrayResize(output, 0);
+        return;
+    }
     int count = g_symbolStates[stateIdx].historyCount;
+    if(count < 0) count = 0;
+    int historySize = ArraySize(g_symbolStates[stateIdx].basePriceHistory);
+    if(count > historySize) count = historySize;
     ArrayResize(output, count);
     for(int i = 0; i < count; i++)
     {
@@ -262,6 +293,10 @@ void GetHistoryArray(string &output[])
 void SetHistoryArray(string &inputArray[], int count)
 {
     int stateIdx = GetSymbolStateIndex();
+    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return;
+    if(count < 0) count = 0;
+    int inputSize = ArraySize(inputArray);
+    if(count > inputSize) count = inputSize;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, count);
     for(int i = 0; i < count; i++)
     {
@@ -270,8 +305,11 @@ void SetHistoryArray(string &inputArray[], int count)
     g_symbolStates[stateIdx].historyCount = count;
 }
 
-// Legacy global variables for backward compatibility (now use GetSymbolStateIndex())
-// These are kept as macros that redirect to symbol-specific state
+// Legacy global variables for backward compatibility.
+// CRITICAL FIX (C1): GetSymbolStateIndex() now guarantees it never returns -1:
+// every error path falls back to a safe initialized state slot (index 0
+// after auto-initialization) so the legacy g_xxx macros below cannot
+// underflow g_symbolStates[] and crash the terminal.
 #define g_basePriceCached (g_symbolStates[GetSymbolStateIndex()].basePriceCached)
 #define g_lastProcessedBlockTimestamp (g_symbolStates[GetSymbolStateIndex()].lastProcessedBlockTimestamp)
 #define g_referenceM1Power (g_symbolStates[GetSymbolStateIndex()].referenceM1Power)

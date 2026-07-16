@@ -1,4 +1,4 @@
-﻿  //+------------------------------------------------------------------+
+  //+------------------------------------------------------------------+
 //|                                          ObjectCountManager.mqh  |
 //|                     Object Count Management & Overflow Prevention|
 //|                                                     Overflow      |
@@ -145,31 +145,38 @@ int EmergencyCleanupObjects()
     Print("   Emergency cleanup starting...");
     Print("   Cutoff time: ", TimeToString(cutoffTime, TIME_DATE|TIME_MINUTES));
     
-    //                                                                
+    //
     // PHASE 1: Delete old temporary objects (labels, zones)
     // OPTIMIZATION: Cache prefix and length
-    //                                                                
+    // FIX (H8): only delete objects that belong to THIS indicator (match the
+    // configured prefix). Previously this loop deleted ANY chart object older
+    // than the cutoff - including drawings from other indicators, manual user
+    // objects, and unrelated EA annotations. With MT4's 64K object ceiling
+    // this could wipe a third-party indicator's state. The fix gates every
+    // delete on a prefix match so we can only reap our own objects.
+    //
     string cachedPrefix = inpObjectPrefix;
     int prefixLen = StringLen(cachedPrefix);
-    
+
     int totalObjects = ObjectsTotal(0, -1, -1);
     for(int i = totalObjects - 1; i >= 0; i--)
     {
         string objName = ObjectName(0, i, -1, -1);
-        
+
         // Skip TH3 structures (user drawings - never delete)
         if(StringFind(objName, "TH3_Structure_") >= 0) {
             continue;
         }
-        
+
         // Skip custom price line (user setting)
         if(StringFind(objName, "CustomPriceHorizontalLine") >= 0) {
             continue;
         }
-        
-        // CRITICAL FIX: Skip current indicator objects (prevent self-deletion)
-        // OPTIMIZED: Use StringSubstr for faster prefix check
-        if(StringLen(objName) >= prefixLen && StringSubstr(objName, 0, prefixLen) == cachedPrefix) {
+
+        // FIX (H8): only consider objects that match our prefix. Objects
+        // belonging to other indicators or the user's manual drawings are
+        // left untouched regardless of age.
+        if(StringLen(objName) < prefixLen || StringSubstr(objName, 0, prefixLen) != cachedPrefix) {
             continue;
         }
         
@@ -194,26 +201,36 @@ int EmergencyCleanupObjects()
     
     Print("   Phase 1: Deleted ", deletedCount, " old objects");
     
-    //                                                                
+    //
     // PHASE 2: If still critical, delete ALL non-essential objects
-    //                                                                
+    // FIX (H8): scope Zone_/Mid_ deletion to our prefix only. Other
+    // indicators commonly use the same generic tokens ("Zone_", "Mid_")
+    // for their own objects; deleting them by token alone was a silent
+    // cross-indicator wipe.
+    //
     totalObjects = ObjectsTotal(0, -1, -1);
     if(totalObjects >= CRITICAL_OBJECT_LIMIT) {
         Print("   Still critical after Phase 1, starting Phase 2...");
-        
+
         int phase2Deleted = 0;
-        
-        // Delete all zones (can be recreated)
-        phase2Deleted += ObjectsDeleteAll(0, "Zone_", -1, -1);
-        
-        // Delete all mid-zones (can be recreated)
-        phase2Deleted += ObjectsDeleteAll(0, "Mid_", -1, -1);
-        
-        // Delete all labels except mode labels
+
+        // Delete all our zones (can be recreated). Use ObjectsDeleteAll with
+        // the full prefix so we never touch a foreign "Zone_" object.
+        phase2Deleted += ObjectsDeleteAll(0, cachedPrefix + "Zone_", -1, -1);
+
+        // Delete all our mid-zones (can be recreated).
+        phase2Deleted += ObjectsDeleteAll(0, cachedPrefix + "Mid_", -1, -1);
+
+        // Delete our own non-essential labels, keep user-facing mode labels.
         for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
         {
             string objName = ObjectName(0, i, -1, -1);
-            
+
+            // FIX (H8): only touch our own labels in this pass.
+            if(StringLen(objName) < prefixLen || StringSubstr(objName, 0, prefixLen) != cachedPrefix) {
+                continue;
+            }
+
             // Keep mode labels (important for user)
             if(StringFind(objName, "StepMode_Label") >= 0 ||
                StringFind(objName, "BasisMode_Label") >= 0 ||
@@ -221,7 +238,7 @@ int EmergencyCleanupObjects()
                StringFind(objName, "LockStatus_Label") >= 0) {
                 continue;
             }
-            
+
             // Delete other labels
             if(ObjectGetInteger(0, objName, OBJPROP_TYPE) == OBJ_LABEL) {
                 if(ObjectDelete(0, objName)) {
@@ -229,7 +246,7 @@ int EmergencyCleanupObjects()
                 }
             }
         }
-        
+
         deletedCount += phase2Deleted;
         Print("   Phase 2: Deleted ", phase2Deleted, " non-essential objects");
     }

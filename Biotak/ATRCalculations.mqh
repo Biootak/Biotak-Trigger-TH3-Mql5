@@ -994,7 +994,7 @@ double CalculateWeightedATRFromRates(const MqlRates &rates[], const int count, c
         if(!IsZero(atrValues[i], EPSILON_PRICE) && atrCompleteness[i] > 0.0) {
             double effWeight = weights[i] * atrCompleteness[i];
             weightedSum += atrValues[i] * effWeight;
-            totalWeight += effWeight;
+            totalWeight += (int)effWeight;
         }
     }
 

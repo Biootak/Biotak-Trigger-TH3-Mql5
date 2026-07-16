@@ -108,14 +108,12 @@ void OnChartEvent(const int id,
 
 void OnTimer()
 {
-    // PERF (2026, TF switch fast path): run the deferred heavy redraw here
-    // ~80 ms after the TF switch tick so the rename and the recreate run on
-    // separate ticks (matching main MQ5 behavior).
-    if(g_deferredTFRedrawPending) {
-        if(GetTickCount() >= g_deferredTFRedrawDueMs) {
-            g_deferredTFRedrawPending = false;
-            RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
-        }
+    // The deferred TF-redraw buffer (g_deferredTFRedrawPending /
+    // g_deferredTFRedrawDueMs) is defined in the main MQ5 only; Lite does
+    // not include the heavy redraw fast path so just call RedrawAllObjects
+    // when something needs to be refreshed.
+    if(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw) {
+        RedrawAllObjects(true);
     }
 
     // FIX: rate-limit the not-initialized redraw path (see main MQ5 for

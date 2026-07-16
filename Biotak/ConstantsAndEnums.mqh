@@ -27,6 +27,7 @@
 // Division Safety Constants (GOLD FIX v3)
 #define MIN_SAFE_DIVISIONS 0.001      // Minimum divisions to prevent precision loss
 #define MAX_SAFE_FACTOR 10000.0       // Maximum factor value to prevent overflow
+#define DEFAULT_FACTOR_VALUE 50.0     // Fallback factor when input is invalid (used by M1)
 
 // Visibility Constants for OBJPROP_TIMEFRAMES (visual align MT5)
 // Used by VisibilityManager for hide/show without deletion

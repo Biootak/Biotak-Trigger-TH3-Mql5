@@ -474,8 +474,8 @@ int OnInitHandler() {
     // Manual mode factor clamping
     if(inpFactorMode == FACTOR_MODE_MANUAL) {
         if(inpFactorValue <= 0 || inpFactorValue > MAX_SAFE_FACTOR) {
-            _LOG_GATE_E Print("[E][GEN] OnInit: Invalid inpFactorValue (", inpFactorValue, "), clamping to 50.0");
-            g_factorValueOverride = 50.0;
+            _LOG_GATE_E Print("[E][GEN] OnInit: Invalid inpFactorValue (", inpFactorValue, "), clamping to ", DoubleToString(DEFAULT_FACTOR_VALUE, 1));
+            g_factorValueOverride = DEFAULT_FACTOR_VALUE;
         }
     }
 
@@ -2057,7 +2057,6 @@ void RedrawAllObjects(bool force_redraw=false)
 
         if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
         g_calculatedOnce = true;
-        g_labelsRelayoutNeeded = false;
     }
 
     // FIX: Snapshot final Y offset so mode/lock/factor labels always appear below all data labels
@@ -2148,14 +2147,14 @@ void RedrawAllObjects(bool force_redraw=false)
     // determined for THIS timeframe with valid ATR, so the first render already uses
     // the correct spacing (no narrow-then-wide double draw). Fallback: after the
     // timeout, draw anyway (shift 0).
-    bool jumpReady = fractalReady ||
-                     (g_fractalDetermineStartMs != 0 && (GetTickCount() - g_fractalDetermineStartMs > FRACTAL_DETERMINE_TIMEOUT_MS));
+bool jumpReady = fractalReady ||
+                      (g_fractalDetermineStartMs != 0 && (GetTickCount() - g_fractalDetermineStartMs > FRACTAL_DETERMINE_TIMEOUT_MS));
     if (inpShowTHLevels && g_redrawTHLevelsNeeded && jumpReady)
     {
         #ifdef ENABLE_DEBUG_LOGS
         static datetime s_lastLevelRedrawLog = 0;
         if(TimeCurrent() - s_lastLevelRedrawLog > 5) {
-            Print("[D][GEN] [MT4] [DRAW] REDRAWING LEVELS | Base Price: ", DoubleToString(g_dailyClosePriceForTH, Digits),
+            Print("[D][GEN] REDRAWING LEVELS | Base Price: ", DoubleToString(g_dailyClosePriceForTH, Digits),
                   " | Mode: ", GetStepModeName(GetCurrentStepMode()));
             s_lastLevelRedrawLog = TimeCurrent();
         }
@@ -2175,6 +2174,18 @@ void RedrawAllObjects(bool force_redraw=false)
         ENUM_STEP_CALCULATION_MODE modeNow = GetCurrentStepMode();
         ulong newLevelHash = HashLevelTopology(objectPrefix, modeNow);
         bool levelTopologyChanged = (newLevelHash != s_lastLevelHash);
+
+        // PERF (2026, TF-switch fast path): on first frame after TF switch,
+        // the object count and names are identical to the previous TF — only
+        // their prices differ. Skip the expensive ObjectsDeleteAll + ObjectCreate
+        // cycle (50-150ms clear + 200ms draw) and update everything in-place
+        // via the cache. Old objects at stale prices are overwritten on first
+        // contact; extra objects from a larger previous TF are cleaned lazily
+        // on the next redraw when topology changes again.
+        bool skipClearOnTFSwitch = false;
+        if(levelTopologyChanged && g_pendingChartChange) {
+            skipClearOnTFSwitch = true;
+        }
 
         // PERF (2026, A): a "topology change" — shift moved, scaling factor
         // moved, mode changed, settings changed — is the ONLY thing that
@@ -2305,7 +2316,6 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     // and the LogRedrawDecision print on every no-op tick. We now do the
     // same comparisons but exit at the FIRST non-trivial condition so a tick
     // that didn't change anything falls through to a single return.
-    if(rates_total <= 0) return rates_total;
 
     static uint s_lastTickMs = 0;
     static double s_lastPrice = 0;
@@ -2349,15 +2359,7 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     // that case there is NO geometry to recompute and we can short-circuit
     // before even the throttle comparison. The 50ms throttle below catches
     // most cases, but the prev_calculated check is the canonical MQL5 way and
-    // costs essentially nothing.
-    if(prev_calculated > 0 && rates_total == prev_calculated &&
-       !g_redrawTHLevelsNeeded && !g_forceClearOnNextDraw &&
-       !g_labelsRelayoutNeeded && g_initialized && !g_pendingChartChange) {
-        g_wasLastTickNoOp = true;
-        g_lastRatesTotal = rates_total;
-        g_lastPrevCalculated = prev_calculated;
-        return rates_total;
-    }
+    // costs essentially nothing. (Already handled above at first gate.)
 
     if(tickThrottled && !isNewBar && !forceRedrawRequested &&
        !timeframeChanged && !customPriceChanged) {
@@ -2590,11 +2592,12 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             if(curW == g_lastChartWidthPx && curH == g_lastChartHeightPx) {
                 return;  // scroll/zoom only; no relayout needed
             }
-            // Size changed: schedule a label relayout on the next redraw.
+            // Size changed: relayout labels immediately (resize only, no chart change).
             g_lastChartWidthPx  = curW;
             g_lastChartHeightPx = curH;
             g_labelsRelayoutNeeded = true;
-            g_pendingChartChange = true;
+            RedrawLabelsOnly();
+            ThrottledChartRedraw();
             return;
         }
         // Real chart change. Set a dirty flag for the next OnCalculate pass.
@@ -2608,8 +2611,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         g_lastChartHeightPx = curH;
         g_pendingChartChange = true;
         g_redrawTHLevelsNeeded = true;
-        // No return: let any other handlers (e.g. visibility cache refresh)
-        // run if they care about CHART_CHANGE.
+        g_visibilityFrameCounter++;
+        CacheRefreshVisibilityState();
+        return;
     }
 
     bool suppressDeleteEvent = g_suppressDeleteEvents || (g_suppressDeleteEventsUntilMs != 0 && GetTickCount() <= g_suppressDeleteEventsUntilMs);
@@ -2633,13 +2637,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // repeats within HOTKEY_DEBOUNCE_MS. 150ms = ~6 presses/sec ceiling,
         // well above the fastest intentional tap rate (~10/sec) but below the
         // ~30/sec OS auto-repeat rate that fires on every key hold.
-        #define HOTKEY_DEBOUNCE_MS 150
+        const int HOTKEY_DEBOUNCE_MS = 150;
         static int   s_lastHotkeyCode = 0;
         static uint  s_lastHotkeyMs   = 0;
         uint hotkeyNowMs = GetTickCount();
         if((int)lparam == s_lastHotkeyCode &&
            s_lastHotkeyCode != 0 &&
-           (hotkeyNowMs - s_lastHotkeyMs) < HOTKEY_DEBOUNCE_MS) {
+           ((int)hotkeyNowMs - (int)s_lastHotkeyMs) < HOTKEY_DEBOUNCE_MS) {
             return;  // suppressed repeat
         }
         s_lastHotkeyCode = (int)lparam;
@@ -2808,18 +2812,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //  
         if(IsHotkeyPressed(lparam, sparam, inpCustomPriceKey))
         {
-            g_waitingForCustomPriceClick = true;
-            g_customPriceKeyboardOverride = true;
-            string overrideFlagName = "Biotak_CustomPriceOverride_" + GetCachedSymbol();
-            GlobalVariableSet(overrideFlagName, 1.0);
-            _LOG_GATE_D Print("[D][GEN] Press anywhere on the chart to set custom TH start price");
+            double currentPrice = iClose(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0);
             ObjectDelete(0, g_customPriceHorizontalLineName);
             g_customPriceLineCreated = false;
-            double currentPrice = iClose(_Symbol, (ENUM_TIMEFRAMES)GetCachedPeriod(), 0);
-            g_customTHStartPrice = currentPrice;
-            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            string gvarName = "Biotak_CustomPrice_" + GetCachedSymbol();
-            GlobalVariableSet(gvarName, currentPrice);
             if(!ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, currentPrice)) {
                 _LOG_GATE_E Print("[E][GEN] Failed to create custom price horizontal line. Error: ", GetLastError());
                 return;
@@ -2830,8 +2825,15 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
             ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, true);
             ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-            ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
+            ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP,
                           "[PIN] Custom Price: " + DoubleToString(currentPrice, Digits) + " | Drag to adjust, Double-click to confirm");
+            // Set state only after ObjectCreate succeeds. If it failed above we returned.
+            g_waitingForCustomPriceClick = true;
+            g_customPriceKeyboardOverride = true;
+            g_customTHStartPrice = currentPrice;
+            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+            GlobalVariableSet("Biotak_CustomPriceOverride_" + GetCachedSymbol(), 1.0);
+            GlobalVariableSet("Biotak_CustomPrice_" + GetCachedSymbol(), currentPrice);
             g_customPriceLineCreated = true;
             g_redrawTHLevelsNeeded = true;
             _LOG_GATE_D Print("[D][GEN] [PIN] Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
@@ -3167,12 +3169,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //  
         if(IsHotkeyPressed(lparam, sparam, inpLockKey))
         {
-            bool hadCustomPrice = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
-            double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;
-            g_suppressDeleteEvents = true;
-            ObjectsDeleteAll(0, inpObjectPrefix);
-            g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
-            g_suppressDeleteEvents = false;
             g_timeframeLocked = !g_timeframeLocked;
             if(g_timeframeLocked)
             {
@@ -3195,21 +3191,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_calculatedOnce = false;
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);
-            if(hadCustomPrice && savedCustomPrice > 0) {
-                g_customTHStartPrice = savedCustomPrice;
-                g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-                if(ObjectCreate(0, g_customPriceHorizontalLineName, OBJ_HLINE, 0, 0, savedCustomPrice)) {
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_COLOR, inpCustomPriceLevelColor);
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_STYLE, STYLE_SOLID);
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_WIDTH, inpCustomPriceLevelWidth);
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTABLE, true);
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED, false);
-                    ObjectSetInteger(0, g_customPriceHorizontalLineName, OBJPROP_ZORDER, 100);
-                    ObjectSetString(0, g_customPriceHorizontalLineName, OBJPROP_TOOLTIP, 
-                                  "[PIN] Custom Price: " + DoubleToString(savedCustomPrice, Digits) + " | Drag to adjust (live update)");
-                    g_customPriceLineCreated = true;
-                }
-            }
             ThrottledChartRedraw();
             return;
         }
@@ -3231,57 +3212,12 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 #endif
 
     //  
-    // CHARTEVENT_CHART_CHANGE   Layout/Resize/Scroll/Zoom
-    //  
-    if(id == CHARTEVENT_CHART_CHANGE) {
-        if(IsIndicatorHidden()) return;
-        static uint s_lastLayoutMs = 0;
-        static int s_lastW = -1;
-        static int s_lastH = -1;
-        static double s_lastVisibleMin = 0;
-        static double s_lastVisibleMax = 0;
-        uint nowMs = GetTickCount();
-        if(nowMs - s_lastLayoutMs < CHART_CHANGE_THROTTLE_MS) return;
-
-        int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-        int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-        bool sizeChanged = (w != s_lastW || h != s_lastH);
-        
-        double visibleMin = ChartGetDouble(0, CHART_PRICE_MIN);
-        double visibleMax = ChartGetDouble(0, CHART_PRICE_MAX);
-        bool viewportChanged = (MathAbs(visibleMin - s_lastVisibleMin) > GetCachedPoint() ||
-                                MathAbs(visibleMax - s_lastVisibleMax) > GetCachedPoint());
-        
-        if(!sizeChanged && !viewportChanged) return;
-        
-        s_lastW = w;
-        s_lastH = h;
-        s_lastVisibleMin = visibleMin;
-        s_lastVisibleMax = visibleMax;
-        s_lastLayoutMs = nowMs;
-
-        if(sizeChanged) g_labelsRelayoutNeeded = true;
-        // PERF (2026): Levels/zones are fixed-price OBJ_HLINE objects; MT5 keeps
-        // them anchored to their price across scroll/zoom automatically. A full
-        // level redraw on a plain viewport change was pure waste and was the main
-        // source of scroll/zoom lag (CHART_CHANGE_THROTTLE_MS=100 fired ~10 full
-        // clear+recreate cycles/sec while dragging). Only a chart RESIZE needs a
-        // label relayout - RedrawLabelsOnly touches labels only, not level/zone
-        // objects, so it is cheap. We therefore skip the level redraw entirely on
-        // viewport change and let the HLINE objects render themselves.
-        if(sizeChanged) {
-            RedrawLabelsOnly();
-        }
-        ThrottledChartRedraw();
-        return;
-    }
-
     //  
     // CHARTEVENT_CLICK   Custom Price Click
     //  
     if(id == CHARTEVENT_CLICK && g_waitingForCustomPriceClick)
     {
-        if(StringFind(sparam, "r") >= 0)
+        if(StringFind(sparam, "RIGHT") >= 0)
         {
             CleanupCustomPriceObjects(true, true);
             _LOG_GATE_D Print("[D][GEN] Custom price setting cancelled (right-click)");
