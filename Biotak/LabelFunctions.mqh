@@ -669,18 +669,37 @@ void ClearAllLabels(const string objectPrefix) {
     // 1. Delete all labels with the standard LBL_ prefix (New thorough way)
     string labelPrefix = objectPrefix + "LBL_";
     ObjectsDeleteAll(0, labelPrefix);
-    
+
     // 2. Delete labels that might have different timeframe prefixes (cleanup old logic)
     int total = ObjectsTotal(0, -1, -1);
     string tfSearch = objectPrefix + "TF";
     int tfSearchLen = StringLen(tfSearch);
-    
+
     for(int i = total - 1; i >= 0; i--) {
         string objName = ObjectName(0, i, -1, -1);
         if(StringSubstr(objName, 0, tfSearchLen) == tfSearch) {
             ObjectDelete(0, objName);
         }
     }
+}
+
+//+------------------------------------------------------------------+
+//| Clear only ATR labels (scoped to avoid cross-contamination)     |
+//| FIX (2026): ClearAllLabels was shared by DisplayATRLabels,       |
+//| DisplayFractalTHs, and DisplayStandardTHs. When one type was     |
+//| hidden, it deleted ALL labels including the other type.          |
+//+------------------------------------------------------------------+
+void ClearATRLabels(const string objectPrefix) {
+    string atrPrefix = objectPrefix + "LBL_ATR";
+    ObjectsDeleteAll(0, atrPrefix);
+}
+
+//+------------------------------------------------------------------+
+//| Clear only TH labels (scoped to avoid cross-contamination)      |
+//+------------------------------------------------------------------+
+void ClearTHLabels(const string objectPrefix) {
+    string thPrefix = objectPrefix + "LBL_TH";
+    ObjectsDeleteAll(0, thPrefix);
 }
 
 void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) {
@@ -696,7 +715,7 @@ void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) 
     g_currentLabelYOffset = in_startYOffset;
 
     if(!g_atrLabelsVisible) {
-        ClearAllLabels(objectPrefix);
+        ClearATRLabels(objectPrefix);
         return;
     }
 
@@ -1006,10 +1025,10 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     // FIX (2026, clear-on-hidden): previously the early-out only `return`ed
     // without clearing. After a TF switch the user could be left with stale
     // fractal-TH labels if g_thLabelsVisible had flipped between renders.
-    // Now we explicitly ClearAllLabels so the chart doesn't accumulate ghost
+    // Now we explicitly ClearTHLabels so the chart doesn't accumulate ghost
     // OBJ_LABEL objects across switches.
     if(!g_thLabelsVisible || (g_thLabelsMode != 1 && g_thLabelsMode != 3)) {
-        ClearAllLabels(objectPrefix);
+        ClearTHLabels(objectPrefix);
         return;
     }
     
@@ -1099,7 +1118,7 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
 void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
     // FIX (2026, clear-on-hidden): same rationale as DisplayFractalTHs above.
     if(!g_thLabelsVisible || (g_thLabelsMode != 2 && g_thLabelsMode != 3)) {
-        ClearAllLabels(objectPrefix);
+        ClearTHLabels(objectPrefix);
         return;
     }
 

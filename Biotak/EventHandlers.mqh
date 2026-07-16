@@ -1992,101 +1992,6 @@ void RedrawAllObjects(bool force_redraw=false)
 
     DrawMainLevels(objectPrefix);
 
-    bool needLabels = (!g_calculatedOnce) || g_labelsRelayoutNeeded;
-    if(needLabels)
-    {
-        if (g_dailyClosePriceForTH == EMPTY_VALUE)
-        {
-            g_dailyClosePriceForTH = thBasePrice;
-        }
-
-        // FIX (2026, no-clear on relayout): previously this block called
-        // ClearAllLabels(objectPrefix) unconditionally on every needLabels
-        // pass. With the OnDeinit state-preservation fix, a TF/symbol
-        // switch now sets g_labelsRelayoutNeeded=true (via the central ATR
-        // refresh loop detecting value changes), which made this Clear fire
-        // on every TF toggle — deleting all 24 ATR labels + ~30 TH labels
-        // and recreating them one tick later. The visible flicker the user
-        // reported was this: the OBJ_LABEL objects disappeared for one
-        // redraw frame and reappeared with new text.
-        //
-        // CreateATRLabelSimple already handles the create-or-update case
-        // correctly (ObjectFind check + per-label cache for text/color
-        // delta; positions are reapplied every call). The same applies to
-        // DisplayFractalTHs and DisplayStandardTHs. So we ONLY clear on
-        // the very first redraw (g_calculatedOnce=false) where we cannot
-        // trust any pre-existing label state. On relayout passes we let
-        // the Display* functions update in place.
-        //
-        // Explicit-clear callers (which genuinely need a clean slate) are:
-        //   - RedrawLabelsOnly()      → A/S hotkey toggles
-        //   - OnDeinit REASON_PARAMETERS → settings dialog
-        //   - OnDeinit REASON_REMOVE      → indicator remove
-        //   - DisplayATRLabels itself when g_atrLabelsVisible=false
-        bool isFirstLabelsDraw = !g_calculatedOnce;
-        if(isFirstLabelsDraw) {
-            ClearAllLabels(objectPrefix);
-            // FIX (2026, bottom offset reset on first draw): DisplayFractalTHs
-            // and DisplayStandardTHs BOTH mutate g_currentLabelYOffsetBottom
-            // (they're stacked sections that share one accumulator). If we
-            // don't reset it on the first draw, the labels will progressively
-            // creep off-screen on each relayout pass — a bug the user sees as
-            // "TH labels drift down after every TF switch". The first-draw
-            // guard (NOT a per-relayout reset) preserves the design from the
-            // LBL-3 fix: DisplayATRLabels resets its own top offset, the
-            // caller owns the bottom offset for the lifetime of one draw cycle.
-            g_currentLabelYOffsetBottom = 0;
-        } else {
-            // FIX (TF-switch / relayout drift, 2026): every subsequent
-            // relayout pass (g_labelsRelayoutNeeded=true) must also start
-            // from a clean bottom offset, otherwise DisplayFractalTHs +
-            // DisplayStandardTHs keep adding to a stale value and the TH
-            // title and labels drift up on every redraw. This is the
-            // "TH labels move up after a TF switch" symptom reported by
-            // users. The accumulator is local to one draw cycle, so
-            // resetting it here is safe and matches what RedrawLabelsOnly
-            // already does on the hotkey path.
-            g_currentLabelYOffsetBottom = 0;
-        }
-
-        // FIX (2026, unconditional display* calls): drop the
-        // if(g_atrLabelsVisible) / if(g_thLabelsMode != 0) guards that
-        // used to skip the Display* calls. The guards meant that when
-        // g_atrLabelsVisible (or g_thLabelsVisible) flipped between
-        // renders, the Display* function never ran and the previous
-        // labels were never cleared — leaving ghost labels on screen
-        // after a TF switch that reset visibility state. The Display*
-        // functions now own their own clear-or-draw decision internally:
-        //   - DisplayATRLabels clears when g_atrLabelsVisible=false (L698)
-        //   - DisplayFractalTHs/StandardTHs clear when not in mode (new)
-        //
-        // This means the relayout pass on every TF switch now:
-        //   1. Removes any stale OBJ_LABEL objects the previous TF left
-        //   2. Creates fresh ones for the new TF's values
-        // with no ObjectDelete flicker on the visible chart.
-        TH3_PROF_START(Labels);
-        DisplayATRLabels(objectPrefix);
-        bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
-        bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
-        if(showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-        if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
-        // FIX (2026, consume the relayout flag): after a relayout-driven
-        // draw, clear the flag so subsequent frames don't redundantly
-        // re-run the (relatively expensive) label rebuild on every tick.
-        // The next flag-set will come from the central ATR refresh loop
-        // when ATR values actually change.
-        g_labelsRelayoutNeeded = false;
-        TH3_PROF_END(Labels);
-
-        if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
-        g_calculatedOnce = true;
-    }
-
-    // FIX: Snapshot final Y offset so mode/lock/factor labels always appear below all data labels
-    // Move outside needLabels block to ensure overlay labels are always correctly positioned
-    g_modeLabelYOffset = g_currentLabelYOffset;
-    RepositionAllOverlayLabels();
-
     // (PERF 2026: removed duplicate `g_dailyClosePriceForTH = thBasePrice;`
     //  assignment — it was already set at line 1502 above before any work that
     //  could return early. The duplicate write was harmless but unnecessary
@@ -2219,7 +2124,15 @@ bool jumpReady = fractalReady ||
         // need a wipe either. The in-place update path (CreateOrUpdateHLine
         // cache hit + SetPipelineObjectTimeframesIfExists) handles every
         // other tick at zero chart-engine cost.
-        bool shouldClearLevels = levelTopologyChanged;
+        // FIX (2026, TF-switch fast path): skipClearOnTFSwitch was computed
+        // but never used — shouldClearLevels was just levelTopologyChanged,
+        // defeating the entire "update in-place on TF switch" optimization.
+        // On a TF switch the SET of level/zone names is identical (Above_1..N,
+        // Below_1..N); only prices differ. ClearAllLevels (ObjectsDeleteAll +
+        // ObjectCreate of ~290 objects) costs 100-500ms. The in-place update
+        // path (cache hit in CreateZone/CreateOrUpdateHLine) updates prices
+        // without ObjectDelete, saving the chart-engine churn.
+        bool shouldClearLevels = levelTopologyChanged && !skipClearOnTFSwitch;
 
         if(shouldClearLevels) {
             TH3_PROF_START(LevelsClear);
@@ -2244,6 +2157,119 @@ bool jumpReady = fractalReady ||
         g_forceClearOnNextDraw = false;
         g_redrawTHLevelsNeeded = false;
     }
+
+    // FIX (2026, label-after-levels): Moved the label section AFTER the
+    // level section so that ClearAllLevels() (which uses ObjectsDeleteAll
+    // with the bare objectPrefix, deleting ALL objects including labels)
+    // runs first. Without this ordering, labels created in the label
+    // section would be immediately destroyed by ClearAllLevels on the
+    // same redraw pass when the topology hash changes (ATR scaling,
+    // fractal shift, etc.), causing a visible flash or permanent
+    // disappearance until the next ATR refresh interval (up to 30 min).
+    // Now: levels are drawn → labels are created/updated → no flash.
+    bool needLabels = (!g_calculatedOnce) || g_labelsRelayoutNeeded;
+    // FIX (2026, label-resurrection): even after the reorder, detect if
+    // labels were deleted by an external path (OnDeinit, cleanup timer,
+    // etc.) and force a rebuild.
+    if(!needLabels) {
+        string lblProbe = objectPrefix + "LBL_ATR_Title";
+        if(ObjectFind(0, lblProbe) < 0 && (g_atrLabelsVisible || g_thLabelsVisible)) {
+            needLabels = true;
+        }
+    }
+    if(needLabels)
+    {
+        if (g_dailyClosePriceForTH == EMPTY_VALUE)
+        {
+            g_dailyClosePriceForTH = thBasePrice;
+        }
+
+        // FIX (2026, no-clear on relayout): previously this block called
+        // ClearAllLabels(objectPrefix) unconditionally on every needLabels
+        // pass. With the OnDeinit state-preservation fix, a TF/symbol
+        // switch now sets g_labelsRelayoutNeeded=true (via the central ATR
+        // refresh loop detecting value changes), which made this Clear fire
+        // on every TF toggle — deleting all 24 ATR labels + ~30 TH labels
+        // and recreating them one tick later. The visible flicker the user
+        // reported was this: the OBJ_LABEL objects disappeared for one
+        // redraw frame and reappeared with new text.
+        //
+        // CreateATRLabelSimple already handles the create-or-update case
+        // correctly (ObjectFind check + per-label cache for text/color
+        // delta; positions are reapplied every call). The same applies to
+        // DisplayFractalTHs and DisplayStandardTHs. So we ONLY clear on
+        // the very first redraw (g_calculatedOnce=false) where we cannot
+        // trust any pre-existing label state. On relayout passes we let
+        // the Display* functions update in place.
+        //
+        // Explicit-clear callers (which genuinely need a clean slate) are:
+        //   - RedrawLabelsOnly()      → A/S hotkey toggles
+        //   - OnDeinit REASON_PARAMETERS → settings dialog
+        //   - OnDeinit REASON_REMOVE      → indicator remove
+        //   - DisplayATRLabels itself when g_atrLabelsVisible=false
+        bool isFirstLabelsDraw = !g_calculatedOnce;
+        if(isFirstLabelsDraw) {
+            ClearAllLabels(objectPrefix);
+            // FIX (2026, bottom offset reset on first draw): DisplayFractalTHs
+            // and DisplayStandardTHs BOTH mutate g_currentLabelYOffsetBottom
+            // (they're stacked sections that share one accumulator). If we
+            // don't reset it on the first draw, the labels will progressively
+            // creep off-screen on each relayout pass — a bug the user sees as
+            // "TH labels drift down after every TF switch". The first-draw
+            // guard (NOT a per-relayout reset) preserves the design from the
+            // LBL-3 fix: DisplayATRLabels resets its own top offset, the
+            // caller owns the bottom offset for the lifetime of one draw cycle.
+            g_currentLabelYOffsetBottom = 0;
+        } else {
+            // FIX (TF-switch / relayout drift, 2026): every subsequent
+            // relayout pass (g_labelsRelayoutNeeded=true) must also start
+            // from a clean bottom offset, otherwise DisplayFractalTHs +
+            // DisplayStandardTHs keep adding to a stale value and the TH
+            // title and labels drift up on every redraw. This is the
+            // "TH labels move up after a TF switch" symptom reported by
+            // users. The accumulator is local to one draw cycle, so
+            // resetting it here is safe and matches what RedrawLabelsOnly
+            // already does on the hotkey path.
+            g_currentLabelYOffsetBottom = 0;
+        }
+
+        // FIX (2026, unconditional display* calls): drop the
+        // if(g_atrLabelsVisible) / if(g_thLabelsMode != 0) guards that
+        // used to skip the Display* calls. The guards meant that when
+        // g_atrLabelsVisible (or g_thLabelsVisible) flipped between
+        // renders, the Display* function never ran and the previous
+        // labels were never cleared — leaving ghost labels on screen
+        // after a TF switch that reset visibility state. The Display*
+        // functions now own their own clear-or-draw decision internally:
+        //   - DisplayATRLabels clears when g_atrLabelsVisible=false (L698)
+        //   - DisplayFractalTHs/StandardTHs clear when not in mode (new)
+        //
+        // This means the relayout pass on every TF switch now:
+        //   1. Removes any stale OBJ_LABEL objects the previous TF left
+        //   2. Creates fresh ones for the new TF's values
+        // with no ObjectDelete flicker on the visible chart.
+        TH3_PROF_START(Labels);
+        DisplayATRLabels(objectPrefix);
+        bool showFractal = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
+        bool showStandard = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
+        if(showFractal)  DisplayFractalTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        if(showStandard) DisplayStandardTHs(objectPrefix, g_dailyClosePriceForTH, currentTime);
+        // FIX (2026, consume the relayout flag): after a relayout-driven
+        // draw, clear the flag so subsequent frames don't redundantly
+        // re-run the (relatively expensive) label rebuild on every tick.
+        // The next flag-set will come from the central ATR refresh loop
+        // when ATR values actually change.
+        g_labelsRelayoutNeeded = false;
+        TH3_PROF_END(Labels);
+
+        if(!g_calculatedOnce && inpShowTHLevels) g_redrawTHLevelsNeeded = true;
+        g_calculatedOnce = true;
+    }
+
+    // FIX: Snapshot final Y offset so mode/lock/factor labels always appear below all data labels
+    // Move outside needLabels block to ensure overlay labels are always correctly positioned
+    g_modeLabelYOffset = g_currentLabelYOffset;
+    RepositionAllOverlayLabels();
 
     CheckAlerts(objectPrefix, g_currentPrice);
     
@@ -2404,7 +2430,11 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     //   clear the pending flag.
     if(g_pendingChartChange) {
         timeframeChanged = true;
-        g_pendingChartChange = false;
+        // FIX (2026, TF-switch perf): do NOT clear g_pendingChartChange here.
+        // RedrawAllObjects needs it alive to set skipClearOnTFSwitch=true,
+        // which skips the expensive ObjectsDeleteAll + ObjectCreate cycle
+        // (~290 objects) on the first frame after a TF switch. The flag is
+        // cleared after RedrawAllObjects returns (below).
     }
 
     // Now (and only now) compute the more expensive significantPriceChange
@@ -2532,6 +2562,9 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
         // the full pipeline to run unconditionally on every TF-switch tick.
         // MT4 didn't have this — it relied on the g_redrawTHLevelsNeeded flag.
         RedrawAllObjects(g_redrawTHLevelsNeeded || g_forceClearOnNextDraw);
+        // FIX (2026, TF-switch perf): clear the pending flag AFTER
+        // RedrawAllObjects so skipClearOnTFSwitch can read it inside.
+        g_pendingChartChange = false;
         TH3_PROF_END(RedrawCall);
 
         if(barsChanged || s_lastBarTime == 0) {
