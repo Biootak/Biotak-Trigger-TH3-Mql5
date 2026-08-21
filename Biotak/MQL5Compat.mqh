@@ -6,6 +6,17 @@
 #define Digits _Digits
 #define Point  _Point
 
+// MQL4 series-function bridges: MQL5's iHigh/iLow/iOpen/iClose/iTime/
+// iBars take ENUM_TIMEFRAMES, while the shared MQL4 modules pass int
+// timeframes (e.g. from GetEffectiveTimeframe()). The self-referential
+// macros insert the cast without infinite expansion.
+#define iBars(sym, tf)  iBars(sym, (ENUM_TIMEFRAMES)(tf))
+#define iTime(sym, tf, sh)  iTime(sym, (ENUM_TIMEFRAMES)(tf), sh)
+#define iHigh(sym, tf, sh)  iHigh(sym, (ENUM_TIMEFRAMES)(tf), sh)
+#define iLow(sym, tf, sh)   iLow(sym, (ENUM_TIMEFRAMES)(tf), sh)
+#define iOpen(sym, tf, sh)  iOpen(sym, (ENUM_TIMEFRAMES)(tf), sh)
+#define iClose(sym, tf, sh) iClose(sym, (ENUM_TIMEFRAMES)(tf), sh)
+
 // MQL4 MarketInfo mode constants used by shared modules.
 #define MODE_LOW            1
 #define MODE_HIGH           2
@@ -77,7 +88,10 @@ int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT)
 }
 
 // MQL4-style iATR(symbol, timeframe, period, shift) bridge for MQL5 handles.
-#define ATR_HANDLE_CACHE_SIZE 16
+// 64 slots hold every (period x timeframe) combo the multi-TF label/scaling
+// path uses (6 periods x 9 TFs = 54), so handles warm up once and persist
+// instead of being evicted and restarted on every poll.
+#define ATR_HANDLE_CACHE_SIZE 64
 
 struct ATRHandleCacheEntry {
     int handle;
@@ -104,10 +118,14 @@ void InitATRHandleCache()
     g_atrHandleCacheInitialized = true;
 }
 
-double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shift)
+// Forward declaration: implemented below iATRMQL4 (MQL5 needs prototypes
+// before use).
+double iATRRatesFallback(string symbol, ENUM_TIMEFRAMES tf, int atrPeriod, int shift);
+
+double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
 {
     if(symbol == NULL || symbol == "") symbol = _Symbol;
-    if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = (ENUM_TIMEFRAMES)Period();
+    if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = (int)Period();
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
     if(!SymbolSelect(symbol, true)) {
@@ -130,7 +148,7 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
     int cacheIndex = -1;
     for(int i = 0; i < g_atrHandleCacheCount; i++) {
         if(g_atrHandleCache[i].symbol == symbol &&
-           g_atrHandleCache[i].timeframe == timeframe &&
+           g_atrHandleCache[i].timeframe == (ENUM_TIMEFRAMES)timeframe &&
            g_atrHandleCache[i].period == atrPeriod) {
             handle = g_atrHandleCache[i].handle;
             cacheIndex = i;
@@ -138,17 +156,16 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
         }
     }
 
-    if(handle != INVALID_HANDLE && BarsCalculated(handle) <= 0) {
-        IndicatorRelease(handle);
-        if(cacheIndex >= 0) g_atrHandleCache[cacheIndex].handle = INVALID_HANDLE;
-        handle = INVALID_HANDLE;
-    }
-
+    // NOTE: a handle with BarsCalculated()<=0 must NOT be released. Releasing
+    // it restarts the terminal's async calculation from scratch on every call
+    // (the label retry polls each second), so slow-to-build timeframes (MN1,
+    // W1, D1 - synthesized from M1 on demand) never finish calculating. Keep
+    // the handle and serve instant rates-based values until it is ready.
     if(handle == INVALID_HANDLE) {
-        handle = iATR(symbol, timeframe, atrPeriod);
+        handle = iATR(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod);
         if(handle == INVALID_HANDLE) {
-            LOG_E(LOG_CAT_ATR, "iATRMQL4: failed ATR handle " + symbol + "/" + EnumToString(timeframe));
-            return 0.0;
+            LOG_E(LOG_CAT_ATR, "iATRMQL4: failed ATR handle " + symbol + "/" + EnumToString((ENUM_TIMEFRAMES)timeframe));
+            return iATRRatesFallback(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod, shift);
         }
 
         static int s_atrEvictSlot = 0;
@@ -164,15 +181,15 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
 
         g_atrHandleCache[slot].handle = handle;
         g_atrHandleCache[slot].symbol = symbol;
-        g_atrHandleCache[slot].timeframe = timeframe;
+        g_atrHandleCache[slot].timeframe = (ENUM_TIMEFRAMES)timeframe;
         g_atrHandleCache[slot].period = atrPeriod;
     }
 
-    // FIX (2026-07-13): Only bail if the indicator has produced zero bars at
-    // all. If history is shorter than atrPeriod, BarsCalculated may be small
-    // but CopyBuffer below will still return the available value — or fail,
-    // in which case we return 0.0 and the caller uses the rates fallback.
-    if(BarsCalculated(handle) <= 0) return 0.0;
+    // While the handle is still calculating, return an identical value
+    // computed directly from CopyRates (instant, MT4-like) instead of 0.
+    if(BarsCalculated(handle) <= 0) {
+        return iATRRatesFallback(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod, shift);
+    }
 
     static double s_atrBuffer[];
     static bool s_bufferReady = false;
@@ -188,9 +205,60 @@ double iATRMQL4(string symbol, ENUM_TIMEFRAMES timeframe, int atrPeriod, int shi
         Print("iATRMQL4: CopyBuffer failed for ", symbol, "/", EnumToString(timeframe),
               " period=", atrPeriod, " shift=", shift, " error=", GetLastError());
         #endif
-        return 0.0;
+        // Transient data rebuild - serve the rates-based value meanwhile.
+        return iATRRatesFallback(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod, shift);
     }
     return s_atrBuffer[0];
+}
+
+//+------------------------------------------------------------------+
+//| Manual Wilder's ATR fallback (MT4-like instant values)           |
+//|                                                                  |
+//| MT5 iATR handles calculate asynchronously: after creation,       |
+//| BarsCalculated() stays 0/-1 until the terminal has built the     |
+//| timeframe's history AND run the indicator over all of it. For    |
+//| timeframes synthesized from M1 on demand (MN1/W1/D1...) this can |
+//| take seconds. CopyRates returns the bars as soon as they exist,  |
+//| so computing Wilder's ATR directly from them yields the same     |
+//| value instantly - no handle warmup wait. Used only while the     |
+//| handle is not ready; once ready, the handle path takes over.     |
+//+------------------------------------------------------------------+
+double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrPeriod, const int shift)
+{
+    if(symbol == NULL || symbol == "") symbol = _Symbol;
+    if(atrPeriod <= 0 || shift < 0) return 0.0;
+
+    // Wilder's ATR converges after ~3x the period; request extra headroom.
+    int needBars = MathMax(atrPeriod * 3, 60) + shift + 2;
+    MqlRates rates[];
+    ArraySetAsSeries(rates, true);
+    int copied = CopyRates(symbol, tf, 0, needBars, rates);
+    if(copied < atrPeriod + shift + 2) return 0.0; // not enough data yet
+
+    // TR[i] = max(high-low, |high-prevClose|, |low-prevClose|), prevClose = rates[i+1]
+    // Initial ATR = simple average of the `atrPeriod` oldest computable TRs,
+    // then Wilder smoothing toward the requested shift (0 = forming bar).
+    int anchor = copied - 2; // oldest bar with a computable TR
+    double sum = 0.0;
+    for(int i = 0; i < atrPeriod; i++) {
+        int idx = anchor - i;
+        double tr = rates[idx].high - rates[idx].low;
+        double hc = MathAbs(rates[idx].high - rates[idx + 1].close);
+        if(hc > tr) tr = hc;
+        double lc = MathAbs(rates[idx].low - rates[idx + 1].close);
+        if(lc > tr) tr = lc;
+        sum += tr;
+    }
+    double atr = sum / atrPeriod;
+    for(int idx = anchor - 1; idx >= shift; idx--) {
+        double tr = rates[idx].high - rates[idx].low;
+        double hc = MathAbs(rates[idx].high - rates[idx + 1].close);
+        if(hc > tr) tr = hc;
+        double lc = MathAbs(rates[idx].low - rates[idx + 1].close);
+        if(lc > tr) tr = lc;
+        atr = (atr * (atrPeriod - 1) + tr) / atrPeriod;
+    }
+    return atr;
 }
 
 void ReleaseATRHandleCache()
@@ -223,6 +291,218 @@ bool ObjectSetText(string name, string text, int fontSize = 0, string fontName =
     if(fontName != "") ObjectSetString(0, name, OBJPROP_FONT, fontName);
     if(textColor != clrNONE) ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
     return result;
+}
+
+//+------------------------------------------------------------------+
+//| MQL4 predefined series arrays (Time[], Open[], High[], Low[],    |
+//| Close[], Bars) emulation. MQL5 has no built-in series variables,  |
+//| so the shared modules read these globals (index 0 = current bar,  |
+//| exactly like MQL4). CompatRefreshChartData() must be called from  |
+//| the indicator main file on every OnCalculate and OnTimer.        |
+//+------------------------------------------------------------------+
+static MqlRates   g_seriesRates[];
+static datetime   g_seriesTime[];
+static double     g_seriesOpen[];
+static double     g_seriesHigh[];
+static double     g_seriesLow[];
+static double     g_seriesClose[];
+static int        g_seriesBars     = 0;
+static int        g_seriesSyncedAt = -1;
+
+#define Time  g_seriesTime
+#define Open  g_seriesOpen
+#define High  g_seriesHigh
+#define Low   g_seriesLow
+#define Close g_seriesClose
+#define Bars  g_seriesBars
+
+void CompatRefreshChartData()
+{
+    int bars = iBars(_Symbol, PERIOD_CURRENT);
+    if(bars <= 0) return;
+
+    // Full re-sync whenever the visible bar count changes (new bar /
+    // history download). Otherwise only the forming bar (index 0) moves.
+    if(bars != g_seriesSyncedAt)
+    {
+        ResetLastError();
+        ArraySetAsSeries(g_seriesRates, true);
+        int copied = CopyRates(_Symbol, PERIOD_CURRENT, 0, bars, g_seriesRates);
+        if(copied > 0)
+        {
+            ArrayResize(g_seriesTime, copied);
+            ArrayResize(g_seriesOpen, copied);
+            ArrayResize(g_seriesHigh, copied);
+            ArrayResize(g_seriesLow, copied);
+            ArrayResize(g_seriesClose, copied);
+            ArraySetAsSeries(g_seriesTime, true);
+            ArraySetAsSeries(g_seriesOpen, true);
+            ArraySetAsSeries(g_seriesHigh, true);
+            ArraySetAsSeries(g_seriesLow, true);
+            ArraySetAsSeries(g_seriesClose, true);
+            for(int i = 0; i < copied; i++)
+            {
+                g_seriesTime[i]  = g_seriesRates[i].time;
+                g_seriesOpen[i]  = g_seriesRates[i].open;
+                g_seriesHigh[i]  = g_seriesRates[i].high;
+                g_seriesLow[i]   = g_seriesRates[i].low;
+                g_seriesClose[i] = g_seriesRates[i].close;
+            }
+            g_seriesBars = copied;
+            g_seriesSyncedAt = bars;
+            return;
+        }
+        // CopyRates failed (history still loading) - keep old arrays,
+        // refresh only the current bar below and retry next call.
+    }
+
+    // Same bar count (or failed full sync): refresh only the forming bar's
+    // moving values (Time[0]/Open[0] are fixed once a bar starts).
+    if(g_seriesBars > 0)
+    {
+        g_seriesHigh[0]  = iHigh(_Symbol, PERIOD_CURRENT, 0);
+        g_seriesLow[0]   = iLow(_Symbol, PERIOD_CURRENT, 0);
+        g_seriesClose[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| MQL4 object API shims. This MQL5 build does not define the        |
+//| OBJPROP_PRICE1/PRICE2/TIME1/TIME2 constants, so they are mapped  |
+//| onto OBJPROP_PRICE/OBJPROP_TIME with the anchor-point modifier.  |
+//| The MQL4 call forms of ObjectsTotal/ObjectName/ObjectFind are    |
+//| provided via rename macros; the built-ins stay reachable through |
+//| the *_Real helpers defined before the renames.                   |
+//+------------------------------------------------------------------+
+#ifndef OBJPROP_TIME1
+#define OBJPROP_TIME1  ((ENUM_OBJECT_PROPERTY_INTEGER)2010)
+#endif
+#ifndef OBJPROP_TIME2
+#define OBJPROP_TIME2  ((ENUM_OBJECT_PROPERTY_INTEGER)2012)
+#endif
+#ifndef OBJPROP_PRICE1
+#define OBJPROP_PRICE1 ((ENUM_OBJECT_PROPERTY_DOUBLE)2011)
+#endif
+#ifndef OBJPROP_PRICE2
+#define OBJPROP_PRICE2 ((ENUM_OBJECT_PROPERTY_DOUBLE)2013)
+#endif
+
+bool ObjectSetDoubleReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const double value)
+{
+    return ObjectSetDouble(chart_id, name, prop, value);
+}
+
+bool ObjectSetDoubleRealMod(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier, const double value)
+{
+    return ObjectSetDouble(chart_id, name, prop, modifier, value);
+}
+
+#define ObjectSetDouble ObjectSetDoubleCompat
+
+bool ObjectSetDoubleCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const double value)
+{
+    if(prop == OBJPROP_PRICE1) return ObjectSetDoubleRealMod(chart_id, name, OBJPROP_PRICE, 0, value);
+    if(prop == OBJPROP_PRICE2) return ObjectSetDoubleRealMod(chart_id, name, OBJPROP_PRICE, 1, value);
+    return ObjectSetDoubleReal(chart_id, name, prop, value);
+}
+
+bool ObjectSetDoubleCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier, const double value)
+{
+    return ObjectSetDoubleRealMod(chart_id, name, prop, modifier, value);
+}
+
+double ObjectGetDoubleReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier)
+{
+    return ObjectGetDouble(chart_id, name, prop, modifier);
+}
+
+#define ObjectGetDouble ObjectGetDoubleCompat
+
+double ObjectGetDoubleCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier = 0)
+{
+    if(prop == OBJPROP_PRICE1) return ObjectGetDoubleReal(chart_id, name, OBJPROP_PRICE, 0);
+    if(prop == OBJPROP_PRICE2) return ObjectGetDoubleReal(chart_id, name, OBJPROP_PRICE, 1);
+    return ObjectGetDoubleReal(chart_id, name, prop, modifier);
+}
+
+bool ObjectSetIntegerReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const long value)
+{
+    return ObjectSetInteger(chart_id, name, prop, value);
+}
+
+bool ObjectSetIntegerRealMod(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier, const long value)
+{
+    return ObjectSetInteger(chart_id, name, prop, modifier, value);
+}
+
+#define ObjectSetInteger ObjectSetIntegerCompat
+
+bool ObjectSetIntegerCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const long value)
+{
+    if(prop == OBJPROP_TIME1) return ObjectSetIntegerRealMod(chart_id, name, OBJPROP_TIME, 0, value);
+    if(prop == OBJPROP_TIME2) return ObjectSetIntegerRealMod(chart_id, name, OBJPROP_TIME, 1, value);
+    return ObjectSetIntegerReal(chart_id, name, prop, value);
+}
+
+bool ObjectSetIntegerCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier, const long value)
+{
+    return ObjectSetIntegerRealMod(chart_id, name, prop, modifier, value);
+}
+
+int ObjectsTotalReal(const long chart_id, const int type, const bool selected)
+{
+    return ObjectsTotal(chart_id, type, selected);
+}
+
+#define ObjectsTotal ObjectsTotalCompat
+
+int ObjectsTotalCompat()
+{
+    return ObjectsTotalReal(0, -1, false);
+}
+
+int ObjectsTotalCompat(const long chart_id, const int type, const int selected)
+{
+    return ObjectsTotalReal(chart_id, type, selected != 0);
+}
+
+string ObjectNameReal(const long chart_id, const int pos, const int sub_window, const int type)
+{
+    return ObjectName(chart_id, pos, sub_window, type);
+}
+
+#define ObjectName ObjectNameCompat
+
+string ObjectNameCompat(const int pos)
+{
+    return ObjectNameReal(0, pos, -1, -1);
+}
+
+string ObjectNameCompat(const long chart_id, const int pos)
+{
+    return ObjectNameReal(chart_id, pos, -1, -1);
+}
+
+string ObjectNameCompat(const long chart_id, const int pos, const int sub_window, const int type)
+{
+    return ObjectNameReal(chart_id, pos, sub_window, type);
+}
+
+int ObjectFindReal(const long chart_id, const string name)
+{
+    return ObjectFind(chart_id, name);
+}
+
+#define ObjectFind ObjectFindCompat
+
+int ObjectFindCompat(const string name)
+{
+    return ObjectFindReal(0, name);
+}
+
+int ObjectFindCompat(const long chart_id, const string name)
+{
+    return ObjectFindReal(chart_id, name);
 }
 
 #endif // MQL5_COMPAT_MQH

@@ -35,8 +35,7 @@ void InvalidateAllVisibilityCaches()
 
 void SetObjectVisibility(const string name, const bool visible)
 {
-    if(ObjectFind(0, name) < 0) return;
-    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+    SetManagedObjectTimeframes(name, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
 }
 
 void SetAllTHObjectsVisibility(const bool visible)
@@ -49,28 +48,8 @@ void SetAllTHObjectsVisibility(const bool visible)
 
     long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
-        if(g_objectCacheHash[i].occupied) {
-            ObjectSetInteger(0, g_objectCacheHash[i].name, OBJPROP_TIMEFRAMES, timeframes);
-        }
-    }
-}
-
-void SetAllLineObjectsVisibility(const bool visible)
-{
-    static bool s_lastAllLineVisible = true;
-    static bool s_allLineInit = false;
-    if(s_allLineInit && s_lastAllLineVisible == visible) return;
-    s_allLineInit = true;
-    s_lastAllLineVisible = visible;
-
-    long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
-        if(g_objectCacheHash[i].occupied) {
-            int objType = (int)ObjectGetInteger(0, g_objectCacheHash[i].name, OBJPROP_TYPE);
-            if(objType == OBJ_HLINE || objType == OBJ_TREND) {
-                ObjectSetInteger(0, g_objectCacheHash[i].name, OBJPROP_TIMEFRAMES, timeframes);
-            }
-        }
+        if(g_objectCacheHash[i].occupied)
+            SetManagedObjectTimeframes(g_objectCacheHash[i].name, timeframes);
     }
 }
 
@@ -82,29 +61,116 @@ static bool g_prevFrameVisibilityNonLines = true;
 static bool g_visibilityChangedThisFrame = true;
 static int g_visibilityFrameCounter = 0;
 
-// FIX (2026): Per the MQL5 docs, when the underlying chart re-initializes
-// (which MT5 does on every TF/symbol switch) the chart engine silently
-// resets OBJPROP_TIMEFRAMES back to OBJ_ALL_PERIODS for every chart
-// object whose time series got reattached. The cache still says "this
-// object is at OBJ_NO_PERIODS" so ApplyVisibilityStateIfUnchangedSkip
-// skips the push — the lines/zones reappear and the user's "off" toggle
-// becomes a no-op after every TF switch. The fix is a one-shot flag that
-// forces the next N redraw frames to push timeframes unconditionally
-// after OnInit (which is the MQL5 callback fired on every TF/symbol
-// switch — see OnInitHandler in EventHandlers.mqh).
-static int g_forcePushTimeframesFrames = 0;
-
-void RequestForcePushTimeframes(int frames = 5)
+bool IsLineVisibilityExcludedObject(const string name)
 {
-    if(frames > g_forcePushTimeframesFrames)
-        g_forcePushTimeframesFrames = frames;
+    // Empty-box borders belong to the zone itself, not to the L-key line set.
+    if(StringFind(name, "_B_Top") >= 0)    return true;
+    if(StringFind(name, "_B_Bottom") >= 0) return true;
+    if(StringFind(name, "_B_Left") >= 0)   return true;
+    if(StringFind(name, "_B_Right") >= 0)  return true;
+    return false;
 }
 
-bool ConsumeForcePushTimeframes()
+void SetAllLineObjectsVisibility(const bool visible)
 {
-    if(g_forcePushTimeframesFrames <= 0) return false;
-    g_forcePushTimeframesFrames--;
-    return true;
+    long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    string prefix = inpObjectPrefix;
+    int prefixLen = StringLen(prefix);
+
+    // Scan the chart itself so objects created by either the legacy renderer
+    // or the zone-first pipeline are handled, even if the cache missed them.
+    int total = ObjectsTotal(0, -1, -1);
+    for(int i = total - 1; i >= 0; i--)
+    {
+        string name = ObjectName(0, i, -1, -1);
+        if(prefixLen == 0 || StringLen(name) < prefixLen ||
+           StringSubstr(name, 0, prefixLen) != prefix)
+            continue;
+        if(IsLineVisibilityExcludedObject(name)) continue;
+
+        int objType = (int)ObjectGetInteger(0, name, OBJPROP_TYPE);
+        if(objType == OBJ_HLINE || objType == OBJ_TREND)
+            SetManagedObjectTimeframes(name, timeframes);
+    }
+
+    // Second pass closes the gap for objects that are temporarily absent from
+    // the terminal enumeration during a redraw but are already cache-managed.
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++)
+    {
+        if(!g_objectCacheHash[i].occupied) continue;
+        string name = g_objectCacheHash[i].name;
+        if(prefixLen == 0 || StringLen(name) < prefixLen ||
+           StringSubstr(name, 0, prefixLen) != prefix)
+            continue;
+        if(IsLineVisibilityExcludedObject(name)) continue;
+
+        int objType = (int)ObjectGetInteger(0, name, OBJPROP_TYPE);
+        if(objType == OBJ_HLINE || objType == OBJ_TREND)
+            SetManagedObjectTimeframes(name, timeframes);
+    }
+
+    // Keep both visibility caches in sync before the next redraw frame.
+    UpdateLinesVisibleCache(visible);
+    g_frameVisibilityLines = visible && !IsIndicatorHidden();
+    g_visibilityChangedThisFrame = true;
+}
+
+//+------------------------------------------------------------------+
+//| Hide retained objects belonging to inactive step-mode families   |
+//|                                                                  |
+//| Mode changes normally cleared every family and recreated the     |
+//| selected one. Keeping the families cached allows E-key switches  |
+//| to update existing objects in place; only the inactive families   |
+//| need a visibility change here.                                  |
+//+------------------------------------------------------------------+
+string GetStepModeFamilySuffix(const ENUM_STEP_CALCULATION_MODE mode)
+{
+    switch(mode) {
+        case SS_LS_STEP: return "SSLS_";
+        case COMBO_STEP: return "Combo_";
+        case FACTOR_STEP: return "Factor_"; // Covers Factor_Harmonic_ too.
+        case TH_STEP:
+        default:          return "TH_Level_";
+    }
+}
+
+void HideInactiveStepModeObjects(const string objectPrefix,
+                                 const ENUM_STEP_CALCULATION_MODE activeMode,
+                                 const bool forceApply = false)
+{
+    if(StringLen(objectPrefix) == 0) return;
+
+    static const string modeFamilies[] = {"SSLS_", "Combo_", "Factor_", "TH_Level_"};
+    string activeFamily = objectPrefix + GetStepModeFamilySuffix(activeMode);
+    int prefixLen = StringLen(objectPrefix);
+
+    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        if(!g_objectCacheHash[i].occupied || !g_objectCacheHash[i].entry.exists) continue;
+
+        string name = g_objectCacheHash[i].name;
+        if(StringLen(name) < prefixLen || StringSubstr(name, 0, prefixLen) != objectPrefix)
+            continue;
+
+        bool isInactiveModeObject = false;
+        for(int family = 0; family < ArraySize(modeFamilies); family++) {
+            string familyPrefix = objectPrefix + modeFamilies[family];
+            if(StringFind(name, familyPrefix, 0) == 0) {
+                isInactiveModeObject = (familyPrefix != activeFamily);
+                break;
+            }
+        }
+        if(!isInactiveModeObject) continue;
+
+        // F/L handlers can write OBJPROP_TIMEFRAMES directly while walking
+        // chart objects, so forceApply refreshes the cache-backed state after
+        // those paths. The normal E-key path skips already-hidden objects.
+        if(forceApply || !g_objectCacheHash[i].entry.lastTimeframesKnown ||
+           g_objectCacheHash[i].entry.lastTimeframes != OBJ_NO_PERIODS) {
+            ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            g_objectCacheHash[i].entry.lastTimeframes = OBJ_NO_PERIODS;
+            g_objectCacheHash[i].entry.lastTimeframesKnown = true;
+        }
+    }
 }
 
 void CacheRefreshVisibilityState()
@@ -113,7 +179,7 @@ void CacheRefreshVisibilityState()
     bool hidden = IsIndicatorHidden();
     g_frameVisibilityNonLines = !hidden;
     g_frameVisibilityLines = !hidden && GetCachedLinesVisible();
-
+    
     g_visibilityChangedThisFrame = (g_frameVisibilityLines != g_prevFrameVisibilityLines) ||
                                     (g_frameVisibilityNonLines != g_prevFrameVisibilityNonLines);
     g_prevFrameVisibilityLines = g_frameVisibilityLines;
@@ -123,84 +189,14 @@ void CacheRefreshVisibilityState()
 void ApplyVisibilityState(const string name, const bool isLine)
 {
     long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
-    // PERF (2026): keep the cache in sync so subsequent callers can take
-    // the cache-only fast path in ApplyVisibilityStateIfUnchangedSkip /
-    // SetObjectTimeframesIfChanged.
-    int idx = CacheFindIndex(name);
-    if(idx >= 0) {
-        g_objectCacheHash[idx].entry.lastTimeframes = tf;
-        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-    }
+    SetManagedObjectTimeframes(name, tf);
 }
 
-//+------------------------------------------------------------------+
-//| PERF (2026): cache-backed ApplyVisibilityStateIfUnchangedSkip    |
-//|                                                                  |
-//| Old implementation called the SYNCHRONOUS chart API              |
-//| ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES) for every line/    |
-//| label on every redraw just to decide whether to skip the async  |
-//| ObjectSetInteger write. Per the MQL5 docs that getter is "time   |
-//| consuming" with many objects. With 200+ lines/labels on M1 this  |
-//| is the dominant sync cost on timeframe switch and tick updates.  |
-//|                                                                  |
-//| We replace the chart read with a cache lookup. The cache is the  |
-//| source of truth — every place that mutates OBJPROP_TIMEFRAMES    |
-//| (ApplyVisibilityState, SetObjectTimeframesIfChanged,             |
-//|  SetPipelineObjectTimeframesIfExists, CreateZone, CreateOrUpdate |
-//|  HLine) keeps the cached value in sync.                          |
-//+------------------------------------------------------------------+
 void ApplyVisibilityStateIfUnchangedSkip(const string name, const bool isLine)
 {
+    if(!g_visibilityChangedThisFrame && (g_visibilityFrameCounter % 10) != 0) return;
     long tf = (isLine ? g_frameVisibilityLines : g_frameVisibilityNonLines) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-
-    // FIX (2026): For a few frames after OnInit / TF switch, bypass the
-    // cache entirely and push every object's OBJPROP_TIMEFRAMES directly
-    // to the chart. The chart engine reset those properties on re-init
-    // (MT5 docs: chart object time-series re-attachment forces a reset)
-    // and the cache cannot observe the reset. Without this guard the
-    // user's "lines off" toggle silently flips back to on after every
-    // TF switch.
-    if(ConsumeForcePushTimeframes()) {
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
-        int idx = CacheFindIndex(name);
-        if(idx >= 0) {
-            g_objectCacheHash[idx].entry.lastTimeframes = tf;
-            g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-            g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-        }
-        return;
-    }
-
-    // Visibility state changed this frame: always push to chart.
-    if(g_visibilityChangedThisFrame) {
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
-        int idx = CacheFindIndex(name);
-        if(idx >= 0) {
-            g_objectCacheHash[idx].entry.lastTimeframes = tf;
-            g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-            g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-        }
-        return;
-    }
-
-    // Steady-state frame: trust the cache.
-    int idx = CacheFindIndex(name);
-    if(idx >= 0 && g_objectCacheHash[idx].entry.exists &&
-       g_objectCacheHash[idx].entry.lastTimeframes == tf) {
-        return;  // already on the right timeframes, skip chart API
-    }
-
-    // PERF (2026): removed 1-in-10 ObjectGetInteger(OBJPROP_TIMEFRAMES) fallback.
-    // Cache tracks lastTimeframes via SetObjectTimeframesIfChanged; cache is
-    // the source of truth. On miss we just write through.
-    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tf);
-    if(idx >= 0) {
-        g_objectCacheHash[idx].entry.lastTimeframes = tf;
-        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-    }
+    SetManagedObjectTimeframes(name, tf);
 }
 
 #endif // VISIBILITY_MANAGER_MQH

@@ -1,8 +1,10 @@
-  //+------------------------------------------------------------------+
+﻿  //+------------------------------------------------------------------+
 //| BasePriceHistoryManager.mqh                                       |
 //| Persistent storage for base price history                         |
 //| Matches Java BasePriceHistoryManager.java implementation         |
 //+------------------------------------------------------------------+
+#ifndef BASE_PRICE_HISTORY_MANAGER_MQH
+#define BASE_PRICE_HISTORY_MANAGER_MQH
 #property strict
 
 // Constants for history file management
@@ -99,7 +101,7 @@ int LoadBasePriceHistory(int year, int dayOfYear, string &history[])
     string filePath = GetHistoryFilePath(year, dayOfYear);
     
     // Retry logic for file locking (max 3 attempts with 100ms delay)
-    int maxRetries = 1;
+    int maxRetries = 3;
     int retryDelay = 100;
     
     // GOLD FIX #6: Declare fileHandle outside loop for proper cleanup
@@ -131,6 +133,7 @@ int LoadBasePriceHistory(int year, int dayOfYear, string &history[])
             if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] LoadHistory: File locked (error ", errorCode, "), retrying...");
+                Sleep(retryDelay);
                 continue;
             }
             else
@@ -214,7 +217,7 @@ bool SaveBasePriceHistory(int year, int dayOfYear, const string &history[], int 
     string tempPath = filePath + ".tmp";
     
     // Retry logic for file locking (max 3 attempts with 100ms delay)
-    int maxRetries = 1;
+    int maxRetries = 3;
     int retryDelay = 100;  // milliseconds
     
     for(int attempt = 0; attempt < maxRetries; attempt++)
@@ -228,6 +231,7 @@ bool SaveBasePriceHistory(int year, int dayOfYear, const string &history[], int 
             if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Temp file locked (error ", errorCode, "), retrying...");
+                Sleep(retryDelay);
                 continue;
             }
             else
@@ -260,6 +264,7 @@ bool SaveBasePriceHistory(int year, int dayOfYear, const string &history[], int 
             if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Write failed, retrying...");
+                Sleep(retryDelay);
                 continue;
             }
             else
@@ -279,6 +284,7 @@ bool SaveBasePriceHistory(int year, int dayOfYear, const string &history[], int 
                 {
                     HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Failed to delete old file (error ", deleteError, "), retrying...");
                     FileDelete(tempPath);  // Clean up temp file
+                    Sleep(retryDelay);
                     continue;
                 }
                 else
@@ -296,6 +302,7 @@ bool SaveBasePriceHistory(int year, int dayOfYear, const string &history[], int 
             if(attempt < maxRetries - 1)
             {
                 HISTORY_PRINT("[BasePriceHistoryManager] SaveHistory: Failed to rename temp file (error ", moveError, "), retrying...");
+                Sleep(retryDelay);
                 continue;
             }
             else
@@ -328,7 +335,7 @@ bool AppendBasePriceHistoryEntry(int year, int dayOfYear, const string entry)
     string filePath = GetHistoryFilePath(year, dayOfYear);
     
     // Retry logic for file locking (max 3 attempts with 100ms delay)
-    int maxRetries = 1;
+    int maxRetries = 3;
     int retryDelay = 100;  // milliseconds
     
     for(int attempt = 0; attempt < maxRetries; attempt++)
@@ -359,6 +366,7 @@ bool AppendBasePriceHistoryEntry(int year, int dayOfYear, const string entry)
         if(attempt < maxRetries - 1)
         {
             HISTORY_PRINT("[BasePriceHistoryManager] AppendEntry: File locked (error ", errorCode, "), retrying in ", retryDelay, "ms...");
+            Sleep(retryDelay);
         }
         else
         {
@@ -723,6 +731,7 @@ void CleanupOldHistory(int daysToKeep = DEFAULT_DAYS_TO_KEEP)
                         if(retry < 2)
                         {
                             HISTORY_PRINT("[BasePriceHistoryManager] CleanupOldHistory: Delete failed (error ", errorCode, "), retrying...");
+                            Sleep(100);
                         }
                         else
                         {
@@ -898,3 +907,5 @@ void DeleteAllHistoryFiles()
     
     HISTORY_PRINT("[BasePriceHistoryManager] Deleted ", deletedCount, " history files");
 }
+
+#endif // BASE_PRICE_HISTORY_MANAGER_MQH

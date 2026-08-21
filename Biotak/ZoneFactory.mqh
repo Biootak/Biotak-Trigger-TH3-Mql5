@@ -3,6 +3,8 @@
 //|                                  Copyright 2025, Biotak Project  |
 //|                          Factory Pattern for Zone Creation       |
 //+------------------------------------------------------------------+
+#ifndef ZONE_FACTORY_MQH
+#define ZONE_FACTORY_MQH
 #property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 #property strict
@@ -11,52 +13,6 @@
 #include "ZoneValidator.mqh"
 
 #include "ObjectCache.mqh"
-
-// Minimum visible zone height (each side, in points). Mirrors the define in
-// LevelPipeline.mqh so zones are never rejected as sub-point on low TFs.
-#ifndef ZONE_MIN_HEIGHT_POINTS
-#define ZONE_MIN_HEIGHT_POINTS 2   // minimum half-height each side in points
-#endif
-
-//+------------------------------------------------------------------+
-//| PERF (2026): Per-frame timeseries cache                          |
-//|                                                                  |
-//| Per the official MQL5 documentation                              |
-//| (https://www.mql5.com/en/docs/series/itime):                      |
-//|   "The function always returns actual data. For this purpose it  |
-//|    performs a request to the timeseries for the specified        |
-//|    symbol/period during EACH call. ... The function does not     |
-//|    store previous calls results, and there is no local cache for |
-//|    quick value return."                                          |
-//|                                                                  |
-//| iBars/iTime are SYNCHRONOUS timeseries requests with NO local    |
-//| cache. The 2026 best practice (and the high-performance          |
-//| iTimeSeries library on the MQL5 codebase benchmarks 50-100x      |
-//| faster with a per-frame cache) is to compute these values ONCE   |
-//| per redraw frame and reuse them for every zone in the loop.      |
-//|                                                                  |
-//| With ~200 zones on M1, the unpatched code made ~600 sync        |
-//| timeseries requests per redraw — the dominant cost on TF switch  |
-//| and tick redraws. After this cache, it's at most 3-4 per frame.  |
-//+------------------------------------------------------------------+
-static datetime g_tfCacheFrame = 0;        // CacheGetFrameTime() of last compute
-static int      g_tfCachePeriod = -1;      // Period() of last compute (TF-switch guard)
-static int      g_cachedSafeBars = 0;      // iBars(Symbol(), Period())
-static datetime g_cachedCurrentTime = 0;   // iTime(..., 0) — current bar opening
-static datetime g_cachedOldestBarTime = 0; // iTime(..., safeBars-1) — oldest bar
-static bool     g_cachedStartValid = false;// whether oldestBarTime was found
-
-// Force the next CreateZone call to recompute the per-frame timeseries
-// cache. Call this from any code path that invalidates the timeseries
-// (e.g. after a timeframe switch, after a manual history refresh).
-void InvalidateZoneTimeSeriesCache() {
-    g_tfCacheFrame = 0;
-    g_tfCachePeriod = -1;
-    g_cachedSafeBars = 0;
-    g_cachedCurrentTime = 0;
-    g_cachedOldestBarTime = 0;
-    g_cachedStartValid = false;
-}
 
 //+------------------------------------------------------------------+
 //| Zone Factory - Centralized Zone Creation                         |
@@ -80,6 +36,8 @@ struct SZoneCreationRequest {
     color zoneColor;          // Zone color
     int transparency;         // Transparency (0-100)
     bool filled;              // Fill zone?
+    int borderStyle;          // Rectangle border line style (STYLE_SOLID/DASH/DOT/...)
+    int borderWidth;          // Rectangle border width (1-5)
     datetime startTime;       // Start time (optional, 0 = auto)
     datetime endTime;         // End time (optional, 0 = auto)
 };
@@ -138,6 +96,73 @@ color GetZoneRenderColor(const color sourceColor, const int transparency)
 }
 
 //+------------------------------------------------------------------+
+//| Create/update a single box border segment (OBJ_TREND)            |
+//|                                                                  |
+//| EMPTY boxes are drawn as border segments instead of an           |
+//| OBJ_RECTANGLE with OBJPROP_FILL=false, because some MT4 builds   |
+//| render the rectangle filled regardless of the FILL flag.         |
+//| Border segments guarantee a hollow box on every build.           |
+//+------------------------------------------------------------------+
+bool CreateOrUpdateZoneBorder(const string name,
+                              const datetime t1, const double p1,
+                              const datetime t2, const double p2,
+                              const color clr, const int style, const int width,
+                              const bool rayRight)
+{
+    // Cache-based change detection (same pattern as other zone objects)
+    SObjectCacheEntry cachedEntry;
+    bool hasCached = CacheGetObject(name, cachedEntry) && cachedEntry.exists;
+    bool objectExists = hasCached;
+    // ObjectFind is synchronous in MT5. Managed objects are invalidated by
+    // CHARTEVENT_OBJECT_DELETE, so only uncached objects need this fallback.
+    if(!objectExists)
+        objectExists = (ObjectFind(0, name) >= 0);
+    
+    // Migrate non-TREND leftovers (e.g. old rectangles with the same name)
+    // only during cache warm-up. A managed object cannot change type without
+    // a delete event, so repeating this synchronous query is unnecessary.
+    if(objectExists && !hasCached) {
+        int objType = (int)ObjectGetInteger(0, name, OBJPROP_TYPE);
+        if(objType != OBJ_TREND) {
+            ObjectDelete(0, name);
+            CacheRemoveObject(name);
+            objectExists = false;
+            hasCached = false;
+        }
+    }
+    
+    if(!objectExists) {
+        if(!ObjectCreate(0, name, OBJ_TREND, 0, t1, p1, t2, p2)) return false;
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, rayRight);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_BACK, true);
+        ObjectSetInteger(0, name, OBJPROP_ZORDER, 0);
+        CacheUpdateZone(name, p1, p2, t1, t2, clr, true, style, width);
+        return true;
+    }
+    
+    bool geometryChanged = (!hasCached || cachedEntry.lastPrice != p1 || cachedEntry.lastPrice2 != p2 ||
+                            cachedEntry.lastTime1 != t1 || cachedEntry.lastTime2 != t2);
+    if(geometryChanged) {
+        ObjectMove(0, name, 0, t1, p1);
+        ObjectMove(0, name, 1, t2, p2);
+    }
+    bool visualChanged = (!hasCached || cachedEntry.lastColor != clr ||
+                          cachedEntry.lastStyle != style || cachedEntry.lastWidth != width);
+    if(visualChanged) {
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, rayRight);
+    }
+    CacheUpdateZone(name, p1, p2, t1, t2, clr, true, style, width);
+    return true;
+}
+
+//+------------------------------------------------------------------+
 //| Create Zone with Full Validation - GOLD VERSION v3 FINAL         |
 //|      Zone                    -            v3                     |
 //|                                                                  |
@@ -151,26 +176,13 @@ color GetZoneRenderColor(const color sourceColor, const int transparency)
 //| - Atomic object creation (cleanup on failure)                   |
 //| - Comprehensive error context                                   |
 //+------------------------------------------------------------------+
-SZoneCreationResult CreateZone(SZoneCreationRequest &request)
+SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
 {
     SZoneCreationResult result;
     result.success = false;
     result.zoneName = request.name;
     result.errorMessage = "";
     result.errorCode = ERR_ZONE_NONE;
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    // DIAGNOSTIC LOG: log first 10 CreateZone calls per run
-    static int s_createZoneCallCount = 0;
-    s_createZoneCallCount++;
-    if(s_createZoneCallCount <= 10) {
-        Print("[CREATEZONE_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-              " name=", request.name,
-              " top=", DoubleToString(request.topPrice, Digits),
-              " bottom=", DoubleToString(request.bottomPrice, Digits),
-              " top<=bottom=", (request.topPrice <= request.bottomPrice ? "YES" : "NO"));
-    }
-    #endif
     
     //                                                                
     // PHASE 1: VALIDATION (Fail Fast)
@@ -180,9 +192,6 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
     if(StringLen(request.name) == 0) {
         result.errorMessage = "Zone name cannot be empty";
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[CREATEZONE_FAIL] name empty");
-        #endif
         return result;
     }
     
@@ -192,36 +201,14 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
                                           DoubleToString(request.topPrice, Digits),
                                           DoubleToString(request.bottomPrice, Digits));
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[CREATEZONE_FAIL] name=", request.name, " invalid prices");
-        #endif
         return result;
     }
-
-    // FIX: Enforce a minimum visible zone height (in points) so zones created on
-    // lower timeframes (where the fractal step is sub-point) are not silently
-    // rejected as "top <= bottom" after NormalizeDouble. Expand symmetrically
-    // around the box center, preserving the intended price level.
-    {
-        double point = GetCachedPoint();
-        if(point <= 0) point = 1e-5;
-        double center = (request.topPrice + request.bottomPrice) * 0.5;
-        double half = (request.topPrice - request.bottomPrice) * 0.5;
-        double minHalf = point * ZONE_MIN_HEIGHT_POINTS;
-        if(half < minHalf) {
-            request.topPrice = NormalizeDouble(center + minHalf, Digits);
-            request.bottomPrice = NormalizeDouble(center - minHalf, Digits);
-        }
-    }
-
+    
     if(request.topPrice <= request.bottomPrice) {
         result.errorMessage = StringFormat("Top price (%s) must be greater than bottom price (%s)",
                                           DoubleToString(request.topPrice, Digits),
                                           DoubleToString(request.bottomPrice, Digits));
         result.errorCode = ERR_ZONE_INVALID_CONFIG;
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[CREATEZONE_FAIL] name=", request.name, " top<=bottom");
-        #endif
         return result;
     }
     
@@ -242,63 +229,19 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
         #endif
     }
     
+    // Validate/clamp border style and width (defensive - callers pass inputs)
+    int borderStyle = request.borderStyle;
+    if(borderStyle < STYLE_SOLID || borderStyle > STYLE_DASHDOTDOT) borderStyle = STYLE_SOLID;
+    int borderWidth = request.borderWidth;
+    if(borderWidth < 1 || borderWidth > 5) borderWidth = 1;
+    
     //                                                                
     // PHASE 2: TIME CALCULATION (Optimized - No slow GlobalVariables)
     //                                                                
     
-    // CRITICAL FIX: Use iBars() instead of Bars(). On lower timeframes Bars() can report
-    // more bars than are actually loaded, causing iTime(..., safeBars-1) to return 0 and
-    // silently failing zone creation. iBars() returns the count of actually loaded bars.
-    //
-    // PERF (2026): iBars and iTime are SYNCHRONOUS timeseries requests with NO local
-    // cache (per the official MQL5 docs). With ~200 zones on M1, calling them inside
-    // the zone loop made ~600 sync timeseries requests per redraw — the dominant cost
-    // on timeframe switch and tick redraws. We now memoize (safeBars, currentTime,
-    // oldestBarTime) once per redraw frame (keyed on CacheGetFrameTime() and Period())
-    // and reuse them for every zone in the same frame.
-    int currentTf = Period();
-    datetime frameStamp = CacheGetFrameTime();
-    if(g_tfCacheFrame != frameStamp || g_tfCachePeriod != currentTf || g_tfCacheFrame == 0) {
-        g_tfCacheFrame = frameStamp;
-        g_tfCachePeriod = currentTf;
-        g_cachedSafeBars = iBars(Symbol(), (ENUM_TIMEFRAMES)currentTf);
-        g_cachedCurrentTime = (g_cachedSafeBars > 0) ? iTime(Symbol(), (ENUM_TIMEFRAMES)currentTf, 0) : TimeCurrent();
-        if(g_cachedCurrentTime <= 0) g_cachedCurrentTime = TimeCurrent();
-        // Oldest-bar time: walk back at most a small fixed number of slots (the
-        // server returns 0 only for the few most-recently-loaded bars; walking
-        // 32 slots is enough to cover any realistic startup race).
-        g_cachedOldestBarTime = 0;
-        g_cachedStartValid = false;
-        if(g_cachedSafeBars >= 1) {
-            int startIndex = g_cachedSafeBars - 1;
-            g_cachedOldestBarTime = iTime(Symbol(), (ENUM_TIMEFRAMES)currentTf, startIndex);
-            int walkedBack = 0;
-            // FIX (2026): walkback raised from 32 to 256 slots. On first TF
-            // switch after a fresh chart load on MT5, the visible-bar history
-            // can legitimately have 100+ bars at index 0 because the terminal
-            // reports the loaded-range count before iTime has filled every
-            // timestamp in the buffer. The 32-slot cap silently dropped into
-            // the current-bar fallback (line 330), which anchored every zone
-            // rectangle to bar 0 — visually that showed as "only the right-
-            // hand side of the zone is drawn" because the rest of the
-            // rectangle extends leftward to the (still-unresolved) startTime.
-            // The 256-slot cap covers the realistic MT5 startup race.
-            // PERF (2026): cap walkback at 32. On TF chart switch MT5 returns
-            // 0 from iTime for visible-bar history not yet loaded; walking 256
-            // slots is 256 sync timeseries syscalls. The synthetic fallback
-            // below handles the unresolved case identically and is bounded.
-            const int MAX_WALKBACK = 32;
-            while(startIndex >= 0 && g_cachedOldestBarTime <= 0 && walkedBack < MAX_WALKBACK) {
-                startIndex--;
-                walkedBack++;
-                if(startIndex >= 0)
-                    g_cachedOldestBarTime = iTime(Symbol(), (ENUM_TIMEFRAMES)currentTf, startIndex);
-            }
-            g_cachedStartValid = (g_cachedOldestBarTime > 0);
-        }
-    }
-    int safeBars = g_cachedSafeBars;
-    datetime currentTime = g_cachedCurrentTime;
+    int safeBars = Bars;
+    datetime currentTime = (safeBars > 0) ? Time[0] : TimeCurrent();
+    if(currentTime <= 0) currentTime = TimeCurrent();
     
     datetime startTime = request.startTime;
     datetime endTime = request.endTime;
@@ -306,60 +249,27 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
     // Auto-calculate times if not provided
     if(startTime == 0) {
         if(safeBars < 1) {
-            // DIAGNOSTIC + SAFETY: On M1 with monthly history unavailable, fall back to current bar.
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[CreateZone] safeBars < 1 on ", EnumToString((ENUM_TIMEFRAMES)Period()), " using TimeCurrent fallback");
-            #endif
-            startTime = currentTime;
+            result.errorMessage = "Not enough bars for zone creation";
+            result.errorCode = ERR_ZONE_RENDER_FAILED;
+            return result;
         }
-        else {
-            // PERF (2026): use the per-frame cached oldest-bar timestamp instead of
-            // calling iTime(...) again. The cache is invalidated on TF switch and
-            // each new redraw frame, so this stays correct.
-            if(g_cachedStartValid) {
-                startTime = g_cachedOldestBarTime;
-            }
-            else {
-                // FIX (2026): The previous fallback set `startTime = currentTime`,
-                // which anchored the zone rectangle to bar 0 (right edge). On
-                // H1/H4 right after a TF switch, MT5 had not yet populated
-                // iTime for the visible bars, so the rectangle visually rendered
-                // as "only the right-hand side of the zone is drawn". The fix
-                // synthesizes a left-edge time from the visible bar count and
-                // timeframe period so the zone rectangle extends visibly to the
-                // left. The next redraw frame, once history arrives, recreates
-                // the zone with the correct oldest-bar time.
-                #ifdef ENABLE_DEBUG_LOGS
-                // OPERATIONAL LOG: Always visible so users can diagnose missing zones on lower TFs
-                static int s_iTimeFailLogCount = 0;
-                static datetime s_lastITimeFailLog = 0;
-                if(s_iTimeFailLogCount < 5 && TimeCurrent() - s_lastITimeFailLog >= 1) {
-                    Print("[ZONE_TIME_FAIL] iTime returned 0 for indices 0..", safeBars - 1,
-                          " on TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-                          " zone=", request.name, " - using mid-history fallback");
-                    s_iTimeFailLogCount++;
-                    s_lastITimeFailLog = TimeCurrent();
-                }
-                #endif
-                int periodSec = PeriodSeconds((ENUM_TIMEFRAMES)Period());
-                int syntheticBars = safeBars > 4 ? (safeBars * 3) / 4 : 0;
-                if(periodSec > 0 && syntheticBars > 0)
-                    startTime = currentTime - periodSec * syntheticBars;
-                else
-                    startTime = currentTime;
-            }
+        
+        int startIndex = safeBars - 1;
+        startTime = Time[startIndex];
+        
+        if(startTime <= 0) {
+            result.errorMessage = StringFormat("Invalid Time[%d]", startIndex);
+            result.errorCode = ERR_ZONE_RENDER_FAILED;
+            return result;
         }
     }
     
     if(endTime == 0) {
-        int periodSeconds = PeriodSeconds((ENUM_TIMEFRAMES)Period());
+        int periodSeconds = PeriodSeconds(Period());
         if(periodSeconds <= 0) {
             result.success = false;
             result.errorCode = ERR_ZONE_INVALID_CONFIG;
             result.errorMessage = "Invalid timeframe period";
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[CREATEZONE_FAIL] name=", request.name, " invalid period");
-            #endif
             return result;
         }
         endTime = currentTime + periodSeconds * ZONE_EXTENSION_PERIODS;
@@ -371,9 +281,6 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
                                           TimeToString(startTime),
                                           TimeToString(endTime));
         result.errorCode = ERR_ZONE_RENDER_FAILED;
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("[CREATEZONE_FAIL] name=", request.name, " invalid time range");
-        #endif
         return result;
     }
     
@@ -382,46 +289,84 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
     //                                                                
     
     color finalColor = GetZoneRenderColor(request.zoneColor, clampedTransparency);
-    // FIX: Removed DeleteIndicatorObjectManaged(_Top/_Bottom) here.
-    // Deleting those border lines on every tick caused visible flicker.
-    // They are only needed when switching zone style (handled by caller).
-
-    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
-    bool isHidden = IsIndicatorHidden();
+    // Transparency applies to the fill (FILLED) AND the border (EMPTY), so the
+    // empty-box outline fades exactly like the filled-box color.
+    color borderColor = finalColor;
+    
+    if(!request.filled) {
+        // EMPTY box: remove any leftover filled rectangle for this zone.
+        // PERF: Cache-gated so this only costs an in-memory lookup on
+        // unchanged frames (the entry is removed once the leftover is gone).
+        SObjectCacheEntry rectCache;
+        bool rectCached = CacheGetObject(request.name, rectCache) && rectCache.exists;
+        bool rectExists = rectCached;
+        if(!rectExists)
+            rectExists = (ObjectFind(0, request.name) >= 0);
+        if(rectExists) {
+            ObjectDelete(0, request.name);
+            CacheRemoveObject(request.name);
+        }
+    }
+    
+    // EMPTY BOX: draw as border segments (hollow on every MT4 build).
+    // Top/bottom borders extend to the chart edge (ray-right, like the
+    // filled box); the left border closes the outline.
+    if(!request.filled) {
+        bool ok = true;
+        if(!CreateOrUpdateZoneBorder(request.name + "_B_Top",
+                                     startTime, request.topPrice, endTime, request.topPrice,
+                                     borderColor, borderStyle, borderWidth, true)) ok = false;
+        if(!CreateOrUpdateZoneBorder(request.name + "_B_Bottom",
+                                     startTime, request.bottomPrice, endTime, request.bottomPrice,
+                                     borderColor, borderStyle, borderWidth, true)) ok = false;
+        if(!CreateOrUpdateZoneBorder(request.name + "_B_Left",
+                                     startTime, request.bottomPrice, startTime, request.topPrice,
+                                     borderColor, borderStyle, borderWidth, false)) ok = false;
+        
+        result.success = ok;
+        return result;
+    }
     
     // PERFORMANCE: Check cache to skip redundant API calls
     SObjectCacheEntry cache;
-    bool inCache = CacheGetObject(request.name, cache);
-    // FIX: Trust the cache for the current redraw frame. Timeframe-switch and
-    // bulk-deletion paths call InvalidateObjectCacheByPrefix/CacheRemoveObject,
-    // so a cache hit within the same frame is reliable. Re-verify only on
-    // cache misses or stale entries.
-    bool objectExists = false;
-    if(inCache && cache.exists && cache.lastUpdate == CacheGetFrameTime() && cache.lastUpdate > 0) {
-        objectExists = true;
-    }
-    else {
+    bool inCache = CacheGetObject(request.name, cache) && cache.exists;
+    bool objectExists = inCache;
+    if(!objectExists)
         objectExists = (ObjectFind(0, request.name) >= 0);
-        if(inCache && !objectExists) {
-            CacheRemoveObject(request.name);
-            inCache = false;
-        }
-    }
-    bool createdObject = false;
     
     if(inCache && objectExists) {
         // Check if anything actually changed
         bool geometryChanged = (cache.lastPrice != request.topPrice || cache.lastPrice2 != request.bottomPrice ||
                                cache.lastTime1 != startTime || cache.lastTime2 != endTime);
-        bool visualChanged = (cache.lastColor != finalColor || cache.lastFilled != request.filled);
+        bool visualChanged = (cache.lastColor != borderColor || cache.lastFilled != request.filled ||
+                             cache.lastStyle != borderStyle || cache.lastWidth != borderWidth);
         
         if(!geometryChanged && !visualChanged) {
-            // PERF: Only rewrite timeframe when it actually changed.
-            SetObjectTimeframesIfChanged(request.name, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
             result.success = true;
-            return result; // Geometry/visuals are current; visibility may still change.
+            return result; // Skip everything!
         }
     }
+    
+    //                                                                
+    // PHASE 3.5: MODE MIGRATION (FILLED <-> EMPTY) - run only on real updates
+    //                                                                
+    // Some MT4 builds render OBJ_RECTANGLE filled even with
+    // OBJPROP_FILL=false, so EMPTY boxes are drawn as border segments
+    // (guaranteed hollow). Keep the chart clean when switching styles.
+    // PERF: These cleanup calls used to run on every frame even when the
+    // zone was unchanged; now they run only when an actual update happens.
+    
+    // FILLED box: remove any leftover empty-box border segments
+    if(ObjectFind(0, request.name + "_B_Top") >= 0) {
+        DeleteIndicatorObjectManaged(request.name + "_B_Top", true);
+        DeleteIndicatorObjectManaged(request.name + "_B_Bottom", true);
+        DeleteIndicatorObjectManaged(request.name + "_B_Left", true);
+        DeleteIndicatorObjectManaged(request.name + "_B_Right", true);
+    }
+    
+    // Legacy boundary lines (L-key) left over from lines-style rendering
+    DeleteIndicatorObjectManaged(request.name + "_Top");
+    DeleteIndicatorObjectManaged(request.name + "_Bottom");
     
     //                                                                
     // PHASE 4: ZONE CREATION/UPDATE
@@ -430,47 +375,40 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
     if(!objectExists) {
         if(!ObjectCreate(0, request.name, OBJ_RECTANGLE, 0, startTime, request.topPrice, endTime, request.bottomPrice)) {
             int error = GetLastError();
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("[CREATEZONE_FAIL] ObjectCreate FAILED name=", request.name,
-                  " TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-                  " start=", TimeToString(startTime), " end=", TimeToString(endTime),
-                  " top=", request.topPrice, " bottom=", request.bottomPrice,
-                  " err=", error);
-            #endif
             result.errorMessage = StringFormat("Failed to create zone '%s': MT4 Error %d", request.name, error);
             result.errorCode = error;
             return result;
         }
-        createdObject = true;
     }
     else {
         // Update geometry ONLY if changed
         bool geometryChanged = !inCache || (cache.lastPrice != request.topPrice || cache.lastPrice2 != request.bottomPrice ||
                                            cache.lastTime1 != startTime || cache.lastTime2 != endTime);
         if(geometryChanged) {
-            ObjectSetDouble(0, request.name, OBJPROP_PRICE, 0, request.topPrice);
-            ObjectSetDouble(0, request.name, OBJPROP_PRICE, 1, request.bottomPrice);
-            ObjectSetInteger(0, request.name, OBJPROP_TIME, 0, startTime);
-            ObjectSetInteger(0, request.name, OBJPROP_TIME, 1, endTime);
+            ObjectSetDouble(0, request.name, OBJPROP_PRICE1, request.topPrice);
+            ObjectSetDouble(0, request.name, OBJPROP_PRICE2, request.bottomPrice);
+            ObjectSetInteger(0, request.name, OBJPROP_TIME1, startTime);
+            ObjectSetInteger(0, request.name, OBJPROP_TIME2, endTime);
         }
     }
     
     // Apply visual properties ONLY if changed
-    bool visualChanged = createdObject || !inCache || (cache.lastColor != finalColor || cache.lastFilled != request.filled);
+    bool visualChanged = !inCache || (cache.lastColor != borderColor || cache.lastFilled != request.filled ||
+                                     cache.lastStyle != borderStyle || cache.lastWidth != borderWidth);
     if(visualChanged) {
-        ObjectSetInteger(0, request.name, OBJPROP_COLOR, finalColor);
+        ObjectSetInteger(0, request.name, OBJPROP_COLOR, borderColor);
         ObjectSetInteger(0, request.name, OBJPROP_BACK, true);
         ObjectSetInteger(0, request.name, OBJPROP_FILL, request.filled);
+        // Border line style/width (solid, dashed, dotted, ... hollow box support)
+        ObjectSetInteger(0, request.name, OBJPROP_STYLE, borderStyle);
+        ObjectSetInteger(0, request.name, OBJPROP_WIDTH, borderWidth);
         ObjectSetInteger(0, request.name, OBJPROP_SELECTABLE, false);
         ObjectSetInteger(0, request.name, OBJPROP_RAY_RIGHT, true);
         ObjectSetInteger(0, request.name, OBJPROP_ZORDER, 0);
     }
-
-    // PERF: Only rewrite timeframe when it actually changed.
-    SetObjectTimeframesIfChanged(request.name, isHidden ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
     
     // Update cache
-    CacheUpdateZone(request.name, request.topPrice, request.bottomPrice, startTime, endTime, finalColor, request.filled);
+    CacheUpdateZone(request.name, request.topPrice, request.bottomPrice, startTime, endTime, borderColor, request.filled, borderStyle, borderWidth);
     
     result.success = true;
     return result;
@@ -480,7 +418,7 @@ SZoneCreationResult CreateZone(SZoneCreationRequest &request)
 //| Batch Create Zones                                               |
 //|              Zone                                                |
 //+------------------------------------------------------------------+
-int CreateZonesBatch(SZoneCreationRequest &requests[], 
+int CreateZonesBatch(const SZoneCreationRequest &requests[], 
                      SZoneCreationResult &results[])
 {
     int count = ArraySize(requests);
@@ -530,3 +468,5 @@ int DeleteZonesByPrefix(const string &prefix)
     
     return deletedCount;
 }
+
+#endif // ZONE_FACTORY_MQH

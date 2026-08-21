@@ -13,172 +13,27 @@
 #include "MathConstants.mqh"
 #include "UnifiedZoneSystem.mqh"
 #include "ZoneTrackingHelpers.mqh"
+#include "DrawingPipeline.mqh" // Drawing & Zone rendering pipeline
 
 // Note: CalculateFactorStepSize has been moved to THCalculations.mqh
-
-// Forward declaration: Advanced Mode calculator (defined later in this file).
-// Referenced by CalculateComboStepSize() for COMBO_MODE_ADVANCED.
-double CalculateCalculatorModeStepSize(const double basePrice);
-
-//+------------------------------------------------------------------+
-//| PERF: Combo/Advanced step-size cache                             |
-//| The combo step calc calls GetStepSizeForBasisType -> CalculateTimeframeTH|
-//| (linear string search) several times on EVERY redraw. Cache the   |
-//| final result keyed on all topology/component/operator inputs that  |
-//| affect it, so a steady-state redraw skips the whole subtree.    |
-//+------------------------------------------------------------------+
-struct SComboStepCache {
-    double basePrice;
-    int   comboMode;
-    int   comboPreset;
-    int   comboTopology;
-    int   comboComp1, comboComp2, comboComp3, comboComp4;
-    int   comboOp1, comboOp2, comboOp3;
-    int   fractalShift;
-    int   aggMeanType;
-    double result;
-    bool   valid;
-};
-static SComboStepCache g_comboStepCache;
-static bool g_comboStepCacheInit = false;
-
-double GetCachedComboStepSize(const double basePrice) {
-    if(!g_comboStepCacheInit) { g_comboStepCache.valid = false; g_comboStepCacheInit = true; }
-    if(!g_comboStepCache.valid) return 0.0;
-    bool match = MathAbs(g_comboStepCache.basePrice - basePrice) < GetCachedPoint() * 0.1 &&
-                   g_comboStepCache.comboMode == (int)inpComboMode &&
-                   g_comboStepCache.comboPreset == (int)inpComboPreset &&
-                   g_comboStepCache.comboTopology == (int)inpComboTopology &&
-                   g_comboStepCache.comboComp1 == (int)inpComboComp1 &&
-                   g_comboStepCache.comboComp2 == (int)inpComboComp2 &&
-                   g_comboStepCache.comboComp3 == (int)inpComboComp3 &&
-                   g_comboStepCache.comboComp4 == (int)inpComboComp4 &&
-                   g_comboStepCache.comboOp1 == (int)inpComboOp1 &&
-                   g_comboStepCache.comboOp2 == (int)inpComboOp2 &&
-                   g_comboStepCache.comboOp3 == (int)inpComboOp3 &&
-                   g_comboStepCache.fractalShift == (int)g_fractalShift &&
-                   g_comboStepCache.aggMeanType == (int)inpAggregateMeanType;
-    return match ? g_comboStepCache.result : 0.0;
-}
-
-void StoreCachedComboStepSize(const double basePrice, const double result) {
-    g_comboStepCache.basePrice = basePrice;
-    g_comboStepCache.comboMode = (int)inpComboMode;
-    g_comboStepCache.comboPreset = (int)inpComboPreset;
-    g_comboStepCache.comboTopology = (int)inpComboTopology;
-    g_comboStepCache.comboComp1 = (int)inpComboComp1;
-    g_comboStepCache.comboComp2 = (int)inpComboComp2;
-    g_comboStepCache.comboComp3 = (int)inpComboComp3;
-    g_comboStepCache.comboComp4 = (int)inpComboComp4;
-    g_comboStepCache.comboOp1 = (int)inpComboOp1;
-    g_comboStepCache.comboOp2 = (int)inpComboOp2;
-    g_comboStepCache.comboOp3 = (int)inpComboOp3;
-    g_comboStepCache.fractalShift = (int)g_fractalShift;
-    g_comboStepCache.aggMeanType = (int)inpAggregateMeanType;
-    g_comboStepCache.result = result;
-    g_comboStepCache.valid = true;
-}
 
 //+------------------------------------------------------------------+
 //| Helper functions (ported from MT5)                                |
 //+------------------------------------------------------------------+
-bool IsDigitChar(const int ch) {
-    return (ch >= '0' && ch <= '9');
-}
-
-bool ExtractNumberAfterPrefix(const string name, const string prefix, const string suffix, int &number) {
-    int prefixLen = StringLen(prefix);
-    int nameLen = StringLen(name);
-    int suffixLen = StringLen(suffix);
-    if(nameLen < prefixLen + suffixLen) return false;
-    if(StringSubstr(name, 0, prefixLen) != prefix) return false;
-    if(suffixLen > 0 && StringSubstr(name, nameLen - suffixLen, suffixLen) != suffix) return false;
-
-    int numberEnd = nameLen - suffixLen;
-    if(numberEnd <= prefixLen) return false;
-
-    for(int i = prefixLen; i < numberEnd; i++) {
-        if(!IsDigitChar(StringGetCharacter(name, i))) return false;
-    }
-
-    number = (int)StringToInteger(StringSubstr(name, prefixLen, numberEnd - prefixLen));
-    return true;
-}
-
-void DeleteCachedObjectIfExists(const string name) {
-    // PERF (2026): the cache already says "exists" — trust it for the
-    // ObjectDelete. The ObjectFind synchronous chart-API syscall is
-    // explicitly called out in the MQL5 docs as time consuming at scale.
-    // Only fall back to chart when the cache is cold (cache miss / first
-    // call after invalidation).
-    CacheRemoveObject(name);
-    int idx = CacheFindIndex(name);
-    if(idx < 0) {
-        // Cold cache: fall back to chart lookup once. Next call is hot.
-        if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
-        return;
-    }
-    ObjectDelete(0, name);
-}
-
-void HideCachedObjectIfExists(const string name) {
-    // PERF (2026): same cache-first pattern as DeleteCachedObjectIfExists.
-    // Cold-cache: one ObjectFind; warm cache: zero chart-API calls.
-    int idx = CacheFindIndex(name);
-    bool existsInCache = (idx >= 0 && g_objectCacheHash[idx].entry.exists);
-    if(existsInCache) {
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    } else if(ObjectFind(0, name) >= 0) {
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-    }
-}
-
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = "") {
     if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) return;
-
-    // PERF (2026, E): the previous implementation did
-    //   int total = ObjectsTotal(0, -1, -1);
-    //   for(int i = total - 1; i >= 0; i--) {
-    //       string name = ObjectName(0, i, -1, -1);
-    //       ...
-    //   }
-    // which is one ObjectName() synchronous chart-API call per chart object
-    // per cleanup call. CleanupSurplusPipeline invokes CleanupSurplusObjects
-    // 7 times per redraw (zone above/below/center + line above/below + 2x
-    // label), so on M1 with ~300 chart objects that is ~2,100 ObjectName
-    // synchronous syscalls per redraw for what is almost always "delete
-    // nothing".
-    //
-    // The SObjectCacheEntry already tracks every object we created (and
-    // re-hydrated from chart on cold cache). Iterating the cache hash
-    // avoids the chart-API entirely. We still call DeleteCachedObjectIfExists
-    // which is cache-first and only falls back to ObjectFind on cold cache.
-    int prefixLen = StringLen(prefix);
-    int suffixLen = StringLen(suffix);
-    for(int i = 0; i < CACHE_HASH_BUCKETS; i++) {
-        if(!g_objectCacheHash[i].occupied) continue;
-        if(!g_objectCacheHash[i].entry.exists) continue;
-        const string name = g_objectCacheHash[i].name;
-        if(StringLen(name) < prefixLen) continue;
-        if(StringSubstr(name, 0, prefixLen) != prefix) continue;
-        // Strip suffix from the right side to compare the bare name.
-        const int nameLen = StringLen(name);
-        string bareName = name;
-        if(suffixLen > 0 && nameLen >= suffixLen &&
-           StringSubstr(name, nameLen - suffixLen, suffixLen) == suffix) {
-            bareName = StringSubstr(name, 0, nameLen - suffixLen);
-        }
-        int objectIdx = 0;
-        if(ExtractNumberAfterPrefix(bareName, prefix, "", objectIdx) && objectIdx >= startIdx) {
-            DeleteCachedObjectIfExists(name);
+    int misses = 0;
+    bool zoneFamily = (suffix == "" && StringFind(prefix, "_Zone_") >= 0);
+    for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
+        string name = prefix + IntegerToString(idx) + suffix;
+        bool deleted = zoneFamily ? DeleteManagedZoneObjects(name, true)
+                                  : DeleteIndicatorObjectManaged(name, true);
+        if(deleted) {
+            misses = 0;
+        } else {
+            misses++;
         }
     }
-}
-
-void CleanupSurplusZoneLineObjects(const string prefix, const int startIdx) {
-    if(g_customPriceLineDragging) return;
-    CleanupSurplusObjects(prefix, startIdx, 6, "_Top");
-    CleanupSurplusObjects(prefix, startIdx, 6, "_Bottom");
 }
 
 bool CreateOrUpdateHLine(const string name, double price, 
@@ -186,32 +41,16 @@ bool CreateOrUpdateHLine(const string name, double price,
                           const string tooltip,
                           const bool visibilityAsLine = true) {
     SObjectCacheEntry cachedEntry;
-    bool hasCached = CacheGetObject(name, cachedEntry);
-    bool objectExists = false;
-    if(hasCached && cachedEntry.exists) {
-        // PERF: Trust cache within same frame to skip ObjectFind() syscall
-        if(cachedEntry.lastUpdate == CacheGetFrameTime() && cachedEntry.lastUpdate > 0) {
-            objectExists = true;
-        } else {
-            objectExists = (ObjectFind(0, name) >= 0);
-            if(!objectExists) {
-                CacheRemoveObject(name);
-                hasCached = false;
-            }
-        }
-    } else {
+    bool hasCached = CacheGetObject(name, cachedEntry) && cachedEntry.exists;
+    bool objectExists = hasCached;
+    // Managed objects are invalidated by the delete-event handler. Avoid a
+    // synchronous ObjectFind on every redraw; use it only for cache misses.
+    if(!objectExists)
         objectExists = (ObjectFind(0, name) >= 0);
-    }
-    double normPrice = NormalizeDouble(price, GetCachedDigits());
+    double normPrice = NormalizeDouble(price, Digits);
     
     if(!objectExists) {
-        ResetLastError();
         if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, normPrice)) {
-            int error = GetLastError();
-            _LOG_GATE_E Print("[E][DRAW] CreateOrUpdateHLine: failed to create '", name,
-                              "' at ", DoubleToString(normPrice, GetCachedDigits()),
-                              " | error=", error);
-            CacheRemoveObject(name);
             return false;
         }
         ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
@@ -221,12 +60,11 @@ bool CreateOrUpdateHLine(const string name, double price,
         ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
         ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
         CacheAddObject(name, normPrice, clr, style, width);
+        CacheUpdateTooltip(name, tooltip);
         ApplyVisibilityState(name, visibilityAsLine);
         return true;
     } else {
-        double point = GetCachedPoint();
-        bool priceChanged = (!hasCached || MathAbs(cachedEntry.lastPrice - normPrice) > point * 0.1);
-        if(priceChanged) {
+        if(!hasCached || MathAbs(hasCached ? cachedEntry.lastPrice - normPrice : 1.0) > GetCachedPoint() * 0.1) {
             ObjectSetDouble(0, name, OBJPROP_PRICE, normPrice);
         }
         if(!hasCached || cachedEntry.lastColor != clr) {
@@ -238,48 +76,48 @@ bool CreateOrUpdateHLine(const string name, double price,
         if(!hasCached || cachedEntry.lastWidth != width) {
             ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
         }
-        // PERF (2026): only push the tooltip when the price actually moved
-        // (the tooltip embeds the price via DoubleToString), or on the first
-        // sighting of the object. The previous implementation always called
-        // ObjectSetString(..., OBJPROP_TOOLTIP, ...) because lastText was
-        // never populated for HLINEs — 288 redundant async writes per redraw
-        // on M1 just to put the same number back on the chart.
-        if(priceChanged) {
+        bool tooltipChanged = !hasCached || cachedEntry.lastTooltip != tooltip;
+        if(tooltipChanged)
             ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
-        }
         CacheUpdateObject(name, normPrice, clr, style, width);
+        if(tooltipChanged) CacheUpdateTooltip(name, tooltip);
         ApplyVisibilityStateIfUnchangedSkip(name, visibilityAsLine);
         return false;
     }
 }
 
-// PERF: Per-frame cached viewport bounds. GetViewportBounds() is called once per
-// ExecutePipeline() (which runs on every redraw), and the ChartGetDouble() syscalls
-// are relatively expensive. Cache the result per-frame so multiple callers within
-// the same redraw reuse it. Still recomputed fresh on each new frame (no stale TF data).
-static double g_cachedVpTop = 0.0;
-static double g_cachedVpBottom = 0.0;
-static datetime g_cachedVpFrame = 0;
-
 void GetViewportBounds(double &vpTop, double &vpBottom) {
-    // Return cached bounds if computed for the current frame already
-    if(g_cachedVpFrame == CacheGetFrameTime() && g_cachedVpFrame > 0) {
-        vpTop = g_cachedVpTop;
-        vpBottom = g_cachedVpBottom;
-        return;
-    }
+    static double s_vpTop = 0;
+    static double s_vpBottom = 0;
+    static double s_lastChartMax = 0;
+    static double s_lastChartMin = 0;
 
     double vpChartMax = ChartGetDouble(0, CHART_PRICE_MAX);
     double vpChartMin = ChartGetDouble(0, CHART_PRICE_MIN);
     double point = GetCachedPoint();
 
     if(vpChartMax > 0 && vpChartMin > 0 && vpChartMax > vpChartMin) {
+        if(s_vpTop > 0 &&
+           MathAbs(vpChartMax - s_lastChartMax) <= point &&
+           MathAbs(vpChartMin - s_lastChartMin) <= point) {
+            vpTop = s_vpTop;
+            vpBottom = s_vpBottom;
+            return;
+        }
+
         double vpRange = (vpChartMax - vpChartMin) * 0.5;
         vpTop = vpChartMax + vpRange;
         vpBottom = vpChartMin - vpRange;
-        g_cachedVpTop = vpTop;
-        g_cachedVpBottom = vpBottom;
-        g_cachedVpFrame = CacheGetFrameTime();
+        s_vpTop = vpTop;
+        s_vpBottom = vpBottom;
+        s_lastChartMax = vpChartMax;
+        s_lastChartMin = vpChartMin;
+        return;
+    }
+
+    if(s_vpTop > 0 && s_vpBottom > 0 && s_vpTop > s_vpBottom) {
+        vpTop = s_vpTop;
+        vpBottom = s_vpBottom;
         return;
     }
 
@@ -299,9 +137,10 @@ void GetViewportBounds(double &vpTop, double &vpBottom) {
 
     vpTop = anchor + fallbackRange;
     vpBottom = MathMax(anchor - fallbackRange, point);
-    g_cachedVpTop = vpTop;
-    g_cachedVpBottom = vpBottom;
-    g_cachedVpFrame = CacheGetFrameTime();
+    s_vpTop = vpTop;
+    s_vpBottom = vpBottom;
+    s_lastChartMax = 0;
+    s_lastChartMin = 0;
 }
 
 bool ValidateComboParam(bool isInvalid, const string paramName, const string paramValue, const string context = "PRESET MODE") {
@@ -344,13 +183,6 @@ bool CreateFactorMidZone(const string zoneName,
         return true;
     }
     
-    // STYLE: LINES ONLY - Use old implementation (special case)
-    //     style         HLINE            Factory                
-    if(zoneStyle == FACTOR_ZONE_LINES) {
-        return CreateFactorMidZone_LinesStyle(zoneName, upperPrice, lowerPrice, 
-                                              zoneColor, transparency);
-    }
-    
     //                                                                
     // PHASE 2: USE UNIFIED SYSTEM FOR BOX STYLES
     //                                                                
@@ -362,6 +194,8 @@ bool CreateFactorMidZone(const string zoneName,
     config.heightPercent = 1.0; // Factor zones use full height (not percentage)
     config.separateStructureTrigger = false;
     config.defaultColor = zoneColor;
+    config.borderStyle = inpMidZoneBorderStyle;
+    config.borderWidth = inpMidZoneBorderWidth;
     
     // Calculate midpoint (for unified system)
     double midPoint = (upperPrice + lowerPrice) / 2.0;
@@ -375,26 +209,26 @@ bool CreateFactorMidZone(const string zoneName,
     request.zoneColor = zoneColor;
     request.transparency = transparency;
     request.filled = (zoneStyle == FACTOR_ZONE_BOX_FILLED);
+    request.borderStyle = config.borderStyle;
+    request.borderWidth = config.borderWidth;
     request.startTime = 0;  // Auto-calculate
     request.endTime = 0;    // Auto-calculate
-
-    // PERF (2026): the previous code did `DeleteIndicatorObjectManaged(_Top)` and
-    // `DeleteIndicatorObjectManaged(_Bottom)` here. In BOX style, _Top/_Bottom
-    // lines do not exist (only the rectangle does), so this was deleting nothing
-    // but paying two synchronous ObjectFind + ObjectDelete chart-API syscalls per
-    // zone per redraw. Worse, if the user switched from LINES to BOX mid-session,
-    // this would delete the LINES-style _Top/_Bottom objects incorrectly.
-    // CreateZone is already in-place via the cache, so the delete was always
-    // dead code. Removed.
-
+    
     SZoneCreationResult result = CreateZone(request);
     
     // CRITICAL FIX: If indicator is hidden, hide the zone immediately
     //                                             
-    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
+    // PERFORMANCE: Use cached ChartID string
     if(result.success) {
-        if(IsIndicatorHidden()) {
+        string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+        bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+        
+        if(isHidden) {
             ObjectSetInteger(0, zoneName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            // Empty-box border segments (BOX_EMPTY style)
+            ObjectSetInteger(0, zoneName + "_B_Top", OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            ObjectSetInteger(0, zoneName + "_B_Bottom", OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            ObjectSetInteger(0, zoneName + "_B_Left", OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
         }
     }
     
@@ -402,69 +236,117 @@ bool CreateFactorMidZone(const string zoneName,
 }
 
 //+------------------------------------------------------------------+
-//| Create Factor Mid Zone - LINES STYLE (Legacy)                    |
-//|      Zone Factor -             (     )                          |
-//|                                                                  |
-//|                   LINES style                                    |
-//| FIXED: Respects Hide state when creating line zones             |
+//| Create/update a zone boundary SEGMENT (bounded like the box, not |
+//| a full-width HLINE) so LINES style matches the box edges exactly.|
+//| Uses the zone cache for change detection.                        |
+//+------------------------------------------------------------------+
+bool CreateOrUpdateZoneBoundary(const string name, const double price,
+                                 const datetime startTime, const datetime endTime,
+                                 const color clr, const int style, const int width,
+                                 const string tooltip)
+{
+    SObjectCacheEntry cachedEntry;
+    bool hasCached = CacheGetObject(name, cachedEntry) && cachedEntry.exists;
+    bool objectExists = hasCached;
+    // Managed objects are invalidated by the delete-event handler. Avoid a
+    // synchronous ObjectFind on every redraw; use it only for cache misses.
+    if(!objectExists)
+        objectExists = (ObjectFind(0, name) >= 0);
+    
+    // Migrate old full-width HLINE leftovers only during cache warm-up.
+    // Once this renderer owns the cached object, its type cannot change
+    // without a delete event and another synchronous type query is wasteful.
+    if(objectExists && !hasCached) {
+        int objType = (int)ObjectGetInteger(0, name, OBJPROP_TYPE);
+        if(objType != OBJ_TREND) {
+            ObjectDelete(0, name);
+            CacheRemoveObject(name);
+            objectExists = false;
+            hasCached = false;
+        }
+    }
+    
+    double normPrice = NormalizeDouble(price, Digits);
+    if(!objectExists) {
+        if(!ObjectCreate(0, name, OBJ_TREND, 0, startTime, normPrice, endTime, normPrice)) {
+            return false;
+        }
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+        ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, name, OBJPROP_BACK, true);
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+        CacheUpdateZone(name, normPrice, normPrice, startTime, endTime, clr, true, style, width);
+        CacheUpdateTooltip(name, tooltip);
+        // FIX: Zone boundary lines follow the L key (zone visibility)
+        ApplyVisibilityState(name, true);
+        return true;
+    }
+    
+    bool geometryChanged = (!hasCached || cachedEntry.lastPrice != normPrice ||
+                            cachedEntry.lastTime1 != startTime || cachedEntry.lastTime2 != endTime);
+    if(geometryChanged) {
+        ObjectMove(0, name, 0, startTime, normPrice);
+        ObjectMove(0, name, 1, endTime, normPrice);
+    }
+    bool visualChanged = (!hasCached || cachedEntry.lastColor != clr ||
+                          cachedEntry.lastStyle != style || cachedEntry.lastWidth != width);
+    if(visualChanged) {
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+    }
+    bool tooltipChanged = !hasCached || cachedEntry.lastTooltip != tooltip;
+    if(tooltipChanged)
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tooltip);
+    CacheUpdateZone(name, normPrice, normPrice, startTime, endTime, clr, true, style, width);
+    if(tooltipChanged) CacheUpdateTooltip(name, tooltip);
+    // FIX: Zone boundary lines follow the L key (zone visibility)
+    ApplyVisibilityStateIfUnchangedSkip(name, true);
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Create Factor Mid Zone - LINES STYLE                             |
+//| Boundary lines match the box exactly: same time span, same       |
+//| blended color, configurable border style/width.                  |
 //+------------------------------------------------------------------+
 bool CreateFactorMidZone_LinesStyle(const string zoneName,
-                                    double upperPrice,
-                                    double lowerPrice,
+                                    const double upperPrice,
+                                    const double lowerPrice,
                                     const color zoneColor,
                                     const int transparency)
 {
     // Validate inputs
     if(StringLen(zoneName) == 0) return false;
     if(upperPrice <= 0 || lowerPrice <= 0) return false;
-    // FIX: if the two lines collapse to the same price on a low timeframe
-    // (step < 1 point), separate them by a minimum visible gap so the LINES
-    // zone style stays visible instead of being silently rejected.
-    if(upperPrice <= lowerPrice) {
-        double point = GetCachedPoint();
-        if(point <= 0) point = 1e-5;
-        double minHalf = point * ZONE_MIN_HEIGHT_POINTS;
-        double mid = (upperPrice + lowerPrice) * 0.5;
-        upperPrice = NormalizeDouble(mid + minHalf, Digits);
-        lowerPrice = NormalizeDouble(mid - minHalf, Digits);
-    }
+    if(upperPrice <= lowerPrice) return false;
     
     string lineTop = zoneName + "_Top";
     string lineBottom = zoneName + "_Bottom";
 
-    // PERF (2026): removed `DeleteIndicatorObjectManaged(zoneName, true)` here.
-    // In LINES style the zoneName itself is never created (only `_Top` and
-    // `_Bottom` HLINEs are), so the delete was always a no-op that paid the
-    // synchronous ObjectFind cost. CreateOrUpdateHLine is already in-place
-    // via the cache, so when the user toggles LINES style back and forth the
-    // existing _Top/_Bottom objects are simply updated in place.
+    DeleteIndicatorObjectManaged(zoneName);
 
-    bool topOk = CreateOrUpdateHLine(lineTop, upperPrice, zoneColor, STYLE_DOT, 1, zoneName + " top", false);
-    bool bottomOk = CreateOrUpdateHLine(lineBottom, lowerPrice, zoneColor, STYLE_DOT, 1, zoneName + " bottom", false);
+    // Same time span as the box (matches CreateZone geometry)
+    int safeBars = Bars;
+    datetime currentTime = (safeBars > 0) ? Time[0] : TimeCurrent();
+    if(currentTime <= 0) currentTime = TimeCurrent();
+    datetime startTime = (safeBars > 0) ? Time[safeBars - 1] : currentTime;
+    if(startTime <= 0) startTime = currentTime;
+    datetime endTime = currentTime + PeriodSeconds(Period()) * ZONE_EXTENSION_PERIODS;
+    
+    // Blend color with background (same visual as the box)
+    color lineColor = GetZoneRenderColor(zoneColor, transparency);
 
-    // PERF (2026, E): set OBJPROP_BACK / OBJPROP_ZORDER ONLY when the cache
-    // entry was created in this frame (lastUpdate == current frame time).
-    // These are style properties that MQL5 retains forever after the first
-    // set, so we don't need to re-set them on every redraw. The cache tells
-    // us "freshly created" cheaply; the previous code did an ObjectFind for
-    // every line every redraw to discover the same fact.
-    ulong frameMs = CacheGetFrameMs();
-    if(topOk) {
-        int topIdx = CacheFindIndex(lineTop);
-        if(topIdx >= 0 && (ulong)g_objectCacheHash[topIdx].entry.lastUpdate == frameMs) {
-            ObjectSetInteger(0, lineTop, OBJPROP_BACK, true);
-            ObjectSetInteger(0, lineTop, OBJPROP_ZORDER, 0);
-        }
-    }
-    if(bottomOk) {
-        int botIdx = CacheFindIndex(lineBottom);
-        if(botIdx >= 0 && (ulong)g_objectCacheHash[botIdx].entry.lastUpdate == frameMs) {
-            ObjectSetInteger(0, lineBottom, OBJPROP_BACK, true);
-            ObjectSetInteger(0, lineBottom, OBJPROP_ZORDER, 0);
-        }
-    }
+    CreateOrUpdateZoneBoundary(lineTop, upperPrice, startTime, endTime,
+                               lineColor, inpMidZoneBorderStyle, inpMidZoneBorderWidth,
+                               zoneName + " top");
+    CreateOrUpdateZoneBoundary(lineBottom, lowerPrice, startTime, endTime,
+                               lineColor, inpMidZoneBorderStyle, inpMidZoneBorderWidth,
+                               zoneName + " bottom");
 
-    return topOk && bottomOk;
+    return (ObjectFind(0, lineTop) >= 0 && ObjectFind(0, lineBottom) >= 0);
 }
 
 
@@ -657,6 +539,18 @@ double GetStepSizeForFactorBasis(const double basePrice, const ENUM_FACTOR_AUTO_
 //+------------------------------------------------------------------+
 double GetStepSizeForBasisType(const double basePrice, const double multiplier, 
                                 const ENUM_TIMEFRAMES timeframe) {
+    // Standard path: TH% comes from the timeframe lookup.
+    double thPercentage = GetTimeframeTHForPeriod(timeframe);
+    return GetStepSizeForBasisTypeFromTH(basePrice, multiplier, thPercentage);
+}
+
+//+------------------------------------------------------------------+
+//| Step size directly from a TH percentage (no timeframe lookup).  |
+//| Used by the Combo engine for sub-minute fractal components that |
+//| have no standard ENUM_TIMEFRAMES representation.                |
+//+------------------------------------------------------------------+
+double GetStepSizeForBasisTypeFromTH(const double basePrice, const double multiplier,
+                                     const double thPercentage) {
     // CRITICAL: Validate inputs
     if(basePrice <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -672,11 +566,9 @@ double GetStepSizeForBasisType(const double basePrice, const double multiplier,
         return 0;
     }
     
-    // Get TH percentage for specified timeframe
-    double thPercentage = GetTimeframeTHForPeriod(timeframe);
     if(thPercentage <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("  GetStepSizeForBasisType: Invalid TH%=", thPercentage, " for TF=", timeframe);
+        Print("  GetStepSizeForBasisType: Invalid TH%=", thPercentage);
         #endif
         return 0;
     }
@@ -749,1072 +641,16 @@ double GetStepSizeForBasisType(const double basePrice, const double multiplier,
 //| @return Calculated triple combo step size (> 0), or 0 on error |
 //+------------------------------------------------------------------+
 double CalculateComboStepSize(const double basePrice) {
-    if(basePrice <= 0) return 0;
-
-    // PERF: Cache the whole combo/advanced step computation. On every redraw (incl.
-    // every tick-driven redraw on M1/M5) the previous code re-ran GetStepSizeForBasisType
-    // -> CalculateTimeframeTH (linear string scan over FRACTAL_TIMEFRAMES) several
-    // times. With steady inputs the cache short-circuits the entire subtree.
-    double cached = GetCachedComboStepSize(basePrice);
-    if(cached > 0) return cached;
-
-    // COMBO FIX #1: Advanced Mode must use the full calculator (topology + Comp1-4 + Op1-3).
-    // The old path below only honored Comp1/Comp2/Op1, so ADD/SUBTRACT/MIN/MAX and the
-    // 3rd/4th components had NO effect on the displayed levels. CalculateCalculatorModeStepSize
-    // is the single source of truth for Advanced Mode and is never recursive, so this is safe.
-    if(inpComboMode == COMBO_MODE_ADVANCED) {
-        double adv = CalculateCalculatorModeStepSize(basePrice);
-        if(adv > 0) StoreCachedComboStepSize(basePrice, adv);
-        return adv;
-    }
-
-    SComboConfig config;
-    GetComboConfiguration(basePrice, config);
-
-    double step1 = GetStepSizeForBasisType(basePrice, GetStepMultiplier(config.step1), GetTimeframeByType(config.tf1));
-    if(config.activeComponents == 1) {
-        if(step1 > 0) StoreCachedComboStepSize(basePrice, step1);
-        return step1;
-    }
-
-    double step2 = GetStepSizeForBasisType(basePrice, GetStepMultiplier(config.step2), GetTimeframeByType(config.tf2));
-    
-    double result = 0;
-    if(config.isTriple) {
-        double step3 = GetStepSizeForBasisType(basePrice, GetStepMultiplier(config.step3), GetTimeframeByType(config.tf3));
-        if(config.operation == COMBO_OP_MIN) result = MathMin(step1, MathMin(step2, step3));
-        else if(config.operation == COMBO_OP_MAX) result = MathMax(step1, MathMax(step2, step3));
-        else if(config.operation == COMBO_OP_GEO_MEAN) {
-            // AUDIT FIX #2: real 3-value geometric mean (was silently downgraded to arithmetic average).
-            if(step1 > 0 && step2 > 0 && step3 > 0)
-                result = MathPow(step1 * step2 * step3, 1.0 / 3.0);
-            else
-                result = (step1 + step2 + step3) / 3.0; // safe fallback if any component is invalid
-        }
-        else result = (step1 + step2 + step3) / 3.0;
-    } else {
-        result = ApplyComboOperation(step1, step2, config.operation, 0.5, 0.5);
-    }
-
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[D][DRAW] Combo Step [", EnumToString(inpComboMode), "]: ", DoubleToString(result, Digits));
-    #endif
-    if(result > 0) StoreCachedComboStepSize(basePrice, result);
-    return result;
+    // DELEGATES to the pure ComboEngine (ComboEngine.mqh). The legacy
+    // GetComboConfiguration() switch was replaced by the preset data
+    // table in the engine - behavior is identical.
+    return GetComboStepSize(basePrice);
 }
 
-//+------------------------------------------------------------------+
-//| AUDIT FIX #8: Map ENUM_COMBO_OPERATOR (user-facing inputs) to     |
-//| ENUM_COMBO_OPERATION (internal config). The two enums share NO    |
-//| numeric alignment -- e.g. OP_PLUS=0 but COMBO_OP_ADD=1,           |
-//| OP_AVERAGE=4 but COMBO_OP_MIN=4. Casting directly was the root   |
-//| cause of "the combo doesn't apply the operation I picked".        |
-//|                                                                  |
-//| Returns COMBO_OP_AVERAGE for operators with no direct equivalent  |
-//| (DIVIDE, HARMONIC_MEAN, *_ALL variants, NONE) and emits a warning.|
-//+------------------------------------------------------------------+
-ENUM_COMBO_OPERATION MapOperatorToComboOperation(const ENUM_COMBO_OPERATOR op) {
-    switch(op) {
-        case OP_PLUS:                 return COMBO_OP_ADD;
-        case OP_MINUS:                return COMBO_OP_SUBTRACT;
-        case OP_MULTIPLY:             return COMBO_OP_MULTIPLY;
-        case OP_AVERAGE:              return COMBO_OP_AVERAGE;
-        case OP_GEOMETRIC_MEAN:       return COMBO_OP_GEO_MEAN;
-        case OP_GEOMETRIC_MEAN_ALL:   return COMBO_OP_GEO_MEAN;
-        case OP_ARITHMETIC_MEAN_ALL:  return COMBO_OP_AVERAGE;
-        case OP_MIN_ALL:              return COMBO_OP_MIN;
-        case OP_MAX_ALL:              return COMBO_OP_MAX;
-        case OP_DIVIDE:
-        case OP_HARMONIC_MEAN:
-        case OP_HARMONIC_MEAN_ALL:
-        case OP_NONE:
-        default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("   MapOperatorToComboOperation: No exact equivalent for ", EnumToString(op),
-                  " - falling back to COMBO_OP_AVERAGE");
-            #endif
-            return COMBO_OP_AVERAGE;
-    }
-}
+// (Removed: legacy Smart Combo Calculator helpers - see ComboEngine.mqh)
 
-void GetComboConfiguration(const double basePrice, SComboConfig &config) {
-    // Default initialization
-    config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_TH; config.weight1 = 1.0;
-    config.tf2 = COMBO_TF_TRIGGER; config.step2 = COMBO_STEP_TH; config.weight2 = 0.0;
-    config.tf3 = COMBO_TF_TRIGGER; config.step3 = COMBO_STEP_TH; config.weight3 = 0.0;
-    config.operation = COMBO_OP_AVERAGE;
-    config.activeComponents = 1;
-    config.isTriple = false;
 
-    if(inpComboMode == COMBO_MODE_ADVANCED) {
-        config.tf1 = (ENUM_COMBO_TIMEFRAME_TYPE)(inpComboComp1 / 3);
-        config.step1 = (ENUM_COMBO_STEP_TYPE)(inpComboComp1 % 3);
-        config.tf2 = (ENUM_COMBO_TIMEFRAME_TYPE)(inpComboComp2 / 3);
-        config.step2 = (ENUM_COMBO_STEP_TYPE)(inpComboComp2 % 3);
-        // AUDIT FIX #8: was (ENUM_COMBO_OPERATION)inpComboOp1 (broken cast).
-        // OP_PLUS=0 vs COMBO_OP_ADD=1, OP_AVERAGE=4 vs COMBO_OP_MIN=4, etc.
-        config.operation = MapOperatorToComboOperation(inpComboOp1);
-        config.activeComponents = (inpComboComp2 != COMP_IGNORE) ? 2 : 1;
-        return;
-    }
 
-    switch(inpComboPreset) {
-        case COMBO_PRESET_LEGACY_ADD:
-            config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_SS;
-            config.tf2 = COMBO_TF_PATTERN; config.step2 = COMBO_STEP_SS;
-            config.operation = COMBO_OP_ADD; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_BALANCED_MEDIUM:
-            config.tf1 = COMBO_TF_PATTERN; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_TRIGGER; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_BALANCED_LONG:
-            config.tf1 = COMBO_TF_STRUCTURE; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_PATTERN; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_BALANCED_TRIPLE:
-            config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_PATTERN; config.step2 = COMBO_STEP_TH;
-            config.tf3 = COMBO_TF_STRUCTURE; config.step3 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 3; config.isTriple = true;
-            break;
-        case COMBO_PRESET_BALANCED_MIN:
-            config.tf1 = COMBO_TF_PATTERN; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_TRIGGER; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MIN; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_CONSERVATIVE:
-            config.tf1 = COMBO_TF_STRUCTURE; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_PATTERN; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MAX; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_ULTRA_CONSERVATIVE:
-            config.tf1 = COMBO_TF_STRUCTURE; config.step1 = COMBO_STEP_TH;
-            config.activeComponents = 1;
-            break;
-        case COMBO_PRESET_TRIPLE_CONSERVATIVE:
-            config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_PATTERN; config.step2 = COMBO_STEP_TH;
-            config.tf3 = COMBO_TF_STRUCTURE; config.step3 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MAX; config.activeComponents = 3; config.isTriple = true;
-            break;
-        case COMBO_PRESET_AGGRESSIVE:
-            // AUDIT FIX #7: Was identical to BALANCED_MIN (min(Pattern, Trigger)).
-            // Now uses triple min(Pattern, Trigger, Sub) so it is genuinely more
-            // aggressive (smaller step) and clearly distinguishable.
-            config.tf1 = COMBO_TF_PATTERN; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_TRIGGER; config.step2 = COMBO_STEP_TH;
-            config.tf3 = COMBO_TF_SUB; config.step3 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MIN; config.activeComponents = 3; config.isTriple = true;
-            break;
-        case COMBO_PRESET_ULTRA_AGGRESSIVE:
-            config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_SUB; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MIN; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_TRIPLE_AGGRESSIVE:
-            config.tf1 = COMBO_TF_TRIGGER; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_PATTERN; config.step2 = COMBO_STEP_TH;
-            config.tf3 = COMBO_TF_STRUCTURE; config.step3 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_MIN; config.activeComponents = 3; config.isTriple = true;
-            break;
-        case COMBO_PRESET_TREND_FILTER:
-            config.tf1 = COMBO_TF_STRUCTURE; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_SUB; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_SUBTRACT; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_VOLATILITY_ADAPTIVE:
-            config.tf1 = COMBO_TF_STRUCTURE; config.step1 = COMBO_STEP_TH;
-            config.tf2 = COMBO_TF_SUB; config.step2 = COMBO_STEP_TH;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_QT_TRIGGER_PATTERN:
-            // AUDIT FIX #2: was COMBO_OP_AVERAGE despite comment claiming "Geo Mean".
-            config.tf1 = COMBO_TF_TRIGGER; config.tf2 = COMBO_TF_PATTERN;
-            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_QT_ALL_4TF:
-            // AUDIT FIX #2: switched to real geometric mean.
-            config.tf1 = COMBO_TF_SUB; config.tf2 = COMBO_TF_TRIGGER; config.tf3 = COMBO_TF_PATTERN;
-            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 3; config.isTriple = true;
-            break;
-        case COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE:
-            // AUDIT FIX #2: switched to real geometric mean.
-            config.tf1 = COMBO_TF_TRIGGER; config.tf2 = COMBO_TF_PATTERN; config.tf3 = COMBO_TF_STRUCTURE;
-            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 3; config.isTriple = true;
-            break;
-        case COMBO_PRESET_QT_PATTERN_STRUCTURE:
-            // AUDIT FIX #2: switched to real geometric mean.
-            config.tf1 = COMBO_TF_PATTERN; config.tf2 = COMBO_TF_STRUCTURE;
-            config.operation = COMBO_OP_GEO_MEAN; config.activeComponents = 2;
-            break;
-        case COMBO_PRESET_QT_TRIGGER_ONLY:
-            config.tf1 = COMBO_TF_TRIGGER; config.activeComponents = 1;
-            break;
-
-        // AUDIT FIX #1: MANUAL_DUAL / MANUAL_TRIPLE must read user inputs
-        // (inpComboComp1..4, inpComboOp1..3) and behave like Advanced Mode,
-        // instead of silently falling back to the default (Pattern+Trigger AVERAGE).
-        case COMBO_PRESET_MANUAL_DUAL:
-        case COMBO_PRESET_MANUAL_TRIPLE: {
-            ENUM_COMBO_TIMEFRAME_TYPE t1 = COMBO_TF_TRIGGER, t2 = COMBO_TF_TRIGGER;
-            ENUM_COMBO_STEP_TYPE      s1 = COMBO_STEP_TH,  s2 = COMBO_STEP_TH;
-            bool have1 = GetComboComponentParams(inpComboComp1, t1, s1);
-            bool have2 = GetComboComponentParams(inpComboComp2, t2, s2);
-            config.tf1 = have1 ? t1 : COMBO_TF_TRIGGER;
-            config.step1 = have1 ? s1 : COMBO_STEP_TH;
-            config.tf2 = have2 ? t2 : COMBO_TF_TRIGGER;
-            config.step2 = have2 ? s2 : COMBO_STEP_TH;
-            // AUDIT FIX #8: use mapping function instead of broken direct cast.
-            config.operation = MapOperatorToComboOperation(inpComboOp1);
-
-            if(inpComboPreset == COMBO_PRESET_MANUAL_TRIPLE && inpComboComp3 != COMP_IGNORE) {
-                ENUM_COMBO_TIMEFRAME_TYPE t3 = COMBO_TF_TRIGGER;
-                ENUM_COMBO_STEP_TYPE      s3 = COMBO_STEP_TH;
-                if(GetComboComponentParams(inpComboComp3, t3, s3)) {
-                    config.tf3 = t3;
-                    config.step3 = s3;
-                    config.isTriple = true;
-                    config.activeComponents = 3;
-                } else {
-                    config.activeComponents = 2;
-                }
-            } else {
-                config.activeComponents = 2;
-            }
-            break;
-        }
-
-        default:
-            config.tf1 = COMBO_TF_PATTERN; config.tf2 = COMBO_TF_TRIGGER;
-            config.operation = COMBO_OP_AVERAGE; config.activeComponents = 2;
-            break;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Helper to decode Smart Combo Component Item to TF and Step       |
-//|                                                                   |
-//+------------------------------------------------------------------+
-bool GetComboComponentParams(const ENUM_COMBO_COMPONENT_ITEM item, 
-                             ENUM_COMBO_TIMEFRAME_TYPE &outTF, 
-                             ENUM_COMBO_STEP_TYPE &outStep) {
-    if (item == COMP_IGNORE) return false;
-    
-    switch(item) {
-        // Sub
-        case COMP_SUB_TH: outTF = COMBO_TF_SUB; outStep = COMBO_STEP_TH; return true;
-        case COMP_SUB_SS: outTF = COMBO_TF_SUB; outStep = COMBO_STEP_SS; return true;
-        case COMP_SUB_LS: outTF = COMBO_TF_SUB; outStep = COMBO_STEP_LS; return true;
-        
-        // Trigger
-        case COMP_TRIGGER_TH: outTF = COMBO_TF_TRIGGER; outStep = COMBO_STEP_TH; return true;
-        case COMP_TRIGGER_SS: outTF = COMBO_TF_TRIGGER; outStep = COMBO_STEP_SS; return true;
-        case COMP_TRIGGER_LS: outTF = COMBO_TF_TRIGGER; outStep = COMBO_STEP_LS; return true;
-        
-        // Pattern
-        case COMP_PATTERN_TH: outTF = COMBO_TF_PATTERN; outStep = COMBO_STEP_TH; return true;
-        case COMP_PATTERN_SS: outTF = COMBO_TF_PATTERN; outStep = COMBO_STEP_SS; return true;
-        case COMP_PATTERN_LS: outTF = COMBO_TF_PATTERN; outStep = COMBO_STEP_LS; return true;
-        
-        // Structure
-        case COMP_STRUCTURE_TH: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_TH; return true;
-        case COMP_STRUCTURE_SS: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_SS; return true;
-        case COMP_STRUCTURE_LS: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_LS; return true;
-        
-        // Control/Mid (TH * 1.75)
-        case COMP_SUB_CONTROL: outTF = COMBO_TF_SUB; outStep = COMBO_STEP_CONTROL; return true;
-        case COMP_TRIGGER_CONTROL: outTF = COMBO_TF_TRIGGER; outStep = COMBO_STEP_CONTROL; return true;
-        case COMP_PATTERN_CONTROL: outTF = COMBO_TF_PATTERN; outStep = COMBO_STEP_CONTROL; return true;
-        case COMP_STRUCTURE_CONTROL: outTF = COMBO_TF_STRUCTURE; outStep = COMBO_STEP_CONTROL; return true;
-        
-        default: return false;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Helper: Get Step Size from Component Item                        |
-//+------------------------------------------------------------------+
-double GetStepSizeFromComponent(const double basePrice, const ENUM_COMBO_COMPONENT_ITEM comp) {
-    if (comp == COMP_IGNORE) return 0;
-    
-    //                                                                
-    // AGGREGATE COMPONENTS (Mean of TH, SS, LS) -                  
-    //                                                                
-    if(comp >= COMP_SUB_MEAN && comp <= COMP_STRUCTURE_MEAN) {
-        ENUM_COMBO_TIMEFRAME_TYPE tfType;
-        
-        // Determine timeframe based on component
-        switch(comp) {
-            case COMP_SUB_MEAN:       tfType = COMBO_TF_SUB; break;
-            case COMP_TRIGGER_MEAN:   tfType = COMBO_TF_TRIGGER; break;
-            case COMP_PATTERN_MEAN:   tfType = COMBO_TF_PATTERN; break;
-            case COMP_STRUCTURE_MEAN: tfType = COMBO_TF_STRUCTURE; break;
-            default: return 0;
-        }
-        
-        ENUM_TIMEFRAMES tf = GetTimeframeByType(tfType);
-        if(tf <= 0) return 0;
-        
-        // Calculate TH, SS, LS for this timeframe
-        double th = GetStepSizeForBasisType(basePrice, 1.0, tf);   // TH multiplier = 1.0
-        double ss = GetStepSizeForBasisType(basePrice, 1.5, tf);   // SS multiplier = 1.5
-        double ls = GetStepSizeForBasisType(basePrice, 2.0, tf);   // LS multiplier = 2.0
-        
-        // GOLD FIX: Validate that at least ONE value is valid
-        int validCount = 0;
-        if(th > 0) validCount++;
-        if(ss > 0) validCount++;
-        if(ls > 0) validCount++;
-        
-        if(validCount == 0) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  GetStepSizeFromComponent: All MEAN components invalid for ", EnumToString(comp));
-            #endif
-            return 0;
-        }
-        
-        // OBSERVABILITY FIX: Warn if not all values are valid
-        if(validCount < 3) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("   GetStepSizeFromComponent: Only ", validCount, "/3 values valid for ", EnumToString(comp));
-            Print("   TH: ", (th > 0 ? DoubleToString(th, Digits) : "INVALID"));
-            Print("   SS: ", (ss > 0 ? DoubleToString(ss, Digits) : "INVALID"));
-            Print("   LS: ", (ls > 0 ? DoubleToString(ls, Digits) : "INVALID"));
-            #endif
-            
-            // Production warning for incomplete mean calculation
-            if(validCount == 1) {
-                Print("   MEAN COMPONENT INFO: ", EnumToString(comp), 
-                      " - Only 1/3 values valid. Result equals the single valid value.");
-            } else if(validCount == 2) {
-                Print("   MEAN COMPONENT INFO: ", EnumToString(comp), 
-                      " - Only 2/3 values valid. Mean calculated from 2 values.");
-            }
-        }
-        
-        // Build array with only valid values
-        double validValues[];
-        ArrayResize(validValues, validCount);
-        int idx = 0;
-        if(th > 0) validValues[idx++] = th;
-        if(ss > 0) validValues[idx++] = ss;
-        if(ls > 0) validValues[idx++] = ls;
-        
-        // Calculate mean based on configured type
-        double result = CalculateMeanByType(validValues, inpAggregateMeanType);
-        
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("  GetStepSizeFromComponent: MEAN component ", EnumToString(comp), 
-              " = ", DoubleToString(result, Digits), " (", validCount, "/3 valid values, ",
-              EnumToString(inpAggregateMeanType), " mean)");
-        #endif
-        
-        return result;
-    }
-    
-    //                                                                
-    // REGULAR COMPONENTS (Individual TH, SS, LS)
-    //                                                                
-    ENUM_COMBO_TIMEFRAME_TYPE tfType;
-    ENUM_COMBO_STEP_TYPE stepType;
-    
-    if(!GetComboComponentParams(comp, tfType, stepType)) {
-        return 0;
-    }
-    
-    ENUM_TIMEFRAMES tf = GetTimeframeByType(tfType);
-    if(tf <= 0) return 0;
-    
-    double mult = GetStepMultiplier(stepType);
-    if(mult <= 0) return 0;
-    
-    return GetStepSizeForBasisType(basePrice, mult, tf);
-}
-
-//+------------------------------------------------------------------+
-//| N-ARY MEAN CALCULATORS - For Multi-Component Operations          |
-//|                              -                                   |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Calculate Geometric Mean of N values:   (v1   v2   ...   vn)    |
-//|                      N                                            |
-//|                                                                  |
-//| GOLD FIX: Uses logarithmic approach to prevent overflow          |
-//| Formula: exp((ln(v1) + ln(v2) + ... + ln(vn)) / n)              |
-//+------------------------------------------------------------------+
-double CalculateGeometricMeanN(const double &values[]) {
-    int n = ArraySize(values);
-    if(n == 0) return 0;
-    if(n == 1) return values[0];
-    
-    //                                                                
-    // LOGARITHMIC APPROACH (Prevents overflow for large values)
-    //                                                                
-    
-    double logSum = 0;
-    
-    for(int i = 0; i < n; i++) {
-        // Check for non-positive values
-        if(values[i] <= 0) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CalculateGeometricMeanN: Non-positive value at index ", i, ": ", values[i]);
-            #endif
-            return 0;
-        }
-        
-        // Sum of logarithms instead of product
-        logSum += MathLog(values[i]);
-    }
-    
-    // Calculate geometric mean: exp(average of logs)
-    // Formula: exp((ln(v1) + ln(v2) + ... + ln(vn)) / n)
-    double result = MathExp(logSum / n);
-    
-    // SAFETY: Validate result
-    if(result <= 0 || result > DBL_MAX / 2.0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("  CalculateGeometricMeanN: Invalid result=", result);
-        #endif
-        return 0;
-    }
-    
-    return result;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Arithmetic Mean of N values: (v1 + v2 + ... + vn) / n |
-//|                      N                                            |
-//+------------------------------------------------------------------+
-double CalculateArithmeticMeanN(const double &values[]) {
-    int n = ArraySize(values);
-    if(n == 0) return 0;
-    if(n == 1) return values[0];
-    
-    double sum = 0;
-    for(int i = 0; i < n; i++) {
-        sum += values[i];
-    }
-    
-    return sum / n;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Harmonic Mean of N values: n / (1/v1 + 1/v2 + ... + 1/vn) |
-//|                         N                                         |
-//+------------------------------------------------------------------+
-double CalculateHarmonicMeanN(const double &values[]) {
-    int n = ArraySize(values);
-    if(n == 0) return 0;
-    if(n == 1) return values[0];
-    
-    double reciprocalSum = 0;
-    for(int i = 0; i < n; i++) {
-        if(MathAbs(values[i]) < 0.000001) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CalculateHarmonicMeanN: Zero/near-zero value at index ", i, ": ", values[i]);
-            #endif
-            return 0;
-        }
-        reciprocalSum += 1.0 / values[i];
-    }
-    
-    if(MathAbs(reciprocalSum) < 0.000001) return 0;
-    
-    return n / reciprocalSum;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Minimum of N values: min(v1, v2, ..., vn)             |
-//|              N                                                   |
-//+------------------------------------------------------------------+
-double CalculateMinN(const double &values[]) {
-    int n = ArraySize(values);
-    if(n == 0) return 0;
-    if(n == 1) return values[0];
-    
-    double minVal = values[0];
-    for(int i = 1; i < n; i++) {
-        if(values[i] < minVal) minVal = values[i];
-    }
-    
-    return minVal;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Maximum of N values: max(v1, v2, ..., vn)             |
-//|               N                                                  |
-//+------------------------------------------------------------------+
-double CalculateMaxN(const double &values[]) {
-    int n = ArraySize(values);
-    if(n == 0) return 0;
-    if(n == 1) return values[0];
-    
-    double maxVal = values[0];
-    for(int i = 1; i < n; i++) {
-        if(values[i] > maxVal) maxVal = values[i];
-    }
-    
-    return maxVal;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate mean based on type (Unified Interface)                 |
-//|                            (            )                        |
-//|                                                                  |
-//| This is the MAIN interface for all mean calculations             |
-//| Used by: Quick Test, Aggregate Components, N-ary Operators      |
-//+------------------------------------------------------------------+
-double CalculateMeanByType(const double &values[], const ENUM_MEAN_TYPE meanType) {
-    int n = ArraySize(values);
-    
-    // Validation
-    if(n == 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("  CalculateMeanByType: Empty array");
-        #endif
-        return 0;
-    }
-    
-    if(n == 1) return values[0];
-    
-    // Calculate based on type
-    double result = 0;
-    
-    switch(meanType) {
-        case MEAN_ARITHMETIC:
-            result = CalculateArithmeticMeanN(values);
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CalculateMeanByType: Arithmetic Mean of ", n, " values = ", 
-                  DoubleToString(result, Digits));
-            #endif
-            break;
-            
-        case MEAN_GEOMETRIC:
-            result = CalculateGeometricMeanN(values);
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CalculateMeanByType: Geometric Mean of ", n, " values = ", 
-                  DoubleToString(result, Digits));
-            #endif
-            break;
-            
-        case MEAN_HARMONIC:
-            result = CalculateHarmonicMeanN(values);
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CalculateMeanByType: Harmonic Mean of ", n, " values = ", 
-                  DoubleToString(result, Digits));
-            #endif
-            break;
-            
-        default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  CalculateMeanByType: Unknown mean type ", meanType);
-            #endif
-            return 0;
-    }
-    
-    return result;
-}
-
-//+------------------------------------------------------------------+
-//| QUICK TEST MODE FUNCTIONS                                        |
-//|                                                                  |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| Collect components from Quick Test preset or checkboxes          |
-//|          components    preset                Quick Test          |
-//|                                                                  |
-//| Returns: Number of selected components                           |
-//+------------------------------------------------------------------+
-// Removed redundant Quick Test helper
-
-// Removed redundant Quick Test calculator
-
-//+------------------------------------------------------------------+
-//| Helper: Apply Combo Operator (Calculator Mode) - GOLDEN VERSION  |
-//|                    (               ) -                            |
-//+------------------------------------------------------------------+
-double ApplyCalculatorOperator(const double value1, const double value2, 
-                          const ENUM_COMBO_OPERATOR op) {
-    if(op == OP_NONE) return value1;
-    
-    switch(op) {
-        case OP_PLUS: 
-            return value1 + value2;
-            
-        case OP_MINUS: 
-            return value1 - value2;
-            
-        case OP_MULTIPLY: 
-            return value1 * value2;
-            
-        case OP_DIVIDE:
-            // CRITICAL FIX: Use epsilon check for floating-point safety
-            if(MathAbs(value2) < 0.000001) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  ApplyCalculatorOperator: Division by zero/near-zero detected! value2=", DoubleToString(value2, 8));
-                #endif
-                return 0; // Fail explicitly instead of silent fallback
-            }
-            return value1 / value2;
-            
-        case OP_AVERAGE: 
-            // Arithmetic Mean: (A + B) / 2
-            return (value1 + value2) / 2.0;
-            
-        case OP_GEOMETRIC_MEAN:
-            // Geometric Mean:  (A   B)
-            if(value1 <= 0 || value2 <= 0) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  ApplyCalculatorOperator: Geometric mean requires positive values! value1=", value1, " value2=", value2);
-                #endif
-                return 0;
-            }
-            return MathSqrt(value1 * value2);
-            
-        case OP_HARMONIC_MEAN: {
-            // Harmonic Mean: 2 / (1/A + 1/B) = 2AB / (A + B)
-            if(MathAbs(value1) < 0.000001 || MathAbs(value2) < 0.000001) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  ApplyCalculatorOperator: Harmonic mean requires non-zero values! value1=", value1, " value2=", value2);
-                #endif
-                return 0;
-            }
-            double sum = value1 + value2;
-            if(MathAbs(sum) < 0.000001) {
-                return 0;
-            }
-            return (2.0 * value1 * value2) / sum;
-        }
-            
-        default: 
-            return value1;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Calculator Mode Logic - DUAL GROUP Topology - GOLDEN VERSION     |
-//| Formula: (Comp1 Op1 Comp2) [Op2] (Comp3 Op3 Comp4)               |
-//| Refactored: Uses shared helper for consistency                   |
-//+------------------------------------------------------------------+
-double CalculateDualGroupTopology(const double basePrice) {
-    //                                                                
-    // GROUP 1: (Comp1 Op1 Comp2)
-    //                                                                
-    
-    // 1. Start with Component 1
-    if(inpComboComp1 == COMP_IGNORE) {
-        Print("  Calculator Mode (Dual): Component 1 cannot be IGNORE");
-        Alert("   ADVANCED MODE ERROR (Dual Group Topology)\n\nComponent 1 cannot be IGNORE!\nDual Group topology requires at least Component 1.");
-        return 0;
-    }
-    
-    double valG1 = GetStepSizeFromComponent(basePrice, inpComboComp1);
-    if(valG1 <= 0) {
-        Print("  Calculator Mode (Dual): Component 1 calculation failed");
-        Alert("   ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
-        return 0;
-    }
-    
-    // 2. Apply Op1 with Component 2
-    valG1 = ApplyOperationWithComponent(valG1, inpComboOp1, inpComboComp2, basePrice);
-    
-    //                                                                
-    // CHECK MAIN OPERATOR
-    //                                                                
-    
-    if(inpComboOp2 == OP_NONE || inpComboComp3 == COMP_IGNORE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   Dual Group: Only Group 1 active (Op2=NONE or Comp3=IGNORE)");
-        Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-        #endif
-        return valG1;
-    }
-    
-    //                                                                
-    // GROUP 2: (Comp3 Op3 Comp4)
-    //                                                                
-    
-    double valG2 = GetStepSizeFromComponent(basePrice, inpComboComp3);
-    
-    // CRITICAL: Validate Component 3
-    if(valG2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   Dual Group: Component 3 invalid or failed");
-        Print("   Component 3: ", EnumToString(inpComboComp3));
-        Print("   Fallback: Using Group 1 result only");
-        Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-        #endif
-        
-        // Production warning (always show, not just debug)
-        Print("   DUAL GROUP TOPOLOGY WARNING: Component 3 (", EnumToString(inpComboComp3), 
-              ") calculation failed. Using Group 1 result only.");
-        
-        return valG1;
-    }
-    
-    // Apply Op3 with Component 4
-    valG2 = ApplyOperationWithComponent(valG2, inpComboOp3, inpComboComp4, basePrice);
-    
-    // Validate Group 2 result after Op3
-    if(valG2 <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   Dual Group: Group 2 calculation failed after Op3");
-        Print("   Op3: ", EnumToString(inpComboOp3));
-        Print("   Component 4: ", EnumToString(inpComboComp4));
-        Print("   Fallback: Using Group 1 result only");
-        Print("   Group 1 Result: ", DoubleToString(valG1, Digits));
-        #endif
-        
-        Print("   DUAL GROUP TOPOLOGY WARNING: Group 2 calculation failed. Using Group 1 result only.");
-        
-        return valG1;
-    }
-    
-    //                                                                
-    // FINAL COMBINATION: Group1 Op2 Group2
-    //                                                                
-    
-    double finalResult = ApplyCalculatorOperator(valG1, valG2, inpComboOp2);
-    
-    // CRITICAL: Validate final result
-    if(finalResult <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   Dual Group: Final combination failed");
-        Print("   Group 1: ", DoubleToString(valG1, Digits));
-        Print("   Op2: ", EnumToString(inpComboOp2));
-        Print("   Group 2: ", DoubleToString(valG2, Digits));
-        Print("   Result: ", DoubleToString(finalResult, Digits));
-        Print("   Fallback: Using Group 1 result only");
-        #endif
-        
-        Print("   DUAL GROUP TOPOLOGY WARNING: Final combination (", EnumToString(inpComboOp2), 
-              ") produced invalid result. Using Group 1 result only.");
-        
-        return valG1;
-    }
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("  Dual Group: SUCCESS");
-    Print("   Group 1: ", DoubleToString(valG1, Digits));
-    Print("   Op2: ", EnumToString(inpComboOp2));
-    Print("   Group 2: ", DoubleToString(valG2, Digits));
-    Print("   Final Result: ", DoubleToString(finalResult, Digits));
-    #endif
-    
-    return finalResult;
-}
-
-//+------------------------------------------------------------------+
-//| Helper: Apply Operation with Component (Sequential Logic)        |
-//| Applies an operator and a next component to the current value.   |
-//| Handles validation, IGNORE status, and errors gracefully.        |
-//+------------------------------------------------------------------+
-double ApplyOperationWithComponent(const double currentVal, 
-                                  const ENUM_COMBO_OPERATOR op, 
-                                  const ENUM_COMBO_COMPONENT_ITEM nextComp, 
-                                  const double basePrice) {
-    // 1. Skip if Operator is NONE or Component is IGNORE
-    //    Logic: Effectively "skip" this step, preserving currentVal
-    if (op == OP_NONE || nextComp == COMP_IGNORE) {
-        #ifdef ENABLE_DEBUG_LOGS
-        if(op == OP_NONE) {
-            Print("   ApplyOperationWithComponent: Operator is NONE, skipping");
-        } else {
-            Print("   ApplyOperationWithComponent: Component is IGNORE, skipping");
-        }
-        #endif
-        return currentVal;
-    }
-    
-    // 2. Calculate Next Component Value
-    double nextVal = GetStepSizeFromComponent(basePrice, nextComp);
-    
-    // 3. Validation: If next component is invalid (e.g., 0), skip operation
-    if (nextVal <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ApplyOperationWithComponent: Next component invalid");
-        Print("   Component: ", EnumToString(nextComp));
-        Print("   Operator: ", EnumToString(op));
-        Print("   Keeping current value: ", DoubleToString(currentVal, Digits));
-        #endif
-        
-        Print("   CALCULATOR WARNING: Component ", EnumToString(nextComp), 
-              " calculation failed. Skipping operation ", EnumToString(op));
-        
-        return currentVal;
-    }
-    
-    // 4. Apply Operator safely
-    double result = ApplyCalculatorOperator(currentVal, nextVal, op);
-    
-    // 5. Final Safety Check
-    if (result <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   ApplyOperationWithComponent: Operation produced invalid result");
-        Print("   Current: ", DoubleToString(currentVal, Digits));
-        Print("   Operator: ", EnumToString(op));
-        Print("   Next: ", DoubleToString(nextVal, Digits));
-        Print("   Result: ", DoubleToString(result, Digits));
-        Print("   Fallback to current value");
-        #endif
-        
-        Print("   CALCULATOR WARNING: Operation ", EnumToString(op), 
-              " produced invalid result. Keeping previous value.");
-        
-        return currentVal; // Fallback to previous valid value
-    }
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("  ApplyOperationWithComponent: ", DoubleToString(currentVal, Digits), 
-          " ", EnumToString(op), " ", DoubleToString(nextVal, Digits), 
-          " = ", DoubleToString(result, Digits));
-    #endif
-    
-    return result;
-}
-
-//+------------------------------------------------------------------+
-//| Calculator Mode Logic - LINEAR Topology - DIAMOND VERSION        |
-//| Formula: ((Comp1 Op1 Comp2) Op2 Comp3) Op3 Comp4                 |
-//| Refactored: Pure sequential logic (No loops, No arrays)          |
-//| Benefits: Maximum readability, fastest execution (unrolled)      |
-//+------------------------------------------------------------------+
-double CalculateLinearTopology(const double basePrice) {
-    // 1. Start with Component 1 (Foundation)
-    if(inpComboComp1 == COMP_IGNORE) {
-        Print("  Calculator Mode (Linear): Component 1 is IGNORE");
-        Alert("   ADVANCED MODE ERROR (Linear Topology)\n\nComponent 1 cannot be IGNORE!\nLinear topology requires at least Component 1.");
-        return 0;
-    }
-
-    double result = GetStepSizeFromComponent(basePrice, inpComboComp1);
-    if(result <= 0) {
-        Print("  Calculator Mode (Linear): Component 1 calculation failed");
-        Alert("   ADVANCED MODE ERROR\n\nFailed to calculate Component 1.\nPlease check your component selection.");
-        return 0;
-    }
-    
-    // 2. Apply Step 2: (Result Op1 Comp2)
-    result = ApplyOperationWithComponent(result, inpComboOp1, inpComboComp2, basePrice);
-    
-    // 3. Apply Step 3: (Result Op2 Comp3)
-    result = ApplyOperationWithComponent(result, inpComboOp2, inpComboComp3, basePrice);
-    
-    // 4. Apply Step 4: (Result Op3 Comp4)
-    result = ApplyOperationWithComponent(result, inpComboOp3, inpComboComp4, basePrice);
-    
-    return result;
-}
-
-//+------------------------------------------------------------------+
-//| Calculator Mode Logic (Unified Entry Point) - GOLDEN VERSION     |
-//|                 (          ) -            (                )     |
-//|                                                                  |
-//| SUPPORTS:                                                        |
-//| 1. N-ARY OPERATORS: If Op1 is N-ary, collects all components    |
-//| 2. BINARY OPERATORS: Normal topology-based calculation          |
-//+------------------------------------------------------------------+
-double CalculateCalculatorModeStepSize(const double basePrice) {
-    // 1. Security & Validation Check
-    if(basePrice <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("  CalculateCalculatorModeStepSize: Invalid basePrice=", basePrice);
-        #endif
-        return 0;
-    }
-
-    //                                                                
-    // 2. CHECK FOR N-ARY OPERATORS (Multi-Component Mode)
-    //                                                                
-    
-    if(inpComboOp1 >= OP_GEOMETRIC_MEAN_ALL && inpComboOp1 <= OP_MAX_ALL) {
-        // N-ARY MODE: Collect all non-IGNORE components
-        double componentValues[];
-        ArrayResize(componentValues, 0);
-        
-        // Collect Component 1
-        if(inpComboComp1 != COMP_IGNORE) {
-            double val1 = GetStepSizeFromComponent(basePrice, inpComboComp1);
-            if(val1 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-                componentValues[ArraySize(componentValues) - 1] = val1;
-            }
-        }
-        
-        // Collect Component 2
-        if(inpComboComp2 != COMP_IGNORE) {
-            double val2 = GetStepSizeFromComponent(basePrice, inpComboComp2);
-            if(val2 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-                componentValues[ArraySize(componentValues) - 1] = val2;
-            }
-        }
-        
-        // Collect Component 3
-        if(inpComboComp3 != COMP_IGNORE) {
-            double val3 = GetStepSizeFromComponent(basePrice, inpComboComp3);
-            if(val3 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-                componentValues[ArraySize(componentValues) - 1] = val3;
-            }
-        }
-        
-        // Collect Component 4
-        if(inpComboComp4 != COMP_IGNORE) {
-            double val4 = GetStepSizeFromComponent(basePrice, inpComboComp4);
-            if(val4 > 0) {
-                ArrayResize(componentValues, ArraySize(componentValues) + 1);
-                componentValues[ArraySize(componentValues) - 1] = val4;
-            }
-        }
-        
-        // Validate: Need at least 1 component
-        int componentCount = ArraySize(componentValues);
-        if(componentCount == 0) {
-            Print("  N-ARY Mode: No valid components found");
-            Alert("   ADVANCED MODE ERROR (N-ary Operator)\n\nAll components are set to IGNORE!\nPlease select at least one component.");
-            return 0;
-        }
-        
-        // OBSERVABILITY: Warn if less than expected components
-        int expectedComponents = 0;
-        if(inpComboComp1 != COMP_IGNORE) expectedComponents++;
-        if(inpComboComp2 != COMP_IGNORE) expectedComponents++;
-        if(inpComboComp3 != COMP_IGNORE) expectedComponents++;
-        if(inpComboComp4 != COMP_IGNORE) expectedComponents++;
-        
-        if(componentCount < expectedComponents) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("   N-ARY Mode: Only ", componentCount, "/", expectedComponents, " components valid");
-            #endif
-            Print("   N-ARY OPERATOR INFO: Using ", componentCount, " valid components out of ", 
-                  expectedComponents, " selected.");
-        }
-        
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   N-ARY Mode: Collected ", componentCount, " valid components");
-        for(int i = 0; i < componentCount; i++) {
-            Print("   Component[", i, "] = ", DoubleToString(componentValues[i], Digits));
-        }
-        #endif
-        
-        // Calculate N-ary result based on operator
-        double naryResult = 0;
-        
-        switch(inpComboOp1) {
-            case OP_GEOMETRIC_MEAN_ALL:
-                naryResult = CalculateGeometricMeanN(componentValues);
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  N-ARY Mode: Geometric Mean of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-                #endif
-                break;
-                
-            case OP_ARITHMETIC_MEAN_ALL:
-                naryResult = CalculateArithmeticMeanN(componentValues);
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  N-ARY Mode: Arithmetic Mean of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-                #endif
-                break;
-                
-            case OP_HARMONIC_MEAN_ALL:
-                naryResult = CalculateHarmonicMeanN(componentValues);
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  N-ARY Mode: Harmonic Mean of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-                #endif
-                break;
-                
-            case OP_MIN_ALL:
-                naryResult = CalculateMinN(componentValues);
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  N-ARY Mode: Minimum of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-                #endif
-                break;
-                
-            case OP_MAX_ALL:
-                naryResult = CalculateMaxN(componentValues);
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  N-ARY Mode: Maximum of ", componentCount, " components = ", 
-                      DoubleToString(naryResult, Digits));
-                #endif
-                break;
-                
-            default:
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("  N-ARY Mode: Unknown operator ", inpComboOp1);
-                #endif
-                return 0;
-        }
-        
-        // Validate and return
-        if(naryResult <= 0) {
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("  N-ARY Mode: Result is <= 0");
-            #endif
-            return 0;
-        }
-        
-        return NormalizeDouble(naryResult, Digits);
-    }
-    
-    //                                                                
-    // 3. BINARY MODE: Normal Topology-Based Calculation
-    //                                                                
-
-    double finalResult = 0;
-
-    // Dispatch based on Topology
-    if(inpComboTopology == TOPOLOGY_LINEAR) {
-        finalResult = CalculateLinearTopology(basePrice);
-    }
-    else {
-        finalResult = CalculateDualGroupTopology(basePrice);
-    }
-    
-    // 4. Final Validation
-    if(finalResult <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("  Calculator Mode Result is <= 0");
-        #endif
-        return 0;
-    }
-    
-    // 5. Optimization: Normalize Result
-    finalResult = NormalizeDouble(finalResult, Digits);
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    string topoName = (inpComboTopology == TOPOLOGY_LINEAR) ? "LINEAR" : "DUAL_GROUP";
-    Print("  Calculator Mode [", topoName, "]: Result=", DoubleToString(finalResult, Digits));
-    #endif
-    
-    return finalResult;
-}
-
-//+------------------------------------------------------------------+
-//| UNIFIED Combo Step Calculation (used by both modes)              |
-//|                           (               )                      |
-//|                                                                  |
-//| Used by:                                                         |
-//| 1. Combo Step Mode (COMBO_STEP) - for drawing TH levels         |
-//| 2. Factor Auto Basis = COMBO - for calculating Factor           |
-//|                                                                  |
-//| @param basePrice Base price for TH calculation (must be > 0)    |
-//| @return Calculated combo step size (> 0), or 0 on error         |
-//|                                                                  |
-//| GOLD VERSION: Single source of truth, no code duplication       |
-//| - Full input validation                                         |
-//| - Comprehensive error handling                                  |
-//| - Thread-safe (no global state modification)                    |
-//| - Performance optimized with early returns                      |
-// Removed redundant implementations
 //+------------------------------------------------------------------+
 //| Helper function to check if Trigger Levels should be shown      |
 //| Runtime toggle (hotkey T) can override input parameter          |
@@ -1828,91 +664,20 @@ bool IsTriggerLevelsEnabled() {
 //|                                                                  |
 //+------------------------------------------------------------------+
 string GetCurrentFractalTimeframe() {
-    int minutes = GetCurrentTimeframeMinutesForTH();
-    if(minutes <= 0) minutes = 1;
+    // MQL5 Period() returns the ENUM value (H1=16385); normalize to minutes.
+    int minutes = PeriodSeconds(Period()) / 60;
     
-    // Map standard timeframes to fractal strings (exact match to MT4)
-    if(minutes == 1)      return "M1";
+    // Map standard timeframes to fractal strings
+    if(minutes == 1) return "M1";
     else if(minutes == 5) return "M4";  // Closest
-    else if(minutes == 15 || minutes == 30) return "M16"; // Closest
-    else if(minutes == 60)    return "H1+M4";
-    else if(minutes == 240)   return "H4+M16";
-    else if(minutes == 1440)  return "D2+H20+M16"; // Closest
+    else if(minutes == 15) return "M16"; // Closest
+    else if(minutes == 30) return "M16"; // Closest
+    else if(minutes == 60) return "H1+M4";
+    else if(minutes == 240) return "H4+M16";
+    else if(minutes == 1440) return "D2+H20+M16"; // Closest
     else if(minutes == 10080) return "D11+H9+M4"; // Closest
     else if(minutes == 43200) return "D45+H12+M16"; // Closest
     else return "M1"; // Fallback
-}
-
-//+------------------------------------------------------------------+
-//| Sub-minute timeframe encoding.                                   |
-//|                                                                  |
-//| MQL5 has colliding enum values between second and minute TFs:    |
-//|   PERIOD_S5  == PERIOD_M5  == 5                                  |
-//|   PERIOD_S15 == PERIOD_M15 == 15                                 |
-//|   PERIOD_S30 == PERIOD_M30 == 30                                 |
-//| So we cannot use PERIOD_S* enums (and this build's MetaEditor    |
-//| does not declare them at all). Instead we encode sub-minute      |
-//| targets in a dedicated, collision-free range: 2000 + seconds.    |
-//| GetTimeframeTHForPeriod() decodes this range directly.           |
-//+------------------------------------------------------------------+
-#ifndef TF_SEC_BASE
-#define TF_SEC_BASE 2000
-#endif
-#define TF_SEC_2   (TF_SEC_BASE + 2)
-#define TF_SEC_3   (TF_SEC_BASE + 3)
-#define TF_SEC_4   (TF_SEC_BASE + 4)
-#define TF_SEC_5   (TF_SEC_BASE + 5)
-#define TF_SEC_6   (TF_SEC_BASE + 6)
-#define TF_SEC_10  (TF_SEC_BASE + 10)
-#define TF_SEC_15  (TF_SEC_BASE + 15)
-#define TF_SEC_30  (TF_SEC_BASE + 30)
-
-//+------------------------------------------------------------------+
-//| Map an arbitrary duration in SECONDS to the closest timeframe.   |
-//|                                                                  |
-//| Sub-minute targets use the collision-free TF_SEC_* encoding      |
-//| (2000 + seconds) so they never clash with PERIOD_M* enums.       |
-//+------------------------------------------------------------------+
-ENUM_TIMEFRAMES MapDurationSecondsToTimeframe(const int totalSeconds) {
-    if(totalSeconds <= 2)        return (ENUM_TIMEFRAMES)TF_SEC_2;
-    else if(totalSeconds <= 3)   return (ENUM_TIMEFRAMES)TF_SEC_3;
-    else if(totalSeconds <= 4)   return (ENUM_TIMEFRAMES)TF_SEC_4;
-    else if(totalSeconds <= 5)   return (ENUM_TIMEFRAMES)TF_SEC_5;
-    else if(totalSeconds <= 6)   return (ENUM_TIMEFRAMES)TF_SEC_6;
-    else if(totalSeconds <= 10)  return (ENUM_TIMEFRAMES)TF_SEC_10;
-    else if(totalSeconds <= 15)  return (ENUM_TIMEFRAMES)TF_SEC_15;
-    else if(totalSeconds <= 30)  return (ENUM_TIMEFRAMES)TF_SEC_30;
-    else if(totalSeconds <= 60)  return PERIOD_M1;
-    else if(totalSeconds <= 300) return PERIOD_M5;    // 5 min
-    else if(totalSeconds <= 900) return PERIOD_M15;   // 15 min
-    else if(totalSeconds <= 1800) return PERIOD_M30;  // 30 min
-    else if(totalSeconds <= 3600) return PERIOD_H1;   // 1 h
-    else if(totalSeconds <= 14400) return PERIOD_H4;  // 4 h
-    else if(totalSeconds <= 86400) return PERIOD_D1;  // 1 d
-    else if(totalSeconds <= 604800) return PERIOD_W1; // 1 w
-    else return PERIOD_MN1;
-}
-
-//+------------------------------------------------------------------+
-//| TH percentage for an arbitrary duration in SECONDS.              |
-//|                                                                  |
-//| Sub-minute ( < 60s ) uses the power law that mirrors the fractal |
-//| ladder: each x4 in time = x2 in TH%, exactly like the existing   |
-//| MODIFIED_FRACTAL_PERCENTAGES array (M1=2.08%, M4=4.17%, ...).    |
-//| So for s seconds: TH% = 2.08 * sqrt(s / 60).                     |
-//|   S15 -> 2.08*sqrt(15/60)  = 1.04%                               |
-//|   S4  -> 2.08*sqrt(4/60)   = 0.54%                               |
-//| For >= 60s we reuse the existing fractal-string logic so the     |
-//| higher ladder stays identical to current behavior.               |
-//+------------------------------------------------------------------+
-double CalculateFractalTHForDurationSeconds(const int totalSeconds) {
-    if(totalSeconds <= 0) return 0;
-    if(totalSeconds < 60) {
-        // Sub-minute: power law relative to M1 (60s = 2.08%).
-        return MODIFIED_FRACTAL_PERCENTAGES[0] * MathSqrt(totalSeconds / 60.0);
-    }
-    ENUM_TIMEFRAMES tf = MapDurationSecondsToTimeframe(totalSeconds);
-    return GetTimeframeTHForPeriod(tf);
 }
 
 //+------------------------------------------------------------------+
@@ -1927,64 +692,69 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
         // Apply Fractal Jump shift if active
         string shiftedFractal = ApplyFractalShift(currentFractal);
         double th = CalculateTimeframeTH(shiftedFractal);
-
+        
         #ifdef ENABLE_DEBUG_LOGS
-        Print("GetTimeframeTHForPeriod: CURRENT (", GetCurrentTimeframeMinutesForTH(), "min) -> ",
+        Print("GetTimeframeTHForPeriod: CURRENT (", Period(), "min) -> ", 
               shiftedFractal, " = ", DoubleToString(th, 4), "%");
         #endif
-
+        
         return th;
     }
-
-    // SUB-MINUTE SHORT-CIRCUIT: our collision-free encoded second timeframes
-    // (TF_SEC_BASE + seconds, e.g. 2002..2030) carry the exact second count.
-    // PeriodSeconds() returns 0 for these custom values, so decode directly.
-    int periodVal = (int)period;
-    if(periodVal >= TF_SEC_BASE && periodVal < TF_SEC_BASE + 60) {
-        int subSeconds = periodVal - TF_SEC_BASE;
-        double thSub = CalculateFractalTHForDurationSeconds(subSeconds);
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetTimeframeTHForPeriod: SEC-ENCODED ", period, " (", subSeconds, "s) -> SUB-MINUTE = ",
-              DoubleToString(thSub, 4), "%");
-        #endif
-        return thSub;
-    }
-
-    // Standard (>= 60s) path: derive seconds via PeriodSeconds().
-    int totalSeconds = PeriodSeconds(period);
-    if(totalSeconds <= 0) {
-        // PeriodSeconds() can return 0 for some periods; fall back gracefully.
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("   GetTimeframeTHForPeriod: PeriodSeconds(", period, ") == 0, using D45+H12+M16");
-        #endif
-        return CalculateTimeframeTH(ApplyFractalShift("D45+H12+M16"));
-    }
-
-    // Convert period to fractal timeframe string (>= 60s path)
+    
+    // Convert period to fractal timeframe string
     string timeframeStr = "";
-
+    
+    // GOLD FIX: Handle all timeframes including Monthly
+    // PeriodSeconds() may return 0 for some timeframes, so use direct mapping
+    int minutes = 0;
+    
+    switch(period) {
+        case PERIOD_M1:  minutes = 1; break;
+        case PERIOD_M5:  minutes = 5; break;
+        case PERIOD_M15: minutes = 15; break;
+        case PERIOD_M30: minutes = 30; break;
+        case PERIOD_H1:  minutes = 60; break;
+        case PERIOD_H4:  minutes = 240; break;
+        case PERIOD_D1:  minutes = 1440; break;
+        case PERIOD_W1:  minutes = 10080; break;
+        case PERIOD_MN1: minutes = 43200; break;
+        default: {
+            // Fallback: try PeriodSeconds
+            int seconds = PeriodSeconds(period);
+            if(seconds > 0) {
+                minutes = seconds / 60;
+            } else {
+                #ifdef ENABLE_DEBUG_LOGS
+                Print("   GetTimeframeTHForPeriod: Unknown period=", period, ", using D45+H12+M16");
+                #endif
+                return CalculateTimeframeTH(ApplyFractalShift("D45+H12+M16"));
+            }
+            break;
+        }
+    }
+    
     // Map minutes to fractal timeframe string
-    if(totalSeconds <= 60)       timeframeStr = "M1";
-    else if(totalSeconds <= 300) timeframeStr = "M4";
-    else if(totalSeconds <= 900) timeframeStr = "M16";
-    else if(totalSeconds <= 1800) timeframeStr = "M16";
-    else if(totalSeconds <= 3600) timeframeStr = "H1+M4";
-    else if(totalSeconds <= 14400) timeframeStr = "H4+M16";
-    else if(totalSeconds <= 86400) timeframeStr = "D2+H20+M16";
-    else if(totalSeconds <= 604800) timeframeStr = "D11+H9+M4";
+    if(minutes == 1) timeframeStr = "M1";
+    else if(minutes <= 5) timeframeStr = "M4";
+    else if(minutes <= 15) timeframeStr = "M16";
+    else if(minutes <= 30) timeframeStr = "M16";
+    else if(minutes <= 60) timeframeStr = "H1+M4";
+    else if(minutes <= 240) timeframeStr = "H4+M16";
+    else if(minutes <= 1440) timeframeStr = "D2+H20+M16";
+    else if(minutes <= 10080) timeframeStr = "D11+H9+M4";
     else timeframeStr = "D45+H12+M16";
-
+    
     // Apply Fractal Jump shift if active
     string shiftedTF = ApplyFractalShift(timeframeStr);
-
+    
     // Calculate TH for the timeframe
     double th = CalculateTimeframeTH(shiftedTF);
-
+    
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetTimeframeTHForPeriod: ", period, " (", totalSeconds / 60, "min) -> ",
+    Print("GetTimeframeTHForPeriod: ", period, " (", minutes, "min) -> ", 
           shiftedTF, " = ", DoubleToString(th, 4), "%");
     #endif
-
+    
     return th;
 }
 
@@ -1993,44 +763,39 @@ double GetTimeframeTHForPeriod(const ENUM_TIMEFRAMES period) {
 //|                  Sub (1/4      -                )                |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetSubTimeframe() {
-    int currentMinutes = GetCurrentTimeframeMinutesForTH();
-    if(currentMinutes <= 0) currentMinutes = 1;
-    int subSeconds = (currentMinutes * 60) / 4;
-
-    // Map to closest timeframe (seconds-aware: sub-minute targets reach PERIOD_S*).
-    ENUM_TIMEFRAMES result = MapDurationSecondsToTimeframe(subSeconds);
-    if(result <= 0) result = PERIOD_M1;
-
+    // MQL5 Period() returns the ENUM value (H1=16385); normalize to minutes.
+    int currentMinutes = PeriodSeconds(Period()) / 60;
+    int subMinutes = currentMinutes / 4;
+    
+    // SAFETY: Minimum is M1
+    if(subMinutes < 1) subMinutes = 1;
+    
+    // Map to closest standard timeframe
+    ENUM_TIMEFRAMES result;
+    if(subMinutes <= 1) result = PERIOD_M1;
+    else if(subMinutes <= 5) result = PERIOD_M5;
+    else if(subMinutes <= 15) result = PERIOD_M15;
+    else if(subMinutes <= 30) result = PERIOD_M30;
+    else if(subMinutes <= 60) result = PERIOD_H1;
+    else if(subMinutes <= 360) result = PERIOD_H4;   // Fix: 360min (D1/4) -> H4
+    else if(subMinutes <= 1440) result = PERIOD_D1;
+    else if(subMinutes <= 4320) result = PERIOD_D1;  // Fix: 2520min (W1/4) -> D1
+    else if(subMinutes <= 10080) result = PERIOD_W1;
+    else if(subMinutes <= 20000) result = PERIOD_W1; // Fix: 10800min (MN1/4) -> W1
+    else result = PERIOD_MN1;
+    
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetSubTimeframe: Current=", currentMinutes, "min, Sub=",
-          subSeconds, "s ( 4) -> ", result);
+    Print("GetSubTimeframe: Current=", currentMinutes, "min, Sub=", 
+          subMinutes, "min ( 4) -> ", result);
     #endif
-
+    
     return result;
-}
-
-//+------------------------------------------------------------------+
-//| Map an arbitrary minute count to the closest standard timeframe   |
-//| (range-based, mirrors GetSubTimeframe/GetPatternTimeframe logic)  |
-//+------------------------------------------------------------------+
-ENUM_TIMEFRAMES MapMinutesToTimeframeRange(const int minutes) {
-    // Reuse the unified seconds-based mapper so sub-minute (second) timeframes
-    // are reachable too (e.g. 1 min / 64 -> ~1s -> PERIOD_S2).
-    return MapDurationSecondsToTimeframe(minutes * 60);
 }
 
 //+------------------------------------------------------------------+
 //| Get timeframe based on type                                       |
 //|                                                                   |
 //| GOLD FIX: Added validation and error logging                     |
-//|                                                                   |
-//| ADVANCED MODE SHIFT (user request): In Combo Advanced mode the    |
-//| whole fractal ladder is shifted down by one step so that          |
-//| Structure resolves to the CURRENT timeframe (was Current * 4):    |
-//|   Sub     = Current / 64   (was /16)                              |
-//|   Trigger = Current / 16   (was /4)                               |
-//|   Pattern = Current / 4    (was Current)                          |
-//|   Structure = Current      (was *4)                               |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
     // CRITICAL: Validate input
@@ -2038,50 +803,30 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetTimeframeByType: Invalid tfType=", tfType, ", using current period");
         #endif
-        return (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();  // Use effective period, not PERIOD_CURRENT (0)
+        return (ENUM_TIMEFRAMES)Period();  // GOLD FIX: Use Period() instead of PERIOD_CURRENT (0)
     }
-
+    
     ENUM_TIMEFRAMES result;
-
-    // ADVANCED MODE: Shift the whole fractal ladder down one step so that
-    // Structure == current timeframe. See function header for the mapping.
-    if(inpComboMode == COMBO_MODE_ADVANCED) {
-        // Work in SECONDS (not minutes) so sub-minute targets are reachable and
-        // the x4 fractal ladder is preserved exactly even below M1.
-        int curPeriod = GetCurrentTimeframePeriodForTH();
-        int curSeconds = PeriodSeconds((ENUM_TIMEFRAMES)curPeriod);
-        if(curSeconds <= 0) curSeconds = 60; // fallback: assume M1
-
-        int shiftedSeconds;
-        switch(tfType) {
-            case COMBO_TF_SUB:       shiftedSeconds = curSeconds / 64; break;
-            case COMBO_TF_TRIGGER:   shiftedSeconds = curSeconds / 16; break;
-            case COMBO_TF_PATTERN:   shiftedSeconds = curSeconds / 4;  break;
-            case COMBO_TF_STRUCTURE: shiftedSeconds = curSeconds;      break;
-            default:                 shiftedSeconds = curSeconds;      break;
-        }
-        if(shiftedSeconds < 2) shiftedSeconds = 2; // smallest supported = PERIOD_S2
-
-        result = MapDurationSecondsToTimeframe(shiftedSeconds);
-        if(result <= 0) result = (ENUM_TIMEFRAMES)curPeriod;
-
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("GetTimeframeByType[ADVANCED]: type=", tfType, " current=", curSeconds,
-              "s shifted=", shiftedSeconds, "s -> ", result);
-        #endif
-        return result;
-    }
-
+    
     switch(tfType) {
         case COMBO_TF_SUB:
-            // User Request: Sub = 2 Fractals Lower (Current / 16).
-            // Use seconds so sub-minute targets resolve to PERIOD_S* (not clamped to M1).
+            // User Request: Sub = 2 Fractals Lower (Current / 16)
             {
-                int currentMinutes = GetCurrentTimeframeMinutesForTH();
-                if(currentMinutes <= 0) currentMinutes = 1;
-                int subSeconds = (currentMinutes * 60) / 16;
-                if(subSeconds < 2) subSeconds = 2;
-                result = MapDurationSecondsToTimeframe(subSeconds);
+                // MQL5 Period() returns the ENUM value (H1=16385); normalize to minutes.
+                int currentMinutes = PeriodSeconds(Period()) / 60;
+                int subMinutes = currentMinutes / 16;
+                if(subMinutes < 1) subMinutes = 1;
+                
+                // Map to closest standard timeframe (Reusing GetSubTimeframe logic style)
+                if(subMinutes <= 1) result = PERIOD_M1;
+                else if(subMinutes <= 5) result = PERIOD_M5;
+                else if(subMinutes <= 15) result = PERIOD_M15;
+                else if(subMinutes <= 30) result = PERIOD_M30;
+                else if(subMinutes <= 60) result = PERIOD_H1;
+                else if(subMinutes <= 360) result = PERIOD_H4;
+                else if(subMinutes <= 1440) result = PERIOD_D1;
+                else if(subMinutes <= 10080) result = PERIOD_W1;
+                else result = PERIOD_MN1;
             }
             break;
 
@@ -2092,7 +837,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 
         case COMBO_TF_PATTERN:
             // User Request: Pattern = Current Timeframe
-            result = (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();
+            result = (ENUM_TIMEFRAMES)Period();
             break;
 
         case COMBO_TF_STRUCTURE:
@@ -2104,7 +849,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
             #ifdef ENABLE_DEBUG_LOGS
             Print("   GetTimeframeByType: Unexpected tfType=", tfType, ", using current period");
             #endif
-            result = (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();
+            result = (ENUM_TIMEFRAMES)Period();
             break;
     }
     
@@ -2113,7 +858,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetTimeframeByType: Invalid result=", result, " for tfType=", tfType);
         #endif
-        return (ENUM_TIMEFRAMES)GetCurrentTimeframePeriodForTH();  // Use effective period, not PERIOD_CURRENT (0)
+        return (ENUM_TIMEFRAMES)Period();  // GOLD FIX: Use Period() instead of PERIOD_CURRENT (0)
     }
     
     return result;
@@ -2126,7 +871,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 //+------------------------------------------------------------------+
 double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
     // CRITICAL: Validate input
-    if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_CONTROL) {
+    if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_LS) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
         #endif
@@ -2144,9 +889,6 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
             break;
         case COMBO_STEP_LS:
             multiplier = 2.0;   // LS
-            break;
-        case COMBO_STEP_CONTROL:
-            multiplier = 1.75;  // CONTROL/MID
             break;
         default:
             #ifdef ENABLE_DEBUG_LOGS
@@ -2261,21 +1003,10 @@ double ApplyComboOperation(const double value1, const double value2,
             // Minimum: min(A, B)
             result = MathMin(value1, value2);
             break;
-
+            
         case COMBO_OP_MAX:
             // Maximum: max(A, B)
             result = MathMax(value1, value2);
-            break;
-
-        case COMBO_OP_GEO_MEAN:
-            // AUDIT FIX #2: Real geometric mean (was mislabelled in QT presets).
-            // Dual: sqrt(A * B); for triple, CalculateComboStepSize handles it
-            // separately because ApplyComboOperation only receives 2 values.
-            if(value1 <= 0 || value2 <= 0) {
-                result = 0;
-                break;
-            }
-            result = MathSqrt(value1 * value2);
             break;
             
         case COMBO_OP_WEIGHTED: {
@@ -2414,281 +1145,31 @@ double ApplyComboOperation(const double value1, const double value2,
     return result;
 }
 
-//+------------------------------------------------------------------+
-//| Get preset configuration (OPTIMIZED VERSION with all presets)    |
-//|                                 (                  preset   )    |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Get preset configuration (UNIFIED VERSION with Mode support)    |
-//|                                 (                         Mode)  |
-//|                                                                  |
-//| Supports two modes:                                             |
-//| 1. PRESET Mode: Quick select from 9 ready-to-use presets       |
-//| 2. MANUAL Mode: Full control over all parameters               |
-//|                                                                  |
-//| @param preset Preset selection (used in PRESET mode)           |
-//| @param tf1 Output: Timeframe 1                                 |
-//| @param step1 Output: Step type 1                               |
-//| @param tf2 Output: Timeframe 2                                 |
-//| @param step2 Output: Step type 2                               |
-//| @param operation Output: Operation type                        |
-//+------------------------------------------------------------------+
-void GetPresetConfiguration(const ENUM_COMBO_PRESET preset,
-                            ENUM_COMBO_TIMEFRAME_TYPE &tf1,
-                            ENUM_COMBO_STEP_TYPE &step1,
-                            ENUM_COMBO_TIMEFRAME_TYPE &tf2,
-                            ENUM_COMBO_STEP_TYPE &step2,
-                            ENUM_COMBO_OPERATION &operation) {
-    
-    //                                                                
-    // GOLD FIX: Initialize output parameters to safe defaults
-    //                                                                
-    tf1 = COMBO_TF_TRIGGER;
-    step1 = COMBO_STEP_TH;
-    tf2 = COMBO_TF_PATTERN;
-    step2 = COMBO_STEP_TH;
-    operation = COMBO_OP_AVERAGE;
-    
-    //                                                                
-    // GOLD FIX: Manual Mode check removed - handled by preset cases
-    //        Manual Mode -      preset case    handle       
-    //                                                                
-    
-    //                                                                
-    // PRESET MODE: Use predefined combinations
-    //      Preset:                                    
-    //                                                                
-    
-    switch(preset) {
-        //                                                            
-        // CATEGORY 0: LEGACY (                    )
-        //                                                            
-        
-        case COMBO_PRESET_LEGACY_ADD:
-            // Legacy: Trigger SS + Pattern SS (ADD)
-            //                           Combo Step Mode
-            // Old: Component1 (Trigger SS) + Component2 (Pattern SS)
-            tf1 = COMBO_TF_TRIGGER;
-            step1 = COMBO_STEP_SS;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_SS;
-            operation = COMBO_OP_ADD;  // ADD, not AVERAGE!
-            break;
-        
-        //                                                            
-        // CATEGORY 1: BALANCED (      )
-        //                                                            
-        
-        case COMBO_PRESET_BALANCED_MEDIUM:
-            // Balanced Medium: (Pattern + Trigger) / 2
-            //                  -                  
-            tf1 = COMBO_TF_PATTERN;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_TRIGGER;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_AVERAGE;
-            break;
-            
-        case COMBO_PRESET_BALANCED_LONG:
-            // Balanced Long: (Structure + Pattern) / 2
-            //                 -                          
-            tf1 = COMBO_TF_STRUCTURE;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_AVERAGE;
-            break;
-        
-        case COMBO_PRESET_BALANCED_TRIPLE:
-            // Triple Balanced: (Trigger + Pattern + Structure) / 3
-            //                      -                 
-            // NOTE: This is handled in CalculateComboStepSize()
-            tf1 = COMBO_TF_TRIGGER;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_AVERAGE;
-            break;
-        
-        case COMBO_PRESET_BALANCED_MIN:
-            // Balanced Min: min(Pattern TH, Trigger TH)
-            //                             
-            // Uses TH for consistency with other Balanced presets
-            tf1 = COMBO_TF_PATTERN;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_TRIGGER;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MIN;
-            break;
-        
-        //                                                            
-        // CATEGORY 2: CONSERVATIVE (          )
-        //                                                            
-        
-        case COMBO_PRESET_CONSERVATIVE:
-            // Conservative: max(Structure, Pattern)
-            //              -                  
-            tf1 = COMBO_TF_STRUCTURE;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MAX;
-            break;
-            
-        case COMBO_PRESET_ULTRA_CONSERVATIVE:
-            // Ultra Conservative: Structure TH only
-            //            -                   
-            // GOLD FIX:                Structure TH               MAX             
-            //     MAX(Structure, Structure) = Structure
-            tf1 = COMBO_TF_STRUCTURE;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_STRUCTURE;  // Same as tf1
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MAX;
-            break;
-        
-        case COMBO_PRESET_TRIPLE_CONSERVATIVE:
-            // Triple Conservative: max(Trigger, Pattern, Structure)
-            //                         
-            // NOTE: This is handled in CalculateComboStepSize()
-            tf1 = COMBO_TF_TRIGGER;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MAX;
-            break;
-        
-        //                                                            
-        // CATEGORY 3: AGGRESSIVE (      )
-        //                                                            
-        
-        case COMBO_PRESET_AGGRESSIVE:
-            // Aggressive: min(Pattern, Trigger)
-            //              -                      
-            tf1 = COMBO_TF_PATTERN;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_TRIGGER;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MIN;
-            break;
-            
-        case COMBO_PRESET_ULTRA_AGGRESSIVE:
-            // Ultra Aggressive: min(Trigger, Sub)
-            //             -               
-            tf1 = COMBO_TF_TRIGGER;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_SUB;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MIN;
-            break;
-        
-        case COMBO_PRESET_TRIPLE_AGGRESSIVE:
-            // Triple Aggressive: min(Trigger, Pattern, Structure)
-            //                       
-            // NOTE: This is handled in CalculateComboStepSize()
-            tf1 = COMBO_TF_TRIGGER;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_MIN;
-            break;
-        
-        //                                                            
-        // CATEGORY 4: SPECIAL (    )
-        //                                                            
-        
-        case COMBO_PRESET_TREND_FILTER:
-            // Trend Filter: Structure - Sub
-            //            -                          
-            tf1 = COMBO_TF_STRUCTURE;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_SUB;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_SUBTRACT;
-            break;
-            
-        case COMBO_PRESET_VOLATILITY_ADAPTIVE:
-            // Volatility Adaptive: (Structure + Sub) / 2
-            //                 -                 
-            tf1 = COMBO_TF_STRUCTURE;
-            step1 = COMBO_STEP_TH;
-            tf2 = COMBO_TF_SUB;
-            step2 = COMBO_STEP_TH;
-            operation = COMBO_OP_AVERAGE;
-            break;
-        
-        //                                                            
-        // CATEGORY 5: ADVANCED USER PRESETS (    )
-        // These presets redirect to Advanced Mode for full control
-        //                                                            
-        
-        case COMBO_PRESET_MANUAL_DUAL:
-        case COMBO_PRESET_MANUAL_TRIPLE:
-            //    Advanced User Presets: Use Smart Component Inputs
-            // These are legacy presets that redirect to Advanced Mode
-            {
-                ENUM_COMBO_TIMEFRAME_TYPE t1, t2;
-                ENUM_COMBO_STEP_TYPE s1, s2;
-                bool valid = GetComboComponentParams(inpComboComp1, t1, s1) && 
-                             GetComboComponentParams(inpComboComp2, t2, s2);
-                             
-                if (valid) {
-                    tf1 = t1; step1 = s1;
-                    tf2 = t2; step2 = s2;
-                } else {
-                    // Fallback if invalid
-                    tf1 = COMBO_TF_TRIGGER; step1 = COMBO_STEP_SS;
-                    tf2 = COMBO_TF_PATTERN; step2 = COMBO_STEP_SS;
-                }
-                // NOTE: These presets are redirected to Advanced Mode in CalculateComboStepSize
-                // This assignment is kept for legacy compatibility if GetPresetConfiguration is called elsewhere
-                operation = COMBO_OP_ADD; 
-            }
-            break;
-        
-        //                                                            
-        // DEFAULT: Fallback to Legacy
-        //                                                            
-        
-        default:
-            #ifdef ENABLE_DEBUG_LOGS
-            Print("   GetPresetConfiguration: Unknown preset=", preset, ", using Legacy");
-            #endif
-            
-            // Fallback to Legacy
-            tf1 = COMBO_TF_TRIGGER;
-            step1 = COMBO_STEP_SS;
-            tf2 = COMBO_TF_PATTERN;
-            step2 = COMBO_STEP_SS;
-            operation = COMBO_OP_ADD;
-            break;
-    }
-    
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("  GetPresetConfiguration: PRESET MODE - Preset=", EnumToString(preset));
-    Print("   TF1=", EnumToString(tf1), ", Step1=", EnumToString(step1));
-    Print("   TF2=", EnumToString(tf2), ", Step2=", EnumToString(step2));
-    Print("   Operation=", EnumToString(operation));
-    #endif
-}
-
 ENUM_TIMEFRAMES GetPatternTimeframe() {
-    int currentMinutes = GetCurrentTimeframeMinutesForTH();
-    if(currentMinutes <= 0) currentMinutes = 1;
-    int patternSeconds = (currentMinutes * 60) * 4;
-
-    // SAFETY: Clamp to valid range (MN1 ~ 2.68 years in seconds)
-    if(patternSeconds > 43200 * 60) patternSeconds = 43200 * 60; // Max = MN1
-
-    // Map to closest timeframe (seconds-aware).
-    ENUM_TIMEFRAMES result = MapDurationSecondsToTimeframe(patternSeconds);
-    if(result <= 0) result = PERIOD_MN1;
-
+    // MQL5 Period() returns the ENUM value (H1=16385); normalize to minutes.
+    int currentMinutes = PeriodSeconds(Period()) / 60;
+    int patternMinutes = currentMinutes * 4;
+    
+    // SAFETY: Clamp to valid range
+    if(patternMinutes > 43200) patternMinutes = 43200; // Max = MN1
+    
+    // Map to closest standard timeframe
+    ENUM_TIMEFRAMES result;
+    if(patternMinutes <= 1) result = PERIOD_M1;
+    else if(patternMinutes <= 5) result = PERIOD_M5;
+    else if(patternMinutes <= 15) result = PERIOD_M15;
+    else if(patternMinutes <= 30) result = PERIOD_M30;
+    else if(patternMinutes <= 60) result = PERIOD_H1;
+    else if(patternMinutes <= 240) result = PERIOD_H4;
+    else if(patternMinutes <= 1440) result = PERIOD_D1;
+    else if(patternMinutes <= 10080) result = PERIOD_W1;
+    else result = PERIOD_MN1;
+    
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetPatternTimeframe: Current=", currentMinutes, "min, Pattern=",
-          patternSeconds, "s (4x) -> ", result);
+    Print("GetPatternTimeframe: Current=", currentMinutes, "min, Pattern=", 
+          patternMinutes, "min (4x) -> ", result);
     #endif
-
+    
     return result;
 }
 
@@ -2698,22 +1179,30 @@ ENUM_TIMEFRAMES GetPatternTimeframe() {
 //| FIXED: Proper bounds checking and logging                        |
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetStructureTimeframe() {
-    int currentMinutes = GetCurrentTimeframeMinutesForTH();
-    if(currentMinutes <= 0) currentMinutes = 1;
-    int structureSeconds = (currentMinutes * 60) * 16;
-
-    // SAFETY: Clamp to valid range (MN1 ~ 2.68 years in seconds)
-    if(structureSeconds > 43200 * 60) structureSeconds = 43200 * 60; // Max = MN1
-
-    // Map to closest timeframe (seconds-aware).
-    ENUM_TIMEFRAMES result = MapDurationSecondsToTimeframe(structureSeconds);
-    if(result <= 0) result = PERIOD_MN1;
-
+    // MQL5 Period() returns the ENUM value (H1=16385); normalize to minutes.
+    int currentMinutes = PeriodSeconds(Period()) / 60;
+    int structureMinutes = currentMinutes * 16;
+    
+    // SAFETY: Clamp to valid range
+    if(structureMinutes > 43200) structureMinutes = 43200; // Max = MN1
+    
+    // Map to closest standard timeframe
+    ENUM_TIMEFRAMES result;
+    if(structureMinutes <= 1) result = PERIOD_M1;
+    else if(structureMinutes <= 5) result = PERIOD_M5;
+    else if(structureMinutes <= 15) result = PERIOD_M15;
+    else if(structureMinutes <= 30) result = PERIOD_M30;
+    else if(structureMinutes <= 60) result = PERIOD_H1;
+    else if(structureMinutes <= 240) result = PERIOD_H4;
+    else if(structureMinutes <= 1440) result = PERIOD_D1;
+    else if(structureMinutes <= 10080) result = PERIOD_W1;
+    else result = PERIOD_MN1;
+    
     #ifdef ENABLE_DEBUG_LOGS
-    Print("GetStructureTimeframe: Current=", currentMinutes, "min, Structure=",
-          structureSeconds, "s (16x) -> ", result);
+    Print("GetStructureTimeframe: Current=", currentMinutes, "min, Structure=", 
+          structureMinutes, "min (16x) -> ", result);
     #endif
-
+    
     return result;
 }
 
@@ -3065,6 +1554,2003 @@ color GetZoneColorForLevel(const int currentStep, const bool triggerEnabled, con
 }
 
 
+//+------------------------------------------------------------------+
+//| Draw SS/LS levels with alternating pattern                      |
+//+------------------------------------------------------------------+
+void DrawSSLSLevels(const string objectPrefix, const double midpointPrice, 
+                    const double ssValue, const double lsValue, const bool lsFirst,
+                    const int maxLevelsAbove = 0, const int maxLevelsBelow = 0)
+{
+    if(ssValue <= 0 || lsValue <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("DrawSSLSLevels: Invalid SS/LS values");
+        #endif
+        return;
+    }
+    
+    // Note: ClearAllLevels is called in DrawLevelsBasedOnMode before this function
+    
+    //                                                                
+    // CLEANUP OLD ZONES
+    //                         
+    //                                                                
+    if(inpShowMidZones) {
+        ObjectsDeleteAll(0, objectPrefix + "SSLS_Zone_", -1, -1);
+    }
+    
+    double stepDistances[2];
+    stepDistances[0] = lsFirst ? lsValue : ssValue;  // First step
+    stepDistances[1] = lsFirst ? ssValue : lsValue;  // Second step
+    
+    // CRITICAL FIX: Calculate average step size for consistent zone height
+    double avgStepSize = (ssValue + lsValue) / 2.0;
+    
+    int effectiveMaxAbove = (maxLevelsAbove > 0) ? maxLevelsAbove : inpMaxTHLevelsAbove;
+    int effectiveMaxBelow = (maxLevelsBelow > 0) ? maxLevelsBelow : inpMaxTHLevelsBelow;
+    
+    // OPTIMIZATION: Cache frequently called values BEFORE the loop
+    bool triggerEnabled = IsTriggerLevelsEnabled();
+    bool structureEnabled = inpShowStructure;
+    int baseMultiplier = GetValidatedBaseMultiplier(); // Use central validation
+    bool checkCustomPrice = (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE);
+    
+    // Draw level at midpoint (step 0)
+    color midpointColor = clrNONE;
+    ENUM_LINE_STYLE midpointStyle = STYLE_SOLID;
+    int midpointWidth = 1;
+    if(GetPathForLevelOptimized(0, midpointColor, midpointStyle, midpointWidth, triggerEnabled)) {
+        // Use structure/trigger path if available
+    } else {
+        // Use LS color for midpoint as it's the starting point
+        midpointColor = inpLSLevelColor;
+        midpointStyle = inpLSLevelStyle;
+        midpointWidth = inpLSLevelWidth;
+    }
+    
+    string midpointName = objectPrefix + "SSLS_Midpoint_0";
+    if(ObjectFind(0, midpointName) < 0) {
+        ObjectCreate(0, midpointName, OBJ_HLINE, 0, 0, midpointPrice);
+    }
+    ObjectSetInteger(0, midpointName, OBJPROP_COLOR, midpointColor);
+    ObjectSetInteger(0, midpointName, OBJPROP_STYLE, midpointStyle);
+    ObjectSetInteger(0, midpointName, OBJPROP_WIDTH, midpointWidth);
+    ObjectSetInteger(0, midpointName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, midpointName, OBJPROP_SELECTED, false);
+    ObjectSetDouble(0, midpointName, OBJPROP_PRICE, midpointPrice);
+    ObjectSetString(0, midpointName, OBJPROP_TOOLTIP, 
+                   "Midpoint (Start) - " + DoubleToString(midpointPrice, Digits));
+    
+    int drawnAbove = 0;
+    int logicalStep = 0;
+    double cumulative = 0;
+    int zoneCountAbove = 0;  // Track zones drawn above
+    
+    // Initialize zone tracking with validation (Gold Version)
+    double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
+    if(!InitializeZoneTracking(midpointPrice, lastStructurePriceAbove, 
+                               lastTriggerPriceAbove, lastFallbackPriceAbove)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  DrawSSLSLevels: Failed to initialize zone tracking (Above)");
+        #endif
+        return;  // Abort if initialization failed
+    }
+    
+    // SECURITY FIX: Add iteration limit to prevent infinite loops
+    int maxIterations = effectiveMaxAbove * 2;  // Safety margin
+    int iterations = 0;
+    
+    while(drawnAbove < effectiveMaxAbove && iterations < maxIterations) {
+        iterations++;
+        double dist = stepDistances[logicalStep % 2];
+        cumulative += dist;
+        logicalStep++;
+        
+        double priceLevel = midpointPrice + cumulative;
+        
+        // LOG FIRST LEVEL for debugging (GUARDED - compile-time)
+        #ifdef ENABLE_DEBUG_LOGS
+        if(logicalStep == 1) {
+            Print("========== MT4 FIRST LEVEL DEBUG ==========");
+            Print("Anchor (midpoint): ", DoubleToString(midpointPrice, 10));
+            Print("Step distance (LS): ", DoubleToString(dist, 10));
+            Print("First level price: ", DoubleToString(priceLevel, 10));
+            Print("Formula: ", DoubleToString(midpointPrice, 10), " + ", DoubleToString(dist, 10), " = ", DoubleToString(priceLevel, 10));
+            Print("===========================================");
+            Print("   MT4 FIRST LEVEL: ", DoubleToString(priceLevel, 10), " (LS=", DoubleToString(dist, 10), ")");
+        }
+        #endif
+        
+        // Check if we exceeded the highest high (only in non-Custom Price modes)
+        // In Custom Price Mode, we draw exactly the requested number of levels
+        if(checkCustomPrice) {
+            if(priceLevel > g_highestHigh) break;
+        }
+        
+        // Check if this step should be drawn (matching Java shouldDrawStep line 184)
+        // OPTIMIZATION: Use ShouldDrawStepOptimized with cached values
+        if(structureEnabled || triggerEnabled) {
+            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+                continue;
+            }
+        } else {
+            // Neither structure nor trigger enabled - draw every baseMultiplier-th step
+            if(logicalStep % baseMultiplier != 0) {
+                continue;
+            }
+        }
+        
+        // Get path for this level (matching Java getPathForLevel line 187)
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        bool isSS = ((logicalStep % 2 == 0) == lsFirst); // Determine if SS or LS
+        
+        // OPTIMIZATION: Use GetPathForLevelOptimized with cached triggerEnabled
+        if(!GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+            // Fall back to SS/LS specific paths when structure/trigger disabled (Java line 189-191)
+            levelColor = isSS ? inpSSLevelColor : inpLSLevelColor;
+            levelStyle = isSS ? inpSSLevelStyle : inpLSLevelStyle;
+            levelWidth = isSS ? inpSSLevelWidth : inpLSLevelWidth;
+        }
+        
+        string levelName = objectPrefix + "SSLS_Above_" + IntegerToString(logicalStep);
+        
+        // Create the level line
+        if(ObjectFind(0, levelName) < 0) {
+            ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel);
+        }
+        
+        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
+        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
+        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                       (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
+                       " (" + DoubleToString(priceLevel, Digits) + ")");
+        
+        drawnAbove++;
+        
+        //                                                            
+        // DRAW MID-RANGE ZONE (AFTER drawing this level)
+        //                  (                  )
+        // 
+        // UNIFIED APPROACH: Use CreateZoneWithSmartFallback
+        //               :    CreateZoneWithSmartFallback           
+        //                                                            
+        if(inpShowMidZones) {
+            // Determine if this is a structure level
+            bool isStructureLevel = false;
+            if(structureEnabled) {
+                int intervals[];
+                GetCachedIntervals(baseMultiplier, intervals);
+                
+                for(int j = 0; j < 5; j++) {
+                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                        isStructureLevel = true;
+                        break;
+                    }
+                }
+            }
+            
+            string zoneName = objectPrefix + "SSLS_Zone_Above_" + IntegerToString(logicalStep);
+            
+            // CRITICAL FIX: Pass avgStepSize for consistent zone height
+            // CRITICAL FIX: Use separate tracking variables (matching Factor Mode)
+            if(CreateZoneWithSmartFallback(zoneName, priceLevel, isStructureLevel, levelColor,
+                                          structureEnabled, triggerEnabled,
+                                          lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove,
+                                          avgStepSize)) {  // Pass average step size
+                zoneCountAbove++;
+            }
+        }
+        
+        // Note: lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove
+        // are updated inside CreateZoneWithSmartFallback
+    }
+    
+    // Draw levels below midpoint
+    int drawnBelow = 0;
+    logicalStep = 0;
+    cumulative = 0;
+    int zoneCountBelow = 0;  // Track zones drawn below
+    
+    // Initialize zone tracking with validation (Gold Version)
+    double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
+    if(!InitializeZoneTracking(midpointPrice, lastStructurePriceBelow, 
+                               lastTriggerPriceBelow, lastFallbackPriceBelow)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  DrawSSLSLevels: Failed to initialize zone tracking (Below)");
+        #endif
+        return;  // Abort if initialization failed
+    }
+    
+    // SECURITY FIX: Add iteration limit to prevent infinite loops
+    maxIterations = effectiveMaxBelow * 2;  // Safety margin
+    iterations = 0;
+    
+    while(drawnBelow < effectiveMaxBelow && iterations < maxIterations) {
+        iterations++;
+        double dist = stepDistances[logicalStep % 2];
+        cumulative += dist;
+        logicalStep++;
+        
+        double priceLevel = midpointPrice - cumulative;
+        
+        // Check if we went below the lowest low (only in non-Custom Price modes)
+        // In Custom Price Mode, we draw exactly the requested number of levels
+        if(checkCustomPrice) {
+            if(priceLevel < g_lowestLow) break;
+        }
+        
+        // Check if this step should be drawn (matching Java shouldDrawStep line 210)
+        // OPTIMIZATION: Use ShouldDrawStepOptimized with cached values
+        if(structureEnabled || triggerEnabled) {
+            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+                continue;
+            }
+        } else {
+            // Neither structure nor trigger enabled - draw every baseMultiplier-th step
+            if(logicalStep % baseMultiplier != 0) {
+                continue;
+            }
+        }
+        
+        // Get path for this level (matching Java getPathForLevel line 213)
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        bool isSS = ((logicalStep % 2 == 0) == lsFirst); // Determine if SS or LS
+        
+        // OPTIMIZATION: Use GetPathForLevelOptimized with cached triggerEnabled
+        if(!GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+            // Fall back to SS/LS specific paths when structure/trigger disabled (Java line 215-216)
+            levelColor = isSS ? inpSSLevelColor : inpLSLevelColor;
+            levelStyle = isSS ? inpSSLevelStyle : inpLSLevelStyle;
+            levelWidth = isSS ? inpSSLevelWidth : inpLSLevelWidth;
+        }
+        
+        string levelName = objectPrefix + "SSLS_Below_" + IntegerToString(logicalStep);
+        
+        // Create the level line
+        if(ObjectFind(0, levelName) < 0) {
+            ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel);
+        }
+        
+        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);  // Make non-selectable
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);    // Ensure not selected
+        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
+        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                       (isSS ? "SS " : "LS ") + IntegerToString(logicalStep) + 
+                       " (" + DoubleToString(priceLevel, Digits) + ")");
+        
+        drawnBelow++;
+        
+        //                                                            
+        // DRAW MID-RANGE ZONE (AFTER drawing this level)
+        //                  (                  )
+        // 
+        // UNIFIED APPROACH: Use CreateZoneWithSmartFallback
+        //               :    CreateZoneWithSmartFallback           
+        //                                                            
+        if(inpShowMidZones) {
+            // Determine if this is a structure level
+            bool isStructureLevel = false;
+            if(structureEnabled) {
+                int intervals[];
+                GetCachedIntervals(baseMultiplier, intervals);
+                
+                for(int j = 0; j < 5; j++) {
+                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                        isStructureLevel = true;
+                        break;
+                    }
+                }
+            }
+            
+            string zoneName = objectPrefix + "SSLS_Zone_Below_" + IntegerToString(logicalStep);
+            
+            // CRITICAL FIX: Pass avgStepSize for consistent zone height
+            // CRITICAL FIX: Use separate tracking variables (matching Factor Mode)
+            if(CreateZoneWithSmartFallback(zoneName, priceLevel, isStructureLevel, levelColor,
+                                          structureEnabled, triggerEnabled,
+                                          lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow,
+                                          avgStepSize)) {  // Pass average step size
+                zoneCountBelow++;
+            }
+        }
+        
+        // Note: lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow
+        // are updated inside CreateZoneWithSmartFallback
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    if(inpShowMidZones) {
+        Print("  DrawSSLSLevels: Drew ", zoneCountAbove, " zones above, ", 
+              zoneCountBelow, " zones below");
+    }
+    #endif
+}
+
+//+------------------------------------------------------------------+
+//| Draw M levels based on Control ladder                           |
+//+------------------------------------------------------------------+
+//| UNIFIED HELPER: Draw Single Level with Unified Logic             |
+//|                  :                                               |
+//|                                                                  |
+//| This function encapsulates the common logic used by all modes   |
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool DrawUnifiedLevel(
+    const string levelName,
+    const double price,
+    const int logicalStep,
+    const bool triggerEnabled,
+    const bool structureEnabled,
+    const int baseMultiplier,
+    const color fallbackColor,
+    const ENUM_LINE_STYLE fallbackStyle,
+    const int fallbackWidth,
+    const string tooltip)
+{
+    // Get path for this level - check Structure first, then Trigger
+    color levelColor;
+    ENUM_LINE_STYLE levelStyle;
+    int levelWidth;
+    
+    if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+        // Got path from structure levels
+    } else if(triggerEnabled) {
+        // Use Trigger color (unified across all modes)
+        levelColor = inpTriggerColor;
+        levelStyle = inpTriggerStyle;
+        levelWidth = inpTriggerWidth;
+    } else {
+        // Use fallback color (mode-specific)
+        levelColor = fallbackColor;
+        levelStyle = fallbackStyle;
+        levelWidth = fallbackWidth;
+    }
+    
+    // Create or update the level line
+    if(ObjectFind(0, levelName) < 0) {
+        if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, price)) {
+            return false;
+        }
+    }
+    
+    ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+    ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+    ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+    ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+    ObjectSetDouble(0, levelName, OBJPROP_PRICE, price);
+    ObjectSetString(0, levelName, OBJPROP_TOOLTIP, tooltip);
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| UNIFIED HELPER: Draw Single Zone with Unified Logic              |
+//|                  :                                               |
+//+------------------------------------------------------------------+
+bool DrawUnifiedZone(
+    const string zoneName,
+    const double currentPrice,
+    const int logicalStep,
+    const bool triggerEnabled,
+    const bool structureEnabled,
+    const int baseMultiplier,
+    const color levelColor,
+    double &lastDrawnPrice,
+    double &lastTriggerPrice)
+{
+    if(!inpShowMidZones) return false;
+    
+    // Check if current level is a structure level
+    bool isCurrentStructure = false;
+    if(structureEnabled) {
+        int intervals[];
+        GetCachedIntervals(baseMultiplier, intervals);
+        
+        for(int j = 0; j < 5; j++) {
+            if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                isCurrentStructure = true;
+                break;
+            }
+        }
+    }
+    
+    // Use unified zone creation
+    return CreateZoneWithSmartFallback(zoneName, currentPrice, isCurrentStructure, levelColor,
+                                      structureEnabled, triggerEnabled,
+                                      lastDrawnPrice, lastTriggerPrice, lastDrawnPrice);
+}
+
+//+------------------------------------------------------------------+
+//| Draw Factor boundary lines (Historical High/Low reference)       |
+//| Draw Factor boundary lines (Historical High/Low reference)       |
+//|               High/Low             Factor mode                    |
+//+------------------------------------------------------------------+
+void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice, 
+                              const double lowPrice, const double factor, const double stepSize)
+{
+    // Skip drawing High/Low lines when Custom Price mode is active
+    // In Custom Price mode, user defines their own reference point (like other modes)
+    if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
+        // Delete existing High/Low lines and labels if they exist
+        ObjectDelete(0, objectPrefix + "Factor_High");
+        ObjectDelete(0, objectPrefix + "Factor_Low");
+        ObjectDelete(0, objectPrefix + "Factor_High_Label");
+        ObjectDelete(0, objectPrefix + "Factor_Low_Label");
+        return;
+    }
+    
+    // Calculate pip size for tooltip
+    double pipSize = GetCachedPipSize();
+    double rangePips = (highPrice - lowPrice) / pipSize;
+    double stepPips = stepSize / pipSize;
+    
+    // ========== Draw Historical HIGH line ==========
+    string highLineName = objectPrefix + "Factor_High";
+    if(ObjectFind(0, highLineName) < 0) {
+        ObjectCreate(0, highLineName, OBJ_HLINE, 0, 0, highPrice);
+    }
+    ObjectSetDouble(0, highLineName, OBJPROP_PRICE, highPrice);
+    ObjectSetInteger(0, highLineName, OBJPROP_COLOR, inpHighColor);
+    ObjectSetInteger(0, highLineName, OBJPROP_STYLE, inpHighStyle);
+    ObjectSetInteger(0, highLineName, OBJPROP_WIDTH, inpHighWidth);
+    ObjectSetInteger(0, highLineName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
+    ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
+        StringFormat("Historical HIGH | %s | Range: %.0f pips", 
+            DoubleToString(highPrice, Digits), rangePips));
+    
+    // ========== Draw Historical LOW line ==========
+    string lowLineName = objectPrefix + "Factor_Low";
+    if(ObjectFind(0, lowLineName) < 0) {
+        ObjectCreate(0, lowLineName, OBJ_HLINE, 0, 0, lowPrice);
+    }
+    ObjectSetDouble(0, lowLineName, OBJPROP_PRICE, lowPrice);
+    ObjectSetInteger(0, lowLineName, OBJPROP_COLOR, inpLowColor);
+    ObjectSetInteger(0, lowLineName, OBJPROP_STYLE, inpLowStyle);
+    ObjectSetInteger(0, lowLineName, OBJPROP_WIDTH, inpLowWidth);
+    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
+    ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
+        StringFormat("Historical LOW | %s | Range: %.0f pips", 
+            DoubleToString(lowPrice, Digits), rangePips));
+    
+    // ========== Draw HIGH label ==========
+    string highLabelName = objectPrefix + "Factor_High_Label";
+    if(ObjectFind(0, highLabelName) < 0) {
+        ObjectCreate(0, highLabelName, OBJ_TEXT, 0, TimeCurrent(), highPrice);
+    }
+    ObjectSetDouble(0, highLabelName, OBJPROP_PRICE, highPrice);
+    ObjectSetInteger(0, highLabelName, OBJPROP_TIME, TimeCurrent());
+    ObjectSetInteger(0, highLabelName, OBJPROP_COLOR, inpHighColor);
+    ObjectSetInteger(0, highLabelName, OBJPROP_FONTSIZE, 8);
+    ObjectSetInteger(0, highLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+    ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
+    ObjectSetString(0, highLabelName, OBJPROP_TEXT, 
+        StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
+            DoubleToString(highPrice, Digits), rangePips, factor, stepPips));
+    ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
+    
+    // ========== Draw LOW label ==========
+    string lowLabelName = objectPrefix + "Factor_Low_Label";
+    if(ObjectFind(0, lowLabelName) < 0) {
+        ObjectCreate(0, lowLabelName, OBJ_TEXT, 0, TimeCurrent(), lowPrice);
+    }
+    ObjectSetDouble(0, lowLabelName, OBJPROP_PRICE, lowPrice);
+    ObjectSetInteger(0, lowLabelName, OBJPROP_TIME, TimeCurrent());
+    ObjectSetInteger(0, lowLabelName, OBJPROP_COLOR, inpLowColor);
+    ObjectSetInteger(0, lowLabelName, OBJPROP_FONTSIZE, 8);
+    ObjectSetInteger(0, lowLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
+    ObjectSetString(0, lowLabelName, OBJPROP_TEXT, 
+        StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
+            DoubleToString(lowPrice, Digits), rangePips, factor, stepPips));
+    ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
+}
+
+//+------------------------------------------------------------------+
+//| Draw Factor levels with perfect equal spacing (aligned)          |
+//|                                             (        )            |
+//| Ensures all spacing is equal including at chart boundaries       |
+//+------------------------------------------------------------------+
+//| Draw Factor Levels with Harmonic Alternating Pattern             |
+//|                                                                   |
+//| Alternates between Base Step ( 2) and Large Step ( ratio)        |
+//| Creates macro symmetry with micro variation                       |
+#ifndef BUILD_LITE
+//+------------------------------------------------------------------+
+void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice, 
+                              const double lowPrice, const double factor, 
+                              const double baseStepSize, const double harmonicRatio)
+{
+    //                                                                
+    // CRITICAL INPUT VALIDATION
+    //                                                                
+    
+    // Validate object prefix
+    if(StringLen(objectPrefix) == 0) {
+        Print("  DrawFactorLevelsHarmonic: Empty object prefix");
+        return;
+    }
+    
+    // Validate price range
+    if(highPrice <= 0 || lowPrice <= 0) {
+        Print("  DrawFactorLevelsHarmonic: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        return;
+    }
+    if(highPrice <= lowPrice) {
+        Print("  DrawFactorLevelsHarmonic: Invalid range - High must be > Low");
+        return;
+    }
+    
+    // Validate base step size
+    if(baseStepSize <= 0) {
+        Print("  DrawFactorLevelsHarmonic: Invalid base step size: ", baseStepSize);
+        return;
+    }
+    
+    // CRITICAL: Validate harmonic ratio with strict bounds
+    if(harmonicRatio < MIN_HARMONIC_RATIO) {
+        Print("  DrawFactorLevelsHarmonic: Ratio too small (", harmonicRatio, 
+              ") - must be >= ", MIN_HARMONIC_RATIO, " for meaningful alternation");
+        return;
+    }
+    if(harmonicRatio > MAX_HARMONIC_RATIO) {
+        Print("  DrawFactorLevelsHarmonic: Ratio too large (", harmonicRatio, 
+              ") - must be <= ", MAX_HARMONIC_RATIO);
+        return;
+    }
+    
+    //                                                                
+    // CLEANUP OLD OBJECTS (prevent visual clutter)
+    //                                                                
+    
+    // Delete old harmonic objects before drawing new ones
+    ObjectsDeleteAll(0, objectPrefix + "Factor_Mid_", -1, -1);
+    ObjectsDeleteAll(0, objectPrefix + "Factor_Up_", -1, -1);
+    ObjectsDeleteAll(0, objectPrefix + "Factor_Down_", -1, -1);
+    
+    //                                                                
+    // CALCULATE STEP SIZES
+    //                                                                
+    
+    // Calculate large step size
+    double largeStepSize = baseStepSize * harmonicRatio;
+    
+    // Validate large step doesn't exceed range
+    double range = highPrice - lowPrice;
+    if(largeStepSize > range) {
+        Print("   DrawFactorLevelsHarmonic: Large step (", largeStepSize, 
+              ") exceeds range (", range, ") - adjusting");
+        largeStepSize = range * 0.5;  // Max 50% of range
+    }
+    
+    // Calculate midpoint (center of range)
+    double midpoint = NormalizeDouble((highPrice + lowPrice) / 2.0, Digits);
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("==================== DrawFactorLevelsHarmonic ====================");
+    Print("High=", highPrice, ", Low=", lowPrice, ", Range=", range);
+    Print("Midpoint=", midpoint, ", Factor=", factor);
+    Print("BaseStep=", baseStepSize, ", LargeStep=", largeStepSize);
+    Print("Ratio=", harmonicRatio, " (", DoubleToString((harmonicRatio - 1.0) * 100, 1), "% larger)");
+    #endif
+    
+    //                                                                
+    // DRAW MIDPOINT LEVEL
+    //                                                                
+    
+    string midName = objectPrefix + "Factor_Mid_0";
+    if(ObjectFind(0, midName) < 0) {
+        if(!ObjectCreate(0, midName, OBJ_HLINE, 0, 0, midpoint)) {
+            Print("  Failed to create midpoint level. Error: ", GetLastError());
+            return;
+        }
+    }
+    
+    ObjectSetDouble(0, midName, OBJPROP_PRICE, midpoint);
+    ObjectSetInteger(0, midName, OBJPROP_COLOR, C'255,140,0');  // DarkOrange - visible on Lavender
+    ObjectSetInteger(0, midName, OBJPROP_STYLE, STYLE_SOLID);
+    ObjectSetInteger(0, midName, OBJPROP_WIDTH, 2);
+    ObjectSetInteger(0, midName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, midName, OBJPROP_SELECTED, false);
+    ObjectSetInteger(0, midName, OBJPROP_BACK, false);
+    ObjectSetString(0, midName, OBJPROP_TOOLTIP, 
+        StringFormat("   Harmonic Center | %s | F=%.2f | R=%.3f", 
+            DoubleToString(midpoint, Digits), factor, harmonicRatio));
+    
+    //                                                                
+    // PREPARE PATTERN ARRAY (optimization)
+    //                                                                
+    
+    // Pattern: [baseStep, largeStep, baseStep, largeStep, ...]
+    double stepPattern[2];
+    stepPattern[0] = baseStepSize;   // Smaller step ( 2)
+    stepPattern[1] = largeStepSize;  // Larger step ( ratio)
+    
+    //                                                                
+    // CALCULATE MAX LEVELS (with safety limits)
+    //                                                                
+    
+    // Calculate approximate max levels per side
+    double halfRange = range / 2.0;
+    double avgStep = (baseStepSize + largeStepSize) / 2.0;
+    int maxLevelsPerSide = (int)MathCeil(halfRange / avgStep);
+    
+    // Safety limit to prevent infinite loops or MT4 hang
+    const int MAX_HARMONIC_LEVELS = 2500;
+    if(maxLevelsPerSide > MAX_HARMONIC_LEVELS) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   Clamping levels from ", maxLevelsPerSide, " to ", MAX_HARMONIC_LEVELS);
+        #endif
+        maxLevelsPerSide = MAX_HARMONIC_LEVELS;
+    }
+    
+    // Additional safety: minimum step size check
+    if(baseStepSize < Point * 2) {
+        Print("  DrawFactorLevelsHarmonic: Base step too small (", baseStepSize, 
+              ") - must be >= ", Point * 2);
+        return;
+    }
+    
+    //                                                                
+    // CACHE TRIGGER STATE (optimization)
+    //                                                                
+    
+    bool triggerEnabled = IsTriggerLevelsEnabled();
+    bool structureEnabled = inpShowStructure;
+    int baseMultiplier = GetValidatedBaseMultiplier(); // Use central validation
+    
+    //                                                                
+    // DRAW LEVELS ABOVE MIDPOINT
+    //                                                                
+    
+    double cumulative = 0;
+    int levelsAbove = 0;
+    int iterationCount = 0;  // Safety counter
+    
+    for(int i = 0; i < maxLevelsPerSide && iterationCount < MAX_HARMONIC_LEVELS * 2; i++, iterationCount++) {
+        // Get step size for this iteration (alternating pattern)
+        double step = stepPattern[i % 2];
+        cumulative += step;
+        double priceLevel = midpoint + cumulative;
+        
+        // CRITICAL: Stop if we exceed high price
+        if(priceLevel > highPrice) {
+            #ifdef ENABLE_DEBUG_LOGS
+            if(i == 0) Print("   First level above midpoint exceeds high - step too large");
+            #endif
+            break;
+        }
+        
+        // Normalize price
+        priceLevel = NormalizeDouble(priceLevel, Digits);
+        
+        // Determine if this is base or large step
+        bool isBase = (i % 2 == 0);
+        
+        //                                                                
+        // PRIORITY SYSTEM FOR COLORS AND STYLES
+        //                                                                
+        // PRIORITY 1: Harmonic Pattern (always takes precedence)
+        //   - Preserves alternating rhythm
+        //   - No filtering (all levels drawn)
+        // PRIORITY 2: Structure/Trigger (if Harmonic disabled)
+        //   - Applies filtering based on baseMultiplier
+        // PRIORITY 3: Default Factor colors
+        //                                                                
+        
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        bool shouldDraw = true;  // Default: draw all levels
+        
+        int logicalStep = i + 1;  // Step count for Structure levels
+        
+        // PRIORITY 1: Harmonic colors always take precedence
+        levelColor = isBase ? inpHarmonicBaseColor : inpHarmonicLargeColor;
+        levelStyle = inpFactorLevelStyle;
+        levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
+        
+        // NO FILTERING in Harmonic Mode - draw all levels to preserve pattern
+        // (Structure/Trigger filtering would break the alternating rhythm)
+        
+        // Create level name
+        string levelName = objectPrefix + "Factor_Up_" + IntegerToString(i + 1);
+        
+        // Create or update level
+        if(ObjectFind(0, levelName) < 0) {
+            if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
+                Print("   Failed to create level above ", i + 1, ". Error: ", GetLastError());
+                continue;
+            }
+        }
+        
+        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
+        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+            StringFormat("%s Step %d | %s | F=%.2f |  =%.1f", 
+                (isBase ? "   Base" : "   Large"), i + 1, 
+                DoubleToString(priceLevel, Digits), factor, step / Point));
+        
+        levelsAbove++;
+    }
+    
+    //                                                                
+    // DRAW LEVELS BELOW MIDPOINT
+    //                                                                
+    
+    cumulative = 0;
+    int levelsBelow = 0;
+    iterationCount = 0;  // Reset safety counter
+    
+    for(int i = 0; i < maxLevelsPerSide && iterationCount < MAX_HARMONIC_LEVELS * 2; i++, iterationCount++) {
+        double step = stepPattern[i % 2];
+        cumulative += step;
+        double priceLevel = midpoint - cumulative;
+        
+        // CRITICAL: Stop if we go below low price
+        if(priceLevel < lowPrice) {
+            #ifdef ENABLE_DEBUG_LOGS
+            if(i == 0) Print("   First level below midpoint goes below low - step too large");
+            #endif
+            break;
+        }
+        
+        // Normalize price
+        priceLevel = NormalizeDouble(priceLevel, Digits);
+        
+        bool isBase = (i % 2 == 0);
+        
+        //                                                                
+        // PRIORITY SYSTEM FOR COLORS AND STYLES (same as above)
+        //                                                                
+        
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        
+        int logicalStep = i + 1;
+        
+        // PRIORITY 1: Harmonic colors always take precedence
+        levelColor = isBase ? inpHarmonicBaseColor : inpHarmonicLargeColor;
+        levelStyle = inpFactorLevelStyle;
+        levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
+        
+        // NO FILTERING in Harmonic Mode - draw all levels to preserve pattern
+        
+        string levelName = objectPrefix + "Factor_Down_" + IntegerToString(i + 1);
+        
+        if(ObjectFind(0, levelName) < 0) {
+            if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, priceLevel)) {
+                Print("   Failed to create level below ", i + 1, ". Error: ", GetLastError());
+                continue;
+            }
+        }
+        
+        ObjectSetDouble(0, levelName, OBJPROP_PRICE, priceLevel);
+        ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+        ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+        ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+        ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+            StringFormat("%s Step %d | %s | F=%.2f |  =%.1f", 
+                (isBase ? "   Base" : "   Large"), i + 1, 
+                DoubleToString(priceLevel, Digits), factor, step / Point));
+        
+        levelsBelow++;
+    }
+    
+    //                                                                
+    // FINAL REPORT
+    //                                                                
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("  DrawFactorLevelsHarmonic: Drew ", levelsAbove, " levels above, ", 
+          levelsBelow, " levels below midpoint");
+    Print("Total: ", (levelsAbove + levelsBelow + 1), " levels (including midpoint)");
+    #endif
+}
+#endif
+
+//+------------------------------------------------------------------+
+void DrawFactorLevelsAligned(const string objectPrefix, const double highPrice, 
+                             const double lowPrice, const double factor, const double stepSize)
+{
+    // Comprehensive input validation
+    if(StringLen(objectPrefix) == 0) {
+        Print("DrawFactorLevelsAligned: Empty object prefix");
+        return;
+    }
+    if(highPrice <= 0 || lowPrice <= 0) {
+        Print("DrawFactorLevelsAligned: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        return;
+    }
+    if(highPrice <= lowPrice) {
+        Print("DrawFactorLevelsAligned: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
+        return;
+    }
+    if(stepSize <= 0) {
+        Print("DrawFactorLevelsAligned: Invalid step size: ", stepSize);
+        return;
+    }
+    
+    // Determine drawing direction based on current price position
+    // GOAL: Put any unequal gap at the FARTHER boundary from current price
+    // 
+    // LOGIC:
+    // - Starting from HIGH and going DOWN   last level ends near LOW
+    // - Starting from LOW and going UP   last level ends near HIGH
+    // - The "gap" (if any) appears where we END, not where we START
+    // 
+    // Therefore:
+    // - To put gap at LOW (bottom)   start from HIGH (top)
+    // - To put gap at HIGH (top)   start from LOW (bottom)
+    // 
+    // User wants gap at FARTHER boundary:
+    // - If price closer to HIGH   gap should be at LOW   start from HIGH
+    // - If price closer to LOW   gap should be at HIGH   start from LOW
+    // 
+    // CONCLUSION: Start from the boundary that is FARTHER from current price
+    
+    double currentPrice = Bid;
+    double distToHigh = MathAbs(currentPrice - highPrice);
+    double distToLow = MathAbs(currentPrice - lowPrice);
+    
+    // Start from FARTHER boundary so gap ends up at FARTHER side
+    bool startFromHigh = (distToHigh > distToLow);
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("Factor Direction: Price=", DoubleToString(currentPrice, Digits),
+          ", DistHigh=", DoubleToString(distToHigh, Digits),
+          ", DistLow=", DoubleToString(distToLow, Digits),
+          ", Start=", (startFromHigh ? "HIGH" : "LOW"));
+    #endif
+    
+    // Calculate how many levels fit in the range
+    // Formula: totalLevels = floor(range / stepSize)
+    // Example: range=0.78, stepSize=0.09   totalLevels = floor(8.67) = 8
+    // This means we can fit 8 steps in the range
+    // Since loop starts at i=1, we draw levels at: boundary + 1*step, boundary + 2*step, ..., boundary + 8*step
+    double range = highPrice - lowPrice;
+    int totalLevels = (int)MathFloor(range / stepSize);
+    
+    if(totalLevels <= 1) {
+        Print("DrawFactorLevelsAligned: Not enough space (totalLevels=", totalLevels, 
+              ", range=", DoubleToString(range, Digits), 
+              ", stepSize=", DoubleToString(stepSize, Digits), ")");
+        return;
+    }
+    
+    // NOTE: We do NOT subtract 1 here!
+    // The loop starts from i=1 (not i=0), so first level is at (boundary + stepSize)
+    // This naturally avoids drawing ON the boundary itself
+    // If we subtract 1, we lose one valid level that could fit in the range
+    
+    // Safety: Limit max levels to prevent performance issues
+    const int MAX_FACTOR_LEVELS = 5000;
+    if(totalLevels > MAX_FACTOR_LEVELS) {
+        Print("DrawFactorLevelsAligned: WARNING - Too many levels (", totalLevels, 
+              "), clamping to ", MAX_FACTOR_LEVELS);
+        totalLevels = MAX_FACTOR_LEVELS;
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("DrawFactorLevelsAligned: High=", highPrice, ", Low=", lowPrice, 
+          ", Factor=", factor, ", StepSize=", stepSize, ", TotalLevels=", totalLevels,
+          ", StartFrom=", (startFromHigh ? "HIGH" : "LOW"));
+    #endif
+    
+    // Draw levels starting from nearest boundary
+    double startPrice = startFromHigh ? highPrice : lowPrice;
+    double direction = startFromHigh ? -1.0 : 1.0;  // -1 = downward, +1 = upward
+    
+    //                                                                
+    // CLEANUP OLD ZONES
+    //                         
+    //                                                                
+    if(inpShowMidZones) {
+        ObjectsDeleteAll(0, objectPrefix + "Factor_Zone_", -1, -1);
+    }
+    
+    int levelsDrawn = 0;
+    int zoneCount = 0;  // Track zones drawn
+    
+    //                                                                
+    // CALCULATE halfStep and zoneHeight ONCE (DRY principle)
+    //                                    
+    // Zone height = 25% of halfStep (12.5% above + 12.5% below midpoint)
+    //                                                                
+    double halfStep = stepSize / 2.0;
+    double zoneHeight = halfStep * 0.25;  // 25% of halfStep (12.5% each side)
+    
+    //                                                                
+    // MAIN LOOP: Draw levels and zones
+    //          :                     
+    //                                                                
+    for(int i = 1; i <= totalLevels; i++) {
+        // Calculate price for this level (aligned to boundary)
+        double levelPrice = startPrice + (direction * stepSize * i);
+        
+        // Validate level is within range
+        if(levelPrice < lowPrice || levelPrice > highPrice) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("   Level ", i, " outside range: ", DoubleToString(levelPrice, Digits));
+            #endif
+            continue;  // Skip levels outside range
+        }
+        
+        // Normalize price to symbol's digits
+        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        
+        //                                                            
+        // DRAW MID-RANGE ZONE (BEFORE this level)
+        //                  (              )
+        // 
+        // LOGIC: Draw zone between previous boundary/level and current level
+        // - For i=1: Zone between start boundary and first level
+        // - For i>1: Zone between previous level and current level
+        //                                                            
+        if(inpShowMidZones) {
+            // Determine previous price (boundary for i=1, previous level for i>1)
+            double prevPrice = (i == 1) ? startPrice : (startPrice + (direction * stepSize * (i-1)));
+            prevPrice = NormalizeDouble(prevPrice, Digits);
+            
+            // Calculate midpoint between previous and current
+            double midPoint = (normalizedPrice + prevPrice) / 2.0;
+            
+            // Calculate zone boundaries ( 12.5% of halfStep from midpoint)
+            double zoneTop = midPoint + zoneHeight;
+            double zoneBottom = midPoint - zoneHeight;
+            
+            // Normalize zone boundaries
+            zoneTop = NormalizeDouble(zoneTop, Digits);
+            zoneBottom = NormalizeDouble(zoneBottom, Digits);
+            
+            // Validate zone is within chart range
+            if(zoneTop <= highPrice && zoneBottom >= lowPrice) {
+                // Draw zone with style support
+                string zoneName = objectPrefix + "Factor_Zone_" + IntegerToString(i);
+                if(CreateFactorMidZone(zoneName, zoneTop, zoneBottom, 
+                                      inpFactorLevelColor,  // Use Factor level color
+                                      inpMidZoneStyle,  // Use unified zone style
+                                      inpMidZoneTransparency)) {
+                    zoneCount++;
+                    #ifdef ENABLE_DEBUG_LOGS
+                    Print("  Zone ", i, ": Between ", DoubleToString(prevPrice, Digits),
+                          " and ", DoubleToString(normalizedPrice, Digits),
+                          " | Mid=", DoubleToString(midPoint, Digits),
+                          " | Height=", DoubleToString(zoneHeight, Digits),
+                          " | Style=", EnumToString(inpMidZoneStyle));
+                    #endif
+                }
+            }
+        }
+        
+        //                                                            
+        // DRAW FACTOR LEVEL LINE
+        //                  
+        // 
+        // CRITICAL: Factor lines controlled by Trigger Levels (INVERTED)
+        //    :      Factor      Trigger Levels               (     )
+        // Logic: Trigger OFF   Factor lines VISIBLE
+        //        Trigger ON    Factor lines HIDDEN
+        //     :                    Factor                   
+        //                         Factor             
+        //                                                            
+        
+        // Create level name
+        string levelName = objectPrefix + "Factor_" + IntegerToString(i);
+        
+        // Check if Factor lines should be shown (INVERTED: show when Trigger is OFF)
+        bool shouldShowLine = !IsTriggerLevelsEnabled();
+        
+        // Check if object exists
+        bool objectExists = (ObjectFind(0, levelName) >= 0);
+        
+        if(shouldShowLine) {
+            // Trigger ON: Create or update level
+            if(!objectExists) {
+                if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                    Print("DrawFactorLevelsAligned: Failed to create level ", i, ", Error: ", GetLastError());
+                    continue;
+                }
+            }
+            
+            // Set level properties
+            ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, inpFactorLevelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, inpFactorLevelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, inpFactorLevelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+            ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);  // Draw above zones
+            ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);  // Show on all timeframes
+            
+            // Set tooltip
+            ObjectSetString(0, levelName, OBJPROP_TOOLTIP, 
+                StringFormat("Factor Level %d | %s | F=%.2f", 
+                    i, DoubleToString(normalizedPrice, Digits), factor));
+            
+            levelsDrawn++;
+        } else {
+            // Trigger OFF: Hide level if it exists
+            if(objectExists) {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);  // Hide on all timeframes
+            }
+        }
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("  DrawFactorLevelsAligned: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("   halfStep=", DoubleToString(halfStep, Digits), 
+          ", zoneHeight=", DoubleToString(zoneHeight, Digits), " (25% of halfStep = 12.5% each side)");
+    #endif
+}
+
+//+------------------------------------------------------------------+
+//| Draw Harmonic Factor levels FROM CENTER (supports Custom Price) |
+//|          Harmonic Factor         (            Custom Price)      |
+//| Alternates between base and large steps from center              |
+//+------------------------------------------------------------------+
+#ifndef BUILD_LITE
+//+------------------------------------------------------------------+
+//| Draw Factor Harmonic levels FROM CENTER                         |
+//| Alternates between base and large steps from center              |
+//| GOLD VERSION: With safety checks and performance optimization    |
+//+------------------------------------------------------------------+
+void DrawFactorLevelsHarmonicFromCenter(const string objectPrefix, const double centerPrice,
+                                        const double highPrice, const double lowPrice,
+                                        const double factor, const double baseStepSize,
+                                        const double harmonicRatio,
+                                        const int maxLevelsAbove, const int maxLevelsBelow)
+{
+    //                                                                
+    // PHASE 1: INPUT VALIDATION (Security Layer)
+    //                                                                
+    if(StringLen(objectPrefix) == 0 || centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
+        Print("  DrawFactorLevelsHarmonicFromCenter: Invalid inputs");
+        return;
+    }
+    if(highPrice <= lowPrice) {
+        Print("  DrawFactorLevelsHarmonicFromCenter: Invalid range - High must be > Low");
+        return;
+    }
+    if(baseStepSize <= 0 || harmonicRatio < MIN_HARMONIC_RATIO || harmonicRatio > MAX_HARMONIC_RATIO) {
+        Print("  DrawFactorLevelsHarmonicFromCenter: Invalid step or ratio");
+        return;
+    }
+    if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
+        Print("  DrawFactorLevelsHarmonicFromCenter: Invalid level counts");
+        return;
+    }
+    
+    //                                                                
+    // PHASE 2: SAFETY CHECKS (Performance Protection)
+    //                                                                
+    
+    // Calculate historical range and viewport
+    double historicalRange = highPrice - lowPrice;
+    double currentPrice = iClose(_Symbol, _Period, 0);
+    // INCREASED: From 3x to 10x to allow more levels on lower timeframes
+    double viewportTop = currentPrice + (historicalRange * 10.0);
+    double viewportBottom = currentPrice - (historicalRange * 10.0);
+    
+    // SAFETY: Limit levels if center is far from viewport
+    int safeMaxAbove = maxLevelsAbove;
+    int safeMaxBelow = maxLevelsBelow;
+    
+    if(centerPrice > viewportTop || centerPrice < viewportBottom) {
+        safeMaxAbove = (int)MathMin(maxLevelsAbove, 100);
+        safeMaxBelow = (int)MathMin(maxLevelsBelow, 100);
+        
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   Harmonic: Center outside viewport - limiting to ", safeMaxAbove, "/", safeMaxBelow);
+        #endif
+    }
+    
+    // Calculate large step
+    double largeStepSize = baseStepSize * harmonicRatio;
+    
+    // CRITICAL FIX: Calculate average step size for consistent zone height
+    double avgStepSize = (baseStepSize + largeStepSize) / 2.0;
+    
+    //                                                                
+    // CLEANUP OLD OBJECTS (including zones)
+    //                     (     zone   )
+    //                                                                
+    ObjectsDeleteAll(0, objectPrefix + "Factor_Harmonic_", -1, -1);
+    if(inpShowMidZones) {
+        ObjectsDeleteAll(0, objectPrefix + "Factor_Harmonic_Zone_", -1, -1);
+    }
+    
+    bool shouldShowLine = !IsTriggerLevelsEnabled();
+    int levelsDrawn = 0;
+    int zoneCount = 0;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("DrawFactorLevelsHarmonicFromCenter: Center=", DoubleToString(centerPrice, Digits),
+          ", BaseStep=", DoubleToString(baseStepSize, Digits),
+          ", LargeStep=", DoubleToString(largeStepSize, Digits),
+          ", MaxAbove=", maxLevelsAbove, ", MaxBelow=", maxLevelsBelow);
+    #endif
+    
+    // Draw center level
+    string centerName = objectPrefix + "Factor_Harmonic_Center";
+    double normalizedCenter = NormalizeDouble(centerPrice, Digits);
+    
+    if(shouldShowLine && ObjectFind(0, centerName) < 0) {
+        if(ObjectCreate(0, centerName, OBJ_HLINE, 0, 0, normalizedCenter)) {
+            ObjectSetInteger(0, centerName, OBJPROP_COLOR, C'255,140,0');  // DarkOrange
+            ObjectSetInteger(0, centerName, OBJPROP_STYLE, STYLE_SOLID);
+            ObjectSetInteger(0, centerName, OBJPROP_WIDTH, 2);
+            ObjectSetInteger(0, centerName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, centerName, OBJPROP_BACK, false);
+            ObjectSetInteger(0, centerName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+            ObjectSetString(0, centerName, OBJPROP_TOOLTIP,
+                StringFormat("Harmonic Center | %s | F=%.2f | R=%.3f",
+                    DoubleToString(normalizedCenter, Digits), factor, harmonicRatio));
+            levelsDrawn++;
+        }
+    }
+    
+    // Draw levels above center (alternating pattern, respects maxLevelsAbove)
+    // UNIFIED LOGIC: Uses M Mode color logic with Harmonic pattern
+    double cumulative = 0;
+    int levelsAboveCount = 0;
+    
+    // OPTIMIZATION: Cache frequently called values BEFORE the loop
+    // OPTIMIZATION: Cache frequently called values BEFORE the loop
+    bool triggerEnabled = IsTriggerLevelsEnabled();
+    bool structureEnabled = inpShowStructure;
+    int baseMultiplier = GetValidatedBaseMultiplier();
+    
+    // Initialize zone tracking with validation (Gold Version)
+    double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
+    if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
+                               lastTriggerPriceAbove, lastFallbackPriceAbove)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Above)");
+        #endif
+        return;  // Abort if initialization failed
+    }
+    
+    for(int i = 0; i < safeMaxAbove; i++) {
+        double step = (i % 2 == 0) ? baseStepSize : largeStepSize;
+        cumulative += step;
+        double priceLevel = centerPrice + cumulative;
+        
+        int logicalStep = i + 1;  // Harmonic uses sequential steps
+        
+        // Check if this step should be drawn (matching M Mode logic)
+        // Note: Harmonic pattern is special, but still respects Structure/Trigger
+        if(structureEnabled || triggerEnabled) {
+            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+                continue;  // Skip this step but don't break the pattern
+            }
+        } else {
+            // Neither structure nor trigger enabled - draw every baseMultiplier-th step
+            if(logicalStep % baseMultiplier != 0) {
+                continue;
+            }
+        }
+        
+        double normalizedPrice = NormalizeDouble(priceLevel, Digits);
+        bool isBase = (i % 2 == 0);
+        
+        // Get path for this level - check Structure first, then Trigger (matching M Mode)
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        
+        if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+            // Got path from structure levels
+        } else if(triggerEnabled) {
+            // Use Trigger color (matching M Mode exactly)
+            levelColor = inpTriggerColor;
+            levelStyle = inpTriggerStyle;
+            levelWidth = inpTriggerWidth;
+        } else {
+            // Fallback to Harmonic colors
+            levelColor = isBase ? inpHarmonicBaseColor : inpHarmonicLargeColor;
+            levelStyle = inpFactorLevelStyle;
+            levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
+        }
+        
+        string levelName = objectPrefix + "Factor_Harmonic_Above_" + IntegerToString(logicalStep);
+        
+        if(shouldShowLine && ObjectFind(0, levelName) < 0) {
+            if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+                ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+                ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+                ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
+                    StringFormat("Harmonic +%d (%s) | %s | F=%.2f",
+                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, Digits), factor));
+                levelsDrawn++;
+                levelsAboveCount++;
+            }
+        }
+        
+        // Draw zone (matching M Mode logic with CreateZoneWithSmartFallback)
+        if(inpShowMidZones) {
+            // Check if current level is a structure level
+            bool isCurrentStructure = false;
+            if(structureEnabled) {
+                int intervals[];
+                GetCachedIntervals(baseMultiplier, intervals);
+                
+                for(int j = 0; j < 5; j++) {
+                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                        isCurrentStructure = true;
+                        break;
+                    }
+                }
+            }
+            
+            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Above_" + IntegerToString(logicalStep);
+            // CRITICAL FIX: Pass avgStepSize for consistent zone height
+            if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
+                                          structureEnabled, triggerEnabled,
+                                          lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove,
+                                          avgStepSize)) {  // Pass average step size
+                zoneCount++;
+            }
+        }
+    }
+    
+    // Draw levels below center (alternating pattern, respects maxLevelsBelow)
+    // UNIFIED LOGIC: Uses M Mode color logic with Harmonic pattern
+    cumulative = 0;
+    int levelsBelowCount = 0;
+    
+    // Initialize zone tracking with validation (Gold Version)
+    double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
+    if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceBelow, 
+                               lastTriggerPriceBelow, lastFallbackPriceBelow)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  DrawFactorLevelsHarmonicFromCenter: Failed to initialize zone tracking (Below)");
+        #endif
+        return;  // Abort if initialization failed
+    }
+    
+    for(int i = 0; i < safeMaxBelow; i++) {
+        double step = (i % 2 == 0) ? baseStepSize : largeStepSize;
+        cumulative += step;
+        double priceLevel = centerPrice - cumulative;
+        
+        int logicalStep = i + 1;  // Harmonic uses sequential steps
+        
+        // Check if this step should be drawn (matching M Mode logic)
+        if(structureEnabled || triggerEnabled) {
+            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+                continue;  // Skip this step but don't break the pattern
+            }
+        } else {
+            // Neither structure nor trigger enabled - draw every baseMultiplier-th step
+            if(logicalStep % baseMultiplier != 0) {
+                continue;
+            }
+        }
+        
+        double normalizedPrice = NormalizeDouble(priceLevel, Digits);
+        bool isBase = (i % 2 == 0);
+        
+        // Get path for this level - check Structure first, then Trigger (matching M Mode)
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        
+        if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+            // Got path from structure levels
+        } else if(triggerEnabled) {
+            // Use Trigger color (matching M Mode exactly)
+            levelColor = inpTriggerColor;
+            levelStyle = inpTriggerStyle;
+            levelWidth = inpTriggerWidth;
+        } else {
+            // Fallback to Harmonic colors
+            levelColor = isBase ? inpHarmonicBaseColor : inpHarmonicLargeColor;
+            levelStyle = inpFactorLevelStyle;
+            levelWidth = isBase ? inpHarmonicBaseWidth : inpHarmonicLargeWidth;
+        }
+        
+        string levelName = objectPrefix + "Factor_Harmonic_Below_" + IntegerToString(logicalStep);
+        
+        if(shouldShowLine && ObjectFind(0, levelName) < 0) {
+            if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+                ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+                ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+                ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
+                    StringFormat("Harmonic -%d (%s) | %s | F=%.2f",
+                        logicalStep, (isBase ? "Base" : "Large"), DoubleToString(normalizedPrice, Digits), factor));
+                levelsDrawn++;
+                levelsBelowCount++;
+            }
+        }
+        
+        // Draw zone (matching M Mode logic with CreateZoneWithSmartFallback)
+        if(inpShowMidZones) {
+            // Check if current level is a structure level
+            bool isCurrentStructure = false;
+            if(structureEnabled) {
+                int intervals[];
+                GetCachedIntervals(baseMultiplier, intervals);
+                
+                for(int j = 0; j < 5; j++) {
+                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                        isCurrentStructure = true;
+                        break;
+                    }
+                }
+            }
+            
+            string zoneName = objectPrefix + "Factor_Harmonic_Zone_Below_" + IntegerToString(logicalStep);
+            // CRITICAL FIX: Pass avgStepSize for consistent zone height
+            if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
+                                          structureEnabled, triggerEnabled,
+                                          lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow,
+                                          avgStepSize)) {  // Pass average step size
+                zoneCount++;
+            }
+        }
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("  DrawFactorLevelsHarmonicFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("   Above=", levelsAboveCount, "/", maxLevelsAbove,
+          ", Below=", levelsBelowCount, "/", maxLevelsBelow);
+    #endif
+}
+#endif
+
+//+------------------------------------------------------------------+
+//| Draw Factor levels FROM CENTER (supports Custom Price)          |
+//|          Factor         (            Custom Price)               |
+//| Draws levels upward and downward from center point               |
+//| Like other modes (TH, SS/LS, M, TP), respects Custom Price      |
+//| GOLD VERSION: With safety checks and performance optimization    |
+//+------------------------------------------------------------------+
+void DrawFactorLevelsFromCenter(const string objectPrefix, const double centerPrice,
+                                const double highPrice, const double lowPrice,
+                                const double factor, const double stepSize,
+                                const int maxLevelsAbove, const int maxLevelsBelow)
+{
+    //                                                                
+    // PHASE 1: INPUT VALIDATION (Security Layer)
+    //                                                                
+    if(StringLen(objectPrefix) == 0) {
+        Print("  DrawFactorLevelsFromCenter: Empty object prefix");
+        return;
+    }
+    if(centerPrice <= 0 || highPrice <= 0 || lowPrice <= 0) {
+        Print("  DrawFactorLevelsFromCenter: Invalid prices - Center=", centerPrice, 
+              ", High=", highPrice, ", Low=", lowPrice);
+        return;
+    }
+    if(highPrice <= lowPrice) {
+        Print("  DrawFactorLevelsFromCenter: Invalid range - High must be > Low");
+        return;
+    }
+    if(stepSize <= 0) {
+        Print("  DrawFactorLevelsFromCenter: Invalid step size: ", stepSize);
+        return;
+    }
+    if(maxLevelsAbove < 1 || maxLevelsBelow < 1) {
+        Print("  DrawFactorLevelsFromCenter: Invalid level counts");
+        return;
+    }
+    
+    //                                                                
+    // PHASE 2: SAFETY CHECKS (Performance Protection)
+    //                                                                
+    
+    // Use user-defined level counts directly
+    int safeMaxAbove = maxLevelsAbove;
+    int safeMaxBelow = maxLevelsBelow;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("DrawFactorLevelsFromCenter: Center=", DoubleToString(centerPrice, Digits),
+          ", High=", DoubleToString(highPrice, Digits), 
+          ", Low=", DoubleToString(lowPrice, Digits),
+          ", StepSize=", DoubleToString(stepSize, Digits),
+          ", MaxAbove=", safeMaxAbove, ", MaxBelow=", safeMaxBelow);
+    #endif
+    
+    // Cleanup old zones
+    if(inpShowMidZones) {
+        ObjectsDeleteAll(0, objectPrefix + "Factor_Zone_", -1, -1);
+    }
+    
+    //                                                                
+    // ZONE HEIGHT CALCULATION (Unified Formula)
+    //               Zone (             )
+    // Formula: zoneHeight = stepSize * 0.25 * 0.5 = stepSize * 0.125
+    // This means: 25% of step, split equally ( 12.5% each side of midpoint)
+    //                                                                
+    const double ZONE_HEIGHT_PERCENT = 0.25;  // 25% of step
+    double zoneHeight = stepSize * ZONE_HEIGHT_PERCENT * 0.5;  //  12.5% each side
+    
+    int levelsDrawn = 0;
+    int zoneCount = 0;
+    bool shouldShowLine = !IsTriggerLevelsEnabled();  // Cache trigger state
+    
+    //                                                                
+    // DRAW CENTER LEVEL (step 0)
+    //              
+    //                                                                
+    string centerLevelName = objectPrefix + "Factor_Center";
+    double normalizedCenter = NormalizeDouble(centerPrice, Digits);
+    
+    if(shouldShowLine) {
+        if(ObjectFind(0, centerLevelName) < 0) {
+            if(ObjectCreate(0, centerLevelName, OBJ_HLINE, 0, 0, normalizedCenter)) {
+                ObjectSetInteger(0, centerLevelName, OBJPROP_COLOR, inpFactorLevelColor);
+                ObjectSetInteger(0, centerLevelName, OBJPROP_STYLE, inpFactorLevelStyle);
+                ObjectSetInteger(0, centerLevelName, OBJPROP_WIDTH, inpFactorLevelWidth);
+                ObjectSetInteger(0, centerLevelName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, centerLevelName, OBJPROP_BACK, false);
+                ObjectSetInteger(0, centerLevelName, OBJPROP_ZORDER, 1);
+                ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                ObjectSetString(0, centerLevelName, OBJPROP_TOOLTIP, 
+                    StringFormat("Factor Center | %s | F=%.2f", 
+                        DoubleToString(normalizedCenter, Digits), factor));
+                levelsDrawn++;
+            }
+        }
+    } else {
+        if(ObjectFind(0, centerLevelName) >= 0) {
+            ObjectSetInteger(0, centerLevelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        }
+    }
+    
+    //                                                                
+    // DRAW LEVELS ABOVE CENTER (respects maxLevelsAbove)
+    //                     (             maxLevelsAbove)
+    // UNIFIED LOGIC: Matches M Mode exactly
+    //                                                                
+    
+    // OPTIMIZATION: Cache frequently called values BEFORE the loop
+    bool triggerEnabled = IsTriggerLevelsEnabled();
+    bool structureEnabled = inpShowStructure;
+    int baseMultiplier = GetValidatedBaseMultiplier();
+    
+    // Initialize zone tracking with validation (Gold Version)
+    double lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove;
+    if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceAbove, 
+                               lastTriggerPriceAbove, lastFallbackPriceAbove)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Above)");
+        #endif
+        return;  // Abort if initialization failed
+    }
+    
+    int logicalStep = 1;
+    int levelsAboveCount = 0;
+    double prevPrice = normalizedCenter;
+    
+    // SAFETY: Use already calculated viewport boundaries (defined above)
+    // currentPrice, historicalRange, viewportTop already declared
+    
+    // SECURITY FIX: Add iteration limit to prevent infinite loops
+    int maxIterations = safeMaxAbove * 2;  // Safety margin
+    int iterations = 0;
+    
+    while(levelsAboveCount < safeMaxAbove && iterations < maxIterations) {
+        iterations++;
+        double levelPrice = centerPrice + (stepSize * logicalStep);
+        
+        // Check if this step should be drawn (matching M Mode logic)
+        if(structureEnabled || triggerEnabled) {
+            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+                logicalStep++;
+                continue;
+            }
+        } else {
+            // Neither structure nor trigger enabled - draw every baseMultiplier-th step
+            if(logicalStep % baseMultiplier != 0) {
+                logicalStep++;
+                continue;
+            }
+        }
+        
+        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        
+        // Get path for this level - check Structure first, then Trigger (matching M Mode)
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        
+        if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+            // Got path from structure levels
+        } else if(triggerEnabled) {
+            // Use Trigger color (matching M Mode exactly)
+            levelColor = inpTriggerColor;
+            levelStyle = inpTriggerStyle;
+            levelWidth = inpTriggerWidth;
+        } else {
+            // Fallback to Factor color
+            levelColor = inpFactorLevelColor;
+            levelStyle = inpFactorLevelStyle;
+            levelWidth = inpFactorLevelWidth;
+        }
+        
+        // Draw zone between previous and current (matching M Mode logic)
+        if(inpShowMidZones) {
+            // Check if current level is a structure level
+            bool isCurrentStructure = false;
+            if(structureEnabled) {
+                int intervals[];
+                GetCachedIntervals(baseMultiplier, intervals);
+                
+                for(int j = 0; j < 5; j++) {
+                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                        isCurrentStructure = true;
+                        break;
+                    }
+                }
+            }
+            
+            string zoneName = objectPrefix + "Factor_Zone_Above_" + IntegerToString(logicalStep);
+            // CRITICAL FIX: Pass stepSize for consistent zone height
+            if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
+                                          structureEnabled, triggerEnabled,
+                                          lastStructurePriceAbove, lastTriggerPriceAbove, lastFallbackPriceAbove,
+                                          stepSize)) {  // Pass fixed step size
+                zoneCount++;
+            }
+        }
+        
+        // Draw level
+        string levelName = objectPrefix + "Factor_Above_" + IntegerToString(logicalStep);
+        if(shouldShowLine) {
+            if(ObjectFind(0, levelName) < 0) {
+                if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                    ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+                    ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+                    ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+                    ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+                    ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+                    ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
+                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                    ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
+                        StringFormat("Factor +%d | %s | F=%.2f",
+                            logicalStep, DoubleToString(normalizedPrice, Digits), factor));
+                    levelsDrawn++;
+                }
+            }
+        } else {
+            if(ObjectFind(0, levelName) >= 0) {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            }
+        }
+        
+        prevPrice = normalizedPrice;
+        logicalStep++;
+        levelsAboveCount++;
+    }
+    
+    //                                                                
+    //                                                                
+    // DRAW LEVELS BELOW CENTER (respects maxLevelsBelow)
+    //                     (             maxLevelsBelow)
+    // UNIFIED LOGIC: Matches M Mode exactly
+    //                                                                
+    
+    // Initialize zone tracking with validation (Gold Version)
+    double lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow;
+    if(!InitializeZoneTracking(normalizedCenter, lastStructurePriceBelow, 
+                               lastTriggerPriceBelow, lastFallbackPriceBelow)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("  DrawFactorLevelsFromCenter: Failed to initialize zone tracking (Below)");
+        #endif
+        return;  // Abort if initialization failed
+    }
+    
+    logicalStep = 1;
+    int levelsBelowCount = 0;
+    prevPrice = normalizedCenter;
+    
+    // SAFETY: Use already calculated viewport boundary (viewportBottom defined above)
+    
+    // SECURITY FIX: Add iteration limit to prevent infinite loops
+    maxIterations = safeMaxBelow * 2;  // Safety margin
+    iterations = 0;
+    
+    while(levelsBelowCount < safeMaxBelow && iterations < maxIterations) {
+        iterations++;
+        double levelPrice = centerPrice - (stepSize * logicalStep);
+        
+        // Check if this step should be drawn (matching M Mode logic)
+        if(structureEnabled || triggerEnabled) {
+            if(!ShouldDrawStepOptimized(logicalStep, triggerEnabled, baseMultiplier)) {
+                logicalStep++;
+                continue;
+            }
+        } else {
+            // Neither structure nor trigger enabled - draw every baseMultiplier-th step
+            if(logicalStep % baseMultiplier != 0) {
+                logicalStep++;
+                continue;
+            }
+        }
+        
+        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        
+        // Get path for this level - check Structure first, then Trigger (matching M Mode)
+        color levelColor;
+        ENUM_LINE_STYLE levelStyle;
+        int levelWidth;
+        
+        if(GetPathForLevelOptimized(logicalStep, levelColor, levelStyle, levelWidth, triggerEnabled)) {
+            // Got path from structure levels
+        } else if(triggerEnabled) {
+            // Use Trigger color (matching M Mode exactly)
+            levelColor = inpTriggerColor;
+            levelStyle = inpTriggerStyle;
+            levelWidth = inpTriggerWidth;
+        } else {
+            // Fallback to Factor color
+            levelColor = inpFactorLevelColor;
+            levelStyle = inpFactorLevelStyle;
+            levelWidth = inpFactorLevelWidth;
+        }
+        
+        // Draw zone between previous and current (matching M Mode logic)
+        if(inpShowMidZones) {
+            // Check if current level is a structure level
+            bool isCurrentStructure = false;
+            if(structureEnabled) {
+                int intervals[];
+                GetCachedIntervals(baseMultiplier, intervals);
+                
+                for(int j = 0; j < 5; j++) {
+                    if(intervals[j] > 0 && logicalStep % intervals[j] == 0) {
+                        isCurrentStructure = true;
+                        break;
+                    }
+                }
+            }
+            
+            string zoneName = objectPrefix + "Factor_Zone_Below_" + IntegerToString(logicalStep);
+            // CRITICAL FIX: Pass stepSize for consistent zone height
+            if(CreateZoneWithSmartFallback(zoneName, normalizedPrice, isCurrentStructure, levelColor,
+                                          structureEnabled, triggerEnabled,
+                                          lastStructurePriceBelow, lastTriggerPriceBelow, lastFallbackPriceBelow,
+                                          stepSize)) {  // Pass fixed step size
+                zoneCount++;
+            }
+        }
+        
+        // Draw level
+        string levelName = objectPrefix + "Factor_Below_" + IntegerToString(logicalStep);
+        if(shouldShowLine) {
+            if(ObjectFind(0, levelName) < 0) {
+                if(ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                    ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+                    ObjectSetInteger(0, levelName, OBJPROP_STYLE, levelStyle);
+                    ObjectSetInteger(0, levelName, OBJPROP_WIDTH, levelWidth);
+                    ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+                    ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+                    ObjectSetInteger(0, levelName, OBJPROP_ZORDER, 1);
+                    ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+                    ObjectSetString(0, levelName, OBJPROP_TOOLTIP,
+                        StringFormat("Factor -%d | %s | F=%.2f",
+                            logicalStep, DoubleToString(normalizedPrice, Digits), factor));
+                    levelsDrawn++;
+                }
+            }
+        } else {
+            if(ObjectFind(0, levelName) >= 0) {
+                ObjectSetInteger(0, levelName, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            }
+        }
+        
+        prevPrice = normalizedPrice;
+        logicalStep++;
+        levelsBelowCount++;
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("  DrawFactorLevelsFromCenter: Drew ", levelsDrawn, " levels and ", zoneCount, " zones");
+    Print("   Center=", DoubleToString(normalizedCenter, Digits),
+          ", Above=", levelsAboveCount, "/", maxLevelsAbove, 
+          ", Below=", levelsBelowCount, "/", maxLevelsBelow);
+    #endif
+}
+
+//+------------------------------------------------------------------+
+//| DEPRECATED: Use DrawFactorLevelsAligned instead                 |
+//| Draw Factor levels between Historical High and Low               |
+//|                     High   Low                                   |
+//| Divides the range into (Factor * 2) equal parts                   |
+//| NOTE: This function is kept for backward compatibility only      |
+//+------------------------------------------------------------------+
+
+// Track last drawn level count for cleanup
+static int s_lastFactorLevelCount = 0;
+
+void DrawFactorLevels(const string objectPrefix, const double highPrice, 
+                      const double lowPrice, const double factor)
+{
+    // Comprehensive input validation
+    if(StringLen(objectPrefix) == 0) {
+        Print("DrawFactorLevels: Empty object prefix");
+        return;
+    }
+    if(highPrice <= 0 || lowPrice <= 0) {
+        Print("DrawFactorLevels: Invalid prices - High=", highPrice, ", Low=", lowPrice);
+        return;
+    }
+    if(highPrice <= lowPrice) {
+        Print("DrawFactorLevels: Invalid range - High (", highPrice, ") must be greater than Low (", lowPrice, ")");
+        return;
+    }
+    // Support 2 decimal places: minimum 0.01, maximum 10000
+    if(factor < 0.01 || factor > 10000) {
+        Print("DrawFactorLevels: Invalid factor (", DoubleToString(factor, 2), ") - must be 0.01-10000");
+        return;
+    }
+    
+    // Calculate step size
+    double stepSize = CalculateFactorStepSize(highPrice, lowPrice, factor);
+    if(stepSize <= 0) {
+        Print("DrawFactorLevels: Invalid step size calculated");
+        return;
+    }
+    
+    // IMPROVED: Calculate exact number of levels that fit in the range
+    // Instead of using Factor   2 - 1, we calculate how many complete steps fit
+    double range = highPrice - lowPrice;
+    int totalLevels = (int)MathFloor(range / stepSize) - 1;  // -1 to exclude boundaries
+    
+    if(totalLevels <= 0) {
+        Print("DrawFactorLevels: No levels to draw (totalLevels=", totalLevels, 
+              ", factor=", DoubleToString(factor, 2), ", stepSize=", stepSize, ")");
+        return;
+    }
+    
+    // Note: This ensures all levels are equally spaced
+    // The last level might not reach exactly to High, but all steps are equal
+    
+    // CRITICAL: Prevent object overflow (MT4 limit ~64K objects)
+    // Maximum safe levels per indicator: 5000 (leaves room for other objects)
+    const int MAX_FACTOR_LEVELS = 5000;
+    if(totalLevels > MAX_FACTOR_LEVELS) {
+        Print("DrawFactorLevels: WARNING - Too many levels (", totalLevels, 
+              "), clamping to ", MAX_FACTOR_LEVELS, " for safety");
+        totalLevels = MAX_FACTOR_LEVELS;
+    }
+    
+    // Get Point value safely for tooltip
+    // Calculate pip size based on Digits (works for ALL symbols)
+    // Calculate pip size correctly for all asset types
+    // Uses centralized GetCachedPipSize() for proper Gold/JPY/Forex handling
+    double pipSize = GetCachedPipSize();
+    
+    // Calculate range in pips (using correct pip size)
+    double rangePips = (highPrice - lowPrice) / pipSize;
+    double stepPips = stepSize / pipSize;
+    
+    // CLEANUP: Delete stale objects if level count decreased
+    if(s_lastFactorLevelCount > totalLevels) {
+        for(int i = totalLevels + 1; i <= s_lastFactorLevelCount; i++) {
+            string staleName = objectPrefix + "Factor_" + IntegerToString(i);
+            if(ObjectFind(0, staleName) >= 0) {
+                ObjectDelete(0, staleName);
+            }
+        }
+    }
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("DrawFactorLevels: High=", highPrice, ", Low=", lowPrice, ", Factor=", factor,
+          ", StepSize=", stepSize, ", TotalLevels=", totalLevels);
+    #endif
+    
+    // ========== Draw Historical HIGH line ==========
+    string highLineName = objectPrefix + "Factor_High";
+    if(ObjectFind(0, highLineName) < 0) {
+        ObjectCreate(0, highLineName, OBJ_HLINE, 0, 0, highPrice);
+    }
+    ObjectSetDouble(0, highLineName, OBJPROP_PRICE, highPrice);
+    ObjectSetInteger(0, highLineName, OBJPROP_COLOR, inpHighColor);
+    ObjectSetInteger(0, highLineName, OBJPROP_STYLE, inpHighStyle);
+    ObjectSetInteger(0, highLineName, OBJPROP_WIDTH, inpHighWidth);
+    ObjectSetInteger(0, highLineName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, highLineName, OBJPROP_SELECTED, false);
+    ObjectSetString(0, highLineName, OBJPROP_TOOLTIP, 
+        StringFormat("Historical HIGH | %s | Range: %.0f pips", 
+            DoubleToString(highPrice, Digits), rangePips));
+    
+    // ========== Draw Historical LOW line ==========
+    string lowLineName = objectPrefix + "Factor_Low";
+    if(ObjectFind(0, lowLineName) < 0) {
+        ObjectCreate(0, lowLineName, OBJ_HLINE, 0, 0, lowPrice);
+    }
+    ObjectSetDouble(0, lowLineName, OBJPROP_PRICE, lowPrice);
+    ObjectSetInteger(0, lowLineName, OBJPROP_COLOR, inpLowColor);
+    ObjectSetInteger(0, lowLineName, OBJPROP_STYLE, inpLowStyle);
+    ObjectSetInteger(0, lowLineName, OBJPROP_WIDTH, inpLowWidth);
+    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, lowLineName, OBJPROP_SELECTED, false);
+    ObjectSetString(0, lowLineName, OBJPROP_TOOLTIP, 
+        StringFormat("Historical LOW | %s | Range: %.0f pips", 
+            DoubleToString(lowPrice, Digits), rangePips));
+    
+    // ========== Draw HIGH label ==========
+    string highLabelName = objectPrefix + "Factor_High_Label";
+    if(ObjectFind(0, highLabelName) < 0) {
+        ObjectCreate(0, highLabelName, OBJ_TEXT, 0, TimeCurrent(), highPrice);
+    }
+    ObjectSetDouble(0, highLabelName, OBJPROP_PRICE, highPrice);
+    ObjectSetInteger(0, highLabelName, OBJPROP_TIME, TimeCurrent());
+    ObjectSetInteger(0, highLabelName, OBJPROP_COLOR, inpHighColor);
+    ObjectSetInteger(0, highLabelName, OBJPROP_FONTSIZE, 8);
+    ObjectSetInteger(0, highLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+    ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
+    ObjectSetString(0, highLabelName, OBJPROP_TEXT, 
+        StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
+            DoubleToString(highPrice, Digits), rangePips, factor, stepPips));
+    ObjectSetInteger(0, highLabelName, OBJPROP_SELECTABLE, false);
+    
+    // ========== Draw LOW label ==========
+    string lowLabelName = objectPrefix + "Factor_Low_Label";
+    if(ObjectFind(0, lowLabelName) < 0) {
+        ObjectCreate(0, lowLabelName, OBJ_TEXT, 0, TimeCurrent(), lowPrice);
+    }
+    ObjectSetDouble(0, lowLabelName, OBJPROP_PRICE, lowPrice);
+    ObjectSetInteger(0, lowLabelName, OBJPROP_TIME, TimeCurrent());
+    ObjectSetInteger(0, lowLabelName, OBJPROP_COLOR, inpLowColor);
+    ObjectSetInteger(0, lowLabelName, OBJPROP_FONTSIZE, 8);
+    ObjectSetInteger(0, lowLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
+    ObjectSetString(0, lowLabelName, OBJPROP_TEXT, 
+        StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
+            DoubleToString(lowPrice, Digits), rangePips, factor, stepPips));
+    ObjectSetInteger(0, lowLabelName, OBJPROP_SELECTABLE, false);
+    
+    // Draw levels from nearest boundary (High or Low) towards the other
+    // FIX: Start from whichever is closer to current price
+    double currentPrice = Bid;
+    double distanceToHigh = MathAbs(currentPrice - highPrice);
+    double distanceToLow = MathAbs(currentPrice - lowPrice);
+    
+    // Determine starting point and direction
+    bool startFromLow = (distanceToLow <= distanceToHigh);
+    double startPrice = startFromLow ? lowPrice : highPrice;
+    double endPrice = startFromLow ? highPrice : lowPrice;
+    int direction = startFromLow ? 1 : -1;  // 1 = up, -1 = down
+    
+    // FIX: Use multiplication instead of accumulation to avoid floating point errors
+    int levelNumber = 0;  // Start from 0 so first level is at startPrice + stepSize
+    // FIX: Better bound calculation - use small epsilon relative to step size
+    double epsilon = stepSize * 0.001;  // 0.1% of step size
+    
+    // SECURITY FIX: Add iteration limit to prevent infinite loops
+    int maxIterations = totalLevels * 2;  // Safety margin
+    int iterations = 0;
+    
+    while(levelNumber < totalLevels && iterations < maxIterations) {
+        iterations++;
+        levelNumber++;  // Increment first so we start from 1
+        
+        // FIX: Calculate price using multiplication (more accurate than accumulation)
+        // This prevents floating point error accumulation
+        double levelPrice = startPrice + (stepSize * levelNumber * direction);
+        
+        // Check bounds with proper tolerance
+        if(startFromLow) {
+            // Going up: check if we exceeded high
+            if(levelPrice >= (highPrice - epsilon)) break;
+        } else {
+            // Going down: check if we went below low
+            if(levelPrice <= (lowPrice + epsilon)) break;
+        }
+        
+        string levelName = objectPrefix + "Factor_" + IntegerToString(levelNumber);
+        
+        // Normalize price for consistency
+        double normalizedPrice = NormalizeDouble(levelPrice, Digits);
+        
+        // Create or update level
+        bool objectExists = (ObjectFind(0, levelName) >= 0);
+        
+        if(!objectExists) {
+            if(!ObjectCreate(0, levelName, OBJ_HLINE, 0, 0, normalizedPrice)) {
+                Print("DrawFactorLevels: Failed to create level ", levelNumber, ", Error: ", GetLastError());
+                levelNumber++;
+                continue;
+            }
+            
+            // Set properties only for new objects
+            color levelColor = (g_factorColorOverride >= 0) ? (color)g_factorColorOverride : inpFactorLevelColor;
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, levelColor);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, inpFactorLevelStyle);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, inpFactorLevelWidth);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, levelName, OBJPROP_SELECTED, false);
+            ObjectSetInteger(0, levelName, OBJPROP_BACK, false);
+            ObjectSetInteger(0, levelName, OBJPROP_HIDDEN, false);
+        } else {
+            // OPTIMIZATION: Only update price if it changed significantly
+            double oldPrice = ObjectGetDouble(0, levelName, OBJPROP_PRICE);
+            if(MathAbs(oldPrice - normalizedPrice) > Point * 0.1) {
+                ObjectSetDouble(0, levelName, OBJPROP_PRICE, normalizedPrice);
+            }
+        }
+        
+        // Tooltip always updated (lightweight operation)
+        string tooltip = StringFormat("Factor %d/%d | Price: %s | Step: %.1f pips", 
+            levelNumber, totalLevels, 
+            DoubleToString(normalizedPrice, Digits),
+            stepPips);
+        ObjectSetString(0, levelName, OBJPROP_TOOLTIP, tooltip);
+        
+        levelNumber++;
+    }
+    
+    // Update last level count for next cleanup
+    s_lastFactorLevelCount = levelNumber - 1;
+    
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("DrawFactorLevels: Drew ", s_lastFactorLevelCount, " levels");
+    #endif
+}
+
+//+------------------------------------------------------------------+
+//| Clear all Factor level objects                                    |
+//|                                                                   |
+//+------------------------------------------------------------------+
+void ClearFactorLevels(const string objectPrefix)
+{
+    // Delete High/Low lines and labels first
+    string highLineName = objectPrefix + "Factor_High";
+    string lowLineName = objectPrefix + "Factor_Low";
+    string highLabelName = objectPrefix + "Factor_High_Label";
+    string lowLabelName = objectPrefix + "Factor_Low_Label";
+    
+    if(ObjectFind(0, highLineName) >= 0) ObjectDelete(0, highLineName);
+    if(ObjectFind(0, lowLineName) >= 0) ObjectDelete(0, lowLineName);
+    if(ObjectFind(0, highLabelName) >= 0) ObjectDelete(0, highLabelName);
+    if(ObjectFind(0, lowLabelName) >= 0) ObjectDelete(0, lowLabelName);
+    
+    // Use ObjectsTotal with all 3 parameters to avoid ambiguous call
+    int totalObjects = ObjectsTotal(0, -1, -1);
+    string factorPrefix = objectPrefix + "Factor_";
+    
+    // Delete from end to start to avoid index issues
+    for(int i = totalObjects - 1; i >= 0; i--) {
+        string objName = ObjectName(0, i);
+        if(StringFind(objName, factorPrefix) == 0) {
+            ObjectDelete(0, objName);
+        }
+    }
+}
 
 //+------------------------------------------------------------------+
 //| Ensure intervals cache is populated (no array copy needed)       |

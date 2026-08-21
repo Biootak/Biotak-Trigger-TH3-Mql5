@@ -10,6 +10,8 @@
 //| - Performance-optimized (minimal overhead)                      |
 //| - Thread-safe (MT4 single-threaded, but future-proof)          |
 //+------------------------------------------------------------------+
+#ifndef ENHANCED_LOGGING_MQH
+#define ENHANCED_LOGGING_MQH
 #property strict
 
 //                                                                
@@ -152,7 +154,8 @@ void LogMessage(ENUM_LOG_LEVEL level, string module, string message)
     }
     
     if(g_logTimeframe) {
-        context += " [TF:" + IntegerToString(Period()) + "]";
+        // MQL5 Period() returns the ENUM value (H1=16385); log minutes like MQL4.
+        context += " [TF:" + IntegerToString(PeriodSeconds(Period()) / 60) + "]";
     }
     
     if(g_logTimestamp) {
@@ -320,10 +323,13 @@ LOG_ERROR("MyModule", "Failed to create object");
 LOG_INFO_FMT("MyModule", "Processed %d items in %d ms", count, elapsed);
 
 // Example 3: Function tracing
-// void MyFunction(int param) {
-//     LogFunctionEntry("MyModule", "MyFunction", "param=" + IntegerToString(param));
-//     LogFunctionExit("MyModule", "MyFunction", "success");
-// }
+void MyFunction(int param) {
+    LogFunctionEntry("MyModule", "MyFunction", "param=" + IntegerToString(param));
+    
+    // ... function code ...
+    
+    LogFunctionExit("MyModule", "MyFunction", "success");
+}
 
 // Example 4: Performance logging
 uint start = GetTickCount();
@@ -338,3 +344,5 @@ EnableModuleLogging("");  //
 // Example 6: Statistics
 PrintLogStatistics();
 */
+
+#endif // ENHANCED_LOGGING_MQH

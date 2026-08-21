@@ -33,96 +33,16 @@ static double g_lastRawATR = 0.0;                 // Last ATR value (for debug)
 static double g_lastTheoreticalTH = 0.0;          // Last theoretical TH (for debug)
 
 //+------------------------------------------------------------------+
-//| PERF (2026): Idempotent InitializeAdaptiveScaling                |
-//|                                                                  |
-//| Root cause of the "fractal jump on TF switch" instability:       |
-//| the previous implementation reset the EMA scaling state to 1.0   |
-//| on every OnInit, and reset g_scalingInitialized to false. The    |
-//| first UpdateATRScalingFactor call after the reset then bypassed   |
-//| the EMA (it sees "not initialized") and seeded the EMA with the  |
-//| raw factor for the NEW timeframe - a value that can be wildly    |
-//| different from the previous TF's smoothed value. The user saw   |
-//| a hard "jump" instead of a smooth transition.                    |
-//|                                                                  |
-//| Fix: make the function idempotent. The state persists across     |
-//| OnInit/OnDeinit cycles (static locals survive a chart's         |
-//| OnDeinit -> OnInit pair in the same indicator process). We only  |
-//| do a full reset on the very first call per indicator instance.  |
-//| On a TF switch the EMA keeps smoothing across the transition,   |
-//| and the user sees a gradual change - or no visible change at all |
-//| if ATR for the new TF happens to be close to the EMA's value.   |
-//|                                                                  |
-//| The "first init" flag is per-process. If the user wants a true  |
-//| reset (e.g. after changing inpAdaptiveMode to a wildly different|
-//| value), they can remove+re-add the indicator or restart the     |
-//| terminal - both clear the static and trigger the full reset.    |
-//| Or they can call ForceResetAdaptiveScaling() explicitly.        |
+//| Initialize Adaptive Scaling System                               |
+//| Must be called from OnInit                                       |
 //+------------------------------------------------------------------+
-static bool g_scalingFirstInitDone = false;
-
 void InitializeAdaptiveScaling() {
-    if(g_scalingFirstInitDone) {
-        // Subsequent init (TF switch, parameter change): keep the EMA state.
-        // The next UpdateATRScalingFactor call will see g_scalingInitialized=true
-        // and apply normal EMA smoothing, which absorbs the ATR change across
-        // TFs gradually instead of jumping. This is the key fix for the
-        // "wants to redraw from scratch on every TF switch" complaint.
-        return;
-    }
     g_atrScalingFactor = 1.0;
     g_smoothedScalingFactor = 1.0;
     g_lastScalingBarCount = -1;
     g_scalingInitialized = false;
     g_lastRawATR = 0.0;
     g_lastTheoreticalTH = 0.0;
-    g_scalingFirstInitDone = true;
-}
-
-//+------------------------------------------------------------------+
-//| PERF (2026): Force-reset the adaptive scaling state.            |
-//|                                                                  |
-//| Use cases:                                                       |
-//|  - User changed inpAdaptiveMode to a wildly different value     |
-//|    (e.g. ADAPTIVE_FIXED -> ADAPTIVE_ATR with smoothing=2)       |
-//|  - Symbol change: the previous scaling was for the old symbol   |
-//|  - User pressed the reset hotkey and wants a clean slate        |
-//|                                                                  |
-//| After this call, the next UpdateATRScalingFactor will seed the  |
-//| EMA with the new raw factor (one-frame jump), which is what the  |
-//| user explicitly asked for.                                      |
-//+------------------------------------------------------------------+
-void ForceResetAdaptiveScaling() {
-    g_scalingFirstInitDone = false;
-    InitializeAdaptiveScaling();
-}
-
-//+------------------------------------------------------------------+
-//| PERF (2026, M): Fractal jump hysteresis state (file-scope).      |
-//|                                                                  |
-//| These were originally function-scope statics inside              |
-//| UpdateATRScalingFactor. They are now at file-scope so            |
-//| ResetFractalJumpHysteresis() can clear them on a TF switch.     |
-//| Without that, the hysteresis would carry over across TFs and     |
-//| block the first eligible correction for ~10 seconds.            |
-//|                                                                  |
-//|  g_s_proposedShift       - candidate shift from last call        |
-//|  g_s_proposalCount       - consecutive confirmations             |
-//|  g_s_lastConfirmedATR    - ATR at the last accepted shift commit |
-//|  g_s_lastConfirmedTF     - TF of the last accepted shift commit  |
-//|  g_resetHysteresisPending - set by reset, consumed by next call  |
-//+------------------------------------------------------------------+
-static int g_s_proposedShift = -1;
-static int g_s_proposalCount = 0;
-static double g_s_lastConfirmedATR = 0;
-static string g_s_lastConfirmedTF = "";
-static bool g_resetHysteresisPending = false;
-
-// FIX (2026, M): expose the hysteresis reset so OnInit can call it on
-// TF switch. The next UpdateATRScalingFactor sees the pending flag,
-// clears the statics, and treats the call as a first determination
-// (s_lastConfirmedATR=0 -> firstDetermination=true -> immediate shift).
-void ResetFractalJumpHysteresis() {
-    g_resetHysteresisPending = true;
 }
 
 //+------------------------------------------------------------------+
@@ -150,21 +70,14 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
     if(inpAdaptiveMode == ADAPTIVE_FIXED) {
         g_smoothedScalingFactor = 1.0;
         g_atrScalingFactor = 1.0;
-        g_fractalDetermined = true;
-        g_fractalDeterminedTF = GetCurrentTimeframe();
         return false;
     }
     
     // Update frequency gate: allow updates every 5 seconds instead of every bar
     // This makes the indicator much more responsive to intraday volatility spikes.
-    // While the jump has not yet been determined for THIS timeframe, bypass the gate
-    // so we converge on the very next tick that ATR becomes available (no
-    // narrow-then-wide first draw after a timeframe switch).
-    string curTF = GetCurrentTimeframe();
-    bool determinedForThisTF = (g_fractalDetermined && g_fractalDeterminedTF == curTF);
     static datetime s_lastScalingUpdate = 0;
     datetime now = TimeCurrent();
-    if(g_scalingInitialized && determinedForThisTF && (now - s_lastScalingUpdate) < 5) {
+    if(g_scalingInitialized && (now - s_lastScalingUpdate) < 5) {
         return false; 
     }
     s_lastScalingUpdate = now;
@@ -197,10 +110,6 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
         #endif
         return false;
     }
-    
-    // ATR is valid: the jump can now be determined, so the first level draw is safe.
-    g_fractalDetermined = true;
-    g_fractalDeterminedTF = curTF;
     
     // Calculate raw scaling factor: ATR / TH
     double rawFactor = SafeDivide(weightedATR, theoreticalTH, 1.0, EPSILON_PRICE);
@@ -268,49 +177,7 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits) {
                     }
                     targetIdx = i;
                 }
-                int newShift = targetIdx - baseIdx;
-                // HYSTERESIS: Don't jump immediately. Require the new shift to be
-                // proposed at least 2 consecutive times, OR a large ATR change,
-                // OR a TF change (handled by ResetFractalJumpHysteresis from
-                // OnInit which clears the statics AND bypasses the gating below).
-
-                // FIX (2026, M): consume any pending hysteresis reset from a
-                // previous TF switch. Setting s_lastConfirmedATR=0 forces
-                // firstDetermination=true on this call, which commits the
-                // shift immediately. The user sees the correct spacing for the
-                // new TF on the very first eligible redraw - no ~10s wait.
-                if(g_resetHysteresisPending) {
-                    g_s_proposedShift = -1;
-                    g_s_proposalCount = 0;
-                    g_s_lastConfirmedATR = 0;
-                    g_s_lastConfirmedTF = "";
-                    g_resetHysteresisPending = false;
-                }
-
-                bool tfChangedSinceLastConfirm = (g_s_lastConfirmedTF != "" && g_s_lastConfirmedTF != curTF);
-                if(newShift == g_s_proposedShift) {
-                    g_s_proposalCount++;
-                } else {
-                    g_s_proposedShift = newShift;
-                    g_s_proposalCount = 1;
-                }
-                bool largeATRMove = (g_s_lastConfirmedATR > 0 && MathAbs(weightedATR - g_s_lastConfirmedATR) / g_s_lastConfirmedATR > 0.25);
-                // FIX (2026, M): firstDetermination now includes the case where
-                // a TF switch just occurred (tfChangedSinceLastConfirm && we have
-                // a valid ATR). This commits the new TF's correct shift on the
-                // first eligible call, eliminating the ~10s of wrong spacing
-                // after every TF switch.
-                bool firstDetermination = (g_s_lastConfirmedATR <= 0);
-                bool tfSwitchWithFreshATR = tfChangedSinceLastConfirm && (weightedATR > 0);
-                if(firstDetermination || g_s_proposalCount >= 2 ||
-                   (largeATRMove && !tfChangedSinceLastConfirm) ||
-                   tfSwitchWithFreshATR) {
-                    g_fractalShift = newShift;
-                    g_s_lastConfirmedATR = weightedATR;
-                    g_s_lastConfirmedTF = curTF;
-                    g_s_proposalCount = 0;
-                }
-                // else: keep current g_fractalShift
+                g_fractalShift = targetIdx - baseIdx;
                 
                 #ifdef ENABLE_DEBUG_LOGS
                 // CRITICAL LOG: Now showing Pips instead of Points for clarity

@@ -27,7 +27,6 @@
 // Division Safety Constants (GOLD FIX v3)
 #define MIN_SAFE_DIVISIONS 0.001      // Minimum divisions to prevent precision loss
 #define MAX_SAFE_FACTOR 10000.0       // Maximum factor value to prevent overflow
-#define DEFAULT_FACTOR_VALUE 50.0     // Fallback factor when input is invalid (used by M1)
 
 // Visibility Constants for OBJPROP_TIMEFRAMES (visual align MT5)
 // Used by VisibilityManager for hide/show without deletion
@@ -74,10 +73,11 @@ const int STANDARD_MINUTES[] = {1440, 10080, 43200};
 const color STANDARD_COLORS[] = {clrBlue, clrBlue, clrBlue};
 
 enum ENUM_TH_START_POINT_TYPE {
-    TH_START_POINT_MIDPOINT = 0,      // Midpoint
+    TH_START_POINT_MIDPOINT = 0,      // Midpoint (historical H+L / 2)
     TH_START_POINT_HISTORICAL_HIGH = 1, // Historical High
     TH_START_POINT_HISTORICAL_LOW = 2,  // Historical Low
-    TH_START_POINT_CUSTOM_PRICE = 3    // Custom Price
+    TH_START_POINT_CUSTOM_PRICE = 3,    // Custom Price
+    TH_START_POINT_PREVIOUS_CLOSE = 4   // Previous Day Close
 };
 
 enum ENUM_LINE_OBJECT_TYPE {
@@ -111,6 +111,22 @@ enum ENUM_FACTOR_MODE {
 };
 
 //+------------------------------------------------------------------+
+//| Factor Display Mode - How factor value is shown and operation    |
+//|                                                                  |
+//| CLASSIC: Traditional mode - number is Factor, Step is calculated |
+//|   Input: Factor number  →  Step = Range / (Factor × 2)         |
+//|   Display: "F: 50.00 | Step: 12.5 pips"                         |
+//|                                                                  |
+//| DIRECT: New mode - number IS the Step Size, Factor is internal   |
+//|   Input: Step Size  →  Factor = Range / (Step × 2) (internal)   |
+//|   Display: "Step: 12.5 pips | F: 50.00"                         |
+//+------------------------------------------------------------------+
+enum ENUM_FACTOR_DISPLAY_MODE {
+    FACTOR_DISPLAY_CLASSIC = 0,  // Classic: Factor number (current behavior)
+    FACTOR_DISPLAY_DIRECT = 1    // Direct: Step Size is the primary value
+};
+
+//+------------------------------------------------------------------+
 //| Factor Auto Basis - What to base the auto calculation on         |
 //|           Factor                                       |
 //|                                                                  |
@@ -132,22 +148,6 @@ enum ENUM_FACTOR_AUTO_BASIS {
     FACTOR_BASIS_PATTERN = 5,      // Pattern: 4x TF (Medium-term)
     FACTOR_BASIS_STRUCTURE = 6,    // Structure: 16x TF (Long-term)
     FACTOR_BASIS_COMBO = 7         // Combo: Average of 2 components (Custom)
-};
-
-//+------------------------------------------------------------------+
-//| Factor Display Mode - How factor value is shown and operation    |
-//|                                                                  |
-//| CLASSIC: Traditional mode - number is Factor, Step is calculated |
-//|   Input: Factor number  ->  Step = Range / (Factor x 2)          |
-//|   Display: "F: 50.00 | Step: 12.5 pips"                          |
-//|                                                                  |
-//| DIRECT: New mode - number IS the Step Size, Factor is internal   |
-//|   Input: Step Size  ->  Factor = Range / (Step x 2) (internal)   |
-//|   Display: "Step: 12.5 pips | F: 50.00"                          |
-//+------------------------------------------------------------------+
-enum ENUM_FACTOR_DISPLAY_MODE {
-    FACTOR_DISPLAY_CLASSIC = 0,  // Classic: Factor number (current behavior)
-    FACTOR_DISPLAY_DIRECT = 1    // Direct: Step Size is the primary value
 };
 
 //+------------------------------------------------------------------+
@@ -179,17 +179,7 @@ enum ENUM_STRUCTURE_BASE_MULTIPLIER {
 #define MAX_HARMONIC_RATIO 2.0    //   2x (maximum variation)
 #define DEFAULT_HARMONIC_RATIO 1.333  // Golden-like ratio (4/3)
 
-//+------------------------------------------------------------------+
-//| Mean Type Selection (for aggregates and quick test)              |
-//|                        (  aggregates                       |
-//+------------------------------------------------------------------+
-enum ENUM_MEAN_TYPE {
-    MEAN_ARITHMETIC = 0,    // Arithmetic Mean: (A + B + ...) / n
-    MEAN_GEOMETRIC = 1,     // Geometric Mean:     B   ...)
-    MEAN_HARMONIC = 2       // Harmonic Mean: n / (1/A + 1/B + ...)
-};
-
-// NOTE: ENUM_QUICK_TEST_MODE removed - not used anywhere
+// NOTE: ENUM_QUICK_TEST_MODE / ENUM_MEAN_TYPE removed - not used
 // Quick Test is controlled by ENUM_COMBO_MODE instead
 
 //+------------------------------------------------------------------+
@@ -225,101 +215,8 @@ enum ENUM_CALCULATION_BASIS {
     CALC_BASIS_ATR = 1          // ATR-Based (Actual) -   
 };
 
-// Smart Combo Component Selection (Unified)
-//              (            
-enum ENUM_COMBO_COMPONENT_ITEM {
-    // Sub Components (Fastest - 1/4x)
-    COMP_SUB_TH = 0,            // Sub TH
-    COMP_SUB_SS = 1,            // Sub SS
-    COMP_SUB_LS = 2,            // Sub LS
-    
-    // Trigger Components (Current - 1x)
-    COMP_TRIGGER_TH = 3,        // Trigger TH
-    COMP_TRIGGER_SS = 4,        // Trigger SS
-    COMP_TRIGGER_LS = 5,        // Trigger LS
-    
-    // Pattern Components (Medium - 4x)
-    COMP_PATTERN_TH = 6,        // Pattern TH
-    COMP_PATTERN_SS = 7,        // Pattern SS
-    COMP_PATTERN_LS = 8,        // Pattern LS
-    
-    // Structure Components (Slow - 16x)
-    COMP_STRUCTURE_TH = 9,      // Structure TH
-    COMP_STRUCTURE_SS = 10,     // Structure SS
-    COMP_STRUCTURE_LS = 11,     // Structure LS
-    
-    //  
-    // AGGREGATE COMPONENTS (                  
-    // These calculate the mean of TH, SS, LS for a timeframe
-    //  
-    COMP_SUB_MEAN = 12,         // Sub Mean: (Sub_TH + Sub_SS + Sub_LS) / 3
-    COMP_TRIGGER_MEAN = 13,     // Trigger Mean: (Trigger_TH + Trigger_SS + Trigger_LS) / 3
-    COMP_PATTERN_MEAN = 14,     // Pattern Mean: (Pattern_TH + Pattern_SS + Pattern_LS) / 3
-    COMP_STRUCTURE_MEAN = 15,   // Structure Mean: (Structure_TH + Structure_SS + Structure_LS) / 3
-    
-    // Control/Mid Components (TH * 1.75)
-    COMP_SUB_CONTROL = 16,      // Sub Control: Sub_TH * 1.75
-    COMP_TRIGGER_CONTROL = 17,  // Trigger Control: Trigger_TH * 1.75
-    COMP_PATTERN_CONTROL = 18,  // Pattern Control: Pattern_TH * 1.75
-    COMP_STRUCTURE_CONTROL = 19,// Structure Control: Structure_TH * 1.75
-    
-    // Special
-    COMP_IGNORE = 20            // Ignore (None)
-};
-
-//+------------------------------------------------------------------+
-//| Combo Operators for Calculator Mode (Manual)                     |
-//|               (                       |
-//|                                                                  |
-//| BINARY OPERATORS (2 operands): OP_PLUS to OP_HARMONIC_MEAN      |
-//| N-ARY OPERATORS (all components): OP_GEOMETRIC_MEAN_ALL to end  |
-//|                                                                  |
-//| USAGE EXAMPLE (N-ARY):                                           |
-//| Component 1: Trigger SS                                          |
-//| Operator 1: Geometric Mean (All)       Collects ALL components     |
-//| Component 2: Pattern LS                                          |
-//| Operator 2: [Ignored]                                            |
-//| Component 3: Structure TH                                        |
-//| Operator 3: [Ignored]                                            |
-//| Component 4: Ignore                                              |
-//| Result:         Pattern_LS   Structure_TH)              |
-//+------------------------------------------------------------------+
-enum ENUM_COMBO_OPERATOR {
-    //  
-    // BINARY OPERATORS (    - Work on 2 values
-    //  
-    OP_PLUS = 0,                // Plus: A + B
-    OP_MINUS = 1,               // Minus: A - B
-    OP_MULTIPLY = 2,            // Multiply: A   B
-    OP_DIVIDE = 3,              // Divide: A   B
-    OP_AVERAGE = 4,             // Arithmetic Mean: (A + B) / 2
-    OP_GEOMETRIC_MEAN = 5,      // Geometric Mean:     B)
-    OP_HARMONIC_MEAN = 6,       // Harmonic Mean: 2AB / (A + B)
-    
-    //  
-    // N-ARY OPERATORS (           - Work on ALL active components
-    // When used as Operator 1, collects ALL non-IGNORE components
-    //  
-    OP_GEOMETRIC_MEAN_ALL = 7,  // Geometric Mean (All):     C2   ...   Cn)
-    OP_ARITHMETIC_MEAN_ALL = 8, // Arithmetic Mean (All): (C1 + C2 + ... + Cn) / n
-    OP_HARMONIC_MEAN_ALL = 9,   // Harmonic Mean (All): n / (1/C1 + 1/C2 + ... + 1/Cn)
-    OP_MIN_ALL = 10,            // Minimum (All): min(C1, C2, ..., Cn)
-    OP_MAX_ALL = 11,            // Maximum (All): max(C1, C2, ..., Cn)
-    
-    //  
-    // SPECIAL
-    //  
-    OP_NONE = 12                // None (End Chain)
-};
-
-//+------------------------------------------------------------------+
-//| Calculator Topology (Architecture of Calculation)                |
-//|             (                             |
-//+------------------------------------------------------------------+
-enum ENUM_CALCULATOR_TOPOLOGY {
-    TOPOLOGY_LINEAR = 0,        // Linear: ((A op B) op C) op D [Sequential]
-    TOPOLOGY_DUAL_GROUP = 1     // Dual Group: (A op B) MainOp (C op D) [Structural]
-};
+// Combo components are now explicit (ENUM_COMBO_TIMEFRAME_TYPE + ENUM_COMBO_STEP_TYPE)
+// and the operation enum is ENUM_COMBO_OPERATION - geometric/mean operators removed.
 
 //+------------------------------------------------------------------+
 //| Helper structure to hold common calculation values              |
@@ -349,10 +246,7 @@ enum ENUM_COMBO_OPERATION {
     COMBO_OP_MULTIPLY = 3,      // Multiply: A   B
     COMBO_OP_MIN = 4,           // Minimum: min(A, B) or min(A, B, C)
     COMBO_OP_MAX = 5,           // Maximum: max(A, B) or max(A, B, C)
-    COMBO_OP_WEIGHTED = 6,      // Weighted: A  + B  (W1+W2=1)
-    // AUDIT FIX #2: QT presets claimed "Geo Mean" but used AVERAGE (arithmetic).
-    // Added an explicit operation so the label and behavior match.
-    COMBO_OP_GEO_MEAN = 7      // Geometric Mean:  (A B)  for 2 values, (A B C)^(1/3) for 3
+    COMBO_OP_WEIGHTED = 6       // Weighted: A  + B  (W1+W2=1)
 };
 
 //+------------------------------------------------------------------+
@@ -361,17 +255,13 @@ enum ENUM_COMBO_OPERATION {
 //|                                                                  |
 //| TWO INDEPENDENT MODES - Simplified and user-friendly             |
 //|                                                                  |
-//| PRESET: Quick select from ready-to-use combinations              |
-//|   - 18 predefined combinations                                   |
-//|   - Includes Quick Test options                                  |
-//|   - Recommended for daily use                                    |
+//| PRESET: Quick select from the 6 ready-to-use combinations        |
 //|   Uses: inpComboPreset                                           |
 //|                                                                  |
-//| ADVANCED: Full manual control (For power users)                  |
-//|   - Select topology (Linear/Dual Group)                          |
-//|   - Select 4 components and 3 operators                          |
-//|   - Maximum flexibility                                         |
-//|   Uses: inpComboTopology, inpComboComp1-4, inpComboOp1-3        |
+//| ADVANCED: Manual control - two components (TF + Step each) and   |
+//| one operation (ENUM_COMBO_OPERATION).                            |
+//|   Uses: inpComboComp1TF/Step, inpComboOp1, inpComboComp2Enabled, |
+//|         inpComboComp2TF/Step                                     |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_MODE {
     COMBO_MODE_PRESET = 0,      // Preset Mode (Recommended)
@@ -381,14 +271,11 @@ enum ENUM_COMBO_MODE {
 //+------------------------------------------------------------------+
 //| Timeframe Types for Advanced Combo                               |
 //+------------------------------------------------------------------+
-// AUDIT FIX #4: Comments corrected to match GetTimeframeByType() implementation
-// (faster < current < medium < slower). Previously the comments claimed the
-// opposite (1/4x, 1x, 4x, 16x) which is inverted from what the code resolves.
 enum ENUM_COMBO_TIMEFRAME_TYPE {
-    COMBO_TF_SUB = 0,           // Sub: Current / 16 (smallest TF, fastest)
-    COMBO_TF_TRIGGER = 1,       // Trigger: Current / 4 (1 fractal lower)
-    COMBO_TF_PATTERN = 2,       // Pattern: Current timeframe
-    COMBO_TF_STRUCTURE = 3      // Structure: Current * 4 (1 fractal higher)
+    COMBO_TF_SUB = 0,           // Sub: 1/4 current (faster)
+    COMBO_TF_TRIGGER = 1,       // Trigger: Current timeframe
+    COMBO_TF_PATTERN = 2,       // Pattern: 4x current
+    COMBO_TF_STRUCTURE = 3      // Structure: 16x current
 };
 
 //+------------------------------------------------------------------+
@@ -397,91 +284,22 @@ enum ENUM_COMBO_TIMEFRAME_TYPE {
 enum ENUM_COMBO_STEP_TYPE {
     COMBO_STEP_TH = 0,          // TH: Base step (1.0  )
     COMBO_STEP_SS = 1,          // SS: Short step (1.5  )
-    COMBO_STEP_LS = 2,          // LS: Long step (2.0  )
-    COMBO_STEP_CONTROL = 3      // CONTROL/MID: Control step (1.75  )
+    COMBO_STEP_LS = 2           // LS: Long step (2.0  )
 };
 
 //+------------------------------------------------------------------+
-//| Combo Calculation Configuration Struct                           |
-//|                                                                                            |
-//+------------------------------------------------------------------+
-struct SComboConfig {
-    ENUM_COMBO_TIMEFRAME_TYPE tf1;
-    ENUM_COMBO_STEP_TYPE      step1;
-    ENUM_COMBO_TIMEFRAME_TYPE tf2;
-    ENUM_COMBO_STEP_TYPE      step2;
-    ENUM_COMBO_TIMEFRAME_TYPE tf3;
-    ENUM_COMBO_STEP_TYPE      step3;
-    ENUM_COMBO_OPERATION      operation;
-    double                    weight1;
-    double                    weight2;
-    double                    weight3;
-    int                       activeComponents;
-    bool                      isTriple;
-};
-
-//+------------------------------------------------------------------+
-//| Preset Combinations (Common Use Cases) - OPTIMIZED FOR UX        |
+//| Preset Combinations - practical daily-use set (6 presets)        |
 //|                                                                  |
-//| DESIGN PRINCIPLE: 80/20 Rule - 18 presets cover 98% of needs    |
-//|                                                                  |
-//| IMPORTANT: COMBO_PRESET_LEGACY_ADD is the default for backward  |
-//| compatibility with old Combo Step Mode (Component1 + Component2)|
-//|                                                                  |
-//| SIMPLIFIED UX: Quick Test presets (15-19) are exposed in the   |
-//| same list as regular presets, eliminating the Quick Test sub-   |
-//| mode dropdown. All Quick Test presets use TH step + Geometric   |
-//| mean (the most popular default from the old Quick Test mode).   |
+//| DESIGN PRINCIPLE: keep only the commonly used combinations;      |
+//| anything else can be built with Advanced Mode.                  |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_PRESET {
-    //                                                                                                                                                                                              
-    // LEGACY (kept for backward compatibility)
-    //                                                                                                                                                                                              
-    COMBO_PRESET_LEGACY_ADD = 0,            // Legacy: Trigger SS + Pattern SS (ADD)
-
-    //                                                                                                                                                                                              
-    // BALANCED FAMILY
-    //                                                                                                                                                                                              
-    COMBO_PRESET_BALANCED_MEDIUM = 1,       // Balanced Medium: (Pattern + Trigger) / 2 [Most Popular]
-    COMBO_PRESET_BALANCED_LONG = 2,         // Balanced Long: (Structure + Pattern) / 2
-    COMBO_PRESET_BALANCED_TRIPLE = 3,       // Triple Balanced: (Trigger + Pattern + Structure) / 3
-    COMBO_PRESET_BALANCED_MIN = 4,          // Balanced Min: min(Pattern, Trigger)
-
-    //                                                                                                                                                                                              
-    // CONSERVATIVE FAMILY
-    //                                                                                                                                                                                              
-    COMBO_PRESET_CONSERVATIVE = 5,          // Conservative: max(Structure, Pattern)
-    COMBO_PRESET_ULTRA_CONSERVATIVE = 6,    // Ultra Conservative: Structure TH
-    COMBO_PRESET_TRIPLE_CONSERVATIVE = 7,   // Triple Conservative: max(Trigger, Pattern, Structure)
-
-    //                                                                                                                                                                                              
-    // AGGRESSIVE FAMILY
-    //                                                                                                                                                                                              
-    COMBO_PRESET_AGGRESSIVE = 8,            // Aggressive: min(Pattern, Trigger)
-    COMBO_PRESET_ULTRA_AGGRESSIVE = 9,      // Ultra Aggressive: min(Trigger, Sub)
-    COMBO_PRESET_TRIPLE_AGGRESSIVE = 10,    // Triple Aggressive: min(Trigger, Pattern, Structure)
-
-    //                                                                                                                                                                                              
-    // SPECIAL
-    //                                                                                                                                                                                              
-    COMBO_PRESET_TREND_FILTER = 11,         // Trend Filter: Structure - Sub
-    COMBO_PRESET_VOLATILITY_ADAPTIVE = 12,  // Volatility: (Structure + Sub) / 2
-
-    //                                                                                                                                                                                              
-    // ADVANCED REDIRECTS (full manual control)
-    //                                                                                                                                                                                              
-    COMBO_PRESET_MANUAL_DUAL = 13,          // Advanced Dual: User-defined (2 components) -> Advanced Mode
-    COMBO_PRESET_MANUAL_TRIPLE = 14,        // Advanced Triple: User-defined (3 components) -> Advanced Mode
-
-    //                                                                                                                                                                                              
-    // QUICK TEST (merged from old COMBO_MODE_QUICK_TEST)
-    // All use COMBO_STEP_TH and Geometric Mean for consistency.
-    //                                                                                                                                                                                              
-    COMBO_PRESET_QT_TRIGGER_PATTERN = 15,           // QT: Trigger + Pattern, Geo Mean
-    COMBO_PRESET_QT_ALL_4TF = 16,                    // QT: Sub + Trigger + Pattern + Structure, Geo Mean
-    COMBO_PRESET_QT_TRIGGER_PATTERN_STRUCTURE = 17,  // QT: Trigger + Pattern + Structure, Geo Mean
-    COMBO_PRESET_QT_PATTERN_STRUCTURE = 18,          // QT: Pattern + Structure, Geo Mean
-    COMBO_PRESET_QT_TRIGGER_ONLY = 19                // QT: Trigger only
+    COMBO_PRESET_BALANCED_MEDIUM = 0,   // (Pattern + Trigger) / 2 [Most Popular]
+    COMBO_PRESET_BALANCED_LONG = 1,     // (Structure + Pattern) / 2
+    COMBO_PRESET_BALANCED_TRIPLE = 2,   // (Trigger + Pattern + Structure) / 3
+    COMBO_PRESET_CONSERVATIVE = 3,      // max(Structure, Pattern)
+    COMBO_PRESET_AGGRESSIVE = 4,        // min(Trigger, Sub)
+    COMBO_PRESET_TREND_FILTER = 5       // Structure - Sub
 };
 
 // TH3 Label Position
@@ -496,21 +314,18 @@ enum ENUM_TH3_LABEL_POSITION {
 // Unified Zone Display Style (Used by ALL modes)
 //          Zone    (      
 enum ENUM_ZONE_STYLE {
-    ZONE_STYLE_LINES = 0,         // Lines Only (Two boundary lines)
-    ZONE_STYLE_BOX_FILLED = 1,    // Filled Box (Rectangle with fill)
-    ZONE_STYLE_BOX_EMPTY = 2,     // Empty Box (Rectangle outline only)
-    ZONE_STYLE_HIDDEN = 3         // Hidden (No zones)
+    ZONE_STYLE_BOX_FILLED = 0,    // Filled Box (Colored zone)
+    ZONE_STYLE_BOX_EMPTY = 1,     // Empty Box (Outline only, no fill)
+    ZONE_STYLE_HIDDEN = 2         // Hidden (No zones)
 };
 
 // Legacy aliases for backward compatibility
 //                      
 #define ENUM_TH3_ZONE_STYLE ENUM_ZONE_STYLE
 #define ENUM_FACTOR_ZONE_STYLE ENUM_ZONE_STYLE
-#define TH3_ZONE_LINES ZONE_STYLE_LINES
 #define TH3_ZONE_BOX_FILLED ZONE_STYLE_BOX_FILLED
 #define TH3_ZONE_BOX_EMPTY ZONE_STYLE_BOX_EMPTY
 #define TH3_ZONE_HIDDEN ZONE_STYLE_HIDDEN
-#define FACTOR_ZONE_LINES ZONE_STYLE_LINES
 #define FACTOR_ZONE_BOX_FILLED ZONE_STYLE_BOX_FILLED
 #define FACTOR_ZONE_BOX_EMPTY ZONE_STYLE_BOX_EMPTY
 #define FACTOR_ZONE_HIDDEN ZONE_STYLE_HIDDEN
@@ -550,10 +365,6 @@ enum ENUM_FRACTAL_JUMP_STRATEGY {
 
 // Global State Variables for Adaptive Scaling
 static int g_fractalShift = 0;          // Current fractal level shift (power of 2)
-static bool g_fractalDetermined = false; // True once the jump has been computed with valid ATR
-static string g_fractalDeterminedTF = ""; // Timeframe the current determination applies to (jump is per-TF)
-static uint g_fractalDetermineStartMs = 0; // Tick time of first determination attempt (timeout fallback)
-#define FRACTAL_DETERMINE_TIMEOUT_MS 30000 // Draw anyway (shift 0) if ATR never becomes ready
 
 //+------------------------------------------------------------------+
 //| TH3 Object Name Suffixes (Magic Numbers Elimination)            |

@@ -4,13 +4,15 @@
 //|  Dynamic Trading Day Detection from actual market data          |
 //|                                                                |
 //+------------------------------------------------------------------+
+#ifndef DYNAMIC_TRADING_DAY_DETECTOR_MQH
+#define DYNAMIC_TRADING_DAY_DETECTOR_MQH
 #property copyright "Biotak"
 #property strict
 
 //+------------------------------------------------------------------+
 //| Find current session start by detecting gaps in data             |
 //+------------------------------------------------------------------+
-datetime FindCurrentSessionStart(ENUM_TIMEFRAMES timeframe = PERIOD_M1)
+datetime FindCurrentSessionStart(int timeframe = PERIOD_M1)
 {
     datetime currentTime = TimeGMT();
     
@@ -121,10 +123,6 @@ string GetSessionStatistics()
 void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime)
 {
     datetime sessionStart = FindCurrentSessionStart();
-    if(currentTime < sessionStart) {
-        ArrayResize(blocks, 0);
-        return;
-    }
     
     // Round down to nearest 30-minute boundary
     MqlDateTime dt;
@@ -135,19 +133,15 @@ void GetAllBlocksForCurrentSession(datetime &blocks[], datetime currentTime)
     dt.sec = 0;
     datetime blockTime = StructToTime(dt);
     
-    int blockCount = (int)((currentTime - blockTime) / (30 * 60)) + 1;
-    if(blockCount <= 0) {
-        ArrayResize(blocks, 0);
-        return;
-    }
-
-    if(ArrayResize(blocks, blockCount) != blockCount) {
-        ArrayResize(blocks, 0);
-        return;
-    }
-
-    for(int i = 0; i < blockCount; i++) {
-        blocks[i] = blockTime;
+    // Generate blocks up to current time
+    ArrayResize(blocks, 0);
+    while(blockTime <= currentTime)
+    {
+        int size = ArraySize(blocks);
+        ArrayResize(blocks, size + 1);
+        blocks[size] = blockTime;
         blockTime += 30 * 60;
     }
 }
+
+#endif // DYNAMIC_TRADING_DAY_DETECTOR_MQH

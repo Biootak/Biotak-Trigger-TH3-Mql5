@@ -3,6 +3,8 @@
 //|                                  GOLD FIX: HIGH Priority Issues   |
 //|                                  Performance & Memory Fixes       |
 //+------------------------------------------------------------------+
+#ifndef PERFORMANCE_OPTIMIZATIONS_MQH
+#define PERFORMANCE_OPTIMIZATIONS_MQH
 #property copyright "==================== Biotak - Performance Optimized"
 #property strict
 
@@ -68,7 +70,9 @@ string GetCachedSymbol() {
 //|           (    Period()                    |
 //+------------------------------------------------------------------+
 int GetCachedPeriod() {
-    if(g_cachedPeriod <= 0) g_cachedPeriod = Period();
+    int currentPeriod = Period();
+    if(g_cachedPeriod <= 0 || g_cachedPeriod != currentPeriod)
+        g_cachedPeriod = currentPeriod;
     return g_cachedPeriod;
 }
 
@@ -102,10 +106,16 @@ static double g_cachedBid = 0.0;
 static double g_cachedAsk = 0.0;
 static uint   g_tickPriceCacheTime = 0;
 
-void CacheTickPrices() {
+void CacheTickPrices(const bool forceRefresh = false) {
+    uint now = GetTickCount();
+    // OnCalculate and RedrawAllObjects can call this back-to-back for the
+    // same tick. Reuse that snapshot for a tiny window, while the forced
+    // entry-point refresh still captures every new tick immediately.
+    if(!forceRefresh && g_tickPriceCacheTime != 0 && now - g_tickPriceCacheTime < 10)
+        return;
     g_cachedBid = Bid;
     g_cachedAsk = Ask;
-    g_tickPriceCacheTime = GetTickCount();
+    g_tickPriceCacheTime = now;
 }
 
 double GetCachedBid() {
@@ -505,6 +515,11 @@ void CleanupPerformanceOptimizations() {
     }
     g_poolsInitialized = false;
     
-    // Reset global cache
+    // Reset global cache and the short-lived tick snapshot.
     g_globalCacheInitialized = false;
+    g_tickPriceCacheTime = 0;
+    g_cachedBid = 0.0;
+    g_cachedAsk = 0.0;
 }
+
+#endif // PERFORMANCE_OPTIMIZATIONS_MQH

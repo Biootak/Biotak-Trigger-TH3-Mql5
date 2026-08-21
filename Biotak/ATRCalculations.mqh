@@ -22,6 +22,8 @@
 //|   Overflow protection in weighted calculations                  |
 //|   Array bounds checking in batch operations                     |
 //+------------------------------------------------------------------+
+#ifndef ATR_CALCULATIONS_MQH
+#define ATR_CALCULATIONS_MQH
 #property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link "@biotak"
 #property strict
@@ -55,34 +57,6 @@
 // AUDIT FIX: Cache configuration constants
 #define ATR_CACHE_TTL_SECONDS 30        // Cache time-to-live (30 seconds)
 #define ATR_CACHE_BAR_TOLERANCE 1       // Max bar count difference for cache validity
-
-//+------------------------------------------------------------------+
-//| New Bar-Based ATR Cache for Label Timeframes (v2026)             |
-//|                                                                  |
-//| Each label timeframe has its own cache slot. Updates only occur  |
-//| when a new bar opens on that timeframe. Values are computed from |
-//| that timeframe's own price data, never scaled from chart TF.     |
-//+------------------------------------------------------------------+
-#define ATR_LABEL_TF_COUNT 9
-static ENUM_TIMEFRAMES g_atrLabelTFs[ATR_LABEL_TF_COUNT] = {
-    PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30,
-    PERIOD_H1, PERIOD_H4, PERIOD_D1, PERIOD_W1, PERIOD_MN1
-};
-
-struct SATRLabelCache {
-    ENUM_TIMEFRAMES timeframe;
-    double weightedATR;
-    datetime lastBarTime;
-    bool valid;
-};
-static SATRLabelCache g_atrLabelCache[ATR_LABEL_TF_COUNT];
-static bool g_atrLabelCacheInitialized = false;
-
-// FIX: time-based TTL for ATR label cache. The bar-time check alone never
-// invalidates W1/MN1 entries (weekly/monthly bars), so values stay stale
-// until the next bar forms. This forces a refresh every ATR_LABEL_TTL_SECONDS.
-static datetime g_atrLabelCacheLastCheck[ATR_LABEL_TF_COUNT];
-#define ATR_LABEL_TTL_SECONDS 5
 
 //+------------------------------------------------------------------+
 //| ATR Cache Structure for Performance                              |
@@ -138,9 +112,6 @@ void InitializeATRCache() {
     }
     g_multiTFCacheCount = 0;
     g_multiTFCacheInitialized = true;
-
-    // v2026: Initialize label timeframe cache
-    InitATRLabelCache();
 }
 
 //+------------------------------------------------------------------+
@@ -154,42 +125,6 @@ void CleanupATRCache() {
     // AUDIT FIX: Cleanup multi-TF cache
     g_multiTFCacheCount = 0;
     g_multiTFCacheInitialized = false;
-
-    // v2026: Cleanup label cache
-    CleanupATRLabelCache();
-}
-
-//+------------------------------------------------------------------+
-//| Initialize Label ATR Cache (v2026)                               |
-//+------------------------------------------------------------------+
-void InitATRLabelCache() {
-    for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
-        g_atrLabelCache[i].timeframe = g_atrLabelTFs[i];
-        g_atrLabelCache[i].weightedATR = 0.0;
-        g_atrLabelCache[i].lastBarTime = 0;
-        g_atrLabelCache[i].valid = false;
-    }
-    g_atrLabelCacheInitialized = true;
-}
-
-//+------------------------------------------------------------------+
-//| Cleanup Label ATR Cache (v2026)                                  |
-//+------------------------------------------------------------------+
-void CleanupATRLabelCache() {
-    for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
-        g_atrLabelCache[i].valid = false;
-    }
-    g_atrLabelCacheInitialized = false;
-}
-
-//+------------------------------------------------------------------+
-//| Find Label ATR Cache Index by Timeframe (v2026)                  |
-//+------------------------------------------------------------------+
-int FindATRLabelCacheIndex(const ENUM_TIMEFRAMES tf) {
-    for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
-        if(g_atrLabelCache[i].timeframe == tf) return i;
-    }
-    return -1;
 }
 
 //+------------------------------------------------------------------+
@@ -198,7 +133,6 @@ int FindATRLabelCacheIndex(const ENUM_TIMEFRAMES tf) {
 void ReleaseATRHandle() {
     // In MT4, iATR uses direct function calls without handles
     // This is a compatibility stub matching the MT5 interface
-    ReleaseATRHandleCache();
     CleanupATRCache();
 }
 
@@ -222,9 +156,9 @@ int GetEffectiveTimeframe() {
 int GetEffectiveBars() {
     int tf = GetEffectiveTimeframe();
     if(tf == Period()) {
-        return Bars(Symbol(), (ENUM_TIMEFRAMES)Period());
+        return Bars;
     }
-    return iBars(Symbol(), (ENUM_TIMEFRAMES)tf);
+    return iBars(Symbol(), tf);
 }
 
 //+------------------------------------------------------------------+
@@ -249,16 +183,40 @@ double CalculateTrueRange(const int barIndex) {
     
     double high, low, prevClose;
     
-    ENUM_TIMEFRAMES effectiveTF = (ENUM_TIMEFRAMES)tf;
-    high = iHigh(Symbol(), effectiveTF, barIndex);
-    low = iLow(Symbol(), effectiveTF, barIndex);
-
-    // For first bar, use Open as previous close
-    // CRITICAL FIX: Check barIndex + 1 bounds
-    if(barIndex >= totalBars - 1 || totalBars <= 1) {
-        prevClose = iOpen(Symbol(), effectiveTF, barIndex);
+    // Use iHigh/iLow/iClose/iOpen for timeframe-aware access
+    //            iHigh/iLow/iClose/iOpen                              
+    if(tf == Period()) {
+        // Current chart timeframe - use direct array access (faster)
+        // CRITICAL FIX: Validate array bounds before access
+        if(barIndex >= Bars) {
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("   CalculateTrueRange: barIndex exceeds Bars (", barIndex, "/", Bars, ")");
+            #endif
+            return 0.0;
+        }
+        
+        high = High[barIndex];
+        low = Low[barIndex];
+        
+        // For first bar, use Open as previous close
+        // CRITICAL FIX: Check barIndex + 1 bounds before access
+        if(barIndex >= Bars - 1) {
+            prevClose = Open[barIndex];
+        } else {
+            prevClose = Close[barIndex + 1];  // Previous bar's close (MQL4 indexing)
+        }
     } else {
-        prevClose = iClose(Symbol(), effectiveTF, barIndex + 1);
+        // Locked timeframe - use iHigh/iLow/iClose/iOpen
+        high = iHigh(Symbol(), tf, barIndex);
+        low = iLow(Symbol(), tf, barIndex);
+        
+        // For first bar, use Open as previous close
+        // CRITICAL FIX: Check barIndex + 1 bounds
+        if(barIndex >= totalBars - 1 || totalBars <= 1) {
+            prevClose = iOpen(Symbol(), tf, barIndex);
+        } else {
+            prevClose = iClose(Symbol(), tf, barIndex + 1);  // Previous bar's close
+        }
     }
     
     // AUDIT FIX: Use FloatingPointHelper for validation
@@ -308,9 +266,9 @@ double CalculateSimpleATR(const int period) {
         #endif
         return 0.0;
     }
-
+    
     // Use GetEffectiveBars() to respect timeframe lock
-    //            GetEffectiveBars()
+    //            GetEffectiveBars()                             
     int barsAvailable = GetEffectiveBars();
     if(barsAvailable <= period) {
         #ifdef ENABLE_DEBUG_LOGS
@@ -318,43 +276,21 @@ double CalculateSimpleATR(const int period) {
         #endif
         return 0.0;
     }
-
-    // PERF (2026): batch iHigh/iLow/iClose/iOpen via a single CopyRates.
-    // The previous implementation called CalculateTrueRange() once per bar,
-    // which in turn made 3-4 sync timeseries syscalls (iHigh, iLow, iOpen
-    // or iClose) per bar. Over a period of e.g. 14 bars that's 42-56 sync
-    // timeseries requests per ATR call - and CalculateATRBatch calls this
-    // for 6 different periods, so the cost compounded. One CopyRates pulls
-    // all OHLC at once; the inner loop becomes pure math.
-    MqlRates rates[];
-    ArraySetAsSeries(rates, true);
-    ENUM_TIMEFRAMES effectiveTF = (ENUM_TIMEFRAMES)GetEffectiveTimeframe();
-    int copied = CopyRates(Symbol(), effectiveTF, 0, period + 1, rates);
-    if(copied < period + 1) return 0.0;
-
+    
     double sumTR = 0.0;
     int validBars = 0;
-    for(int i = 0; i < period; i++) {
-        double high  = rates[i].high;
-        double low   = rates[i].low;
-        double prevClose = rates[i + 1].close;
-        if(!IsValidPrice(high, EPSILON_PRICE) ||
-           !IsValidPrice(low, EPSILON_PRICE) ||
-           !IsValidPrice(prevClose, EPSILON_PRICE)) {
-            continue;
-        }
-        if(IsLess(high, low, EPSILON_PRICE)) {
-            continue;
-        }
-        double tr = MathMax(high - low,
-                            MathMax(MathAbs(high - prevClose),
-                                    MathAbs(low - prevClose)));
+    
+    // Calculate ATR from most recent bars (index 0 = current bar)
+    for(int i = 0; i < period && i < barsAvailable; i++) {
+        double tr = CalculateTrueRange(i);
+        
+        // AUDIT FIX: Use IsZero for comparison
         if(!IsZero(tr, EPSILON_PRICE)) {
             sumTR += tr;
             validBars++;
         }
     }
-
+    
     // AUDIT FIX: Use SafeDivide
     return SafeDivide(sumTR, (double)validBars, 0.0, EPSILON_GENERAL);
 }
@@ -454,12 +390,72 @@ double CalculateWeightedATR_Locked() {
 }
 
 //+------------------------------------------------------------------+
+//| Calculate Hybrid ATR for Target Timeframe                        |
+//| ... (unchanged header) ...
+//+------------------------------------------------------------------+
+double CalculateHybridATR(const int currentMinutes, const int targetMinutes) {
+    // AUDIT FIX: Validate input parameters
+    if(currentMinutes <= 0 || targetMinutes <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   CalculateHybridATR: Invalid timeframe minutes (current:", currentMinutes, " target:", targetMinutes, ")");
+        #endif
+        return 0.0;
+    }
+    
+    // Calculate weighted ATR for current timeframe (unlocked for consistent scaling)
+    double currentATR = CalculateWeightedATR((ENUM_TIMEFRAMES)Period());
+    
+    // AUDIT FIX: Use IsZero for comparison
+    if(IsZero(currentATR, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   CalculateHybridATR: Current ATR is zero");
+        #endif
+        return 0.0;
+    }
+    
+    // If same timeframe, return current ATR
+    if(currentMinutes == targetMinutes) {
+        return currentATR;
+    }
+    
+    // AUDIT FIX: Use SafeDivide for ratio calculation
+    double ratioValue = SafeDivide((double)targetMinutes, (double)currentMinutes, 1.0, EPSILON_GENERAL);
+    
+    // AUDIT FIX: Use SafeSqrt for square root
+    double ratio = SafeSqrt(ratioValue, 1.0, EPSILON_GENERAL);
+    
+    // AUDIT FIX: Validate ratio range (sanity check)
+    if(ratio < 0.01 || ratio > 100.0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   CalculateHybridATR: Ratio out of range (", ratio, ")");
+        #endif
+        return currentATR; // Return current ATR as fallback
+    }
+    
+    // Scale using fractal relationship: ATR scales with  (timeframe ratio)
+    // ATR_target = ATR_current    (target_minutes / current_minutes)
+    double result = currentATR * ratio;
+    
+    // AUDIT FIX: Validate result
+    if(!IsValidPrice(result, EPSILON_PRICE)) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   CalculateHybridATR: Invalid result (", result, ")");
+        #endif
+        return currentATR; // Return current ATR as fallback
+    }
+    
+    return result;
+}
+
+//+------------------------------------------------------------------+
 //| Get Current Timeframe in Minutes                                 |
 //|                                                                  |
 //| AUDIT FIX: Added validation for Period()                         |
 //+------------------------------------------------------------------+
 int GetCurrentTimeframeMinutes() {
-    int period = Period();
+    // MQL5 Period() returns the ENUM value (H1=16385), not minutes; normalize
+    // so both platforms feed the same minute values (MQL4: 60 == 60).
+    int period = PeriodSeconds(Period()) / 60;
     
     // AUDIT FIX: Validate period
     if(period <= 0) {
@@ -468,16 +464,28 @@ int GetCurrentTimeframeMinutes() {
         #endif
         return 0;
     }
-
-    int minutes = PeriodMinutes((ENUM_TIMEFRAMES)period);
-    if(minutes > 0) {
-        return minutes;
+    
+    switch(period) {
+        case PERIOD_M1:  return 1;
+        case PERIOD_M5:  return 5;
+        case PERIOD_M15: return 15;
+        case PERIOD_M30: return 30;
+        case PERIOD_H1:  return 60;
+        case PERIOD_H4:  return 240;
+        case PERIOD_D1:  return 1440;
+        case PERIOD_W1:  return 10080;
+        case PERIOD_MN1: return 43200;
+        default:         
+            // For custom timeframes, return period directly
+            // Validate it's reasonable (1 min to 1 month)
+            if(period >= 1 && period <= 43200) {
+                return period;
+            }
+            #ifdef ENABLE_DEBUG_LOGS
+            Print("   GetCurrentTimeframeMinutes: Unusual period (", period, ")");
+            #endif
+            return period;
     }
-
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("   GetCurrentTimeframeMinutes: Unusual period (", period, ")");
-    #endif
-    return 0;
 }
 
 //+------------------------------------------------------------------+
@@ -554,120 +562,118 @@ void CalculateATRFractalValues(double &structureValue, double &patternValue, dou
 }
 
 //+------------------------------------------------------------------+
-//| Convert minutes to ENUM_TIMEFRAMES (v2026)                       |
-//+------------------------------------------------------------------+
-ENUM_TIMEFRAMES MinutesToTimeframe(const int minutes) {
-    switch(minutes) {
-        case 1:     return PERIOD_M1;
-        case 5:     return PERIOD_M5;
-        case 15:    return PERIOD_M15;
-        case 30:    return PERIOD_M30;
-        case 60:    return PERIOD_H1;
-        case 240:   return PERIOD_H4;
-        case 1440:  return PERIOD_D1;
-        case 10080: return PERIOD_W1;
-        case 43200: return PERIOD_MN1;
-    }
-    return PERIOD_CURRENT;
-}
-
-//+------------------------------------------------------------------+
-//| Per-timeframe ATR period cap (user request, 2026-07-13)          |
+//| Get ATR for Specific Timeframe (with direct calculation)         |
+//|        ATR                     (                      )          |
 //|                                                                  |
-//| The user wants RECENT volatility only and explicitly does not    |
-//| want "far" periods. For monthly, ~12 candles (1 year) is enough. |
-//| We cap the longest period per timeframe so the ATR never demands |
-//| decades of history and always reflects recent volatility.        |
+//| CRITICAL FIX: Calculate ATR directly for each target timeframe   |
+//| Each timeframe gets its own ATR calculated from its own data     |
+//| AUDIT FIX: Added validation and multi-TF caching                 |
 //+------------------------------------------------------------------+
-int GetMaxATRPeriodForTimeframe(const ENUM_TIMEFRAMES tf) {
-    switch(tf) {
-        case PERIOD_MN1: return 12;    // ~1 year of monthly bars
-        case PERIOD_W1:  return 13;    // ~1 quarter of weekly bars
-        case PERIOD_D1:  return 21;    // ~1 month of daily bars
-        case PERIOD_H4:  return 60;    // ~10 days
-        case PERIOD_H1:  return 120;   // ~5 days
-        case PERIOD_M30: return 120;
-        case PERIOD_M15: return 120;
-        case PERIOD_M5:  return 120;
-        case PERIOD_M1:  return 120;   // ~2 hours
-        default:         return 120;
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Build a (period, weight) set for a timeframe                      |
-//| The base 6 periods are clamped to the TF cap; each base slot     |
-//| stays DISTINCT in the output (no merging) so the weighted sum    |
-//| uses all 6 weights individually, matching Java OptimizedCalculations|
-//| where every base period contributes independently.                |
-//| When clamping causes duplicate period values (e.g. D1 caps 66/    |
-//| 132/264 all to 21) the slots still represent separate weights    |
-//| for the same lookback — mathematically equivalent to merging but  |
-//| preserves the explicit per-slot structure for clarity and so the |
-//| pro-rating fix in CalculateWeightedATRFromRates can scale each   |
-//| weight by its own completeness.                                  |
-//+------------------------------------------------------------------+
-void GetATRPeriodWeightsForTimeframe(const ENUM_TIMEFRAMES tf, int &outPeriods[], int &outWeights[], int &outCount) {
-    int maxP = GetMaxATRPeriodForTimeframe(tf);
-    int basePeriods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3,
-                         ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
-    int baseWeights[] = {ATR_WEIGHT_1, ATR_WEIGHT_2, ATR_WEIGHT_3,
-                         ATR_WEIGHT_4, ATR_WEIGHT_5, ATR_WEIGHT_6};
-
-    ArrayResize(outPeriods, 6);
-    ArrayResize(outWeights, 6);
-    outCount = 0;
-
-    for(int i = 0; i < 6; i++) {
-        int p = MathMin(basePeriods[i], maxP);
-        if(p < 2) p = 2;
-        // Keep every base slot distinct. Duplicate period values are
-        // intentional when the cap is lower than several base periods.
-        outPeriods[outCount] = p;
-        outWeights[outCount] = baseWeights[i];
-        outCount++;
-    }
-}
 double GetATRForTimeframe(const int targetMinutes) {
-    ENUM_TIMEFRAMES tf = MinutesToTimeframe(targetMinutes);
-    if(tf == PERIOD_CURRENT) return 0.0;
-    return CalculateWeightedATR(tf);
-}
-
-//+------------------------------------------------------------------+
-//| Check whether a valid (exact) ATR is cached for a timeframe      |
-//| Used to bound one-time history sync attempts (no per-tick load)  |
-//+------------------------------------------------------------------+
-bool IsATRCacheValidForTF(const ENUM_TIMEFRAMES tf) {
-    if(!g_multiTFCacheInitialized) return false;
-    for(int i = 0; i < g_multiTFCacheCount; i++) {
-        if(g_multiTFCache[i].timeframe == tf && g_multiTFCache[i].valid) {
-            return true;
+    // AUDIT FIX: Validate target minutes
+    if(targetMinutes <= 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   GetATRForTimeframe: Invalid target minutes (", targetMinutes, ")");
+        #endif
+        return 0.0;
+    }
+    
+    // AUDIT FIX: Validate TimeCurrent()
+    datetime currentTime = TimeCurrent();
+    if(currentTime == 0) {
+        #ifdef ENABLE_DEBUG_LOGS
+        Print("   GetATRForTimeframe: TimeCurrent() returned 0");
+        #endif
+        // Try to find cached value
+        if(g_multiTFCacheInitialized) {
+            for(int i = 0; i < g_multiTFCacheCount; i++) {
+                int cachedMins = 0;
+                switch(g_multiTFCache[i].timeframe) {
+                    case PERIOD_M1:  cachedMins = 1; break;
+                    case PERIOD_M5:  cachedMins = 5; break;
+                    case PERIOD_M15: cachedMins = 15; break;
+                    case PERIOD_M30: cachedMins = 30; break;
+                    case PERIOD_H1:  cachedMins = 60; break;
+                    case PERIOD_H4:  cachedMins = 240; break;
+                    case PERIOD_D1:  cachedMins = 1440; break;
+                    case PERIOD_W1:  cachedMins = 10080; break;
+                    case PERIOD_MN1: cachedMins = 43200; break;
+                }
+                if(cachedMins == targetMinutes && g_multiTFCache[i].valid) {
+                    return g_multiTFCache[i].atrValue;
+                }
+            }
+        }
+        return 0.0;
+    }
+    
+    // AUDIT FIX: Check multi-TF cache first
+    if(g_multiTFCacheInitialized) {
+        for(int i = 0; i < g_multiTFCacheCount; i++) {
+            // Check if this timeframe is in cache and valid
+            // We'll convert targetMinutes to enum later, but for now we can check timeframe enum vs minutes
+            if(g_multiTFCache[i].valid && 
+               (currentTime - g_multiTFCache[i].lastUpdate) < 30) {
+                
+                // Check if this cached entry matches our target minutes
+                int cachedMins = 0;
+                switch(g_multiTFCache[i].timeframe) {
+                    case PERIOD_M1:  cachedMins = 1; break;
+                    case PERIOD_M5:  cachedMins = 5; break;
+                    case PERIOD_M15: cachedMins = 15; break;
+                    case PERIOD_M30: cachedMins = 30; break;
+                    case PERIOD_H1:  cachedMins = 60; break;
+                    case PERIOD_H4:  cachedMins = 240; break;
+                    case PERIOD_D1:  cachedMins = 1440; break;
+                    case PERIOD_W1:  cachedMins = 10080; break;
+                    case PERIOD_MN1: cachedMins = 43200; break;
+                }
+                
+                if(cachedMins == targetMinutes) return g_multiTFCache[i].atrValue;
+            }
         }
     }
-    return false;
-}
-
-//+------------------------------------------------------------------+
-//| Nudge the terminal to load a timeframe's price history           |
-//|                                                                  |
-//| SeriesSync() is unavailable on this terminal build, so we use    |
-//| CopyRates which triggers the terminal's background history sync. |
-//| Once downloaded, iATR returns the EXACT ATR on subsequent ticks. |
-//| This is called at most once per timeframe (until a valid value   |
-//| is cached), so it adds no steady-state load.                      |
-//+------------------------------------------------------------------+
-void EnsureTimeframeHistory(const ENUM_TIMEFRAMES tf) {
-    MqlRates rates[];
-    // Request enough bars to cover the longest capped ATR period for this TF.
-    // A single CopyRates(0,1) does not always trigger the terminal to download
-    // the deeper history that iATR needs. Asking for maxPeriod+2 bars forces
-    // the history sync to start immediately on first use.
-    int maxP = GetMaxATRPeriodForTimeframe(tf);
-    int needed = MathMax(maxP + 2, ATR_PERIOD_1 + 2);
-    ArrayResize(rates, needed);
-    CopyRates(Symbol(), tf, 0, needed, rates);
-    ArrayFree(rates);
+    
+    // Convert minutes to ENUM_TIMEFRAMES
+    ENUM_TIMEFRAMES targetTF = PERIOD_CURRENT;
+    switch(targetMinutes) {
+        case 1:     targetTF = PERIOD_M1; break;
+        case 5:     targetTF = PERIOD_M5; break;
+        case 15:    targetTF = PERIOD_M15; break;
+        case 30:    targetTF = PERIOD_M30; break;
+        case 60:    targetTF = PERIOD_H1; break;
+        case 240:   targetTF = PERIOD_H4; break;
+        case 1440:  targetTF = PERIOD_D1; break;
+        case 10080: targetTF = PERIOD_W1; break;
+        case 43200: targetTF = PERIOD_MN1; break;
+    }
+    
+    double result = 0.0;
+    
+    if(targetTF == PERIOD_CURRENT) {
+        // Truly unknown/custom timeframe - use scaling method as last resort
+        int currentMinutes = GetCurrentTimeframeMinutes();
+        if(currentMinutes > 0) {
+            result = CalculateHybridATR(currentMinutes, targetMinutes);
+        }
+    } else {
+        // v3.12: Strictly use real calculations for standard timeframes
+        // No fallback to scaling for standard TFs to avoid inconsistencies
+        result = CalculateWeightedATRForTimeframe(targetTF);
+        
+        // If calculation failed (e.g. data not synchronized), return 0
+        // The UI/Caller should handle 0 as "Loading" or "N/A"
+        if(result == EMPTY_VALUE || IsZero(result, EPSILON_PRICE)) {
+            result = 0.0;
+        }
+    }
+    
+    // Update cache
+    if(g_multiTFCacheInitialized && !IsZero(result, EPSILON_PRICE)) {
+        UpdateMultiTFCache(targetTF != PERIOD_CURRENT ? targetTF : (ENUM_TIMEFRAMES)targetMinutes, result, iBars(Symbol(), targetTF));
+    }
+    
+    return result;
 }
 
 //+------------------------------------------------------------------+
@@ -863,42 +869,17 @@ void CalculateSimpleATRFromTR(double &results[], const double &trValues[], int m
 //| v3.13: Using built-in iATR for maximum reliability and speed     |
 //+------------------------------------------------------------------+
 void CalculateATRBatchWilders(double &results[], const ENUM_TIMEFRAMES tf) {
-    int periods[6], weights[6], count;
-    GetATRPeriodWeightsForTimeframe(tf, periods, weights, count);
-
-    ArrayResize(results, count);
+    ArrayResize(results, 6);
     ArrayInitialize(results, 0.0);
-
-    for(int i = 0; i < count; i++) {
+    
+    int periods[] = {ATR_PERIOD_1, ATR_PERIOD_2, ATR_PERIOD_3,
+                     ATR_PERIOD_4, ATR_PERIOD_5, ATR_PERIOD_6};
+    
+    for(int i = 0; i < 6; i++) {
         // Use iATR with shift 1 for stable, non-flickering values
         double val = iATR(Symbol(), tf, periods[i], 1);
         results[i] = (val != EMPTY_VALUE && val > 0) ? val : 0.0;
     }
-}
-
-//+------------------------------------------------------------------+
-//| Weighted ATR using Wilder's smoothing (iATR)                    |
-//|                                                                  |
-//| This is the production path. iATR uses standard Wilder's ATR,   |
-//| which handles W1/MN1 history and incomplete bars correctly.     |
-//| Fallback to simple average from rates only if iATR unavailable. |
-//+------------------------------------------------------------------+
-double CalculateWeightedATRWilders(const ENUM_TIMEFRAMES tf) {
-    double results[];
-    int periods[6], weights[6], count;
-    GetATRPeriodWeightsForTimeframe(tf, periods, weights, count);
-    CalculateATRBatchWilders(results, tf);
-
-    double weightedSum = 0.0;
-    int totalWeight = 0;
-    for(int i = 0; i < count; i++) {
-        if(results[i] > 0) {
-            weightedSum += results[i] * weights[i];
-            totalWeight += weights[i];
-        }
-    }
-
-    return SafeDivide(weightedSum, (double)totalWeight, 0.0, EPSILON_GENERAL);
 }
 
 //+------------------------------------------------------------------+
@@ -908,7 +889,7 @@ double CalculateWeightedATRWilders(const ENUM_TIMEFRAMES tf) {
 int GetTriggerDurationSeconds(ENUM_TIMEFRAMES tf) {
     int minutes = 0;
     switch(tf) {
-        case PERIOD_MN1: minutes = 60;   break; // MN -> D1 -> H1 (Trigger is H1)
+        case PERIOD_MN1: minutes = 1440; break; // MN -> D1 -> H1 (Trigger is H1)
         case PERIOD_W1:  minutes = 240;  break; // W1 -> D1 -> H4 (Trigger is H4)
         case PERIOD_D1:  minutes = 60;   break; // D1 -> H4 -> H1 (Trigger is H1)
         case PERIOD_H4:  minutes = 15;   break; // H4 -> H1 -> M15 (Trigger is M15)
@@ -923,169 +904,70 @@ int GetTriggerDurationSeconds(ENUM_TIMEFRAMES tf) {
 }
 
 //+------------------------------------------------------------------+
-//| Calculate Weighted ATR from pre-fetched MqlRates (v2026)         |
-//|                                                                  |
-//| Computes simple ATR for each fixed period using True Range from  |
-//| the timeframe's own bars, then combines with fixed weights.      |
-//+------------------------------------------------------------------+
-double CalculateWeightedATRFromRates(const MqlRates &rates[], const int count, const ENUM_TIMEFRAMES tf) {
-    // Allow partial history: on W1/MN1 the terminal may not have 264+ bars.
-    // Each period uses as many bars as available and is excluded if insufficient.
-    // Skip index 0 (current, incomplete bar) so W1/MN1 ATR is based on completed
-    // candles only, matching the stable iATR(shift=1) behavior.
-    if(count <= 2) return 0.0;
-
-    int periods[6], weights[6], count_p;
-    GetATRPeriodWeightsForTimeframe(tf, periods, weights, count_p);
-
-    double atrValues[6];
-    double atrCompleteness[6];
-    ArrayInitialize(atrValues, 0.0);
-    ArrayInitialize(atrCompleteness, 0.0);
-
-    for(int p = 0; p < count_p; p++) {
-        int period = periods[p];
-        double sum = 0.0;
-        int valid = 0;
-
-        for(int i = 1; i <= period && i < count - 1; i++) {
-            double high = rates[i].high;
-            double low  = rates[i].low;
-            double prevClose = rates[i + 1].close;
-
-            if(!IsValidPrice(high, EPSILON_PRICE) ||
-               !IsValidPrice(low, EPSILON_PRICE) ||
-               !IsValidPrice(prevClose, EPSILON_PRICE) ||
-               IsLess(high, low, EPSILON_PRICE))
-                continue;
-
-            double hl = high - low;
-            double hc = MathAbs(high - prevClose);
-            double lc = MathAbs(low - prevClose);
-            double tr = hl;
-            if(hc > tr) tr = hc;
-            if(lc > tr) tr = lc;
-
-            sum += tr;
-            valid++;
-        }
-
-        // PRO-RATE (2026): require at least 50% of the requested lookback so we
-        // don't accept a single-bar "average", but instead of dropping the slot
-        // entirely we scale its weight by completeness. On cold-start W1/MN1
-        // where only ~13 bars exist, a 264-cap slot is at completeness=13/264≈5%
-        // — that's below the 50% floor so it stays excluded, but for a 5-cap
-        // slot with 3 bars (completeness=60%) we contribute 60% of its weight.
-        // This matches the spirit of Java's OptimizedCalculations while
-        // preventing zero-bias on cold starts.
-        double completeness = (period > 0) ? (double)valid / (double)period : 0.0;
-        if(valid >= period / 2 && valid > 0) {
-            atrValues[p] = SafeDivide(sum, (double)valid, 0.0, EPSILON_GENERAL);
-            atrCompleteness[p] = completeness;
-        } else {
-            atrValues[p] = 0.0;
-            atrCompleteness[p] = 0.0;
-        }
-    }
-
-    double weightedSum = 0.0;
-    int totalWeight = 0;
-    for(int i = 0; i < count_p; i++) {
-        if(!IsZero(atrValues[i], EPSILON_PRICE) && atrCompleteness[i] > 0.0) {
-            double effWeight = weights[i] * atrCompleteness[i];
-            weightedSum += atrValues[i] * effWeight;
-            totalWeight += (int)effWeight;
-        }
-    }
-
-    return SafeDivide(weightedSum, (double)totalWeight, 0.0, EPSILON_GENERAL);
-}
-
-//+------------------------------------------------------------------+
-//| Refresh ATR for a single timeframe from its own price history    |
-//| v2026.1: Simple-average-from-rates is PRIMARY (matches Java     |
-//| OptimizedCalculations.calculateATROptimized). Wilder's iATR is    |
-//| the FALLBACK when rates are insufficient for the longest capped  |
-//| period (rare; cold-start on W1/MN1 before history download).     |
-//+------------------------------------------------------------------+
-double RefreshATRForTimeframe(const ENUM_TIMEFRAMES tf) {
-    EnsureTimeframeHistory(tf);
-
-    // PRIMARY: simple-average from the TF's own price history.
-    // CalculateWeightedATRFromRates already handles partial history per
-    // period with the pro-rated completeness fix above, so even a
-    // handful of W1/MN1 bars yields a non-zero estimate instead of 0.
-    MqlRates rates[];
-    int maxBars = iBars(Symbol(), tf);
-    if(maxBars < 1) maxBars = ATR_PERIOD_6 + 1;
-    int maxP = GetMaxATRPeriodForTimeframe(tf);
-    int needed = MathMax(ATR_PERIOD_1 + 2, MathMin(maxBars, maxP + 1));
-    int copied = CopyRates(Symbol(), tf, 0, needed, rates);
-    if(copied > 1) {
-        double value = CalculateWeightedATRFromRates(rates, copied, tf);
-        ArrayFree(rates);
-        if(value > 0) return value;
-    }
-    ArrayFree(rates);
-
-    // FALLBACK: Wilder's iATR if rates cannot produce any non-zero value
-    // (extremely cold start where the longest capped period still has no
-    // history). iATR's Wilder smoothing is acceptable here as a last
-    // resort; the label will still be valid, just not byte-exact with Java.
-    return CalculateWeightedATRWilders(tf);
-}
-
-//+------------------------------------------------------------------+
 //| Calculate Weighted ATR                                           |
-//| v2026: Per-timeframe, bar-based cache from own price data        |
+//| v3.15: Dynamic fractal caching based on Trigger Timeframe        |
 //+------------------------------------------------------------------+
 double CalculateWeightedATR(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
     // If tf is PERIOD_CURRENT, use effective timeframe (respects lock)
     if(tf == PERIOD_CURRENT) {
         tf = (ENUM_TIMEFRAMES)GetEffectiveTimeframe();
     }
-
-    // Initialize label cache if needed
-    if(!g_atrLabelCacheInitialized) InitATRLabelCache();
-
-    int idx = FindATRLabelCacheIndex(tf);
-    if(idx < 0) {
-        // Unknown timeframe: compute uncached (e.g. locked or exotic TF)
-        return RefreshATRForTimeframe(tf);
+    
+    int currentBars = iBars(Symbol(), tf);
+    if(currentBars <= 0) return 0.0;
+    
+    datetime currentTime = TimeCurrent();
+    
+    // Initialize cache if needed
+    if(!g_multiTFCacheInitialized) InitializeATRCache();
+    
+    // Get dynamic TTL based on fractal trigger logic
+    int dynamicTTL = GetTriggerDurationSeconds(tf);
+    
+    // Check multi-TF cache
+    for(int i = 0; i < g_multiTFCacheCount; i++) {
+        if(g_multiTFCache[i].timeframe == tf && g_multiTFCache[i].valid) {
+            // v3.15 Cache Logic:
+            // 1. If a new bar of this TF has started, ALWAYS update
+            if(g_multiTFCache[i].lastBarCount != currentBars) break;
+            
+            // 2. If we are within the "Trigger Timeframe" duration, cache is valid
+            // This prevents excessive calculations while following the fractal range logic
+            if((currentTime - g_multiTFCache[i].lastUpdate) < dynamicTTL) {
+                return g_multiTFCache[i].atrValue;
+            }
+            
+            // Otherwise, cache expired -> proceed to calculation
+            break;
+        }
     }
-
-    datetime currentBarTime = iTime(Symbol(), tf, 0);
-    datetime now = TimeCurrent();
-    if(g_atrLabelCache[idx].valid &&
-       g_atrLabelCache[idx].lastBarTime == currentBarTime &&
-       currentBarTime > 0 &&
-       now - g_atrLabelCacheLastCheck[idx] < ATR_LABEL_TTL_SECONDS) {
-        return g_atrLabelCache[idx].weightedATR;
+    
+    // Calculate using Wilder's via iATR
+    double atrValues[];
+    CalculateATRBatchWilders(atrValues, tf);
+    
+    if(ArraySize(atrValues) < 6) return 0.0;
+    
+    double weightedSum = 0.0;
+    int totalWeight = 0;
+    int weights[] = {ATR_WEIGHT_1, ATR_WEIGHT_2, ATR_WEIGHT_3, 
+                     ATR_WEIGHT_4, ATR_WEIGHT_5, ATR_WEIGHT_6};
+    
+    for(int i = 0; i < 6; i++) {
+        if(!IsZero(atrValues[i], EPSILON_PRICE)) {
+            weightedSum += atrValues[i] * weights[i];
+            totalWeight += weights[i];
+        }
     }
-
-    // THROTTLE (2026-07-13): When history is not yet available the cache stays
-    // invalid (we never cache a 0). Without a throttle this would call
-    // CopyRates/iATR on every tick while waiting for W1/MN1 history. So during
-    // the "still loading" phase we only retry every ATR_LABEL_TTL_SECONDS.
-    if(!g_atrLabelCache[idx].valid && currentBarTime > 0 &&
-       now - g_atrLabelCacheLastCheck[idx] < ATR_LABEL_TTL_SECONDS) {
-        return 0.0;
+    
+    double result = SafeDivide(weightedSum, (double)totalWeight, 0.0, EPSILON_GENERAL);
+    
+    if(IsValidPrice(result, EPSILON_PRICE)) {
+        UpdateMultiTFCache(tf, result, currentBars);
+        return result;
     }
-
-    double value = RefreshATRForTimeframe(tf);
-    // FIX (2026-07-13): Never cache a zero/empty result as "valid". On first
-    // load the W1/MN1 history is often not downloaded yet, so RefreshATR...
-    // returns 0. Caching that as valid would freeze the label at "—" until
-    // the next bar forms (which for MN1 can be weeks away). Instead, leave
-    // valid=false so subsequent ticks retry until real history arrives.
-    // We always stamp lastCheck so the throttle above can pace retries.
-    g_atrLabelCacheLastCheck[idx] = now;
-    if(value > 0 && value != EMPTY_VALUE) {
-        g_atrLabelCache[idx].weightedATR = value;
-        g_atrLabelCache[idx].lastBarTime = currentBarTime;
-        g_atrLabelCache[idx].valid = true;
-    }
-    return value;
+    
+    return 0.0;
 }
 
 //+------------------------------------------------------------------+
@@ -1098,18 +980,90 @@ double CalculateWeightedATRForTimeframe(const ENUM_TIMEFRAMES targetTF) {
 
 //+------------------------------------------------------------------+
 //| Warmup ATR cache for common label timeframes                     |
-//|                                                                  |
-//| Pre-loads each label timeframe's ATR once at startup.            |
-//| v2026: Uses the per-timeframe bar-based cache; no global bridge. |
 //+------------------------------------------------------------------+
 void WarmupATRMultiTFCache() {
-    // Use the restored runtime state so hotkey-enabled ATR labels keep their
-    // per-timeframe data warm across OnDeinit/OnInit cycles on TF switches.
-    if(!g_atrLabelsVisible) return;
-    if(!g_atrLabelCacheInitialized) InitATRLabelCache();
-    for(int i = 0; i < ATR_LABEL_TF_COUNT; i++) {
-        CalculateWeightedATR(g_atrLabelTFs[i]);
+    // NOTE: No input guard here - DisplayATRLabels gates this on actual ATR
+    // label visibility (which may be enabled via the A hotkey, not only via
+    // the inpShowATRLabels input).
+    int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
+    for(int i = 0; i < ArraySize(tfMinutes); i++) {
+        double atrWarmup = GetATRForTimeframe(tfMinutes[i]);
     }
+}
+
+//+------------------------------------------------------------------+
+//| ATR label data readiness (MT5 handle latency)                    |
+//|                                                                  |
+//| MT5 iATR handles calculate asynchronously: right after attach or |
+//| a timeframe switch they can return 0 for a few frames, which     |
+//| made the ATR labels render empty/zero (MT4's native iATR is      |
+//| ready instantly). The label renderer retries until every label   |
+//| timeframe has a valid value, bounded so a timeframe with         |
+//| genuinely short history (e.g. MN1) cannot cause an endless       |
+//| relayout loop.                                                   |
+//+------------------------------------------------------------------+
+// Returns true when every label timeframe has a valid ATR value; fills
+// missingCount with the number of timeframes still returning 0.
+bool IsATRMultiTFReady(int &missingCount)
+{
+    int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
+    missingCount = 0;
+    for(int i = 0; i < ArraySize(tfMinutes); i++) {
+        if(GetATRForTimeframe(tfMinutes[i]) <= 0) missingCount++;
+    }
+    return (missingCount == 0);
+}
+
+static datetime s_atrLabelRetryStart = 0;
+static bool     s_atrLabelRetryActive = false;
+static int      s_atrLabelLastMissing = -1;
+static datetime s_atrLabelGiveUpUntil = 0;
+static const int ATR_LABEL_RETRY_SECONDS = 30;
+static const int ATR_LABEL_RETRY_COOLDOWN_SECONDS = 60;
+
+// Returns true when the ATR labels should be re-rendered because data
+// readiness improved since the last relayout (or because the retry window
+// just started). The first frame arms the window AND re-renders immediately;
+// later frames re-render only on real improvement, so a timeframe that is
+// still loading cannot cause a relayout loop.
+bool ShouldRetryATRLabels()
+{
+    datetime now = TimeCurrent();
+    // Cooldown after giving up (e.g. MN1 genuinely lacks history): do not
+    // re-arm the retry window on every frame.
+    if(now < s_atrLabelGiveUpUntil) return false;
+
+    int missingCount = 0;
+    bool ready = IsATRMultiTFReady(missingCount);
+    if(ready) {
+        s_atrLabelRetryActive = false;
+        s_atrLabelRetryStart = 0;
+        s_atrLabelLastMissing = -1;
+        return false;
+    }
+
+    if(!s_atrLabelRetryActive) {
+        // Start the retry window and re-render right away: the handles were
+        // just created and may be ready within a few frames.
+        s_atrLabelRetryActive = true;
+        s_atrLabelRetryStart = now;
+        s_atrLabelLastMissing = missingCount;
+        return true;
+    }
+
+    if(now - s_atrLabelRetryStart >= ATR_LABEL_RETRY_SECONDS) {
+        s_atrLabelRetryActive = false;
+        s_atrLabelGiveUpUntil = now + ATR_LABEL_RETRY_COOLDOWN_SECONDS;
+        s_atrLabelLastMissing = -1;
+        return false;
+    }
+
+    // Re-render only when readiness actually improved.
+    if(missingCount < s_atrLabelLastMissing) {
+        s_atrLabelLastMissing = missingCount;
+        return true;
+    }
+    return false;
 }
 
 
@@ -1237,29 +1191,29 @@ void TestATRCalculations() {
         Print("  Test 9: GetCurrentTimeframeMinutes - FAIL");
     }
     
-    //                                                                 
-    // Test 10: GetATRForTimeframe (reads per-TF cache)
-    //                                                                 
+    //                                                                
+    // Test 10: CalculateHybridATR
+    //                                                                
     totalTests++;
-    double tfATR = GetATRForTimeframe(60); // H1
-    if(!IsZero(tfATR, EPSILON_PRICE) && IsValidPrice(tfATR, EPSILON_PRICE)) {
-        Print("  Test 10: GetATRForTimeframe H1 (", DoubleToString(tfATR, Digits), ") - PASS");
+    double hybridATR = CalculateHybridATR(currentMinutes, 60); // Scale to H1
+    if(!IsZero(hybridATR, EPSILON_PRICE) && IsValidPrice(hybridATR, EPSILON_PRICE)) {
+        Print("  Test 10: CalculateHybridATR (", DoubleToString(hybridATR, Digits), ") - PASS");
         passCount++;
     } else {
-        Print("  Test 10: GetATRForTimeframe H1 - FAIL (ATR=", tfATR, ")");
+        Print("  Test 10: CalculateHybridATR - FAIL (ATR=", hybridATR, ")");
     }
     
-    //                                                                 
-    // Test 11: Bar-based cache consistency for H1
-    //                                                                 
+    //                                                                
+    // Test 11: GetATRForTimeframe with Multi-TF Cache
+    //                                                                
     totalTests++;
     double tfATR1 = GetATRForTimeframe(60);
     double tfATR2 = GetATRForTimeframe(60); // Should hit cache
-    if(AreEqual(tfATR1, tfATR2, EPSILON_PRICE)) {
-        Print("  Test 11: Bar-based cache - PASS");
+    if(AreEqual(tfATR1, tfATR2, EPSILON_PRICE) && g_multiTFCacheCount > 0) {
+        Print("  Test 11: Multi-TF cache - PASS (", g_multiTFCacheCount, " entries)");
         passCount++;
     } else {
-        Print("  Test 11: Bar-based cache - FAIL");
+        Print("  Test 11: Multi-TF cache - FAIL");
     }
     
     //                                                                
@@ -1331,16 +1285,16 @@ void TestATRCalculations() {
         Print("  Test 16: Edge case (invalid period) - FAIL");
     }
     
-    //                                                                 
-    // Test 17: Edge Case - Invalid Timeframe Minutes
-    //                                                                 
+    //                                                                
+    // Test 17: Edge Case - Zero Division Protection
+    //                                                                
     totalTests++;
-    double zeroATR = GetATRForTimeframe(0);
+    double zeroATR = CalculateHybridATR(0, 60);
     if(IsZero(zeroATR, EPSILON_PRICE)) {
-        Print("  Test 17: Edge case (invalid minutes) - PASS");
+        Print("  Test 17: Edge case (zero division) - PASS");
         passCount++;
     } else {
-        Print("  Test 17: Edge case (invalid minutes) - FAIL");
+        Print("  Test 17: Edge case (zero division) - FAIL");
     }
     
     //                                                                
@@ -1363,3 +1317,5 @@ void TestATRCalculations() {
     // Cleanup
     CleanupATRCache();
 }
+
+#endif // ATR_CALCULATIONS_MQH

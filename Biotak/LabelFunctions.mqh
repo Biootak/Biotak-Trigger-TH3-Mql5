@@ -4,16 +4,21 @@
 #property strict
 
 bool DrawMainLevels(const string prefix) {
-    // Skip drawing High/Low lines when Custom Price mode is active
-    // In Custom Price mode, user defines their own reference point
+    // Skip drawing High/Low lines when Custom Price mode is active. The
+    // cleanup is edge-triggered: repeating four ObjectDelete commands during
+    // every drag/redraw frame only adds terminal queue traffic.
+    static bool s_customPriceCleanupDone = false;
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
-        // Delete existing High/Low lines if they exist
-        ObjectDelete(0, prefix + "High");
-        ObjectDelete(0, prefix + "High_PipsLabel");
-        ObjectDelete(0, prefix + "Low");
-        ObjectDelete(0, prefix + "Low_PipsLabel");
+        if(!s_customPriceCleanupDone) {
+            ObjectDelete(0, prefix + "High");
+            ObjectDelete(0, prefix + "High_PipsLabel");
+            ObjectDelete(0, prefix + "Low");
+            ObjectDelete(0, prefix + "Low_PipsLabel");
+            s_customPriceCleanupDone = true;
+        }
         return true;
     }
+    s_customPriceCleanupDone = false;
     
     // OPTIMIZATION: Cache tooltip strings and only recalculate if prices changed
     static double s_lastHighPrice = 0;
@@ -23,10 +28,9 @@ bool DrawMainLevels(const string prefix) {
     
     // High line
     string highTooltip;
-    // PERF: Compute pips distance once per line (was called twice before)
-    double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
     if(s_lastHighPrice != g_highestHigh) {
-        highTooltip = inpHighLineTooltip + ": " + DoubleToString(g_highestHigh, GetCachedDigits());
+        highTooltip = inpHighLineTooltip + ": " + DoubleToString(g_highestHigh, Digits);
+        double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
         highTooltip = highTooltip + ", Distance: +/- " + DoubleToString(pipsToHigh, 1) + " pips";
         s_cachedHighTooltip = highTooltip;
         s_lastHighPrice = g_highestHigh;
@@ -35,14 +39,15 @@ bool DrawMainLevels(const string prefix) {
     }
     if(!CreateTHLineObject(prefix+"High",g_highestHigh,inpHighColor,inpHighStyle,inpHighWidth,highTooltip, inpTHLineObjectType, false)) return false;
     if(inpShowPipDistanceLabels) {
+        double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
         CreatePipDistanceLabel(prefix+"High_PipsLabel", g_highestHigh, pipsToHigh, inpHighColor);
     }
     
     // Low line
     string lowTooltip;
-    double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
     if(s_lastLowPrice != g_lowestLow) {
-        lowTooltip = inpLowLineTooltip + ": " + DoubleToString(g_lowestLow, GetCachedDigits());
+        lowTooltip = inpLowLineTooltip + ": " + DoubleToString(g_lowestLow, Digits);
+        double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
         lowTooltip = lowTooltip + ", Distance: +/- " + DoubleToString(pipsToLow, 1) + " pips";
         s_cachedLowTooltip = lowTooltip;
         s_lastLowPrice = g_lowestLow;
@@ -51,6 +56,7 @@ bool DrawMainLevels(const string prefix) {
     }
     if(!CreateTHLineObject(prefix+"Low",g_lowestLow,inpLowColor,inpLowStyle,inpLowWidth,lowTooltip, inpTHLineObjectType, false)) return false;
     if(inpShowPipDistanceLabels) {
+        double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
         CreatePipDistanceLabel(prefix+"Low_PipsLabel", g_lowestLow, pipsToLow, inpLowColor);
     }
     return true;
@@ -61,12 +67,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         Print("DrawTHLevels: Invalid daily close price");
         return;
     }
-
-    // PERF (2026): start each redraw with a clean in-memory trigger level
-    // cache. CheckAlerts iterates over this array instead of doing
-    // ~512 synchronous ObjectFind + ObjectGetDouble chart-API calls.
-    ResetTriggerLevelCache();
-
+    
     // OPTIMIZATION: Use centralized cached values from PerformanceOptimizations.mqh
     double s_cachedPointValue = GetCachedPoint();
     int s_cachedDigits = GetCachedDigits();
@@ -143,15 +144,9 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
     }
     
     #ifdef ENABLE_DEBUG_LOGS
-    if(intervalSize >= 5) {
-        Print("   DrawTHLevels using Base Multiplier: ", baseMultiplier,
-              "   L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
-              ", L4=", intervals[3], ", L5=", intervals[4]);
-    }
-    else {
-        Print("   DrawTHLevels using Base Multiplier: ", baseMultiplier,
-              "   intervals=", intervalSize);
-    }
+    Print("   DrawTHLevels using Base Multiplier: ", baseMultiplier,
+          "   L1=", intervals[0], ", L2=", intervals[1], ", L3=", intervals[2],
+          ", L4=", intervals[3], ", L5=", intervals[4]);
     #endif
     //                                                                    
     
@@ -168,9 +163,6 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
         string cachedTFForMid = GetFractalTimeframeForCurrent();
         string midLevelInfo = StringFormat("%s Mid", GetShortTimeframeName(cachedTFForMid));
         if(inpShowPipDistanceLabels) CreatePipDistanceLabel(prefix+"Mid_PipsLabel", midpointPrice, pipsToMid, inpTriggerColor, midLevelInfo);
-        // PERF (2026): feed the in-memory alert cache so CheckAlerts does
-        // not need to do a sync ObjectGetDouble for the midpoint line.
-        RecordMidpointLevel(midpointPrice);
     }
     // OPTIMIZATION: Cache IsTriggerLevelsEnabled() result BEFORE the loops
     bool triggerEnabled = IsTriggerLevelsEnabled();
@@ -178,83 +170,42 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
     //                                                                
     // ZONE SUPPORT: Cleanup old zones
     //          Zone:         zone          
-    //                                                                 
-    // FIX: Removed ObjectsDeleteAll here. Zones are already managed by
-    // ClearAllLevels when topology changes, and cached by ZoneFactory.
-    // Deleting all zones on every redraw caused flicker and heavy load,
-    // especially on M1 where there are many zones.
-    // if(inpShowMidZones) {
-    //     ObjectsDeleteAll(0, prefix + "Zone_", -1, -1);
-    // }
+    //                                                                
+    if(inpShowMidZones) {
+        ObjectsDeleteAll(0, prefix + "Zone_", -1, -1);
+    }
     
     if (triggerEnabled || inpShowStructure) {
         // Get adaptive level counts based on start point type
         int maxLevelsAbove = 0;
         int maxLevelsBelow = 0;
         GetAdaptiveLevelCounts(maxLevelsAbove, maxLevelsBelow);
-
+        
         // Determine if we should check historical high/low bounds
         // Custom Price mode: Only respect level count, ignore historical bounds
         // Historical modes (High/Low/Midpoint): Respect both level count AND historical bounds
         bool checkHistoricalBounds = (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE);
-
+        
         // OPTIMIZATION: Cache GetFractalTimeframeForCurrent() and related values BEFORE the loops
         string cachedCurrentTF = GetFractalTimeframeForCurrent();
         double cachedPatternTH = GetLowerTimeframeTH(cachedCurrentTF, 1);
         double cachedTriggerTH = GetLowerTimeframeTH(cachedCurrentTF, 2);
         double cachedLongStep = timeframePercentage * 2.0;
         double cachedShortStep = timeframePercentage * 1.5;
-
-        //
+        
+        //                                                                
         // ZONE SUPPORT: Tracking variables for Structure/Trigger separation
         //          Zone:                              Structure/Trigger
-        //
+        //                                                                
         double lastDrawnPriceAbove = midpointPrice;  // Track last structure level
         double lastTriggerPriceAbove = 0;            // Track last trigger level
         int zoneCountAbove = 0;
-
+        
         double priceLevelAbove = midpointPrice + (thStepSizePoints * pointValue);
         // NO NormalizeDouble - keep full precision to match MotiveWave
         int stepCountAbove = 1;
         int levelCountAbove = 0;
-
-        // PERF (2026): pre-compute the structure classification for every step
-        // we'll iterate over. The legacy loop called GetHighestStructureLevel +
-        // GetOverlapLevelsInfo + GetOverlapTimeframesInfo per iteration - each
-        // of those re-walks the 5-element intervals array, so a single step
-        // paid 3x5 = 15 modulo/compare operations + 3 array-size validations.
-        // With 288 iterations on M1 that was 4320+ ops per redraw just for the
-        // classification, on top of all the StringFormat allocations. We now
-        // do that work once per step, store the highest level + the short-TF
-        // string + the "L<n>" label string in a flat array, and look them up
-        // in O(1) inside the loop.
-        int lookupCapacity = MathMax(maxLevelsAbove, maxLevelsBelow) + 2;
-        int  lookupHighestLevel[];
-        string lookupShortTF[];
-        string lookupOverlapStr[];
-        ArrayResize(lookupHighestLevel, lookupCapacity);
-        ArrayResize(lookupShortTF,     lookupCapacity);
-        ArrayResize(lookupOverlapStr,  lookupCapacity);
-        for(int li = 0; li < lookupCapacity; li++) {
-            lookupHighestLevel[li] = GetHighestStructureLevel(li, intervals);
-            // step 0 (midpoint) gets the current fractal TF + "Mid"; non-midpoint
-            // steps get the timeframe for their highest structure level (or
-            // the current TF if they are triggers).
-            if(li == 0) {
-                lookupShortTF[li]    = GetShortTimeframeName(cachedCurrentTF);
-                lookupOverlapStr[li] = "Mid";
-            } else {
-                int hl = lookupHighestLevel[li];
-                if(hl > 0) {
-                    lookupShortTF[li]    = GetShortTimeframeName(GetTimeframeForStructureLevel(hl));
-                    lookupOverlapStr[li] = "L" + IntegerToString(hl);
-                } else {
-                    lookupShortTF[li]    = GetShortTimeframeName(cachedCurrentTF);
-                    lookupOverlapStr[li] = "";
-                }
-            }
-        }
-
+        
         // Loop condition: Custom Price = only count, Historical = count AND bounds
         while ((checkHistoricalBounds ? (priceLevelAbove <= g_highestHigh) : true) && levelCountAbove < maxLevelsAbove) {
             string lineNameAbove, tooltipAbove, levelInfoAbove;
@@ -262,15 +213,15 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
             int lineWidth;
             double percentageTooltip = 0.0;
-            string shortCurrentTF = lookupShortTF[stepCountAbove];
-
-            // Build overlap info for this step - O(1) lookup instead of two function calls
-            string overlapLevels = lookupOverlapStr[stepCountAbove];
-            string overlapTFs = shortCurrentTF;
-
+            string shortCurrentTF = GetShortTimeframeName(cachedCurrentTF);
+            
+            // Build overlap info for this step
+            string overlapLevels = GetOverlapLevelsInfo(stepCountAbove, intervals);
+            string overlapTFs = GetOverlapTimeframesInfo(stepCountAbove, intervals);
+            
             // FIX: Use dynamic intervals from Base Multiplier instead of hardcoded values
             // Check from highest to lowest level for priority (matching Java getPathForStep)
-            if (intervalSize > 4 && intervals[4] > 0 && stepCountAbove % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
+            if (intervals[4] > 0 && stepCountAbove % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
                 string tfL5 = GetShortTimeframeName(GetTimeframeForStructureLevel(5));
                 lineNameAbove = prefix + "StructureLevel5_Up_" + IntegerToString(stepCountAbove / intervals[4]);
                 tooltipAbove = StringFormat("[%s] %s +%d | Price: %s | TH: %.1f pips", overlapTFs, overlapLevels, stepCountAbove / intervals[4], DoubleToString(priceLevelAbove, Digits), quintupleStructureTFTHStepSizePoints / 10.0);
@@ -330,13 +281,10 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 stepCountAbove++;
                 continue;
             }
-
+            
             double pipsToLevelAbove = CalculatePipsDistance(priceLevelAbove, g_currentPrice);
             tooltipAbove = FormatTooltipWithDistance(tooltipAbove, priceLevelAbove);
             CreateTHLineObject(lineNameAbove, priceLevelAbove, lineColor, lineStyle, lineWidth, tooltipAbove, inpTHLineObjectType, false);
-            // PERF (2026): record this trigger level for the in-memory alert cache
-            // so CheckAlerts can avoid the per-tick ObjectGetDouble round-trip.
-            if(triggerEnabled) RecordTriggerLevelUp(stepCountAbove, priceLevelAbove);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameAbove+"_PipsLabel", priceLevelAbove, pipsToLevelAbove, lineColor, levelInfoAbove);
             
             //                                                            
@@ -349,9 +297,8 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             // CRITICAL FIX: Pass fixed step size for consistent zone height
             //                                                            
             if(inpShowMidZones) {
-                // PERF (2026): O(1) lookup from the pre-computed table.
                 // GOLD FIX: Use centralized function instead of repeated else-if
-                int highestLevel = lookupHighestLevel[stepCountAbove];
+                int highestLevel = GetHighestStructureLevel(stepCountAbove, intervals);
                 bool isStructureLevel = (highestLevel > 0 && inpShowStructure);
                 
                 string zoneName = prefix + "Zone_Above_" + IntegerToString(stepCountAbove);
@@ -396,16 +343,15 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             ENUM_LINE_STYLE lineStyle = inpTHLineStyle;
             int lineWidth;
             double percentageTooltip = 0.0;
-            // PERF (2026): O(1) lookup from the pre-computed table built before
-            // the above loop. Replaces GetShortTimeframeName + GetOverlapLevelsInfo
-            // + GetOverlapTimeframesInfo per iteration.
-            string shortCurrentTFBelow = lookupShortTF[stepCountBelow];
-            string overlapLevelsBelow = lookupOverlapStr[stepCountBelow];
-            string overlapTFsBelow = shortCurrentTFBelow;
+            string shortCurrentTFBelow = GetShortTimeframeName(cachedCurrentTF);
+            
+            // Build overlap info for this step
+            string overlapLevelsBelow = GetOverlapLevelsInfo(stepCountBelow, intervals);
+            string overlapTFsBelow = GetOverlapTimeframesInfo(stepCountBelow, intervals);
             
             // FIX: Use dynamic intervals from Base Multiplier instead of hardcoded values
             // Check from highest to lowest level for priority (matching Java getPathForStep)
-            if (intervalSize > 4 && intervals[4] > 0 && stepCountBelow % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
+            if (intervals[4] > 0 && stepCountBelow % intervals[4] == 0 && inpShowStructure && inpShowStructureL5) {
                 lineNameBelow = prefix + "StructureLevel5_Down_" + IntegerToString(stepCountBelow / intervals[4]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4], DoubleToString(priceLevelBelow, Digits), quintupleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[4]);
@@ -413,7 +359,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL5Style;
                 lineWidth = inpStructureL5Width;
                 percentageTooltip = structurePercentages[4];
-            } else if (intervalSize > 3 && intervals[3] > 0 && stepCountBelow % intervals[3] == 0 && inpShowStructure && inpShowStructureL4) {
+            } else if (intervals[3] > 0 && stepCountBelow % intervals[3] == 0 && inpShowStructure && inpShowStructureL4) {
                 lineNameBelow = prefix + "StructureLevel4_Down_" + IntegerToString(stepCountBelow / intervals[3]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3], DoubleToString(priceLevelBelow, Digits), quadrupleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[3]);
@@ -421,7 +367,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL4Style;
                 lineWidth = inpStructureL4Width;
                 percentageTooltip = structurePercentages[3];
-            } else if (intervalSize > 2 && intervals[2] > 0 && stepCountBelow % intervals[2] == 0 && inpShowStructure && inpShowStructureL3) {
+            } else if (intervals[2] > 0 && stepCountBelow % intervals[2] == 0 && inpShowStructure && inpShowStructureL3) {
                 lineNameBelow = prefix + "StructureLevel3_Down_" + IntegerToString(stepCountBelow / intervals[2]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2], DoubleToString(priceLevelBelow, Digits), tripleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[2]);
@@ -429,7 +375,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL3Style;
                 lineWidth = inpStructureL3Width;
                 percentageTooltip = structurePercentages[2];
-            } else if (intervalSize > 1 && intervals[1] > 0 && stepCountBelow % intervals[1] == 0 && inpShowStructure && inpShowStructureL2) {
+            } else if (intervals[1] > 0 && stepCountBelow % intervals[1] == 0 && inpShowStructure && inpShowStructureL2) {
                 lineNameBelow = prefix + "StructureLevel2_Down_" + IntegerToString(stepCountBelow / intervals[1]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1], DoubleToString(priceLevelBelow, Digits), doubleStructureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[1]);
@@ -437,7 +383,7 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
                 lineStyle = inpStructureL2Style;
                 lineWidth = inpStructureL2Width;
                 percentageTooltip = structurePercentages[1];
-            } else if (intervalSize > 0 && intervals[0] > 0 && stepCountBelow % intervals[0] == 0 && inpShowStructure && inpShowStructureL1) {
+            } else if (intervals[0] > 0 && stepCountBelow % intervals[0] == 0 && inpShowStructure && inpShowStructureL1) {
                 lineNameBelow = prefix + "StructureLevel1_Down_" + IntegerToString(stepCountBelow / intervals[0]);
                 tooltipBelow = StringFormat("[%s] %s -%d | Price: %s | TH: %.1f pips", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0], DoubleToString(priceLevelBelow, Digits), structureTFTHStepSizePoints / 10.0);
                 levelInfoBelow = StringFormat("%s %s -%d", overlapTFsBelow, overlapLevelsBelow, stepCountBelow / intervals[0]);
@@ -469,9 +415,6 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             double pipsToLevelBelow = NormalizeDouble(MathAbs(priceLevelBelow - g_currentPrice) / pointValue / 10.0, 1);
             tooltipBelow = StringFormat("%s | Dist: %.1f pips", tooltipBelow, pipsToLevelBelow);
             CreateTHLineObject(lineNameBelow, priceLevelBelow, lineColor, lineStyle, lineWidth, tooltipBelow, inpTHLineObjectType, false);
-            // PERF (2026): record this trigger level for the in-memory alert cache
-            // so CheckAlerts can avoid the per-tick ObjectGetDouble round-trip.
-            if(triggerEnabled) RecordTriggerLevelDown(stepCountBelow, priceLevelBelow);
             if(inpShowPipDistanceLabels) CreatePipDistanceLabel(lineNameBelow+"_PipsLabel", priceLevelBelow, pipsToLevelBelow, lineColor, levelInfoBelow);
             
             //                                                            
@@ -484,9 +427,8 @@ void DrawTHLevels(const string objectPrefix, const double dailyClosePrice) {
             // CRITICAL FIX: Pass fixed step size for consistent zone height
             //                                                            
             if(inpShowMidZones) {
-                // PERF (2026): O(1) lookup from the pre-computed table.
                 // GOLD FIX: Use centralized function instead of repeated else-if
-                int highestLevel = lookupHighestLevel[stepCountBelow];
+                int highestLevel = GetHighestStructureLevel(stepCountBelow, intervals);
                 bool isStructureLevel = (highestLevel > 0 && inpShowStructure);
                 
                 string zoneName = prefix + "Zone_Below_" + IntegerToString(stepCountBelow);
@@ -541,7 +483,7 @@ string GetBaseTimeframeName(const string fullName) {
     return fullName;
 }
 
-bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing, const bool hasData = true) {
+bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName, const double atrValuePoints, const int xPos, const int yPos, const color textColor, const int horizontalSpacing, const int verticalSpacing, const bool placeholder = false) {
     double point = GetCachedPoint();
     double pipSize = GetCachedPipSize();
     if(IsZero(point, EPSILON_PRICE) || IsZero(pipSize, EPSILON_PRICE)) return false;
@@ -558,9 +500,12 @@ bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName,
     if(!inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
         ObjectDelete(0, targetsObjName);
     }
-    string targetsText = (hasData) ? (DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0)) : "";
-    string mainText = (hasData) ? (timeframeName + ": " + DoubleToString(atrPips, 1)) : (timeframeName + ": —");
-    string stepsText = (hasData) ? ("(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")") : "";
+    // Placeholder preview: the MT5 ATR handle is still warming up, so render
+    // "..." instead of hiding the label. The improvement-gated relayout
+    // replaces it with the real value once the handle is ready (MT4 behavior).
+    string targetsText = placeholder ? "..." : DoubleToString(target3x, 0) + " - " + DoubleToString(target5x, 0) + " - " + DoubleToString(target15x, 0);
+    string mainText = placeholder ? timeframeName + ": ..." : timeframeName + ": " + DoubleToString(atrPips, 1);
+    string stepsText = placeholder ? "(...)" : "(" + DoubleToString(shortStepPips, 1) + " - " + DoubleToString(midStepPips, 1) + " - " + DoubleToString(longStepPips, 1) + ")";
 
     // PERF: Only update text/color if changed (using Cache)
     string cachedText;
@@ -669,12 +614,12 @@ void ClearAllLabels(const string objectPrefix) {
     // 1. Delete all labels with the standard LBL_ prefix (New thorough way)
     string labelPrefix = objectPrefix + "LBL_";
     ObjectsDeleteAll(0, labelPrefix);
-
+    
     // 2. Delete labels that might have different timeframe prefixes (cleanup old logic)
     int total = ObjectsTotal(0, -1, -1);
     string tfSearch = objectPrefix + "TF";
     int tfSearchLen = StringLen(tfSearch);
-
+    
     for(int i = total - 1; i >= 0; i--) {
         string objName = ObjectName(0, i, -1, -1);
         if(StringSubstr(objName, 0, tfSearchLen) == tfSearch) {
@@ -683,42 +628,17 @@ void ClearAllLabels(const string objectPrefix) {
     }
 }
 
-//+------------------------------------------------------------------+
-//| Clear only ATR labels (scoped to avoid cross-contamination)     |
-//| FIX (2026): ClearAllLabels was shared by DisplayATRLabels,       |
-//| DisplayFractalTHs, and DisplayStandardTHs. When one type was     |
-//| hidden, it deleted ALL labels including the other type.          |
-//+------------------------------------------------------------------+
-void ClearATRLabels(const string objectPrefix) {
-    string atrPrefix = objectPrefix + "LBL_ATR";
-    ObjectsDeleteAll(0, atrPrefix);
-}
-
-//+------------------------------------------------------------------+
-//| Clear only TH labels (scoped to avoid cross-contamination)      |
-//+------------------------------------------------------------------+
-void ClearTHLabels(const string objectPrefix) {
-    string thPrefix = objectPrefix + "LBL_TH";
-    ObjectsDeleteAll(0, thPrefix);
-}
-
-void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) {
-    // FIX (LBL-3, 2026): the function now owns the Y-offset lifecycle.
-    // Before, the caller was responsible for resetting g_currentLabelYOffset=0
-    // before invoking us, and we mutated the global as we drew. Two callers
-    // (RedrawAllObjects, RedrawLabelsOnly) both did `= 0`; the deinit cleanup
-    // path did NOT, leaking a stale offset into the next session — which is
-    // what caused ATR labels to appear lower (and eventually off-screen) every
-    // time the indicator reloaded. We now reset here and accept the caller's
-    // requested starting offset as a parameter (defaults to 0 for top-of-chart
-    // labels; the TH labels below pass their own accumulator).
-    g_currentLabelYOffset = in_startYOffset;
-
+void DisplayATRLabels(const string objectPrefix) {
     if(!g_atrLabelsVisible) {
-        ClearATRLabels(objectPrefix);
+        ClearAllLabels(objectPrefix);
         return;
     }
-
+    
+    // MT5: warm up the ATR handle cache before the first render so label
+    // values are ready immediately (handles calculate asynchronously,
+    // unlike MT4's instant iATR).
+    WarmupATRMultiTFCache();
+    
     double point = GetCachedPoint();
     double pipSize = GetCachedPipSize();
     int digits = GetCachedDigits();
@@ -728,7 +648,7 @@ void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) 
     string timeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
     int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
 
-    // Use TH colors for ATR (original colors)
+    // Use TH colors for ATR
     color colors[] = {
         clrBlack,        // M1
         clrBlack,        // M5
@@ -778,33 +698,36 @@ void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) 
     int renderedCount = 0;
     for(int i = 0; i < ArraySize(timeframes); i++) {
         double atrValue = GetATRForTimeframe(tfMinutes[i]);
-        // EXACT-ONLY: a value is only considered valid data when it is a real,
-        // non-zero ATR. Unavailable data is reported as 0 and the label renders a
-        // "—" placeholder (never a scaled estimate).
-        bool hasData = (atrValue > 0 && atrValue != EMPTY_VALUE);
-        double atrPoints = atrValue / point;
-        double atrPips = NormalizeDouble(atrValue / pipSize, 1);
-        color labelColor = colors[i];
+        // MT4 shows every label immediately; MT5 iATR handles warm up
+        // asynchronously, so render a gray "..." preview instead of hiding the
+        // label. The improvement-gated retry replaces it with the real value
+        // as soon as the handle is ready.
+        bool placeholder = (atrValue <= 0 || atrValue == EMPTY_VALUE);
+        
+        double atrPoints = placeholder ? 0.0 : atrValue / point;
+        double atrPips = placeholder ? 0.0 : NormalizeDouble(atrValue / pipSize, 1);
+        color labelColor = placeholder ? clrGray : colors[i];
     
-        string mainText = hasData ?
-            (inpShowTimeframeInLabels ? timeframes[i] + ": " + DoubleToString(atrPips, 1)
-                                      : DoubleToString(atrPips, 1)) :
-            (inpShowTimeframeInLabels ? timeframes[i] + ": —" : "—");
-        string stepsText = hasData ?
-            "(" + DoubleToString(atrPips * 1.5, 1) + " - " + DoubleToString(atrPips * 1.75, 1) + " - " + DoubleToString(atrPips * 2.0, 1) + ")" : "";
-        string targetsText = hasData ?
-            DoubleToString(MathFloor(atrPips * 3.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 5.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 15.0), 0) : "";
+        string mainText = placeholder ?
+            timeframes[i] + ": ..." :
+            (inpShowTimeframeInLabels ?
+                timeframes[i] + ": " + DoubleToString(atrPips, 1) :
+                DoubleToString(atrPips, 1));
+        string stepsText = placeholder ? "(...)" :
+            "(" + DoubleToString(atrPips * 1.5, 1) + " - " + DoubleToString(atrPips * 1.75, 1) + " - " + DoubleToString(atrPips * 2.0, 1) + ")";
+        string targetsText = placeholder ? "..." :
+            DoubleToString(MathFloor(atrPips * 3.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 5.0), 0) + " - " + DoubleToString(MathFloor(atrPips * 15.0), 0);
         int labelWidth = GetLabelBlockWidth(mainText, stepsText, targetsText, inpShowATRTargets);
     
         if(isVerticalLayout) {
-            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing, hasData)) continue;
+            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing, placeholder)) continue;
             currentYPos += lineHeight;
         } else {
             if(currentXPos + labelWidth + xStep > maxWidth) {
                 currentXPos = labelStartX;
                 currentYPos += lineHeight;
             }
-            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing, hasData)) continue;
+            if(!CreateATRLabelSimple(labelPrefix, timeframes[i], atrPoints, currentXPos, currentYPos, labelColor, xStep, rowSpacing, placeholder)) continue;
             currentXPos += labelWidth + xStep;
         }
         renderedCount++;
@@ -816,16 +739,16 @@ void DisplayATRLabels(const string objectPrefix, const int in_startYOffset = 0) 
 }
 
 void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
+    // ATR labels are created with the LBL_ prefix by DisplayATRLabels
+    // (CreateATRLabelSimple). Older TF-prefixed names ("TF{minutes}_ATR_*") no
+    // longer exist, so toggling used to silently target nothing.
     string labelPrefix = objectPrefix + "LBL_";
-    string currentTFStr = IntegerToString(GetCachedPeriod());
-    string legacyPrefix = objectPrefix + "TF" + currentTFStr + "_";
-    string allTimeframes[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"};
+    string allTimeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
 
     bool shouldShow = (visible && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
     ObjectSetInteger(0, labelPrefix + "ATR_Title", OBJPROP_TIMEFRAMES, tf);
-    ObjectSetInteger(0, legacyPrefix + "ATR_Title", OBJPROP_TIMEFRAMES, tf);
 
     long targetsTF = (shouldShow && inpShowATRTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(allTimeframes); i++) {
@@ -833,18 +756,13 @@ void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
         ObjectSetInteger(0, labelPrefix + "ATR_" + tfName, OBJPROP_TIMEFRAMES, tf);
         ObjectSetInteger(0, labelPrefix + "ATR_Steps_" + tfName, OBJPROP_TIMEFRAMES, tf);
         ObjectSetInteger(0, labelPrefix + "ATR_Targets_" + tfName, OBJPROP_TIMEFRAMES, targetsTF);
-        ObjectSetInteger(0, legacyPrefix + "ATR_" + tfName, OBJPROP_TIMEFRAMES, tf);
-        ObjectSetInteger(0, legacyPrefix + "ATR_Steps_" + tfName, OBJPROP_TIMEFRAMES, tf);
-        ObjectSetInteger(0, legacyPrefix + "ATR_Targets_" + tfName, OBJPROP_TIMEFRAMES, targetsTF);
     }
 }
 
 void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
-    string labelPrefix = objectPrefix + "LBL_";
     bool shouldShow = ((mode != 0) && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
-    ObjectSetInteger(0, labelPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
     ObjectSetInteger(0, objectPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
 
     bool showFractal = (mode == 1 || mode == 3);
@@ -854,9 +772,6 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     long fractalTargetsTF = (shouldShow && showFractal && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(FRACTAL_TIMEFRAMES); i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
-        ObjectSetInteger(0, labelPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
-        ObjectSetInteger(0, labelPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
-        ObjectSetInteger(0, labelPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTargetsTF);
         ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
         ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTF);
         ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, fractalTargetsTF);
@@ -865,9 +780,6 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     long standardTargetsTF = (shouldShow && showStandard && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     for(int i = 0; i < ArraySize(STANDARD_TIMEFRAMES); i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
-        ObjectSetInteger(0, labelPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
-        ObjectSetInteger(0, labelPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
-        ObjectSetInteger(0, labelPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, standardTargetsTF);
         ObjectSetInteger(0, objectPrefix + "TH_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
         ObjectSetInteger(0, objectPrefix + "TH_Steps_" + timeframeName, OBJPROP_TIMEFRAMES, standardTF);
         ObjectSetInteger(0, objectPrefix + "TH_Targets_" + timeframeName, OBJPROP_TIMEFRAMES, standardTargetsTF);
@@ -1022,15 +934,7 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
 }
 
 void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-    // FIX (2026, clear-on-hidden): previously the early-out only `return`ed
-    // without clearing. After a TF switch the user could be left with stale
-    // fractal-TH labels if g_thLabelsVisible had flipped between renders.
-    // Now we explicitly ClearTHLabels so the chart doesn't accumulate ghost
-    // OBJ_LABEL objects across switches.
-    if(!g_thLabelsVisible || (g_thLabelsMode != 1 && g_thLabelsMode != 3)) {
-        ClearTHLabels(objectPrefix);
-        return;
-    }
+    if(!g_thLabelsVisible || (g_thLabelsMode != 1 && g_thLabelsMode != 3)) return;
     
     double point = GetCachedPoint();
     int digits = GetCachedDigits();
@@ -1056,28 +960,12 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     ObjectSetInteger(0, thTitleObjName, OBJPROP_COLOR, clrDarkBlue);
     ObjectSetString(0, thTitleObjName, OBJPROP_FONT, inpFontName);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_FONTSIZE, inpFontSize);
-    // FIX (2026, TH title setter mismatch): CORNER and ANCHOR are integer
-    // properties in MQL5 (ENUM_BASE_CORNER and ENUM_ANCHOR_POINT). The
-    // original code routed them through ObjectSetString, which the
-    // compiler accepts on small files but rejects as `error 262 cannot
-    // convert enum` once the rest of the module reaches the size where
-    // MQL5's overload resolution tightens. The ATR title (L743-L744) has
-    // always used ObjectSetInteger — align the TH title with that.
     ObjectSetInteger(0, thTitleObjName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_HIDDEN, false);
     ObjectSetInteger(0, thTitleObjName, OBJPROP_XDISTANCE, inpLabelsMarginLeft);
-    // FIX (2026, TH title overlap + drift): each data label block is up to
-    // 3 rows tall (targets / steps / main) when `inpShowTHTargets` is true,
-    // so the title row must sit ABOVE the targets row, not on top of it.
-    // Place the title at the bare `titleYPos` (matching the ATR title at
-    // L748) and let the first data row start at `titleYPos + singleLineHeight`
-    // (L1028). The previous formula added an extra singleLineHeight on every
-    // relayout pass, which is what produced the "TH labels move up" symptom
-    // and made the title overlap the targets row of the first data label in
-    // vertical layout.
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos);
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight));
     ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
 
     int titleWidth = (int)CalculateTextWidth("TH:");
@@ -1116,11 +1004,7 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
 }
 
 void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-    // FIX (2026, clear-on-hidden): same rationale as DisplayFractalTHs above.
-    if(!g_thLabelsVisible || (g_thLabelsMode != 2 && g_thLabelsMode != 3)) {
-        ClearTHLabels(objectPrefix);
-        return;
-    }
+    if(!g_thLabelsVisible || (g_thLabelsMode != 2 && g_thLabelsMode != 3)) return;
 
     double point = GetCachedPoint();
     int digits = GetCachedDigits();
@@ -1142,21 +1026,8 @@ void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH,
         ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
         ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, ""); // Clear default "Label" text
     }
-    // FIX (2026, TH title overlap + drift in Standard mode): mirror the
-    // title position fix from DisplayFractalTHs — place the title at the
-    // bare `titleYPos` so it sits exactly above the first data row,
-    // matching the ATR layout and the Fractal TH layout. The previous
-    // formula `titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight)`
-    // pushed the title an extra row up on every relayout pass, causing
-    // the "labels move up" symptom and overlapping the first data row
-    // in vertical layout.
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos);
-    // FIX (2026, TH title visibility in Standard mode): DisplayFractalTHs
-    // already pushes OBJPROP_TIMEFRAMES on the title; DisplayStandardTHs
-    // used to skip that, so on a TF switch in pure Standard mode the title
-    // could inherit OBJ_NO_PERIODS from a previous visibility flip and
-    // never come back. Re-apply the timeframe binding here too.
-    ObjectSetInteger(0, thTitleObjName, OBJPROP_TIMEFRAMES, IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+    // Title already set in DisplayFractalTHs if BOTH mode, but we update Y position here
+    ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight));
 
     int titleWidth = (int)CalculateTextWidth("TH:");
     int labelStartX = GetLabelStartX(startXPos, titleWidth, horizontalPadding, isVerticalLayout);
@@ -1306,26 +1177,23 @@ void UpdateLockStatusLabel(bool updateTimestamp = true)
                 Print("Failed to create lock status label. Error: ", GetLastError());
                 return;
             }
+            g_lockStatusLabelCreateTime = GetTickCount();
         }
         
-        ObjectSetString(0, g_lockStatusLabelName, OBJPROP_TEXT, lockText);
+        SetLabelTextIfChanged(g_lockStatusLabelName, lockText);
         
         if(updateTimestamp) g_lockStatusLabelCreateTime = GetTickCount();
         ApplyModeLabelStyle(g_lockStatusLabelName, clrGold);
         
         ObjectSetString(0, g_lockStatusLabelName, OBJPROP_TOOLTIP, "TF locked to " + PeriodToString(g_lockedPeriod) + " - Press " + inpLockKey + " to unlock");
-        
-        if(inpModeLabelDuration > 0 && updateTimestamp) {
-            EventSetTimer(inpModeLabelDuration);
-        }
     }
     else
     {
         if(ObjectFind(0, g_lockStatusLabelName) >= 0)
         {
             ObjectDelete(0, g_lockStatusLabelName);
-            g_lockStatusLabelCreateTime = 0;
         }
+        g_lockStatusLabelCreateTime = 0;
     }
 }
 

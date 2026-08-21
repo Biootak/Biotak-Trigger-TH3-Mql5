@@ -30,30 +30,6 @@
 #include "ConstantsAndEnums.mqh"
 
 //+------------------------------------------------------------------+
-//| ZONE MINIMUM HEIGHT FLOOR                                        |
-//|                                                                  |
-//| FIX: Zones below a timeframe's fractal step collapse to zero     |
-//| height (renderTop == renderBottom after NormalizeDouble) and are |
-//| silently skipped. This makes zones vanish on lower TFs (M30/M15/ |
-//| M5/M1). Enforce a minimum visible height in POINTS so zones      |
-//| always render. 2 points = 1 pip on a 4-digit symbol.             |
-//+------------------------------------------------------------------+
-#ifndef ZONE_MIN_HEIGHT_POINTS
-#define ZONE_MIN_HEIGHT_POINTS 2   // minimum half-height each side in points
-#endif
-
-// Expand a zone's half-height so the resulting box is always at least
-// ZONE_MIN_HEIGHT_POINTS points tall on each side. Keeps the center price.
-double GetMinSafeZoneHalfHeight(const double centerPrice, double halfHeight)
-{
-    double point = GetCachedPoint();
-    if(point <= 0) point = 1e-5;
-    double minHalf = point * ZONE_MIN_HEIGHT_POINTS;
-    if(halfHeight < minHalf) halfHeight = minHalf;
-    return halfHeight;
-}
-
-//+------------------------------------------------------------------+
 //| STAGE 1 OUTPUT: Raw calculated level                             |
 //+------------------------------------------------------------------+
 struct SCalculatedLevel {
@@ -114,9 +90,6 @@ struct SZoneDefinition {
 //+------------------------------------------------------------------+
 struct STriggerLine {
     string name;            // Object name for this line
-    string labelName;       // PERF (2026): pre-computed name + "_Label". Avoids
-                            // a per-iter string concat in RenderTriggerLines
-                            // (158 allocations/frame on MN1 before fix).
     double price;           // = zone boundary price
     int    logicalStep;
     int    direction;       // +1 = above, -1 = below, 0 = midpoint
@@ -128,11 +101,6 @@ struct STriggerLine {
     string labelText;
     bool   inViewport;      // false = skip render
     bool   isMidpoint;
-    bool   isTrigger;       // PERF (2026): true if this line corresponds to a
-                            // trigger subdivision (vs. structural). Used by
-                            // the in-memory alert cache populated in
-                            // RenderTriggerLines so CheckAlerts can avoid
-                            // synchronous ObjectGetDouble calls.
     bool   setBack;         // OBJPROP_BACK value (mode-specific)
     int    zOrder;          // OBJPROP_ZORDER value (mode-specific)
 };
@@ -237,7 +205,7 @@ int CalculateLevels(
     int safeMaxBelow = MathMin(maxLevelsBelow, MAX_SAFE_LEVELS);
     if(safeMaxAbove < 1) safeMaxAbove = 1;
     if(safeMaxBelow < 1) safeMaxBelow = 1;
-
+    
     int maxTotal = (safeMaxAbove + safeMaxBelow) * 2 + 1;
     ArrayResize(levels, maxTotal, 64);
     int count = 0;
@@ -257,23 +225,10 @@ int CalculateLevels(
     // --- Above levels ---
     int drawnAbove = 0;
     int logicalStep = 1;
-    int logicalStepAboveLast = 0;
     double cumAbove = 0;
     int maxIterations = safeMaxAbove * 2;
     int iterations = 0;
-
-    // RANGE FIX: If the base price is far below the visible/historical top, skip the
-    // levels that fall entirely outside the range so the level budget is spent inside
-    // the range instead of in empty space. Only applied in UNIFORM mode where the step
-    // is constant (exact skip); CUMULATIVE keeps the plain scan to avoid over-skipping.
-    if(stepMode == LEVEL_STEP_UNIFORM && boundByHistorical && maxPrice > 0 && stepSizes[0] > 0) {
-        double gap = maxPrice - shiftedCenter;
-        if(gap > 0) {
-            int skip = (int)MathFloor(gap / stepSizes[0]);
-            if(skip > 0) logicalStep = skip + 1;  // land just inside the top of range
-        }
-    }
-
+    
     while(drawnAbove < safeMaxAbove && iterations < maxIterations) {
         iterations++;
         double price;
@@ -285,18 +240,17 @@ int CalculateLevels(
             cumAbove += dist;
             price = shiftedCenter + cumAbove;
         }
-
+        
         // Price boundary check
         if(boundByHistorical && maxPrice > 0 && price > maxPrice) break;
-
+        
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
         levels[count].isMidpoint = false;
         levels[count].direction = 1;
         count++;
-
+        
         drawnAbove++;
-        logicalStepAboveLast = logicalStep;
         logicalStep++;
     }
     
@@ -306,17 +260,7 @@ int CalculateLevels(
     double cumBelow = 0;
     maxIterations = safeMaxBelow * 2;
     iterations = 0;
-
-    // RANGE FIX (symmetric): skip levels above the visible/historical bottom when the
-    // base price is far above it. UNIFORM mode only (constant step = exact skip).
-    if(stepMode == LEVEL_STEP_UNIFORM && boundByHistorical && minPrice > 0 && stepSizes[0] > 0) {
-        double gap = shiftedCenter - minPrice;
-        if(gap > 0) {
-            int skip = (int)MathFloor(gap / stepSizes[0]);
-            if(skip > 0) logicalStep = skip + 1;  // land just inside the bottom of range
-        }
-    }
-
+    
     while(drawnBelow < safeMaxBelow && iterations < maxIterations) {
         iterations++;
         double price;
@@ -342,12 +286,8 @@ int CalculateLevels(
         logicalStep++;
     }
     
-    // maxStep must reflect the HIGHEST logicalStep actually assigned (objects are named
-    // by logicalStep and CleanupSurplusObjects deletes indices > maxStep). With the range
-    // skip offset the last logicalStep can exceed the drawn count, so derive it directly.
-    int maxLogicalAbove = (drawnAbove > 0) ? (logicalStepAboveLast) : 0;
-    int maxLogicalBelow = (drawnBelow > 0) ? (logicalStep - 1) : 0;
-    maxStepOut = (maxLogicalAbove > maxLogicalBelow) ? maxLogicalAbove : maxLogicalBelow;
+    // PERF: maxStep is known   drawnAbove and drawnBelow track the actual max logicalStep
+    maxStepOut = (drawnAbove > drawnBelow) ? drawnAbove : drawnBelow;
     ArrayResize(levels, count);
     return count;
 }
@@ -566,29 +506,9 @@ void BuildZonesAndLines(
     int maxLines = aboveCount + belowCount;
     if(config.zonesEnabled) ArrayResize(zones, maxZones, 64);
     ArrayResize(lines, maxLines, 64);
-
-    // PERF (2026): hoist the per-direction string prefixes out of the hot
-    // loops. The previous implementation rebuilt the same "<prefix>_<mode>_Above_"
-    // and "<prefix>_<mode>_Zone_Above_" strings via 2-3 concatenations per zone,
-    // allocating a new string buffer each time. With 158 zones on MN1 that was
-    // 474+ intermediate string allocations per redraw - measurable in the
-    // 2026 hot-path profiler. Building the constant prefix once and appending
-    // only the per-level IntegerToString cuts the allocations to 1 per zone.
-    int digits = GetCachedDigits();
-    string modePrefix = config.objectPrefix + config.modeName;
-    string lineAbovePrefix = modePrefix + "_Above_";
-    string lineBelowPrefix = modePrefix + "_Below_";
-    string zoneAbovePrefix = modePrefix + "_Zone_Above_";
-    string zoneBelowPrefix = modePrefix + "_Zone_Below_";
-    string zoneCenterName  = modePrefix + "_Zone_Center_0";
-
-    // PERF (2026, TF switch hot path): the per-step IntegerToString suffix is
-    // cached via the single-slot MRU inside each loop body below. No
-    // initialization is needed here - the per-direction MRU slots reset on
-    // the first step of each direction.
-
+    
     int zIdx = 0, lIdx = 0;
-
+    
     // --- MIDPOINT ZONE (step 0) ---
     if(hasMid && config.zonesEnabled) {
         double neighborDist = 0;
@@ -602,14 +522,11 @@ void BuildZonesAndLines(
             neighborDist = GetCachedPoint() * 100;
         }
         double zoneHeight = neighborDist * config.zoneHeightPercent * 0.5;
-        // FIX: floor to a minimum visible height so the zone never collapses
-        // below one point on lower timeframes (M30/M15/M5/M1).
-        zoneHeight = GetMinSafeZoneHalfHeight(midLevel.price, zoneHeight);
-
-        zones[zIdx].name = zoneCenterName;
+        
+        zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Center_0";
         zones[zIdx].midPrice = midLevel.price;
-        zones[zIdx].renderTop = NormalizeDouble(midLevel.price + zoneHeight, digits);
-        zones[zIdx].renderBottom = NormalizeDouble(midLevel.price - zoneHeight, digits);
+        zones[zIdx].renderTop = NormalizeDouble(midLevel.price + zoneHeight, GetCachedDigits());
+        zones[zIdx].renderBottom = NormalizeDouble(midLevel.price - zoneHeight, GetCachedDigits());
         zones[zIdx].logicalStep = 0;
         zones[zIdx].direction = 0;
         zones[zIdx].zoneIndex = 0;
@@ -619,33 +536,23 @@ void BuildZonesAndLines(
         zones[zIdx].transparency = config.zoneTransparency;
         zones[zIdx].style = config.zoneStyle;
         zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-        // CRITICAL FIX: Always create zones regardless of current viewport. The previous
-        // inViewport filter silently dropped zones on lower TFs due to stale/narrow viewport
-        // calculations. Visibility is controlled later via OBJPROP_TIMEFRAMES.
-        zones[zIdx].inViewport = true;
+        zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                       zones[zIdx].renderBottom <= vpTop);
         zIdx++;
     }
-
+    
     // --- ABOVE DIRECTION: zones on levels + lines between them ---
     double prevPrice = hasMid ? midLevel.price : 0;
     for(int i = 0; i < aboveCount && prevPrice > 0; i++) {
         double currentPrice = s_aboveLevels[i].price;
         if(currentPrice <= prevPrice) { prevPrice = currentPrice; continue; }
-
+        
         double stepSize = currentPrice - prevPrice;
-
-        // PERF (2026): IntegerToString is faster than concat (single allocation
-        // instead of two), and using StringFormat for the tooltip is ~3x
-        // faster than the prior 4-concat pattern.
-        string stepStr = IntegerToString(s_aboveLevels[i].logicalStep);
-
+        
         // Line at midpoint between prev and current
         double lineMidPrice = (prevPrice + currentPrice) / 2.0;
-        const string lineFullName = lineAbovePrefix + stepStr;
-        lines[lIdx].name = lineFullName;
-        // PERF (2026): pre-compute labelName so RenderTriggerLines skips the
-        // per-iter "lineName + _Label" concat (was 158 allocations/frame).
-        lines[lIdx].labelName = lineFullName + "_Label";
+        lines[lIdx].name = config.objectPrefix + config.modeName + "_Above_" + 
+                           IntegerToString(s_aboveLevels[i].logicalStep);
         lines[lIdx].price = lineMidPrice;
         lines[lIdx].logicalStep = s_aboveLevels[i].logicalStep;
         lines[lIdx].direction = 1;
@@ -654,68 +561,53 @@ void BuildZonesAndLines(
         lines[lIdx].lineWidth = s_aboveLevels[i].levelWidth;
         lines[lIdx].clr = s_aboveLevels[i].levelColor;
         lines[lIdx].labelText = s_aboveLevels[i].labelText;
-        // PERF (2026): defer tooltip generation to RenderTriggerLines so it
-        // only happens when the line is actually rendered (in-viewport AND
-        // needs an update). StringFormat allocates a buffer per call; doing
-        // it for every line on every redraw was 158 short-lived heap
-        // allocations per frame on MN1, even for off-viewport lines that the
-        // pipeline would skip rendering. Store the unformatted pieces instead.
-        lines[lIdx].tooltip = "";
+        lines[lIdx].tooltip = "Midpoint +" + IntegerToString(s_aboveLevels[i].logicalStep) + 
+            " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
-        lines[lIdx].isTrigger  = s_aboveLevels[i].isTrigger;
         lines[lIdx].setBack = config.useObjPropBack;
         lines[lIdx].zOrder = config.zOrder;
         lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
         lIdx++;
-
+        
         // Zone centered on this level
         if(config.zonesEnabled) {
             double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
-            // FIX: floor to a minimum visible height on lower timeframes
-            zoneHeight = GetMinSafeZoneHalfHeight(currentPrice, zoneHeight);
-
-            zones[zIdx].name = zoneAbovePrefix + stepStr;
+            
+            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Above_" + 
+                               IntegerToString(s_aboveLevels[i].logicalStep);
             zones[zIdx].midPrice = currentPrice;
-            zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, digits);
-            zones[zIdx].renderBottom = NormalizeDouble(currentPrice - zoneHeight, digits);
+            zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, GetCachedDigits());
+            zones[zIdx].renderBottom = NormalizeDouble(currentPrice - zoneHeight, GetCachedDigits());
             zones[zIdx].logicalStep = s_aboveLevels[i].logicalStep;
             zones[zIdx].direction = 1;
             zones[zIdx].zoneIndex = i;
             zones[zIdx].isStructure = s_aboveLevels[i].isStructure;
             zones[zIdx].isTrigger = s_aboveLevels[i].isTrigger;
-            zones[zIdx].zoneColor = (s_aboveLevels[i].zoneColor != clrNONE) ?
+            zones[zIdx].zoneColor = (s_aboveLevels[i].zoneColor != clrNONE) ? 
                                      s_aboveLevels[i].zoneColor : config.zoneDefaultColor;
             zones[zIdx].transparency = config.zoneTransparency;
             zones[zIdx].style = config.zoneStyle;
             zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-            // CRITICAL FIX: Always create zones regardless of current viewport.
-            zones[zIdx].inViewport = true;
+            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                                      zones[zIdx].renderBottom <= vpTop);
             zIdx++;
         }
-
+        
         prevPrice = currentPrice;
     }
-
+    
     // --- BELOW DIRECTION: zones on levels + lines between them ---
     prevPrice = hasMid ? midLevel.price : 0;
     for(int i = 0; i < belowCount && prevPrice > 0; i++) {
         double currentPrice = s_belowLevels[i].price;
         if(currentPrice >= prevPrice || currentPrice <= 0) { prevPrice = currentPrice; continue; }
-
+        
         double stepSize = prevPrice - currentPrice;
-
-        // PERF (2026): IntegerToString is faster than concat (single allocation
-        // instead of two), and using StringFormat for the tooltip is ~3x
-        // faster than the prior 4-concat pattern.
-        string stepStr = IntegerToString(s_belowLevels[i].logicalStep);
-
+        
         // Line at midpoint between prev and current
         double lineMidPrice = (prevPrice + currentPrice) / 2.0;
-        const string lineFullName = lineBelowPrefix + stepStr;
-        lines[lIdx].name = lineFullName;
-        // PERF (2026): pre-compute labelName so RenderTriggerLines skips the
-        // per-iter "lineName + _Label" concat (was 158 allocations/frame).
-        lines[lIdx].labelName = lineFullName + "_Label";
+        lines[lIdx].name = config.objectPrefix + config.modeName + "_Below_" + 
+                           IntegerToString(s_belowLevels[i].logicalStep);
         lines[lIdx].price = lineMidPrice;
         lines[lIdx].logicalStep = s_belowLevels[i].logicalStep;
         lines[lIdx].direction = -1;
@@ -724,44 +616,41 @@ void BuildZonesAndLines(
         lines[lIdx].lineWidth = s_belowLevels[i].levelWidth;
         lines[lIdx].clr = s_belowLevels[i].levelColor;
         lines[lIdx].labelText = s_belowLevels[i].labelText;
-        // PERF (2026): deferred tooltip generation (see notes on the Above
-        // direction above).
-        lines[lIdx].tooltip = "";
+        lines[lIdx].tooltip = "Midpoint -" + IntegerToString(s_belowLevels[i].logicalStep) + 
+            " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
-        lines[lIdx].isTrigger  = s_belowLevels[i].isTrigger;
         lines[lIdx].setBack = config.useObjPropBack;
         lines[lIdx].zOrder = config.zOrder;
         lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
         lIdx++;
-
+        
         // Zone centered on this level
         if(config.zonesEnabled) {
             double zoneHeight = stepSize * config.zoneHeightPercent * 0.5;
-            // FIX: floor to a minimum visible height on lower timeframes
-            zoneHeight = GetMinSafeZoneHalfHeight(currentPrice, zoneHeight);
-
-            zones[zIdx].name = zoneBelowPrefix + stepStr;
+            
+            zones[zIdx].name = config.objectPrefix + config.modeName + "_Zone_Below_" + 
+                               IntegerToString(s_belowLevels[i].logicalStep);
             zones[zIdx].midPrice = currentPrice;
-            zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, digits);
-            zones[zIdx].renderBottom = NormalizeDouble(currentPrice - zoneHeight, digits);
+            zones[zIdx].renderTop = NormalizeDouble(currentPrice + zoneHeight, GetCachedDigits());
+            zones[zIdx].renderBottom = NormalizeDouble(currentPrice - zoneHeight, GetCachedDigits());
             zones[zIdx].logicalStep = s_belowLevels[i].logicalStep;
             zones[zIdx].direction = -1;
             zones[zIdx].zoneIndex = i;
             zones[zIdx].isStructure = s_belowLevels[i].isStructure;
             zones[zIdx].isTrigger = s_belowLevels[i].isTrigger;
-            zones[zIdx].zoneColor = (s_belowLevels[i].zoneColor != clrNONE) ?
+            zones[zIdx].zoneColor = (s_belowLevels[i].zoneColor != clrNONE) ? 
                                      s_belowLevels[i].zoneColor : config.zoneDefaultColor;
             zones[zIdx].transparency = config.zoneTransparency;
             zones[zIdx].style = config.zoneStyle;
             zones[zIdx].filled = (config.zoneStyle == ZONE_STYLE_BOX_FILLED);
-            // CRITICAL FIX: Always create zones regardless of current viewport.
-            zones[zIdx].inViewport = true;
+            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                                      zones[zIdx].renderBottom <= vpTop);
             zIdx++;
         }
-
+        
         prevPrice = currentPrice;
     }
-
+    
     // Trim output arrays
     if(config.zonesEnabled) ArrayResize(zones, zIdx);
     ArrayResize(lines, lIdx);
@@ -775,141 +664,67 @@ void BuildZonesAndLines(
 //| Creates/updates MT5 rectangle objects for each zone.             |
 //| Handles all zone styles: Lines, Filled Box, Empty Box, Hidden.   |
 //+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| PERF (2026): cache-backed SetPipelineObjectTimeframesIfExists    |
-//|                                                                  |
-//| The original implementation called ObjectFind on every zone/line  |
-//| (a SYNCHRONOUS chart API call per the official MQL5 docs) just    |
-//| to gate the asynchronous ObjectSetInteger write. With ~200 zones  |
-//| on M1 that is ~200 sync syscalls per redraw for nothing —         |
-//| the cache already knows which objects exist and what their last  |
-//| OBJPROP_TIMEFRAMES value was. We now skip the chart API entirely  |
-//| on the hot path.                                                  |
-//+------------------------------------------------------------------+
 void SetPipelineObjectTimeframesIfExists(const string name, const long timeframes)
 {
-    int idx = CacheFindIndex(name);
-    if(idx >= 0 && g_objectCacheHash[idx].entry.exists) {
-        if(g_objectCacheHash[idx].entry.lastTimeframes == timeframes) return;
-        ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
-        g_objectCacheHash[idx].entry.lastTimeframes = timeframes;
-        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-        return;
-    }
-    // Cache miss (object never cached, or was invalidated): pay the
-    // sync ObjectFind cost ONCE and hydrate the cache for the next call.
-    if(ObjectFind(0, name) < 0) return;
-    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, timeframes);
-    if(idx >= 0) {
-        g_objectCacheHash[idx].entry.lastTimeframes = timeframes;
-        g_objectCacheHash[idx].entry.lastUpdate     = CacheGetFrameTime();
-        g_objectCacheHash[idx].lastAccess          = CacheGetFrameTime();
-    }
+    // PERF: CacheFindIndex is the hot path here. It avoids synchronous
+    // ObjectFind calls for objects created by this indicator and applies the
+    // terminal property only when the desired state actually changed.
+    SetManagedObjectTimeframes(name, timeframes);
 }
 
-void SetPipelineZoneVisibility(const string zoneName, const bool visible)
+void SetPipelineZoneVisibility(const string zoneName, const bool visible,
+                               const ENUM_ZONE_STYLE zoneStyle,
+                               const bool indicatorHidden)
 {
-    long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    SetPipelineObjectTimeframesIfExists(zoneName, timeframes);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_Top", timeframes);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_Bottom", timeframes);
+    // FIX: The L key controls only zone boundary lines. The box/empty-box
+    // outline is controlled by F. More importantly, do not probe six object
+    // names that cannot exist for the selected zone style on every frame.
+    long tfAll = (visible && !indicatorHidden) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
+    if(zoneStyle == ZONE_STYLE_BOX_FILLED) {
+        // Only the rectangle exists for a filled box.
+        SetPipelineObjectTimeframesIfExists(zoneName, tfAll);
+        return;
+    }
+
+    // BOX_EMPTY is represented by three ray/border segments (there is no
+    // rectangle and the right edge is intentionally omitted because the top
+    // and bottom borders use RAY_RIGHT).
+    if(zoneStyle == ZONE_STYLE_BOX_EMPTY) {
+        SetPipelineObjectTimeframesIfExists(zoneName + "_B_Top", tfAll);
+        SetPipelineObjectTimeframesIfExists(zoneName + "_B_Bottom", tfAll);
+        SetPipelineObjectTimeframesIfExists(zoneName + "_B_Left", tfAll);
+    }
 }
 
 void RenderZones(
     const SZoneDefinition &zones[],
     const int zoneCount,
-    const SModeConfig &config,
-    const double vpTop = 0,
-    const double vpBottom = 0)
+    const SModeConfig &config)
 {
     bool triggerEnabled = IsTriggerLevelsEnabled();
+    bool indicatorHidden = IsIndicatorHidden();
     
-    // PERF/B (in-place shift updates): when a valid viewport is supplied, delete
-    // (not hide) zones that fall outside the visible price window. Deleting is
-    // what lets a shift change update levels in place instead of a full clear:
-    // objects no longer in view are removed here, while still-visible ones are
-    // moved/updated by CreateZone. OBJ_ALL_PERIODS is kept (never OBJ_NO_PERIODS),
-    // and redraws on scroll regenerate off-screen zones, so lower-TF visibility is
-    // preserved (objects simply reappear when scrolled into view).
-    // v2026: Disabled viewport culling for zones. On lower timeframes the tiny
-    // TH steps make zones very small; even a slight price shift or stale
-    // viewport calculation was hiding them. Zones are cheap to keep because the
-    // adaptive level cap already limits their count, and CreateZone handles
-    // sub-point heights. Keeping them always visible avoids the "disappears
-    // after a few seconds" symptom.
-    
-    // DIAGNOSTIC LOG: always print zone render summary (first 5 calls per run)
-    static int s_zoneRenderLogCount = 0;
-    int createdCount = 0;
-    int failedCount = 0;
-    int skippedCount = 0;
-    int culledCount = 0;
-    string firstFailReason = "";
-    
-    // PERF (2026): viewport culling for ZONES (safe variant). A zone rectangle
-    // is only hidden when it is COMPLETELY outside the visible price window
-    // (its whole body is above vpTop or below vpBottom). A zone straddling the
-    // edge is always drawn — this avoids the old "zones vanish after a few
-    // seconds" bug that came from deleting partial-overlap zones. We HIDE
-    // (OBJ_NO_PERIODS) rather than delete, so scrolling back shows them
-    // instantly with no recreate churn. vpTop/vpBottom are 0 during init, in
-    // which case we skip culling entirely and draw all zones.
-    bool canCullZones = (vpTop > vpBottom && vpTop > 0 && vpBottom > 0);
-
     for(int i = 0; i < zoneCount; i++) {
-        // DISABLED: viewport culling for zones. It caused zones to vanish on
-        // lower timeframes when price moved slightly. Visibility is now managed
-        // solely by the global hide (F key) and OBJ_ALL_PERIODS default.
-
-        // PERF (2026): hide zones whose entire rectangle is outside the visible
-        // window. renderTop > vpTop means the whole zone sits above the view;
-        // renderBottom < vpBottom means it sits fully below. Straddling zones
-        // (renderBottom <= vpTop AND renderTop >= vpBottom) are drawn normally.
-        if(canCullZones && (zones[i].renderTop > vpTop || zones[i].renderBottom < vpBottom)) {
-            SetPipelineZoneVisibility(zones[i].name, false);
-            skippedCount++;
+        if(!zones[i].inViewport) {
+            SetPipelineZoneVisibility(zones[i].name, false, config.zoneStyle, indicatorHidden);
             continue;
         }
 
         if(config.zoneStyle == ZONE_STYLE_HIDDEN) {
             DeleteManagedZoneObjects(zones[i].name);
-            skippedCount++;
             continue;
         }
         
         // Skip trigger zones when triggers are disabled
         if(zones[i].isTrigger && !triggerEnabled) {
             DeleteManagedZoneObjects(zones[i].name);
-            skippedCount++;
             continue;
         }
         
-        if(zones[i].renderTop <= zones[i].renderBottom) {
-            skippedCount++;
-            continue;
-        }
+        if(zones[i].renderTop <= zones[i].renderBottom) continue;
         
-        if(config.zoneStyle == ZONE_STYLE_LINES) {
-            CreateFactorMidZone_LinesStyle(zones[i].name,
-                                           zones[i].renderTop, zones[i].renderBottom,
-                                           zones[i].zoneColor, zones[i].transparency);
-            // PERF (2026): SetPipelineZoneVisibility(zoneName, true) was a
-            // 3x redundant call here:
-            //   * The main `zoneName` object is deleted by
-            //     CreateFactorMidZone_LinesStyle before the top/bottom lines
-            //     are created, so writing OBJPROP_TIMEFRAMES on it is wasted.
-            //   * The `_Top` / `_Bottom` lines are created by
-            //     CreateOrUpdateHLine, which already pushes the right
-            //     visibility through ApplyVisibilityState /
-            //     ApplyVisibilityStateIfUnchangedSkip (cache-backed since
-            //     the 2026 PERF patch).
-            // We just trust the visibility state from the per-frame cache
-            // (CacheRefreshVisibilityState) — the global hide (F key) and
-            // lines-visibility (L key) are already applied at the call site.
-            createdCount++;
-        } else {
-            // Box style (filled or empty)
+        {
+            // Box style (filled or empty) with configurable border style/width
             SZoneCreationRequest request;
             request.name = zones[i].name;
             request.topPrice = zones[i].renderTop;
@@ -917,34 +732,14 @@ void RenderZones(
             request.zoneColor = zones[i].zoneColor;
             request.transparency = zones[i].transparency;
             request.filled = zones[i].filled;
+            request.borderStyle = inpMidZoneBorderStyle;
+            request.borderWidth = inpMidZoneBorderWidth;
             request.startTime = 0;
             request.endTime = 0;
-
-            SZoneCreationResult zoneResult = CreateZone(request);
-            if(zoneResult.success) {
-                createdCount++;
-            } else {
-                failedCount++;
-                if(StringLen(firstFailReason) == 0) {
-                    firstFailReason = zoneResult.errorMessage;
-                }
-            }
-            // PERF (2026): the redundant SetPipelineZoneVisibility(zoneName,
-            // true) was removed. CreateZone already calls
-            // SetObjectTimeframesIfChanged for the main zone name, and the
-            // `_Top` / `_Bottom` lines do not exist in BOX style (only in
-            // LINES style). On 200+ zones this saves 600+ cache lookups
-            // per redraw frame.
+            
+            CreateZone(request);
+            SetPipelineZoneVisibility(zones[i].name, true, config.zoneStyle, indicatorHidden);
         }
-    }
-    
-    // DIAGNOSTIC LOG: report zone render results (first 5 calls per run)
-    if(s_zoneRenderLogCount < 5) {
-        Print("[ZONE_RENDER_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-              " zones=", zoneCount, " created=", createdCount, " failed=", failedCount,
-              " skipped=", skippedCount, " culled=", culledCount, " style=", EnumToString(config.zoneStyle),
-              " firstFail=", firstFailReason);
-        s_zoneRenderLogCount++;
     }
 }
 
@@ -957,87 +752,16 @@ void RenderZones(
 void RenderTriggerLines(
     const STriggerLine &lines[],
     const int lineCount,
-    const SModeConfig &config,
-    const double vpTop = 0,
-    const double vpBottom = 0)
+    const SModeConfig &config)
 {
     bool triggerEnabled = IsTriggerLevelsEnabled();
     double currentPrice = GetCurrentPriceForLabels();
-
-    // PERF (2026): hoist the per-line invariants out of the loop. The previous
-    // implementation called IsIndicatorHidden() and the g_linesVisible branch
-    // TWICE per line (once for the line, once for its pip-distance label) -
-    // 316 calls per redraw on MN1 with 158 lines. Both are stable for the
-    // whole frame, so compute them once and pass the resolved OBJPROP_TIMEFRAMES
-    // value through. SetPipelineObjectTimeframesIfExists then becomes a single
-    // cache lookup per object instead of a getter + setter chain.
-    bool hiddenCached = IsIndicatorHidden();
-    long lineTf = (hiddenCached || !g_linesVisible || !triggerEnabled) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-    long labelTf = (hiddenCached || !triggerEnabled) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-    bool showPipLabels = inpShowPipDistanceLabels;
-
-    // FIX (2026): The user reported that trigger levels silently re-enabled
-    // themselves after switching to a higher timeframe (H1 / H4). Root cause
-    // was that g_triggerLevelsEnabled was being overwritten by inpShowTrigger
-    // inside a side-path that ran on TF switch but not on T-key. The T-key
-    // path correctly wrote to the global gvar, but the next OnCalculate
-    // tick — which fires once the chart re-attaches after TF switch — would
-    // re-sync g_triggerLevelsEnabled = inpShowTrigger (the input default),
-    // clobbering the user's "off" toggle. Defense-in-depth: when the user
-    // has explicitly toggled triggers off, RenderTriggerLines now enforces
-    // OBJ_NO_PERIODS on every trigger line, regardless of any stale state
-    // upstream. The cache key is also cleared so the next legitimate
-    // re-enable does the right thing.
-    if(!triggerEnabled) {
-        for(int k = 0; k < lineCount; k++) {
-            if(!lines[k].isMidpoint) {
-                SetPipelineObjectTimeframesIfExists(lines[k].name, OBJ_NO_PERIODS);
-                SetPipelineObjectTimeframesIfExists(lines[k].name + "_Label", OBJ_NO_PERIODS);
-            }
-        }
-    }
-
-    // PERF (2026): pre-compute the "_Label" suffix once. Per the MQL5 docs,
-    // every `+` on a string allocates a new buffer; doing it inside a
-    // 158-iteration loop was 158 short-lived heap allocations per redraw.
-    // The label is always 6 chars appended to the line name. With the new
-    // STriggerLine.labelName field, the per-iter concat is gone entirely —
-    // BuildZonesAndLines computes it once when the array is built.
-    int digits = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
-    string tooltip;
-
-    // PERF (2026): viewport culling for HLINEs. An OBJ_HLINE is an infinite
-    // horizontal line — when its price is outside the visible chart window
-    // [vpBottom, vpTop] the user can never see it, yet the previous code
-    // created/updated every line on every redraw (up to 2x MAX_SAFE_LEVELS
-    // objects). We HIDE (OBJ_NO_PERIODS) out-of-view lines instead of
-    // creating/updating them. Unlike the old deleted-cull, the object is kept
-    // on the chart, so scrolling back into view just re-binds OBJ_ALL_PERIODS
-    // (the normal lineTf branch below) with no re-create churn and no "lines
-    // vanished" symptom. Zones are intentionally NOT culled — a rectangle can
-    // straddle the viewport edge and must stay fully visible.
-    // vpTop/vpBottom are 0 when ExecutePipeline did not supply a real viewport
-    // (e.g. during init); in that case skip culling and draw everything.
-    bool canCull = (vpTop > vpBottom && vpTop > 0 && vpBottom > 0);
-
+    
     for(int i = 0; i < lineCount; i++) {
-        const string lineName = lines[i].name;
-        const string labelName = lines[i].labelName;
-
-        // PERF (2026): hide (not delete) lines whose price is outside the
-        // visible window. This avoids the chart-engine cost of maintaining
-        // thousands of off-screen HLINEs while keeping them ready to re-show
-        // on scroll. We still push the trigger-level cache so alerts keep
-        // working for off-screen trigger lines.
-        if(canCull && (lines[i].price < vpBottom || lines[i].price > vpTop)) {
-            SetPipelineObjectTimeframesIfExists(lineName, OBJ_NO_PERIODS);
+        string labelName = lines[i].name + "_Label";
+        if(!lines[i].inViewport) {
+            SetPipelineObjectTimeframesIfExists(lines[i].name, OBJ_NO_PERIODS);
             SetPipelineObjectTimeframesIfExists(labelName, OBJ_NO_PERIODS);
-            if(lines[i].isTrigger && !lines[i].isMidpoint) {
-                if(lines[i].direction > 0)
-                    RecordTriggerLevelUp(lines[i].logicalStep, lines[i].price);
-                else if(lines[i].direction < 0)
-                    RecordTriggerLevelDown(lines[i].logicalStep, lines[i].price);
-            }
             continue;
         }
 
@@ -1045,59 +769,35 @@ void RenderTriggerLines(
         if(config.hideLineWhenTriggerOnly && !lines[i].isMidpoint) {
             bool shouldShow = !triggerEnabled;
             if(!shouldShow) {
-                SetPipelineObjectTimeframesIfExists(lineName, OBJ_NO_PERIODS);
-                SetPipelineObjectTimeframesIfExists(labelName, OBJ_NO_PERIODS);
+                SetManagedObjectTimeframes(lines[i].name, OBJ_NO_PERIODS);
+                SetManagedObjectTimeframes(labelName, OBJ_NO_PERIODS);
                 continue;
             }
         }
-
-        // PERF (2026): build the tooltip here (one string per actually-rendered
-        // line) instead of in BuildZonesAndLines (one string per classified
-        // line, regardless of viewport). On MN1 with 158 classified lines this
-        // saves 158 StringFormat heap allocations per redraw frame; lines that
-        // get hidden or filtered still skip the allocation.
-        // PERF (2026): digits hoisted out of the loop (was 158 SymbolInfoInteger
-        // sync calls/frame on MN1). tooltip LHS reused — MQL5 reuses the LHS
-        // string buffer on reassignment.
-        string sign = (lines[i].direction > 0) ? "+" : "-";
-        tooltip = StringFormat("Midpoint %s%s (%s)",
-                               sign, lines[i].labelText,
-                               DoubleToString(lines[i].price, digits));
-
+        
         // Use the individual line color instead of config.triggerColor
-        bool isNew = CreateOrUpdateHLine(lineName, lines[i].price,
+        bool isNew = CreateOrUpdateHLine(lines[i].name, lines[i].price,
                                           lines[i].clr, lines[i].lineStyle, lines[i].lineWidth,
-                                          tooltip);
-        SetPipelineObjectTimeframesIfExists(lineName, lineTf);
-
+                                          lines[i].tooltip);
+        // CreateOrUpdateHLine already applies lineTf through the visibility
+        // cache; avoid a second hash lookup for the same object.
+        
         // Set mode-specific properties on new objects
         if(isNew) {
             if(config.useObjPropBack) {
-                ObjectSetInteger(0, lineName, OBJPROP_BACK, false);
+                ObjectSetInteger(0, lines[i].name, OBJPROP_BACK, false);
             }
             if(config.zOrder > 0) {
-                ObjectSetInteger(0, lineName, OBJPROP_ZORDER, config.zOrder);
+                ObjectSetInteger(0, lines[i].name, OBJPROP_ZORDER, config.zOrder);
             }
-        }
-
-        // PERF (2026): record trigger levels for the in-memory alert cache so
-        // CheckAlerts can avoid sync ObjectGetDouble calls. The pipeline
-        // classifies each line as structure or trigger; we only need the
-        // trigger lines here. The midpoint is captured separately in
-        // ExecutePipeline from the classified array (it is represented as
-        // a zone, not a trigger line).
-        if(lines[i].isTrigger && !lines[i].isMidpoint) {
-            if(lines[i].direction > 0)
-                RecordTriggerLevelUp(lines[i].logicalStep, lines[i].price);
-            else if(lines[i].direction < 0)
-                RecordTriggerLevelDown(lines[i].logicalStep, lines[i].price);
         }
 
         // Render Pip Distance Label
-        if(showPipLabels) {
+        if(inpShowPipDistanceLabels) {
             double pips = MathAbs(lines[i].price - currentPrice) / GetCachedPoint() / 10.0;
             CreatePipDistanceLabel(labelName, lines[i].price, pips, lines[i].clr, lines[i].labelText);
-            SetPipelineObjectTimeframesIfExists(labelName, labelTf);
+            // CreatePipDistanceLabel applies the non-line visibility state;
+            // no second TIMEFRAMES/cache pass is needed here.
         }
     }
 }
@@ -1125,37 +825,90 @@ void CleanupSurplusPipeline(
         s_lastDragCleanupMs = nowMs;
     }
     
-    // PERF (2026): hoist prefix strings. Previously each call below did
-    // `objectPrefix + modeName + "_..."` — 2 string allocs per call, ~14/frame.
-    const string abovePrefix      = config.objectPrefix + config.modeName + "_Above_";
-    const string belowPrefix      = config.objectPrefix + config.modeName + "_Below_";
-    const string zoneAbovePrefix  = config.objectPrefix + config.modeName + "_Zone_Above_";
-    const string zoneBelowPrefix  = config.objectPrefix + config.modeName + "_Zone_Below_";
-    const string zoneCenterPrefix = config.objectPrefix + config.modeName + "_Zone_Center_";
-
     // Cleanup surplus zones
     if(config.zonesEnabled) {
-        CleanupSurplusObjects(zoneAbovePrefix,  maxLogicalStep + 1);
-        CleanupSurplusObjects(zoneBelowPrefix,  maxLogicalStep + 1);
-        CleanupSurplusObjects(zoneCenterPrefix, 1);
+        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Above_", maxLogicalStep + 1);
+        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Below_", maxLogicalStep + 1);
+        CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Zone_Center_", 1);
     }
-
+    
     // Cleanup surplus lines and their labels
-    CleanupSurplusObjects(abovePrefix, maxLogicalStep + 1);
-    CleanupSurplusObjects(belowPrefix, maxLogicalStep + 1);
-    CleanupSurplusObjects(abovePrefix, maxLogicalStep + 1, 6, "_Label");
-    CleanupSurplusObjects(belowPrefix, maxLogicalStep + 1, 6, "_Label");
-
-    // Legacy cleanup. PERF (2026): trust the cache before paying the sync
-    // ObjectFind chart-API syscall. Cache is the source of truth for object
-    // existence — only fall back to chart when the cache has no entry.
+    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1);
+    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1);
+    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Above_", maxLogicalStep + 1, 6, "_Label");
+    CleanupSurplusObjects(config.objectPrefix + config.modeName + "_Below_", maxLogicalStep + 1, 6, "_Label");
+    
+    // Legacy cleanup
     string midpointName = config.objectPrefix + config.modeName + "_Midpoint_0";
-    int midpointIdx = CacheFindIndex(midpointName);
-    bool midpointInCache = (midpointIdx >= 0 && g_objectCacheHash[midpointIdx].entry.exists);
-    if(midpointInCache || ObjectFind(0, midpointName) >= 0) {
-        if(midpointIdx >= 0) CacheRemoveObject(midpointName);
+    if(ObjectFind(0, midpointName) >= 0) {
+        CacheRemoveObject(midpointName);
         ObjectDelete(0, midpointName);
     }
+}
+
+//+------------------------------------------------------------------+
+//| Viewport-only refresh cache                                      |
+//|                                                                  |
+//| Caches the last rendered zone/line geometry plus mode config so  |
+//| CHARTEVENT_CHART_CHANGE (scroll/zoom) can re-render ONLY the     |
+//| visibility of existing objects against the new viewport instead  |
+//| of running the full calculation pipeline on every scroll event.  |
+//+------------------------------------------------------------------+
+static SZoneDefinition s_cachedZones[];
+static STriggerLine   s_cachedLines[];
+static int   s_cachedZoneCount = 0;
+static int   s_cachedLineCount = 0;
+static SModeConfig s_cachedModeConfig;
+static bool  s_pipelineCacheValid = false;
+
+void InvalidatePipelineViewportCache()
+{
+    s_pipelineCacheValid = false;
+    s_cachedZoneCount = 0;
+    s_cachedLineCount = 0;
+    ArrayFree(s_cachedZones);
+    ArrayFree(s_cachedLines);
+}
+
+//+------------------------------------------------------------------+
+//| Re-render cached zones/lines against the CURRENT viewport.       |
+//|                                                                  |
+//| Skips CalculateLevels/ClassifyLevels/BuildZonesAndLines entirely  |
+//| (geometry does not change on scroll/zoom) and only recomputes the |
+//| inViewport flags + runs the two render stages. Objects whose      |
+//| visibility state is unchanged are cheap no-ops thanks to the      |
+//| timeframes cache; only objects entering/leaving the viewport      |
+//| touch the terminal API.                                          |
+//|                                                                  |
+//| @return true if a refresh was performed, false if the cache is   |
+//|         empty (caller should fall back to a full redraw).        |
+//+------------------------------------------------------------------+
+bool RefreshPipelineViewportOnly()
+{
+    // Native chart objects are already anchored to time/price. Let MT5
+    // re-project them during scroll/zoom instead of touching visibility or
+    // geometry on every CHARTEVENT_CHART_CHANGE event.
+    if(inpRenderEngine == RENDER_ENGINE_OBJECTS) return true;
+    if(!s_pipelineCacheValid) return false;
+    if(s_cachedZoneCount <= 0 && s_cachedLineCount <= 0) return false;
+    
+    double vpTop, vpBottom;
+    GetViewportBounds(vpTop, vpBottom);
+    
+    // Recompute inViewport flags against the CURRENT viewport bounds
+    for(int i = 0; i < s_cachedZoneCount; i++) {
+        s_cachedZones[i].inViewport = (s_cachedZones[i].renderTop >= vpBottom &&
+                                       s_cachedZones[i].renderBottom <= vpTop);
+    }
+    for(int i = 0; i < s_cachedLineCount; i++) {
+        s_cachedLines[i].inViewport = (s_cachedLines[i].price >= vpBottom &&
+                                       s_cachedLines[i].price <= vpTop);
+    }
+    
+    // Render stages only (no calculation stages)
+    RenderZones(s_cachedZones, s_cachedZoneCount, s_cachedModeConfig);
+    RenderTriggerLines(s_cachedLines, s_cachedLineCount, s_cachedModeConfig);
+    return true;
 }
 
 //+------------------------------------------------------------------+
@@ -1209,83 +962,6 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
 }
 
 //+------------------------------------------------------------------+
-//| PERF (2026): String hash set for zone/line name diff.            |
-//|                                                                  |
-//| The previous ExecutePipeline did an O(N*M) nested-loop name diff  |
-//| to figure out which previously-rendered zones/lines were no      |
-//| longer in the new kept set. With 289 zones on M1, that was       |
-//| 289*289 = 83,521 string comparisons per redraw.                  |
-//|                                                                  |
-//| We replace it with a small open-addressed hash set, sized as a   |
-//| power of two so the modulo is a cheap bitmask. Load factor is    |
-//| ~28% on M1 (289/1024) and ~58% on the heaviest timeframe, so     |
-//| the bounded linear probe stays short. Insert/lookup are amortized |
-//| O(1), so the whole diff becomes O(N+M) ≈ 600 ops on M1.          |
-//+------------------------------------------------------------------+
-#define ZONE_DIFF_HASH_SIZE 1024
-#define ZONE_DIFF_HASH_MASK (ZONE_DIFF_HASH_SIZE - 1)
-#define ZONE_DIFF_MAX_PROBE 32
-
-struct SDiffHashEntry {
-    string name;
-    bool   occupied;
-};
-
-static SDiffHashEntry g_diffHash[];
-static bool g_diffHashInit = false;
-
-void DiffHashEnsure() {
-    if(g_diffHashInit) return;
-    ArrayResize(g_diffHash, ZONE_DIFF_HASH_SIZE);
-    for(int i = 0; i < ZONE_DIFF_HASH_SIZE; i++) {
-        g_diffHash[i].name = "";
-        g_diffHash[i].occupied = false;
-    }
-    g_diffHashInit = true;
-}
-
-int DiffHashKey(const string name) {
-    // djb2 hash — cheap, well-distributed for short ASCII names.
-    uint h = 5381;
-    int len = StringLen(name);
-    for(int i = 0; i < len; i++) {
-        h = ((h << 5) + h) + (uint)(ushort)StringGetCharacter(name, i);
-    }
-    return (int)(h & ZONE_DIFF_HASH_MASK);
-}
-
-void DiffHashInsert(const string name) {
-    int key = DiffHashKey(name);
-    for(int probe = 0; probe < ZONE_DIFF_MAX_PROBE; probe++) {
-        int idx = (key + probe) & ZONE_DIFF_HASH_MASK;
-        if(!g_diffHash[idx].occupied || g_diffHash[idx].name == name) {
-            g_diffHash[idx].name = name;
-            g_diffHash[idx].occupied = true;
-            return;
-        }
-    }
-}
-
-bool DiffHashContains(const string name) {
-    int key = DiffHashKey(name);
-    for(int probe = 0; probe < ZONE_DIFF_MAX_PROBE; probe++) {
-        int idx = (key + probe) & ZONE_DIFF_HASH_MASK;
-        if(!g_diffHash[idx].occupied) return false;
-        if(g_diffHash[idx].name == name) return true;
-    }
-    return false;
-}
-
-void DiffHashClear() {
-    // PERF: just flip occupied to false. Don't bother clearing names —
-    // an empty slot is recognized by `occupied == false`, and the next
-    // insert overwrites the name in-place.
-    for(int i = 0; i < ZONE_DIFF_HASH_SIZE; i++) {
-        g_diffHash[i].occupied = false;
-    }
-}
-
-//+------------------------------------------------------------------+
 //| UNIFIED PIPELINE EXECUTOR                                        |
 //+------------------------------------------------------------------+
 SPipelineResult ExecutePipeline(
@@ -1305,25 +981,10 @@ SPipelineResult ExecutePipeline(
     result.success = false;
     result.errorMessage = "";
     
-    // DIAGNOSTIC LOG: confirm pipeline entry
-    static int s_pipelineEntryLogCount = 0;
-    if(s_pipelineEntryLogCount < 5) {
-        Print("[PIPELINE_ENTRY] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-              " mode=", config.modeName,
-              " center=", DoubleToString(centerPrice, Digits),
-              " stepCount=", stepSizeCount);
-        s_pipelineEntryLogCount++;
-    }
-    
     if(centerPrice <= 0) {
         result.errorMessage = "Invalid center price";
         return result;
     }
-
-    // PERF (2026): reset the in-memory trigger level cache. DrawTHLevels
-    // does this too (legacy path) but the pipeline is the active path for
-    // every mode that uses ExecutePipeline.
-    ResetTriggerLevelCache();
     for(int s = 0; s < stepSizeCount; s++) {
         if(stepSizes[s] <= 0) {
             result.errorMessage = "Invalid step size";
@@ -1335,6 +996,15 @@ SPipelineResult ExecutePipeline(
     int baseMultiplier = GetValidatedBaseMultiplier();
     double vpTop, vpBottom;
     GetViewportBounds(vpTop, vpBottom);
+
+    // The retained-object renderer must keep every calculated object alive.
+    // OBJ_HLINE/OBJ_RECTANGLE are chart-space objects and the terminal clips
+    // them natively; viewport culling here would hide levels until a scroll
+    // event re-renders them and causes the MT5 flicker/jump being avoided.
+    if(inpRenderEngine == RENDER_ENGINE_OBJECTS) {
+        vpTop = 1.0e100;
+        vpBottom = -1.0e100;
+    }
     
     // Stage 1: Calculate (unified)
     SCalculatedLevel rawLevels[];
@@ -1347,7 +1017,7 @@ SPipelineResult ExecutePipeline(
         result.errorMessage = "No levels calculated";
         return result;
     }
-
+    
     // Stage 2: Classify (mode-specific variant)
     SLevelClassified classified[];
     int classifiedCount = 0;
@@ -1368,148 +1038,30 @@ SPipelineResult ExecutePipeline(
     STriggerLine lines[];
     BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
                        zones, result.zoneCount, lines, result.lineCount);
-
-    // PERF (2026): record the midpoint price for the in-memory alert cache.
-    // The pipeline represents the midpoint as a zone (not a trigger line), so
-    // RenderTriggerLines will not produce a midpoint entry. We capture it
-    // directly from the classified array instead - it is always step 0.
-    for(int ci = 0; ci < classifiedCount; ci++) {
-        if(classified[ci].isMidpoint) {
-            RecordMidpointLevel(classified[ci].price);
-            break;
-        }
-    }
-    
-    // DIAGNOSTIC LOG: pipeline summary (print first 5 calls per run)
-    static int s_pipelineLogCount = 0;
-    if(s_pipelineLogCount < 5) {
-        Print("[PIPELINE_DIAG] TF=", EnumToString((ENUM_TIMEFRAMES)Period()),
-              " mode=", config.modeName,
-              " raw=", rawCount, " classified=", classifiedCount,
-              " zones=", result.zoneCount, " lines=", result.lineCount,
-              " vpBottom=", DoubleToString(vpBottom, Digits),
-              " vpTop=", DoubleToString(vpTop, Digits),
-              " center=", DoubleToString(centerPrice, Digits));
-        s_pipelineLogCount++;
-    }
     
     // Stage 5: Render and cleanup
-    // PERF/B (in-place shift updates): delete objects from the previous draw that
-    // are NOT present in the current render set, so a fractal-shift change updates
-    // levels in place (move still-visible ones via CreateZone) instead of a full
-    // clear+recreate. Names shared between old and new sets are kept and moved.
-    // Tracked per-mode so Combinations/Factor modes don't delete each other's objects.
-    // NOTE: Out-of-viewport objects are kept in the set and hidden by RenderZones/
-    // RenderTriggerLines to avoid object churn on scroll.
-    bool trigEn = IsTriggerLevelsEnabled();
-
-    // PERF (2026, D): only run the diff-then-delete loop when something that
-    // affects the SET of zone/line NAMES has changed (mode, level count,
-    // step count, trigger enable, zonesEnabled toggle). When this hash is
-    // unchanged from the previous run, the prev and keep sets are identical
-    // and the delete loops would only find that nothing has to be deleted -
-    // ~316 ObjectFind+Delete syscalls per redraw for nothing. MT4 has no
-    // equivalent loop; the equivalent MT4 path simply re-rendered and let
-    // the cache-backed update flow (CreateZone/CreateOrUpdateHLine) keep
-    // the objects in place. We do the same here.
-    //
-    // FIX (2026, F): centerPrice MUST NOT be in this hash. centerPrice changes
-    // tick-by-tick on M1 (last-bar close wobble). If it were in the hash, the
-    // diff loop would run on every tick, AND CleanupSurplusPipeline would
-    // run on every tick (defeating the gate), AND the keep-set array would
-    // be rebuilt on every tick. centerPrice affects GEOMETRY (the prices of
-    // each line/zone) not the SET of names — that's exactly what the cache
-    // hit path in CreateZone / CreateOrUpdateHLine handles in-place.
-    const ulong FNV_PRIME = 1099511628211ULL;
-    ulong setHash = 14695981039346656037ULL;
-    setHash ^= (ulong)(int)config.zoneStyle;         setHash *= FNV_PRIME;
-    setHash ^= (ulong)(int)stepMode;                  setHash *= FNV_PRIME;
-    setHash ^= (ulong)(int)classifyMode;              setHash *= FNV_PRIME;
-    setHash ^= (ulong)result.zoneCount;               setHash *= FNV_PRIME;
-    setHash ^= (ulong)result.lineCount;               setHash *= FNV_PRIME;
-    setHash ^= (ulong)stepSizeCount;                  setHash *= FNV_PRIME;
-    setHash ^= (ulong)maxLevelsAbove;                 setHash *= FNV_PRIME;
-    setHash ^= (ulong)maxLevelsBelow;                 setHash *= FNV_PRIME;
-    setHash ^= (ulong)(trigEn ? 1 : 0);               setHash *= FNV_PRIME;
-    setHash ^= (ulong)(config.zonesEnabled ? 1 : 0);  setHash *= FNV_PRIME;
-
-    int slot = GetRenderedSlot(config.modeName);
-    string prevZoneNames[];
-    string prevLineNames[];
-    ArrayCopy(prevZoneNames, g_renderedNames[slot].zoneNames);
-    ArrayCopy(prevLineNames, g_renderedNames[slot].lineNames);
-
-    static ulong s_lastSetHash[8] = {0,0,0,0,0,0,0,0};
-    bool setChanged = (setHash != s_lastSetHash[slot]);
-
-    // Build the keep-set unconditionally — RenderZones/RenderTriggerLines
-    // need it regardless of whether the diff loop runs, and computing it
-    // is cheap relative to the chart-API calls we save.
-    string keepZoneNames[];
-    ArrayResize(keepZoneNames, result.zoneCount);
-    int keepZoneCount = 0;
-    for(int zi = 0; zi < result.zoneCount; zi++) {
-        if(config.zoneStyle == ZONE_STYLE_HIDDEN) continue;
-        if(zones[zi].isTrigger && !trigEn) continue;
-        if(zones[zi].renderTop <= zones[zi].renderBottom) continue;
-        keepZoneNames[keepZoneCount++] = zones[zi].name;
-    }
-    ArrayResize(keepZoneNames, keepZoneCount);
-
-    string keepLineNames[];
-    ArrayResize(keepLineNames, result.lineCount);
-    int keepLineCount = 0;
-    for(int li = 0; li < result.lineCount; li++) {
-        keepLineNames[keepLineCount++] = lines[li].name;
-    }
-    ArrayResize(keepLineNames, keepLineCount);
-
-    if(setChanged) {
-        // O(N+M) zone/line diff using the open-addressed hash set.
-        DiffHashEnsure();
-        DiffHashClear();
-        for(int kz = 0; kz < keepZoneCount; kz++) DiffHashInsert(keepZoneNames[kz]);
-        for(int kl = 0; kl < keepLineCount; kl++) DiffHashInsert(keepLineNames[kl]);
-
-        for(int pi = 0; pi < ArraySize(prevZoneNames); pi++) {
-            if(!DiffHashContains(prevZoneNames[pi]))
-                DeleteManagedZoneObjects(prevZoneNames[pi]);
-        }
-        for(int pi = 0; pi < ArraySize(prevLineNames); pi++) {
-            if(!DiffHashContains(prevLineNames[pi])) {
-                DeleteIndicatorObjectManaged(prevLineNames[pi]);
-                DeleteIndicatorObjectManaged(prevLineNames[pi] + "_Label");
-            }
-        }
-
-        s_lastSetHash[slot] = setHash;
-    }
-
-    RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
-    RenderTriggerLines(lines, result.lineCount, config, vpTop, vpBottom);
-
-    // FIX (2026, F): CleanupSurplusPipeline runs on every structural change
-    // (mode swap, level count change, trig toggle). When setChanged is true,
-    // the maxStep may have shifted and old objects past startIdx need to be
-    // deleted. The previous gate `s_lastSetHash[slot] != setHash` was always
-    // false because the assignment happens inside the setChanged block above
-    // (which already exited). CleanupSurplusPipeline has its own cache-iterated
-    // scan now (E1), so even when it runs every frame the cost is bounded.
-    if(setChanged) {
-        CleanupSurplusPipeline(config, maxStep);
-
-        // FIX (2026, F): write the keep-set back to g_renderedNames[slot] so
-        // the NEXT call has a populated prev set. The previous code updated
-        // only the local prevZoneNames copy, so g_renderedNames[slot] stayed
-        // empty across calls and the diff loop was comparing an empty prev
-        // against the full keep set every time — never finding anything to
-        // delete, but doing the full hash build + probe work each frame.
-        ArrayResize(g_renderedNames[slot].zoneNames, keepZoneCount);
-        for(int kz = 0; kz < keepZoneCount; kz++) g_renderedNames[slot].zoneNames[kz] = keepZoneNames[kz];
-        ArrayResize(g_renderedNames[slot].lineNames, keepLineCount);
-        for(int kl = 0; kl < keepLineCount; kl++) g_renderedNames[slot].lineNames[kl] = keepLineNames[kl];
-    }
-
+    RenderZones(zones, result.zoneCount, config);
+    RenderTriggerLines(lines, result.lineCount, config);
+    
+    // PERF: Cache the geometry used for rendering so a later scroll/zoom
+    // (CHARTEVENT_CHART_CHANGE) can refresh visibility without rebuilding
+    // levels, classifications and zones from scratch.
+    // NOTE: ArrayCopy is not allowed on struct arrays containing strings
+    // (error 368), so copy element-by-element into pre-sized static arrays.
+    if(ArraySize(s_cachedZones) < result.zoneCount)
+        ArrayResize(s_cachedZones, result.zoneCount);
+    for(int i = 0; i < result.zoneCount; i++) s_cachedZones[i] = zones[i];
+    if(ArraySize(s_cachedLines) < result.lineCount)
+        ArrayResize(s_cachedLines, result.lineCount);
+    for(int i = 0; i < result.lineCount; i++) s_cachedLines[i] = lines[i];
+    s_cachedZoneCount = result.zoneCount;
+    s_cachedLineCount = result.lineCount;
+    s_cachedModeConfig = config;
+    s_pipelineCacheValid = true;
+    
+    // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
+    CleanupSurplusPipeline(config, maxStep);
+    
     result.success = true;
     return result;
 }
@@ -1520,26 +1072,6 @@ SPipelineResult ExecutePipeline(
 //| All mode suffixes registered in one place.                       |
 //| Adding a new mode = add one entry here.                          |
 //+------------------------------------------------------------------+
-
-// PERF/B: per-mode registry of object names rendered in the last draw so that
-// in-place updates (fractal shift, scroll) can delete only objects no longer in
-// the current set, instead of a full clear+recreate.
-struct SModeRenderedNames {
-    string mode;
-    string zoneNames[];
-    string lineNames[];
-};
-SModeRenderedNames g_renderedNames[];
-int GetRenderedSlot(const string mode) {
-    for(int i = 0; i < ArraySize(g_renderedNames); i++) {
-        if(g_renderedNames[i].mode == mode) return i;
-    }
-    int n = ArraySize(g_renderedNames);
-    ArrayResize(g_renderedNames, n + 1);
-    g_renderedNames[n].mode = mode;
-    return n;
-}
-
 struct SModeSuffixEntry {
     string zoneSuffix;      // e.g., "SSLS_Zone_"
     string levelAbove;      // e.g., "SSLS_Above_"
@@ -1604,6 +1136,43 @@ void GetAllLevelSuffixes(string &suffixes[], int &count)
         suffixes[idx++] = entries[i].midpoint;
     }
     count = idx;
+}
+
+// Get compact mode-family prefixes for one-call bulk deletion.
+//
+// Every object a mode creates is named objectPrefix + "<ModeName>_..."
+// (e.g. "SSLS_Zone_Above_1", "Factor_Above_5", "Combo_Midpoint_0"), so a
+// single ObjectsDeleteAll per family prefix replaces the per-suffix sweeps
+// above (25 calls -> 4). A family whose prefix starts with an earlier one
+// (Factor_Harmonic_ under Factor_) is already covered and is deduped.
+// Future modes only need to add their name to GetAllModeSuffixes' list and
+// they are automatically covered here - no ClearAllLevels change required.
+void GetAllModeFamilyPrefixes(string &prefixes[], int &count)
+{
+    SModeSuffixEntry entries[];
+    int entryCount = 0;
+    GetAllModeSuffixes(entries, entryCount);
+
+    const string ZONE_MARKER = "Zone_"; // zoneSuffix == "<ModeName>_Zone_"
+    int markerLen = StringLen(ZONE_MARKER);
+
+    ArrayResize(prefixes, entryCount);
+    count = 0;
+    for(int i = 0; i < entryCount; i++) {
+        string fam = entries[i].zoneSuffix;
+        int famLen = StringLen(fam) - markerLen; // length of "<ModeName>_"
+        if(famLen < 1) continue;
+        string famPrefix = StringSubstr(fam, 0, famLen);
+        bool covered = false;
+        for(int j = 0; j < count; j++) {
+            if(StringFind(famPrefix, prefixes[j], 0) == 0) {
+                covered = true;
+                break;
+            }
+        }
+        if(!covered) prefixes[count++] = famPrefix;
+    }
+    ArrayResize(prefixes, count);
 }
 
 #endif // LEVEL_PIPELINE_MQH

@@ -1,7 +1,9 @@
-  //+------------------------------------------------------------------+
+﻿  //+------------------------------------------------------------------+
 //|                                                  BuildConfig.mqh |
 //|                        Build Configuration for Debug/Production  |
 //+------------------------------------------------------------------+
+#ifndef BUILD_CONFIG_MQH
+#define BUILD_CONFIG_MQH
 #property copyright "  Biotak"
 #property strict
 
@@ -37,6 +39,24 @@
     #define TH3_PROF_END(tag)
 #else
     #define LITE_MODE_STR "FULL"
+#endif
+
+//+------------------------------------------------------------------+
+//| Default render engine                                            |
+//|   CANVAS  = new immediate-mode rasterizer (fastest, default)     |
+//|   OBJECTS = legacy retained chart objects. Sync Compare forces   |
+//|             OBJECTS so its CSV object dump (MT4/MT5 parity diff) |
+//|             keeps comparing the retained-object path.            |
+//+------------------------------------------------------------------+
+#ifdef SYNC_COMPARE_BUILD
+    #define RENDER_ENGINE_DEFAULT RENDER_ENGINE_OBJECTS
+#else
+    // Default = chart-anchored OBJECTS (OBJ_RECTANGLE / OBJ_HLINE ...), the
+    // same mechanism MT4 uses: the terminal re-projects them natively on
+    // scroll/zoom, so levels stay glued to prices with ZERO MQL work during
+    // scroll - exactly the MT4 feel. (Canvas engines are opt-in for users
+    // who prefer instant mode/TF switches over native scroll.)
+    #define RENDER_ENGINE_DEFAULT RENDER_ENGINE_OBJECTS
 #endif
 
 #ifdef DEBUG_BUILD
@@ -138,3 +158,4 @@ void PrintBuildInfo()
     Print("====================");
 }
 
+#endif // BUILD_CONFIG_MQH

@@ -1,9 +1,11 @@
-  //+------------------------------------------------------------------+
+﻿  //+------------------------------------------------------------------+
 //| BasePriceManager.mqh                                              |
 //| Base Price Management with 30-minute block updates                |
 //| Matches MotiveWave/Java implementation exactly                    |
 //+------------------------------------------------------------------+
 
+#ifndef BASE_PRICE_MANAGER_MQH
+#define BASE_PRICE_MANAGER_MQH
 #property strict
 
 #include "BasePriceHistoryManager.mqh"
@@ -87,6 +89,9 @@ static int g_symbolStateCount = 0;
 #define MAX_SYMBOL_STATES 100              // Maximum symbols to track
 #define SYMBOL_STATE_LRU_THRESHOLD 50      // Trigger LRU eviction above this count
 #define SYMBOL_STATE_INACTIVE_HOURS 24     // Only evict states inactive for 24+ hours
+#define LOCK_TIMEOUT_SECONDS 2             // Stale lock timeout
+#define LOCK_MAX_ATTEMPTS 5                // Maximum lock acquisition attempts
+#define LOCK_RETRY_DELAY_MS 20             // Delay between lock attempts
 
 // Cached symbol state index (performance: 50+ calls/tick   1 call/tick)
 static int _g_cachedStateIdx = -1;
@@ -107,29 +112,53 @@ int GetSymbolStateIndex()
         Print("  CRITICAL: Corrupted symbol state count (", g_symbolStateCount, ")");
         g_symbolStateCount = 0;
         ArrayResize(g_symbolStates, 0);
-        // FIX (C1): ensure slot 0 exists and return it instead of -1 so the
-        // legacy g_xxx macros cannot underflow g_symbolStates[].
-        ArrayResize(g_symbolStates, 1);
-        g_symbolStates[0].symbol = currentSymbol;
-        g_symbolStateCount = 1;
-        return 0;
+        return -1;
     }
     
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
         Print("  CRITICAL: Symbol state limit reached (", MAX_SYMBOL_STATES, ")");
         Print("   Cannot track more symbols. Consider increasing MAX_SYMBOL_STATES.");
-        // FIX (C1): return existing safe slot 0 instead of -1
-        return 0;
+        return -1;
     }
     
     //                                                                
-    // NOTE: The previous global-variable lock + Sleep() loop was REMOVED.
-    // Indicators on one symbol share a SINGLE thread; an infinite/blocking
-    // action in one indicator halts all other indicators on that symbol.
-    // GlobalVariables are terminal-wide shared memory, so a cross-program
-    // lock here also risked deadlocking EAs/scripts. MQL5 already serializes
-    // event handlers per-symbol, so this array access is safe without a lock.
+    // CRITICAL FIX #2: Enhanced Lock with Stale Detection
     //                                                                
+    string lockName = "Biotak_StateAccess_Lock_" + currentSymbol;
+    string lockTimeName = lockName + "_Time";
+    
+    // Check for stale lock
+    if(GlobalVariableCheck(lockTimeName)) {
+        datetime lockTime = (datetime)GlobalVariableGet(lockTimeName);
+        if(TimeCurrent() - lockTime > LOCK_TIMEOUT_SECONDS) {
+            Print("   Stale lock detected (", TimeCurrent() - lockTime, "s old), forcing release");
+            GlobalVariableDel(lockName);
+            GlobalVariableDel(lockTimeName);
+        }
+    }
+    
+    // Try to acquire lock
+    bool lockAcquired = false;
+    for(int attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++)
+    {
+        if(!GlobalVariableCheck(lockName))
+        {
+            GlobalVariableSet(lockName, 1.0);
+            GlobalVariableSet(lockTimeName, (double)TimeCurrent());
+            GlobalVariableTemp(lockName);
+            GlobalVariableTemp(lockTimeName);
+            lockAcquired = true;
+            break;
+        }
+        Sleep(LOCK_RETRY_DELAY_MS);
+    }
+    
+    if(!lockAcquired)
+    {
+        Print("  CRITICAL: GetSymbolStateIndex failed to acquire lock after ", LOCK_MAX_ATTEMPTS, " attempts");
+        Print("   Symbol: ", currentSymbol, " - Aborting to prevent race condition");
+        return -1; // CRITICAL FIX: Return error instead of proceeding
+    }
     
     //                                                                
     // CRITICAL FIX #3: Bounds-Checked Search
@@ -152,6 +181,10 @@ int GetSymbolStateIndex()
         }
     }
     
+    // Release lock
+    GlobalVariableDel(lockName);
+    GlobalVariableDel(lockTimeName);
+    
     if(resultIndex >= 0)
     {
         return resultIndex;
@@ -162,13 +195,7 @@ int GetSymbolStateIndex()
     //                                                                
     if(g_symbolStateCount >= MAX_SYMBOL_STATES) {
         Print("  Cannot create new state - limit reached");
-        // FIX (C1): ensure slot 0 exists and return it
-        if(ArraySize(g_symbolStates) == 0) {
-            ArrayResize(g_symbolStates, 1);
-            g_symbolStates[0].symbol = currentSymbol;
-            g_symbolStateCount = 1;
-        }
-        return 0;
+        return -1;
     }
     
     // Create new state for this symbol
@@ -177,13 +204,7 @@ int GetSymbolStateIndex()
     // Safe resize with validation
     if(ArrayResize(g_symbolStates, newIndex + 1) != newIndex + 1) {
         Print("  CRITICAL: Failed to resize symbol states array");
-        // FIX (C1): ensure slot 0 exists and return it
-        if(ArraySize(g_symbolStates) == 0) {
-            ArrayResize(g_symbolStates, 1);
-            g_symbolStates[0].symbol = currentSymbol;
-            g_symbolStateCount = 1;
-        }
-        return 0;
+        return -1;
     }
     
     // Initialize new state
@@ -201,50 +222,53 @@ int GetSymbolStateIndex()
     
     Print("  Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");
     return newIndex;
+    ArrayResize(g_symbolStates, g_symbolStateCount + 1);
+    g_symbolStates[g_symbolStateCount].symbol = currentSymbol;
+    g_symbolStates[g_symbolStateCount].basePriceCached = EMPTY_VALUE;
+    g_symbolStates[g_symbolStateCount].lastProcessedBlockTimestamp = 0;  // Used for log deduplication
+    g_symbolStates[g_symbolStateCount].referenceM1Power = 0.0;
+    ArrayResize(g_symbolStates[g_symbolStateCount].basePriceHistory, 0);
+    g_symbolStates[g_symbolStateCount].historyCount = 0;
+    g_symbolStates[g_symbolStateCount].lastHistoryDay = -1;
+    g_symbolStates[g_symbolStateCount].lastHistoryYear = -1;
+    g_symbolStates[g_symbolStateCount].systemInitialized = false;
+    
+    DEBUG_PRINTF("Created new state for symbol: ", currentSymbol);
+    
+    g_symbolStateCount++;
+    return g_symbolStateCount - 1;
 }
 
 // Helper functions for array access (to avoid macro expansion issues)
-// CRITICAL FIX (C1): every helper now checks stateIdx and historyCount against
-// the live array bounds before touching g_symbolStates[]. A -1 return from
-// GetSymbolStateIndex() (lock failure, MAX_SYMBOL_STATES hit, resize failure)
-// previously crashed the terminal by indexing g_symbolStates[-1].
 string GetHistoryEntry(int index)
 {
     int stateIdx = GetSymbolStateIndex();
-    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return "";
-    int historySize = ArraySize(g_symbolStates[stateIdx].basePriceHistory);
-    int count = g_symbolStates[stateIdx].historyCount;
-    if(index < 0 || index >= count || index >= historySize) return "";
-    return g_symbolStates[stateIdx].basePriceHistory[index];
+    if(index >= 0 && index < g_symbolStates[stateIdx].historyCount)
+    {
+        return g_symbolStates[stateIdx].basePriceHistory[index];
+    }
+    return "";
 }
 
 void SetHistoryEntry(int index, string value)
 {
     int stateIdx = GetSymbolStateIndex();
-    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return;
-    int historySize = ArraySize(g_symbolStates[stateIdx].basePriceHistory);
-    if(index < 0 || index >= historySize) return;
-    g_symbolStates[stateIdx].basePriceHistory[index] = value;
+    if(index >= 0 && index < ArraySize(g_symbolStates[stateIdx].basePriceHistory))
+    {
+        g_symbolStates[stateIdx].basePriceHistory[index] = value;
+    }
 }
 
 void ResizeHistory(int newSize)
 {
     int stateIdx = GetSymbolStateIndex();
-    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, newSize);
 }
 
 void GetHistoryArray(string &output[])
 {
     int stateIdx = GetSymbolStateIndex();
-    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) {
-        ArrayResize(output, 0);
-        return;
-    }
     int count = g_symbolStates[stateIdx].historyCount;
-    if(count < 0) count = 0;
-    int historySize = ArraySize(g_symbolStates[stateIdx].basePriceHistory);
-    if(count > historySize) count = historySize;
     ArrayResize(output, count);
     for(int i = 0; i < count; i++)
     {
@@ -255,10 +279,6 @@ void GetHistoryArray(string &output[])
 void SetHistoryArray(string &inputArray[], int count)
 {
     int stateIdx = GetSymbolStateIndex();
-    if(stateIdx < 0 || stateIdx >= g_symbolStateCount) return;
-    if(count < 0) count = 0;
-    int inputSize = ArraySize(inputArray);
-    if(count > inputSize) count = inputSize;
     ArrayResize(g_symbolStates[stateIdx].basePriceHistory, count);
     for(int i = 0; i < count; i++)
     {
@@ -267,11 +287,8 @@ void SetHistoryArray(string &inputArray[], int count)
     g_symbolStates[stateIdx].historyCount = count;
 }
 
-// Legacy global variables for backward compatibility.
-// CRITICAL FIX (C1): GetSymbolStateIndex() now guarantees it never returns -1:
-// every error path falls back to a safe initialized state slot (index 0
-// after auto-initialization) so the legacy g_xxx macros below cannot
-// underflow g_symbolStates[] and crash the terminal.
+// Legacy global variables for backward compatibility (now use GetSymbolStateIndex())
+// These are kept as macros that redirect to symbol-specific state
 #define g_basePriceCached (g_symbolStates[GetSymbolStateIndex()].basePriceCached)
 #define g_lastProcessedBlockTimestamp (g_symbolStates[GetSymbolStateIndex()].lastProcessedBlockTimestamp)
 #define g_referenceM1Power (g_symbolStates[GetSymbolStateIndex()].referenceM1Power)
@@ -1938,3 +1955,5 @@ void CleanupBasePriceManager()
     
     DEBUG_PRINT("[BasePriceManager] CleanupBasePriceManager() - Cleanup complete (memory leak fixed)");
 }
+
+#endif // BASE_PRICE_MANAGER_MQH

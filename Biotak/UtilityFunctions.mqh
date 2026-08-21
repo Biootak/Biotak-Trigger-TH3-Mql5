@@ -106,13 +106,21 @@ double GetMidpointPrice(ENUM_TH_START_POINT_TYPE startPointType) {
         case TH_START_POINT_CUSTOM_PRICE:
         {
             double customPrice = (g_customTHStartPrice > 0.0) ? g_customTHStartPrice : inpCustomTHStartPrice;
-            if(customPrice > 0.0) return customPrice;
-            // No custom price set: anchor on the TH base price (current daily close)
-            // instead of the multi-year historical midpoint, so levels stay on-screen
-            // near the live chart price.
-            if(g_dailyClosePriceForTH > 0.0 && g_dailyClosePriceForTH != EMPTY_VALUE)
-                return g_dailyClosePriceForTH;
-            return Bid;
+            return (customPrice > 0.0) ? customPrice : (g_highestHigh + g_lowestLow) / 2.0;
+        }
+        case TH_START_POINT_PREVIOUS_CLOSE:
+        {
+            // Previous day close (D1 bar 1). Static daily cache so the
+            // per-second label refresh stays cheap. (GetPriceForPreviousDay
+            // lives in a later include, so this uses the built-in iClose.)
+            static datetime s_prevCloseUpdate = 0;
+            static double   s_prevClose = 0;
+            datetime now = TimeCurrent();
+            if(s_prevCloseUpdate == 0 || now - s_prevCloseUpdate >= 86400 || s_prevClose <= 0) {
+                s_prevClose = iClose(Symbol(), PERIOD_D1, 1);
+                s_prevCloseUpdate = now;
+            }
+            return (s_prevClose > 0 && s_prevClose != EMPTY_VALUE) ? s_prevClose : Bid;
         }
         case TH_START_POINT_MIDPOINT:
         default:
@@ -147,130 +155,37 @@ string GetStepModeName(ENUM_STEP_CALCULATION_MODE mode) {
     }
 }
 
-//+------------------------------------------------------------------+
-//| Get Preset name for display (user-friendly)                     |
-//|            Preset            (         )                        |
-//+------------------------------------------------------------------+
-string GetComboPresetName(const ENUM_COMBO_PRESET preset) {
-    switch(preset) {
-        case COMBO_PRESET_LEGACY_ADD:           return "Legacy (Trigger SS + Pattern SS)";
-        case COMBO_PRESET_BALANCED_MEDIUM:      return "Balanced Medium";
-        case COMBO_PRESET_BALANCED_LONG:        return "Balanced Long";
-        case COMBO_PRESET_BALANCED_TRIPLE:      return "Triple Balanced";
-        case COMBO_PRESET_BALANCED_MIN:         return "Balanced Min";
-        case COMBO_PRESET_CONSERVATIVE:         return "Conservative";
-        case COMBO_PRESET_ULTRA_CONSERVATIVE:   return "Ultra Conservative";
-        case COMBO_PRESET_TRIPLE_CONSERVATIVE:  return "Triple Conservative";
-        case COMBO_PRESET_AGGRESSIVE:           return "Aggressive";
-        case COMBO_PRESET_ULTRA_AGGRESSIVE:     return "Ultra Aggressive";
-        case COMBO_PRESET_TRIPLE_AGGRESSIVE:    return "Triple Aggressive";
-        case COMBO_PRESET_TREND_FILTER:         return "Trend Filter";
-        case COMBO_PRESET_VOLATILITY_ADAPTIVE:  return "Volatility Adaptive";
-        case COMBO_PRESET_MANUAL_DUAL:          return "Manual Dual";
-        case COMBO_PRESET_MANUAL_TRIPLE:        return "Manual Triple";
-        default:                                return "Unknown";
-    }
-}
-
-//+------------------------------------------------------------------+
-//| DEPRECATED: Old Combo Step component system                     |
-//| Use CalculateComboStepSize() with Preset system instead         |
-//|                                                                  |
-//| This function is kept for backward compatibility only           |
-//+------------------------------------------------------------------+
-double GetSharedComponentValue(ENUM_COMBO_COMPONENT_ITEM component, double structure, double pattern, double trigger) {
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("   DEPRECATED: GetSharedComponentValue called - use CalculateComboStepSize instead");
-    #endif
-    
-    switch(component) {
-        // Sub components (1/4x - using trigger/4 approximation for legacy)
-        case COMP_SUB_TH:          return trigger * 0.25;             // Sub TH
-        case COMP_SUB_SS:          return trigger * 0.375;            // Sub SS (1.5/4)
-        case COMP_SUB_LS:          return trigger * 0.5;              // Sub LS (2.0/4)
-        
-        // Trigger components
-        case COMP_TRIGGER_TH:      return trigger;                    // Trigger TH
-        case COMP_TRIGGER_SS:      return trigger * 1.5;              // Trigger SS
-        case COMP_TRIGGER_LS:      return trigger * 2.0;              // Trigger LS
-        
-        // Pattern components
-        case COMP_PATTERN_TH:      return pattern;                    // Pattern TH
-        case COMP_PATTERN_SS:      return pattern * 1.5;              // Pattern SS
-        case COMP_PATTERN_LS:      return pattern * 2.0;              // Pattern LS
-        
-        // Structure components
-        case COMP_STRUCTURE_TH:    return structure;                  // Structure TH
-        case COMP_STRUCTURE_SS:    return structure * 1.5;            // Structure SS
-        case COMP_STRUCTURE_LS:    return structure * 2.0;            // Structure LS
-        
-        // Control/Mid components (TH * 1.75)
-        case COMP_SUB_CONTROL:     return trigger * 0.25 * 1.75;      // Sub Control
-        case COMP_TRIGGER_CONTROL: return trigger * 1.75;             // Trigger Control
-        case COMP_PATTERN_CONTROL: return pattern * 1.75;             // Pattern Control
-        case COMP_STRUCTURE_CONTROL: return structure * 1.75;         // Structure Control
-        
-        case COMP_IGNORE:          return 0.0;                        // Ignore
-        
-        default:                   return trigger;                    // Default to Trigger TH
-    }
-}
-
-//+------------------------------------------------------------------+
-//| DEPRECATED: Get component name for display                      |
-//| Use Preset names instead                                        |
-//+------------------------------------------------------------------+
-string GetSharedComponentName(ENUM_COMBO_COMPONENT_ITEM component) {
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("   DEPRECATED: GetSharedComponentName called - use Preset system instead");
-    #endif
-    
-    switch(component) {
-        case COMP_SUB_TH:          return "Sub-TH";
-        case COMP_SUB_SS:          return "Sub-SS";
-        case COMP_SUB_LS:          return "Sub-LS";
-        
-        case COMP_TRIGGER_TH:      return "Trigger-TH";
-        case COMP_TRIGGER_SS:      return "Trigger-SS";
-        case COMP_TRIGGER_LS:      return "Trigger-LS";
-        
-        case COMP_PATTERN_TH:      return "Pattern-TH";
-        case COMP_PATTERN_SS:      return "Pattern-SS";
-        case COMP_PATTERN_LS:      return "Pattern-LS";
-        
-        case COMP_STRUCTURE_TH:    return "Structure-TH";
-        case COMP_STRUCTURE_SS:    return "Structure-SS";
-        case COMP_STRUCTURE_LS:    return "Structure-LS";
-        
-        case COMP_SUB_CONTROL:     return "Sub-Control";
-        case COMP_TRIGGER_CONTROL: return "Trigger-Control";
-        case COMP_PATTERN_CONTROL: return "Pattern-Control";
-        case COMP_STRUCTURE_CONTROL: return "Structure-Control";
-        
-        case COMP_IGNORE:          return "Ignore";
-        
-        default:                   return "Unknown";
-    }
-}
+// (Removed: legacy GetComboPresetName / GetSharedComponentValue / GetSharedComponentName -
+//  dead code referencing the old combo component system. Combo names/values now live in
+//  ComboEngine.mqh; preset display is handled by EnumToString.)
 
 //+------------------------------------------------------------------+
 //| Clear all temporary mode labels (call before showing new one)   |
 //|              label          (                         )         |
 //+------------------------------------------------------------------+
 void ClearAllModeLabels() {
+    // Reset expiry timestamps so deleted labels are not re-cleared
+    // or counted in stacking rows afterwards.
     if(ObjectFind(0, g_stepModeLabelName) >= 0) {
         ObjectDelete(0, g_stepModeLabelName);
     }
+    g_stepModeLabelCreateTime = 0;
     if(ObjectFind(0, g_factorLabelName) >= 0) {
         ObjectDelete(0, g_factorLabelName);
     }
+    g_factorLabelCreateTime = 0;
 #ifndef BUILD_LITE
     if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
         ObjectDelete(0, g_th3FreqLabelName);
     }
+    g_th3FreqLabelCreateTime = 0;
 #endif
-    if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
-        ObjectDelete(0, g_lockStatusLabelName);
+    // Lock status is a persistent status while TF is locked - keep it visible.
+    if(!g_timeframeLocked) {
+        if(ObjectFind(0, g_lockStatusLabelName) >= 0) {
+            ObjectDelete(0, g_lockStatusLabelName);
+        }
+        g_lockStatusLabelCreateTime = 0;
     }
 }
 
@@ -294,72 +209,8 @@ double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
             return thValue;
 
         case FACTOR_STEP:
-        {
-            bool useDirect = (inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT);
-            if(useDirect) {
-                // DIRECT MODE: value IS the step size
-                if(g_factorValueOverride > 0) return g_factorValueOverride;
-                if(inpFactorMode == FACTOR_MODE_MANUAL) return inpFactorValue;
-                // Auto mode: get from basis
-                double tfPct = GetTimeframeTH();
-                double thVal = CalculateTH(basePrice, digits, tfPct);
-                thVal = GetAdaptedStepSize(thVal);
-                if(thVal <= 0) thVal = thValue;
-                switch(inpFactorAutoBasis) {
-                    case FACTOR_BASIS_SS:      return thVal * 1.5;
-                    case FACTOR_BASIS_LS:      return thVal * 2.0;
-                    case FACTOR_BASIS_TH:      return thVal;
-                    case FACTOR_BASIS_CONTROL: return thVal * 1.75;
-                    case FACTOR_BASIS_TRIGGER:
-                    {
-                        double trgPct = GetTimeframeTH();
-                        double trgVal = CalculateTH(basePrice, digits, trgPct);
-                        return GetAdaptedStepSize(trgVal);
-                    }
-                    case FACTOR_BASIS_PATTERN:
-                    {
-                        double patPct = GetPatternTH();
-                        if(patPct <= 0) patPct = GetTimeframeTH() * 4.0;
-                        double patVal = CalculateTH(basePrice, digits, patPct);
-                        return GetAdaptedStepSize(patVal);
-                    }
-                    case FACTOR_BASIS_STRUCTURE:
-                    {
-                        string strTF = GetStructureTimeframeForCurrent();
-                        double strPct = CalculateTimeframeTH(strTF);
-                        if(strPct <= 0) strPct = GetTimeframeTH() * 16.0;
-                        double strVal = CalculateTH(basePrice, digits, strPct);
-                        return GetAdaptedStepSize(strVal);
-                    }
-                    case FACTOR_BASIS_COMBO:
-                        return CalculateComboStepSize(basePrice);
-                    default:
-                        return thVal * 1.5;
-                }
-            }
-            // CLASSIC MODE
-            double factorValue;
-            if(g_factorValueOverride > 0) {
-                factorValue = g_factorValueOverride;
-            } else if(inpFactorMode == FACTOR_MODE_MANUAL) {
-                factorValue = inpFactorValue;
-            } else {
-                double range = g_highestHigh - g_lowestLow;
-                if(inpFactorAutoBasis == FACTOR_BASIS_SS) {
-                    double targetStep = thValue * 1.5;
-                    double denominator = targetStep * 2.0;
-                    factorValue = (range > 0 && denominator > 0) ? range / denominator : 50.0;
-                } else if(inpFactorAutoBasis == FACTOR_BASIS_LS) {
-                    double targetStep = thValue * 2.0;
-                    double denominator = targetStep * 2.0;
-                    factorValue = (range > 0 && denominator > 0) ? range / denominator : 50.0;
-                } else {
-                    factorValue = GetDefaultFactorValue(basePrice);
-                }
-            }
-            factorValue = NormalizeDouble(MathMax(0.01, MathMin(10000, factorValue)), 2);
-            return CalculateFactorStepSize(g_highestHigh, g_lowestLow, factorValue);
-        }
+            // Centralized: handles DIRECT (step semantics) and CLASSIC (factor semantics)
+            return GetFactorModePrimaryStepPrice(basePrice);
 
         case SS_LS_STEP:
         {
@@ -379,14 +230,52 @@ double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
 //+------------------------------------------------------------------+
 //| Get ATR Info string for status display                           |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Base price (B) info for the status label.                        |
+//| B is ALWAYS the step-calculation basis: the reference base price  |
+//| (g_dailyClosePriceForTH, synced from GetBasePriceForTH on every   |
+//| redraw) that CalculateTH / CalculateComboStepSize use to compute  |
+//| the step sizes. It is NOT the level-drawing anchor - that is a    |
+//| separate value shown as A: when it differs (see below).           |
+//| Never displays 0: falls back to the live bid.                     |
+//+------------------------------------------------------------------+
 string GetBasePriceStatusInfo() {
     double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
-    if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
-        basePrice = (g_customTHStartPrice > 0) ? g_customTHStartPrice : inpCustomTHStartPrice;
-    }
+    if(basePrice <= 0) basePrice = Bid;
+    if(basePrice <= 0) basePrice = SymbolInfoDouble(Symbol(), SYMBOL_BID);
     return StringFormat(" | B: %.5f", basePrice);
 }
 
+//+------------------------------------------------------------------+
+//| Anchor (drawing basis) info for the status label.                |
+//| Levels are drawn AROUND GetMidpointPrice(g_thStartPointType):    |
+//|   Custom Price -> the custom price; Midpoint -> (H+L)/2;         |
+//|   Hist High/Low -> g_highestHigh / g_lowestLow.                  |
+//| This is a separate value from the step-calculation basis (B).    |
+//| Shown only when it differs from B, so the user can see what the  |
+//| levels anchor to without cluttering the label.                   |
+//+------------------------------------------------------------------+
+string GetAnchorPriceStatusInfo() {
+    double basis = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
+    if(basis <= 0) return "";
+
+    double anchor = GetMidpointPrice(g_thStartPointType);
+    if(anchor <= 0 || anchor == EMPTY_VALUE) return "";
+
+    double point = GetCachedPoint();
+    if(point <= 0) return "";
+
+    // Hide when the anchor equals the calculation basis (avoids noise)
+    if(MathAbs(anchor - basis) <= point * 0.1) return "";
+
+    return StringFormat(" | A: %.5f", anchor);
+}
+
+// The combo calc breakdown is filled by RefreshComboLabelExtraInfo() in
+// ComboEngine.mqh (included later) - see g_comboLabelExtraInfo global.
+//
+// Combo mode appends a compact "how it was computed" breakdown, e.g.
+// "avg(PatTH12.1p,TrigTH6.1p)" so the user can verify the math.
 string BuildUnifiedModeLabelText()
 {
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
@@ -396,12 +285,29 @@ string BuildUnifiedModeLabelText()
 
     if(pipSize <= 0 || stepPrice <= 0) return "[ " + modeName + " ]";
 
-    return StringFormat("[ %s | S: %.1f%s ]", 
-        modeName, stepPrice / pipSize, GetBasePriceStatusInfo());
+    string calcInfo = "";
+    if(currentMode == COMBO_STEP && g_comboLabelExtraInfo != "")
+        calcInfo = " | " + g_comboLabelExtraInfo;
+
+    return StringFormat("[ %s | S: %.1f%s%s%s ]", 
+        modeName, stepPrice / pipSize, calcInfo,
+        GetBasePriceStatusInfo(), GetAnchorPriceStatusInfo());
+}
+
+//+------------------------------------------------------------------+
+//| Set label text only when it actually changed (PERF: avoids      |
+//| pointless ObjectSetString syscalls on every tick/refresh)       |
+//+------------------------------------------------------------------+
+void SetLabelTextIfChanged(const string name, const string text) {
+    if(ObjectFind(0, name) < 0) return;
+    string currentText = ObjectGetString(0, name, OBJPROP_TEXT);
+    if(currentText != text) ObjectSetString(0, name, OBJPROP_TEXT, text);
 }
 
 //+------------------------------------------------------------------+
 //| Update step mode label on chart (configurable duration)         |
+//| Updates text in place when already visible (no recreate churn,  |
+//| no expiry timestamp reset) so real-time refresh stays cheap.    |
 //+------------------------------------------------------------------+
 void UpdateStepModeLabel(bool clearFirst = true) {
     if(!inpShowModeChangeLabel) return;
@@ -409,19 +315,15 @@ void UpdateStepModeLabel(bool clearFirst = true) {
     if(clearFirst) ClearAllModeLabels();
     if(IsIndicatorHidden()) return;
     
-    if(ObjectFind(0, g_stepModeLabelName) < 0) {
-        ObjectCreate(0, g_stepModeLabelName, OBJ_LABEL, 0, 0, 0);
-    }
-    
     string labelText = BuildUnifiedModeLabelText();
-    ObjectSetString(0, g_stepModeLabelName, OBJPROP_TEXT, labelText);
     
-    g_stepModeLabelCreateTime = GetTickCount();
-    ApplyModeLabelStyle(g_stepModeLabelName, inpModeLabelColor);
-    
-    if(inpModeLabelDuration > 0) {
-        EventSetTimer(inpModeLabelDuration);
+    if(ObjectFind(0, g_stepModeLabelName) < 0) {
+        if(!ObjectCreate(0, g_stepModeLabelName, OBJ_LABEL, 0, 0, 0)) return;
+        // Timestamp set ONLY on creation so auto-hide still fires on schedule.
+        g_stepModeLabelCreateTime = GetTickCount();
+        ApplyModeLabelStyle(g_stepModeLabelName, inpModeLabelColor);
     }
+    SetLabelTextIfChanged(g_stepModeLabelName, labelText);
 }
 
 //+------------------------------------------------------------------+
@@ -435,14 +337,30 @@ void UpdateBasisModeLabel(ENUM_CALCULATION_BASIS basis) {
 }
 
 //+------------------------------------------------------------------+
-//| Update Factor value label on chart (configurable duration)      |
-//|                                    (                      )      |
-//| Shows: "F: 2.50 | Step: 12.5 pips" with auto-hide               |
+//| Build the factor label text (shared by show + real-time refresh)|
 //|                                                                  |
-//| DIRECT MODE: When directStepSize > 0, shows step size first      |
-//|   Display: "[ Step: 12.5 | F: 50.00 ]"                          |
-//| CLASSIC MODE: When directStepSize = 0, shows factor first        |
-//|   Display: "[ F: 50.00 | Step: 12.5 pips ]"                     |
+//| DIRECT MODE:  step size first  -> "[ Step: 12.5 | F: 50.00 ]"   |
+//| CLASSIC MODE: factor first     -> "[ F: 50.00 | Step: 12.5 pips ]" |
+//+------------------------------------------------------------------+
+string BuildFactorLabelText(const double factorValue, const double stepSize) {
+    double pipSize = GetCachedPipSize();
+    if(stepSize > 0 && pipSize > 0) {
+        double stepPips = stepSize / pipSize;
+        if(inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT) {
+            // DIRECT MODE: Show Step first, Factor second
+            return "[ Step: " + DoubleToString(stepPips, 1) + " | F: " + DoubleToString(factorValue, 2) + " ]";
+        }
+        // CLASSIC MODE: Show Factor first, Step second
+        return "[ F: " + DoubleToString(factorValue, 2) + " | Step: " + DoubleToString(stepPips, 1) + " pips ]";
+    }
+    // Fallback: show only factor value
+    return "[ F: " + DoubleToString(factorValue, 2) + " ]";
+}
+
+//+------------------------------------------------------------------+
+//| Update Factor value label on chart (configurable duration)      |
+//| Updates text in place when already visible (no recreate churn,  |
+//| no expiry timestamp reset) so real-time refresh stays cheap.    |
 //+------------------------------------------------------------------+
 void UpdateFactorLabel(double factorValue, double directStepSize = 0, bool clearFirst = true) {
     // Check if mode label display is enabled
@@ -456,9 +374,6 @@ void UpdateFactorLabel(double factorValue, double directStepSize = 0, bool clear
     
     // Calculate step size for display
     double stepSize = directStepSize;
-    string labelText = "";
-    double pipSize = GetCachedPipSize();
-    
     if(stepSize <= 0) {
         // CLASSIC MODE: Calculate step from factor
         if(g_highestHigh > 0 && g_lowestLow > 0 && g_highestHigh > g_lowestLow) {
@@ -466,44 +381,87 @@ void UpdateFactorLabel(double factorValue, double directStepSize = 0, bool clear
         }
     }
     
-    if(stepSize > 0) {
-        double stepPips = stepSize / pipSize;
-        
-        if(inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT && directStepSize > 0) {
-            // DIRECT MODE: Show Step first, Factor second
-            labelText = "[ Step: " + DoubleToString(stepPips, 1) + " | F: " + DoubleToString(factorValue, 2) + " ]";
-        } else {
-            // CLASSIC MODE: Show Factor first, Step second
-            labelText = "[ F: " + DoubleToString(factorValue, 2) + " | Step: " + DoubleToString(stepPips, 1) + " pips ]";
-        }
-    } else {
-        // Fallback: show only factor value
-        labelText = "[ F: " + DoubleToString(factorValue, 2) + " ]";
-    }
+    string labelText = BuildFactorLabelText(factorValue, stepSize);
     
     // GOLD FIX: Check if object exists before creating
     if(ObjectFind(0, g_factorLabelName) < 0) {
-        ObjectCreate(0, g_factorLabelName, OBJ_LABEL, 0, 0, 0);
+        if(!ObjectCreate(0, g_factorLabelName, OBJ_LABEL, 0, 0, 0)) return;
+        // Timestamp set ONLY on creation so auto-hide still fires on schedule.
+        g_factorLabelCreateTime = GetTickCount();
+        ApplyModeLabelStyle(g_factorLabelName, inpFactorLevelColor);
     }
     
-    // Set text
-    ObjectSetString(0, g_factorLabelName, OBJPROP_TEXT, labelText);
-    
-    g_factorLabelCreateTime = GetTickCount();
-    ApplyModeLabelStyle(g_factorLabelName, inpFactorLevelColor);
-    
-    // Set timer based on user setting (0=permanent, >0=auto-hide after N seconds)
-    if(inpModeLabelDuration > 0) {
-        EventSetTimer(inpModeLabelDuration);
-    }
+    SetLabelTextIfChanged(g_factorLabelName, labelText);
 }
 
 #ifndef BUILD_LITE
 //+------------------------------------------------------------------+
+//| Build TH3 Frequency label text (shared by show + real-time      |
+//| refresh). The FIBO object scan is throttled (max once per 5s or |
+//| when the frequency changed) so the per-second refresh stays     |
+//| lightweight.                                                    |
+//+------------------------------------------------------------------+
+string BuildTH3FrequencyLabelText(const double frequency) {
+    static uint s_lastStepInfoMs = 0;
+    static double s_lastStepInfoFreq = -1;
+    static string s_cachedStepInfo = "";
+    uint nowMs = GetTickCount();
+    bool freqChanged = (frequency != s_lastStepInfoFreq);
+    if(freqChanged || nowMs - s_lastStepInfoMs >= 5000) {
+        s_lastStepInfoMs = nowMs;
+        s_lastStepInfoFreq = frequency;
+        s_cachedStepInfo = "";
+        
+        // Try to find an active TH3 structure to calculate step info
+        int total = ObjectsTotal(0, -1, OBJ_FIBO);
+        for(int i = 0; i < total; i++) {
+            string name = ObjectName(0, i, -1, OBJ_FIBO);
+            
+            if(StringFind(name, "TH3_Structure_") == 0 && 
+               StringFind(name, "_Text") < 0 && 
+               StringFind(name, "_Target") < 0) {
+                
+                // Get structure range
+                datetime t1 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 0);
+                double p1 = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
+                datetime t2 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 1);
+                double p2 = ObjectGetDouble(0, name, OBJPROP_PRICE, 1);
+                
+                // CRITICAL FIX: Validate ObjectGet results
+                if(t1 <= 0 || t2 <= 0 || p1 <= 0 || p2 <= 0) {
+                    #ifdef ENABLE_DEBUG_LOGS
+                    Print("   GetStructureRangeFromTH3: Invalid object data for ", name);
+                    #endif
+                    continue;
+                }
+                
+                if(t1 > 0 && t2 > 0 && p1 > 0 && p2 > 0) {
+                    double rangePips = CalculatePipsDistance(p1, p2);
+                    
+                    // Calculate step size and count
+                    double stepPips = rangePips * (frequency / 100.0);
+                    if(stepPips > 0) {
+                        double stepCount = rangePips / stepPips;
+                        int fullSteps = (int)MathFloor(stepCount);
+                        double remainder = stepCount - fullSteps;
+                        
+                        s_cachedStepInfo = StringFormat(" | Step: %.1f pips | Steps: %d + %.2f", 
+                            stepPips, fullSteps, remainder);
+                        break; // Use first found structure
+                    }
+                }
+            }
+        }
+    }
+    return "[ TH3 Freq: " + DoubleToString(frequency, 3) + "%" + s_cachedStepInfo + " ]";
+}
+
+//+------------------------------------------------------------------+
 //| Update TH3 Frequency Label (configurable duration)              |
-//|              TH3          (                             )        |
 //+------------------------------------------------------------------+
 void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
+    // Only show TH3 info when the TH3 tool is actually enabled
+    if(!inpEnableTH3Tool) return;
     // Check if mode label display is enabled
     if(!inpShowModeChangeLabel) return;
     
@@ -511,70 +469,22 @@ void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
     if(clearFirst) ClearAllModeLabels();
     
     // CRITICAL FIX: Don't show label if indicator is hidden
-    // PERFORMANCE: Use per-frame cached IsIndicatorHidden() instead of GlobalVariableCheck/Get
-    if(IsIndicatorHidden()) return; // Don't show mode labels when hidden
+    // PERFORMANCE: Use cached ChartID string
+    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+    bool isHidden = GlobalVariableCheck(gvar_name) && (bool)GlobalVariableGet(gvar_name);
+    if(isHidden) return; // Don't show mode labels when hidden
     
-    // Calculate step information based on current TH3 structure range
-    string stepInfo = "";
-    
-    // Try to find an active TH3 structure to calculate step info
-    int total = ObjectsTotal(0, -1, OBJ_FIBO);
-    for(int i = 0; i < total; i++) {
-        string name = ObjectName(0, i, -1, OBJ_FIBO);
-        
-        if(StringFind(name, "TH3_Structure_") == 0 && 
-           StringFind(name, "_Text") < 0 && 
-           StringFind(name, "_Target") < 0) {
-            
-            // Get structure range
-            datetime t1 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 0);
-            double p1 = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
-            datetime t2 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 1);
-            double p2 = ObjectGetDouble(0, name, OBJPROP_PRICE, 1);
-            
-            // CRITICAL FIX: Validate ObjectGet results
-            if(t1 <= 0 || t2 <= 0 || p1 <= 0 || p2 <= 0) {
-                #ifdef ENABLE_DEBUG_LOGS
-                Print("   GetStructureRangeFromTH3: Invalid object data for ", name);
-                #endif
-                continue;
-            }
-            
-            if(t1 > 0 && t2 > 0 && p1 > 0 && p2 > 0) {
-                double range = MathAbs(p2 - p1);
-                
-                // Use existing CalculatePipsDistance function for accurate pip calculation
-                double rangePips = CalculatePipsDistance(p1, p2);
-                
-                // Calculate step size and count
-                double stepPips = rangePips * (frequency / 100.0);
-                double stepCount = rangePips / stepPips;
-                int fullSteps = (int)MathFloor(stepCount);
-                double remainder = stepCount - fullSteps;
-                
-                stepInfo = StringFormat(" | Step: %.1f pips | Steps: %d + %.2f", 
-                    stepPips, fullSteps, remainder);
-                break; // Use first found structure
-            }
-        }
-    }
+    string labelText = BuildTH3FrequencyLabelText(frequency);
     
     // GOLD FIX: Check if object exists before creating
     if(ObjectFind(0, g_th3FreqLabelName) < 0) {
-        ObjectCreate(0, g_th3FreqLabelName, OBJ_LABEL, 0, 0, 0);
+        if(!ObjectCreate(0, g_th3FreqLabelName, OBJ_LABEL, 0, 0, 0)) return;
+        // Timestamp set ONLY on creation so auto-hide still fires on schedule.
+        g_th3FreqLabelCreateTime = GetTickCount();
+        ApplyModeLabelStyle(g_th3FreqLabelName, inpModeLabelColor);
     }
     
-    // Set text with frequency value and step info
-    ObjectSetString(0, g_th3FreqLabelName, OBJPROP_TEXT, 
-        "[ TH3 Freq: " + DoubleToString(frequency, 3) + "%" + stepInfo + " ]");
-    
-    g_th3FreqLabelCreateTime = GetTickCount();
-    ApplyModeLabelStyle(g_th3FreqLabelName, inpModeLabelColor);
-
-    // Set timer based on user setting (0=permanent, >0=auto-hide after N seconds)
-    if(inpModeLabelDuration > 0) {
-        EventSetTimer(inpModeLabelDuration);
-    }
+    SetLabelTextIfChanged(g_th3FreqLabelName, labelText);
 }
 #endif
 
@@ -585,43 +495,76 @@ void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
 void ShowAllStatusLabels() {
     ClearAllModeLabels();
     
-    bool useDirect = (inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT);
-    if(useDirect) {
-        // DIRECT MODE: Show factor label with direct step size
-        double overrideVal = g_factorValueOverride;
+    // Show every info label, stacked (non-destructive updates)
+    UpdateStepModeLabel(false);
+    
+    // Factor info only applies in Factor mode - don't show it in other
+    // modes (the values would be irrelevant to what is actually drawn).
+    if(GetCurrentStepMode() == FACTOR_STEP) {
         double factorVal = 0;
         double stepVal = 0;
-        if(overrideVal > 0) {
-            stepVal = overrideVal;
-        } else if(inpFactorMode == FACTOR_MODE_MANUAL) {
-            stepVal = inpFactorValue;
-        } else {
-            // Auto: get from current basis via common data
-            double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
-            double tfPct = GetTimeframeTH();
-            double thVal = CalculateTH(basePrice, GetCachedDigits(), tfPct);
-            thVal = GetAdaptedStepSize(thVal);
-            switch(inpFactorAutoBasis) {
-                case FACTOR_BASIS_SS:      stepVal = thVal * 1.5; break;
-                case FACTOR_BASIS_LS:      stepVal = thVal * 2.0; break;
-                case FACTOR_BASIS_TH:      stepVal = thVal; break;
-                case FACTOR_BASIS_CONTROL: stepVal = thVal * 1.75; break;
-                default:                   stepVal = thVal * 1.5; break;
-            }
-        }
-        if(g_highestHigh > 0 && g_lowestLow > 0 && stepVal > 0) {
-            double range = g_highestHigh - g_lowestLow;
-            factorVal = range / (stepVal * 2.0);
-        }
+        double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
+        ComputeFactorModeValues(basePrice, factorVal, stepVal);
         UpdateFactorLabel(factorVal, stepVal, false);
-    } else {
-        UpdateFactorLabel(g_factorValueOverride > 0 ? g_factorValueOverride : inpFactorValue, 0, false);
     }
 #ifndef BUILD_LITE
-    double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
-    UpdateTH3FrequencyLabel(freq, false);
+    // TH3 frequency info belongs to the TH3 tool - only show it when the
+    // tool is enabled (UpdateTH3FrequencyLabel also gates internally).
+    if(inpEnableTH3Tool) {
+        double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
+        UpdateTH3FrequencyLabel(freq, false);
+    }
 #endif
     UpdateLockStatusLabel();
+}
+
+//+------------------------------------------------------------------+
+//| Real-time refresh of currently visible info labels               |
+//| Called from OnTimer (1s cadence). Updates text in place ONLY     |
+//| when it changed - never recreates objects, never resets expiry   |
+//| timestamps, so auto-hide and CPU usage stay correct.             |
+//+------------------------------------------------------------------+
+void RefreshVisibleStatusLabels() {
+    if(!inpShowModeChangeLabel) return;
+    if(IsIndicatorHidden()) return;
+    
+    // Step-mode label (mode + current step in pips)
+    if(ObjectFind(0, g_stepModeLabelName) >= 0) {
+        SetLabelTextIfChanged(g_stepModeLabelName, BuildUnifiedModeLabelText());
+    }
+    
+    // Factor label (F + Step) - only relevant while in Factor mode
+    if(GetCurrentStepMode() == FACTOR_STEP) {
+        if(ObjectFind(0, g_factorLabelName) >= 0) {
+            double factorVal = 0;
+            double stepVal = 0;
+            double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
+            ComputeFactorModeValues(basePrice, factorVal, stepVal);
+            SetLabelTextIfChanged(g_factorLabelName, BuildFactorLabelText(factorVal, stepVal));
+        }
+    } else {
+        // Not in Factor mode: remove any lingering factor label
+        if(ObjectFind(0, g_factorLabelName) >= 0) {
+            ObjectDelete(0, g_factorLabelName);
+            g_factorLabelCreateTime = 0;
+        }
+    }
+    
+#ifndef BUILD_LITE
+    // TH3 frequency label (frequency + step info) - only when tool enabled
+    if(inpEnableTH3Tool) {
+        if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
+            double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
+            SetLabelTextIfChanged(g_th3FreqLabelName, BuildTH3FrequencyLabelText(freq));
+        }
+    } else {
+        // Tool disabled: remove any lingering TH3 label
+        if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
+            ObjectDelete(0, g_th3FreqLabelName);
+            g_th3FreqLabelCreateTime = 0;
+        }
+    }
+#endif
 }
 
 //+------------------------------------------------------------------+
@@ -716,6 +659,8 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     request.zoneColor = zoneColor;
     request.transparency = transparency;
     request.filled = true;
+    request.borderStyle = inpMidZoneBorderStyle;
+    request.borderWidth = inpMidZoneBorderWidth;
     request.startTime = 0;  // Auto-calculate
     request.endTime = 0;    // Auto-calculate
     
@@ -802,7 +747,10 @@ bool CheckAndClearExpiredLabels() {
         }
 #endif
         if(g_lockStatusLabelCreateTime > 0) {
-            if((now - g_lockStatusLabelCreateTime) >= durationMs) {
+            // Lock status is a persistent status: stays visible while locked.
+            if(g_timeframeLocked) {
+                anyRemaining = true;
+            } else if((now - g_lockStatusLabelCreateTime) >= durationMs) {
                 ClearSingleModeLabel(g_lockStatusLabelName, g_lockStatusLabelCreateTime);
                 anyCleared = true;
             } else {
@@ -913,50 +861,17 @@ void ApplyModeLabelStyle(const string name, const color textColor, const int yOf
 //| Unified repositioning for ALL overlay labels                     |
 //| Call after g_modeLabelYOffset changes to keep layout consistent  |
 //+------------------------------------------------------------------+
-// PERF (2026, E): cache-first overlay label check. The previous code did
-// 4 × ObjectFind + 4 × ObjectGetInteger(OBJPROP_COLOR) per call, and this
-// function is invoked from the heavy redraw path on every full redraw
-// (MT5 calls it from EventHandlers.mqh ~1665 regardless of needLabels).
-// We trust the cache for existence and pull the color from the cache too.
-//
-// FIX (LBL-DISSOLVE, 2026): after a TF/symbol switch the cache is wiped
-// (InvalidateObjectCacheByPrefix in OnInit) but the chart engine preserved
-// the 5 overlay objects across OnDeinit/OnInit. The cache-first path would
-// skip those preserved labels entirely, leaving them at stale (x, y)
-// positions. We now: (a) check the cache fast path, (b) fall back to a
-// single ObjectFind per missing label and re-insert into the cache so the
-// next call is fast again.
 void RepositionAllOverlayLabels() {
-    string names[4];
-    int nameCount = 0;
-    names[nameCount++] = g_stepModeLabelName;
-    names[nameCount++] = g_factorLabelName;
+    if(ObjectFind(0, g_stepModeLabelName) >= 0)
+        ApplyModeLabelStyle(g_stepModeLabelName, (color)ObjectGetInteger(0, g_stepModeLabelName, OBJPROP_COLOR));
+    if(ObjectFind(0, g_factorLabelName) >= 0)
+        ApplyModeLabelStyle(g_factorLabelName, (color)ObjectGetInteger(0, g_factorLabelName, OBJPROP_COLOR));
 #ifndef BUILD_LITE
-    names[nameCount++] = g_th3FreqLabelName;
+    if(ObjectFind(0, g_th3FreqLabelName) >= 0)
+        ApplyModeLabelStyle(g_th3FreqLabelName, (color)ObjectGetInteger(0, g_th3FreqLabelName, OBJPROP_COLOR));
 #endif
-    names[nameCount++] = g_lockStatusLabelName;
-
-    for(int n = 0; n < nameCount; n++) {
-        int idx = CacheFindIndex(names[n]);
-        bool exists;
-        color cachedColor;
-        if(idx >= 0 && g_objectCacheHash[idx].entry.exists) {
-            exists = true;
-            cachedColor = g_objectCacheHash[idx].entry.lastColor;
-        } else {
-            // Cache miss after OnInit (LBL-DISSOLVE): the chart preserved
-            // the object but the cache was invalidated. One ObjectFind +
-            // color read + cache insert; subsequent calls take the fast path.
-            exists = (ObjectFind(0, names[n]) >= 0);
-            if(!exists) continue;
-            cachedColor = (color)ObjectGetInteger(0, names[n], OBJPROP_COLOR);
-            // OBJ_LABEL objects have no price/style/width but the cache
-            // entry needs *some* value; pass 0 for the unused fields and
-            // let the per-label text update path overwrite lastColor later.
-            CacheAddObject(names[n], 0.0, cachedColor, 0, 0);
-        }
-        ApplyModeLabelStyle(names[n], cachedColor);
-    }
+    if(ObjectFind(0, g_lockStatusLabelName) >= 0)
+        ApplyModeLabelStyle(g_lockStatusLabelName, (color)ObjectGetInteger(0, g_lockStatusLabelName, OBJPROP_COLOR));
 
     UpdateLockStatusLabel(false);
 #ifndef BUILD_LITE

@@ -1,39 +1,10 @@
-﻿  #property strict
+﻿  #ifndef TIMEFRAME_FUNCTIONS_MQH
+#define TIMEFRAME_FUNCTIONS_MQH
 
-int GetCurrentTimeframePeriodForTH()
-{
-    return (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period();
-}
-
-int GetCurrentTimeframeMinutesForTH()
-{
-    int timeframe = GetCurrentTimeframePeriodForTH();
-    int minutes = PeriodMinutes((ENUM_TIMEFRAMES)timeframe);
-    if(minutes <= 0 && timeframe > 0 && timeframe <= 10080) minutes = timeframe;
-    if(minutes <= 0 && timeframe == PERIOD_MN1) minutes = 43200;
-    return minutes;
-}
-
-// PERF: Per-frame cached current timeframe string. GetCurrentTimeframe() is called
-// multiple times per redraw (ExecutePipeline, objectPrefix building, label placement)
-// and each call rebuilds the string via switch + minute math. Cache it per-frame.
-static string g_cachedTFStr = "";
-static datetime g_cachedTFStrFrame = 0;
+#property strict
 
 string GetCurrentTimeframe() {
-    // Invalidate cache if the cached period differs from the live one.
-    static int s_cachedTFPeriod = -1;
-    int livePeriod = GetCurrentTimeframePeriodForTH();
-    if(g_cachedTFStrFrame != CacheGetFrameTime() || s_cachedTFPeriod != livePeriod) {
-        s_cachedTFPeriod = livePeriod;
-        g_cachedTFStrFrame = CacheGetFrameTime();
-        g_cachedTFStr = GetCurrentTimeframeUncached();
-    }
-    return g_cachedTFStr;
-}
-
-string GetCurrentTimeframeUncached() {
-    int timeframe = GetCurrentTimeframePeriodForTH();
+    int timeframe = (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period();
     switch(timeframe) {
         case PERIOD_M1:return "M1";
         case PERIOD_M5:return "M5";
@@ -44,12 +15,7 @@ string GetCurrentTimeframeUncached() {
         case PERIOD_D1:return "D1";
         case PERIOD_W1:return "W1";
         case PERIOD_MN1:return "MN1";
-        default:
-        {
-            int minutes = GetCurrentTimeframeMinutesForTH();
-            if(minutes > 0) return GetTimeframeStringFromMinutes(minutes);
-            return "UNKNOWN";
-        }
+        default:return "UNKNOWN";
     }
 }
 
@@ -60,8 +26,8 @@ string GetCurrentTimeframeUncached() {
 //|                              (                      = 4      )  |
 //+------------------------------------------------------------------+
 string GetHigherPatternTimeframeString() {
-    int currentMinutes = GetCurrentTimeframeMinutesForTH();
-    if(currentMinutes <= 0) currentMinutes = 1;
+    // MQL5 Period()/g_lockedPeriod hold ENUM values (H1=16385); normalize to minutes.
+    int currentMinutes = PeriodSeconds((ENUM_TIMEFRAMES)((g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period())) / 60;
     int higherMinutes = currentMinutes * 4;
     return GetTimeframeStringFromMinutes(higherMinutes);
 }
@@ -111,8 +77,8 @@ string GetTimeframeStringFromMinutes(int minutes) {
 //| Returns ENUM_TIMEFRAMES value for the higher pattern timeframe  |
 //+------------------------------------------------------------------+
 int GetHigherPatternTimeframePeriod() {
-    int currentMinutes = GetCurrentTimeframeMinutesForTH();
-    if(currentMinutes <= 0) currentMinutes = 1;
+    // MQL5 Period()/g_lockedPeriod hold ENUM values (H1=16385); normalize to minutes.
+    int currentMinutes = PeriodSeconds((ENUM_TIMEFRAMES)((g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period())) / 60;
     int higherMinutes = currentMinutes * 4;
     
     // Map to ENUM_TIMEFRAMES
@@ -136,3 +102,5 @@ int GetHigherPatternTimeframePeriod() {
     if(higherMinutes < 10080) return PERIOD_D1;
     return PERIOD_W1;
 }
+
+#endif // TIMEFRAME_FUNCTIONS_MQH

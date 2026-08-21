@@ -8,33 +8,22 @@ static double g_currentPrice = 0.0;
 static datetime g_lastCalculation = 0;
 static datetime g_lastHistoricalUpdate = 0;
 static bool g_initialized = false;
-
-// PERF (2026): Chart-change fast path. OnChartEvent(CHART_CHANGE) compares
-// the current symbol/timeframe against these caches. If both match, we
-// early-exit without invoking any heavy path. If they differ, we set
-// g_pendingChartChange=true and let the next OnCalculate pick it up —
-// no need to trigger OnDeinit/OnInit for a pure chart-property change.
-static string g_lastChartSymbol = "";
-static ENUM_TIMEFRAMES g_lastChartPeriod = PERIOD_CURRENT;
-// FIX (LBL-1, 2026): chart pixel dimensions cached alongside symbol/period
-// so CHARTEVENT_CHART_CHANGE can distinguish scroll/zoom (no-op) from a
-// real resize (labels must relayout). Pixel values default to 0 to force
-// the first post-init seed-write to fire.
-static long g_lastChartWidthPx  = 0;
-static long g_lastChartHeightPx = 0;
-static bool g_pendingChartChange = false;
-// PERF (2026): Track prev_calculated state so we can distinguish
-// "new tick on existing bar" (no-op), "new bar" (incremental work), and
-// "history reload" (full recalc). The OnCalculate hot path skips almost
-// all work in the new-tick-on-existing-bar case.
-static int g_lastRatesTotal = 0;
-static int g_lastPrevCalculated = 0;
-static bool g_wasLastTickNoOp = true;
 static bool g_calculatedOnce = false;
 static bool g_labelsRelayoutNeeded = false;
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
 bool g_redrawTHLevelsNeeded = true;
 bool g_forceClearOnNextDraw = false;
+// E-key mode changes reuse retained objects instead of deleting/recreating
+// every mode family. The flag is consumed by RedrawAllObjects after the
+// inactive mode families have been hidden.
+bool g_modeSwitchPending = false;
+// Clean-slate guarantee: OnDeinit wipes every object under inpObjectPrefix
+// (REASON_CHARTCHANGE/REASON_PARAMETERS/REASON_RECOMPILE) and on a fresh
+// attach nothing exists yet, so the FIRST ClearAllLevels after (re)init is
+// guaranteed to delete 0 objects and can skip the ~40 ObjectsDeleteAll IPC
+// calls entirely. Program globals reset on every re-init, so this re-arms
+// automatically after each timeframe switch.
+bool g_skipNextLevelsClear = true;
 // g_viewportOnlyRedraw removed   scroll no longer triggers level redraw
 int g_currentLabelYOffset = 0;       // Cumulative Y offset for stacking top label sections (ATR)
 int g_currentLabelYOffsetBottom = 0;  // Cumulative Y offset for stacking bottom label sections (TH)
@@ -50,7 +39,7 @@ static bool g_waitingForCustomPriceClick = false;
 static string g_customPriceHorizontalLineName = "CustomPriceHorizontalLine";
 static bool g_customPriceLineCreated = false;
 static double g_customTHStartPrice = 0.0;
-static ENUM_TH_START_POINT_TYPE g_thStartPointType = TH_START_POINT_MIDPOINT;
+static ENUM_TH_START_POINT_TYPE g_thStartPointType = TH_START_POINT_PREVIOUS_CLOSE;
 static uint g_lastClickTickCount = 0;
 static bool g_customPriceLineDragging = false;
 static double g_lastCustomPriceLinePos = 0.0;
@@ -74,88 +63,20 @@ static int    g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX; // Binary subdivision ind
 static datetime g_lastAlertTime = 0;
 static string g_lastAlertLevel = "";
 
-// PERF (2026): In-memory trigger level cache for CheckAlerts.
-// Populated by DrawTHLevels during each redraw so CheckAlerts can iterate
-// over a tight array instead of doing ~512 synchronous ObjectFind +
-// ObjectGetDouble chart-API calls per redraw. The trigger lines are
-// already computed in DrawTHLevels - this just records the resulting
-// (price, step) pairs once instead of re-reading them through the chart
-// engine from CheckAlerts.
-static double g_triggerUpPrices[];
-static int    g_triggerUpSteps[];
-static int    g_triggerUpCount = 0;
-static double g_triggerDownPrices[];
-static int    g_triggerDownSteps[];
-static int    g_triggerDownCount = 0;
-static double g_midpointLevelCached = 0.0;
-static bool   g_midpointLevelValid = false;
-static int    g_triggerLevelCapacity = 0;
-
-void ResetTriggerLevelCache()
-{
-   g_triggerUpCount = 0;
-   g_triggerDownCount = 0;
-   g_midpointLevelValid = false;
-}
-
-void EnsureTriggerLevelCapacity(const int need)
-{
-   if(need <= g_triggerLevelCapacity) return;
-   int newCap = MathMax(need, g_triggerLevelCapacity > 0 ? g_triggerLevelCapacity * 2 : 64);
-   ArrayResize(g_triggerUpPrices,   newCap);
-   ArrayResize(g_triggerUpSteps,    newCap);
-   ArrayResize(g_triggerDownPrices, newCap);
-   ArrayResize(g_triggerDownSteps,  newCap);
-   g_triggerLevelCapacity = newCap;
-}
-
-void RecordTriggerLevelUp(const int step, const double price)
-{
-   EnsureTriggerLevelCapacity(g_triggerUpCount + 1);
-   g_triggerUpPrices[g_triggerUpCount] = price;
-   g_triggerUpSteps[g_triggerUpCount]  = step;
-   g_triggerUpCount++;
-}
-
-void RecordTriggerLevelDown(const int step, const double price)
-{
-   EnsureTriggerLevelCapacity(g_triggerDownCount + 1);
-   g_triggerDownPrices[g_triggerDownCount] = price;
-   g_triggerDownSteps[g_triggerDownCount]  = step;
-   g_triggerDownCount++;
-}
-
-void RecordMidpointLevel(const double price)
-{
-   g_midpointLevelCached = price;
-   g_midpointLevelValid  = (price > 0);
-}
-
-int GetTriggerUpCount()   { return g_triggerUpCount;   }
-int GetTriggerDownCount() { return g_triggerDownCount; }
-bool HasMidpointLevel()   { return g_midpointLevelValid; }
-double GetMidpointLevel() { return g_midpointLevelCached; }
-
-double GetTriggerUpPrice(const int idx)
-{
-   if(idx < 0 || idx >= g_triggerUpCount) return 0.0;
-   return g_triggerUpPrices[idx];
-}
-
-double GetTriggerDownPrice(const int idx)
-{
-   if(idx < 0 || idx >= g_triggerDownCount) return 0.0;
-   return g_triggerDownPrices[idx];
-}
-
 // Timeframe Lock
 static bool g_timeframeLocked = false;
 static int g_lockedPeriod = 0;
-static string g_lockStatusLabelName = "TH3v1_LockStatus_Label";
-static string g_stepModeLabelName = "TH3v1_StepMode_Label";
-static string g_factorLabelName = "TH3v1_Factor_Label";
+static string g_lockStatusLabelName = "Biotak_LockStatus_Label";
+static string g_stepModeLabelName = "Biotak_StepMode_Label";
+
+// Combo calc breakdown text for the step-mode label. Filled by
+// RefreshComboLabelExtraInfo() in ComboEngine.mqh (included AFTER the
+// label builder, so it communicates through this global instead of a
+// forward declaration - MQL4 treats bare prototypes as #imports).
+string g_comboLabelExtraInfo = "";
+static string g_factorLabelName = "Biotak_Factor_Label";
 #ifndef BUILD_LITE
-static string g_th3FreqLabelName = "TH3v1_TH3Freq_Label";
+static string g_th3FreqLabelName = "Biotak_TH3Freq_Label";
 #endif
 
 // Independent label expiry timestamps (tick count)
@@ -169,48 +90,16 @@ static uint g_resetCommentCreateTime = 0;  // For "[ RESET ]" comment auto-clear
 
 // ChartRedraw Throttling
 static uint g_lastChartRedrawTime = 0;
-
-// Chart state snapshot (so we restore grid/mouse-move on REMOVE, not leave
-// the chart modified for other programs sharing this chart)
-static bool g_savedGridState = true;
-static bool g_savedMouseMoveState = true;
 #define CHART_REDRAW_THROTTLE_MS 100
 static uint g_lastDragRedrawTime = 0;
 #define DRAG_REDRAW_THROTTLE_MS 50
-
-// PERF (2026, TF switch fast path): when the chart timeframe changes, the
-// heavy RedrawAllObjects() pass is deferred to a timer so the OnCalculate
-// tick that observes the new Period() can return immediately. Without this,
-// the user saw 500-800 ms freezes on every TF switch because the rename
-// (in OnChartEvent or RenamePrefixedObjects) AND the 290-zone recreate
-// PERF (2026): The deferred TF-redraw buffer (g_deferredTFRedrawPending /
-// g_deferredTFRedrawDueMs / DEFERRED_TF_REDRAW_DELAY_MS) was removed.
-// Measured on M1 with the 158-line trigger set: the artificial 80ms delay
-// added a full tick of latency before the user saw levels appear on a
-// timeframe switch. RedrawAllObjects now runs synchronously on the TF-
-// change tick because all of its work is in-place property writes on
-// existing chart objects — no settle time required.
-// (kept as a no-op define so any third-party include that still references
-//  the symbol compiles cleanly; safe to delete in a later pass.)
-#define DEFERRED_TF_REDRAW_DELAY_MS 0
 
 // Suppression flag: prevents CHARTEVENT_OBJECT_DELETE cascade during programmatic deletions
 static bool g_suppressDeleteEvents = false;
 static uint g_suppressDeleteEventsUntilMs = 0;
 
 #ifndef BUILD_LITE
-// AB=CD Pattern State
-static bool g_abcdDrawing = false;
-static int g_abcdPointCount = 0;
-static datetime g_abcdTimeX = 0;
-static double g_abcdPriceX = 0.0;
-static datetime g_abcdTimeA = 0;
-static double g_abcdPriceA = 0.0;
-static datetime g_abcdTimeB = 0;
-static double g_abcdPriceB = 0.0;
-static datetime g_abcdTimeC = 0;
-static double g_abcdPriceC = 0.0;
-static uint g_abcdLastClickTime = 0;
+// AB=CD drawing state now lives in TH3DrawingSession (TH3Controller.mqh)
 static string g_activeABCDPattern = "";
 
 // Frequency Optimizer Result (last auto-find result for info label)
@@ -244,7 +133,7 @@ bool g_isHiddenCached = false;
 uint g_isHiddenCacheTime = 0;
 
 void RefreshIsHiddenCache() {
-    string gvar_name = "TH3v1_isHidden_" + GetCachedChartIdStr();
+    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
     if(!GlobalVariableCheck(gvar_name))
         g_isHiddenCached = false;
     else
@@ -268,47 +157,16 @@ string SanitizeSymbolName(const string symbol) {
     static string s_cachedResult = "";
     if(symbol == s_cachedInput && s_cachedResult != "") return s_cachedResult;
     s_cachedInput = symbol;
-
-    // FIX: single-pass scan over the unicode codepoints. The previous loop of
-    // StringReplace allocated a fresh string on every pass (O(n*m)). Output
-    // is byte-identical for the same unsafe-char set.
-    int len = StringLen(symbol);
-    ushort buf[];
-    ArrayResize(buf, len + 1);
-    int outIdx = 0;
-    for(int i = 0; i < len; i++) {
-        ushort c = StringGetCharacter(symbol, i);
-        bool unsafe = false;
-        switch(c) {
-            case '_':  case '|':  case ':':  case '/':  case '\\':
-            case ' ':  case '.':  case '*':  case '?':  case '<':
-            case '>':  case '"':  case '\'': case '-':
-                unsafe = true; break;
-        }
-        if(!unsafe) buf[outIdx++] = c;
-    }
-
-    string safe;
-    if(outIdx == 0) {
-        safe = "UNKNOWN";
-    } else {
-        safe = ShortArrayToString(buf, 0, outIdx);
-    }
+    string safe = symbol;
+    // Remove all unsafe characters via loop
+    static const string unsafeChars[] = {"_","|",":","/","\\", " ",".","*","?","<",">","\"","'","-"};
+    int numChars = ArraySize(unsafeChars);
+    for(int i = 0; i < numChars; i++)
+        StringReplace(safe, unsafeChars[i], "");
+    if(StringLen(safe) == 0) safe = "UNKNOWN";
     if(StringLen(safe) > 50) safe = StringSubstr(safe, 0, 50);
     s_cachedResult = safe;
     return safe;
-}
-
-//+------------------------------------------------------------------+
-//| Cleanup symbol-scoped GlobalVariables for a given symbol         |
-//| Called when the chart's symbol changes so stale price state      |
-//| from the previous symbol does not leak into the new symbol.      |
-//+------------------------------------------------------------------+
-void CleanupSymbolScopedGlobalVariables(const string symbol) {
-    if(StringLen(symbol) == 0) return;
-    string symbolName = SanitizeSymbolName(symbol);
-    GlobalVariableDel("TH3v1_CustomPrice_" + symbolName);
-    GlobalVariableDel("TH3v1_CustomPriceOverride_" + symbolName);
 }
 
 //+------------------------------------------------------------------+
@@ -316,22 +174,29 @@ void CleanupSymbolScopedGlobalVariables(const string symbol) {
 //+------------------------------------------------------------------+
 void CleanupAllGlobalVariables() {
     string chartIdStr = GetCachedChartIdStr();
-    string symbolName = SanitizeSymbolName(GetCachedSymbol());
+    string rawSymbolName = GetCachedSymbol();
+    string sanitizedSymbolName = SanitizeSymbolName(rawSymbolName);
     string gvars[];
-    ArrayResize(gvars, 13);
-    gvars[0]  = "TH3v1_isHidden_" + chartIdStr;
-    gvars[1]  = "TH3v1_CustomPrice_" + symbolName;
-    gvars[2]  = "TH3v1_LockTF_" + chartIdStr;
-    gvars[3]  = "TH3v1_LockTFPeriod_" + chartIdStr;
-    gvars[4]  = "TH3v1_TriggerLevels_" + chartIdStr;
-    gvars[5]  = "TH3v1_CustomPriceOverride_" + symbolName;
-    gvars[6]  = "TH3v1_StepMode_" + chartIdStr;
-    gvars[7]  = "TH3v1_Factor_" + chartIdStr;
-    gvars[8]  = "TH3v1_TH3Freq_" + chartIdStr;
-    gvars[9]  = "TH3v1_TH3FreqIdx_" + chartIdStr;
-    gvars[10] = "TH3v1_LinesVisible_" + chartIdStr;
-    gvars[11] = "TH3v1_ATRLabels_" + chartIdStr;
-    gvars[12] = "TH3v1_THLabels_" + chartIdStr;
+    ArrayResize(gvars, 19);
+    gvars[0]  = "Biotak_isHidden_" + chartIdStr;
+    gvars[1]  = "Biotak_CustomPrice_" + rawSymbolName;
+    gvars[2]  = "Biotak_LockTF_" + chartIdStr;
+    gvars[3]  = "Biotak_LockTFPeriod_" + chartIdStr;
+    gvars[4]  = "Biotak_TriggerLevels_" + chartIdStr;
+    gvars[5]  = "Biotak_CustomPriceOverride_" + rawSymbolName;
+    gvars[6]  = "Biotak_StepMode_" + chartIdStr;
+    gvars[7]  = "Biotak_Factor_" + chartIdStr;
+    gvars[8]  = "Biotak_TH3Freq_" + chartIdStr;
+    gvars[9]  = "Biotak_TH3FreqIdx_" + chartIdStr;
+    gvars[10] = "Biotak_LinesVisible_" + chartIdStr;
+    gvars[11] = "Biotak_ATRLabels_" + chartIdStr;
+    gvars[12] = "Biotak_THLabels_" + chartIdStr;
+    gvars[13] = "Biotak_LastTFSwitch_" + chartIdStr;
+    gvars[14] = "Biotak_BaseInit_" + chartIdStr;
+    gvars[15] = "Biotak_ATRWarmup_" + chartIdStr;
+    gvars[16] = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
+    gvars[17] = "Biotak_CustomPrice_" + sanitizedSymbolName;
+    gvars[18] = "Biotak_CustomPriceOverride_" + sanitizedSymbolName;
     for(int i = 0; i < ArraySize(gvars); i++) {
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }
