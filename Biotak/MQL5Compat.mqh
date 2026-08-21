@@ -103,6 +103,7 @@ struct ATRHandleCacheEntry {
 static ATRHandleCacheEntry g_atrHandleCache[];
 static int  g_atrHandleCacheCount = 0;
 static bool g_atrHandleCacheInitialized = false;
+static string g_atrSelectedSymbol = "";
 
 void InitATRHandleCache()
 {
@@ -122,15 +123,106 @@ void InitATRHandleCache()
 // before use).
 double iATRRatesFallback(string symbol, ENUM_TIMEFRAMES tf, int atrPeriod, int shift);
 
+// Fallback history cache. During MT5 handle warm-up, one weighted ATR needs
+// six periods for the same timeframe. Re-reading the same CopyRates block for
+// every period was the main startup cost (especially for W1/MN1). Keep one
+// shared history block and the already-computed period values; the formula is
+// unchanged and the cache is invalidated when the source timeframe advances.
+#define ATR_FALLBACK_CACHE_BASE_PERIOD 264
+#define ATR_FALLBACK_VALUE_SLOTS       8
+static MqlRates g_atrFallbackRates[];
+static string g_atrFallbackSymbol = "";
+static ENUM_TIMEFRAMES g_atrFallbackTimeframe = PERIOD_CURRENT;
+static int g_atrFallbackShift = -1;
+static int g_atrFallbackSourceBars = -1;
+static datetime g_atrFallbackLatestBar = 0;
+static int g_atrFallbackCopied = 0;
+static bool g_atrFallbackRatesValid = false;
+static int g_atrFallbackPeriods[ATR_FALLBACK_VALUE_SLOTS];
+static double g_atrFallbackValues[ATR_FALLBACK_VALUE_SLOTS];
+static bool g_atrFallbackValueValid[ATR_FALLBACK_VALUE_SLOTS];
+static int g_atrFallbackValueCount = 0;
+
+double CalculateATRFallbackFromRates(const MqlRates &rates[], const int copied,
+                                      const int atrPeriod, const int shift)
+{
+    if(atrPeriod <= 0 || shift < 0 || copied < atrPeriod + shift + 2)
+        return 0.0;
+
+    // Match the previous per-call CopyRates request. The shared cache may
+    // contain more history, but using this period's requested length keeps
+    // the seed and Wilder smoothing identical to the old calculation.
+    int requestedBars = MathMax(atrPeriod * 3, 60) + shift + 2;
+    int usableBars = (copied < requestedBars) ? copied : requestedBars;
+    if(usableBars < atrPeriod + shift + 2) return 0.0;
+
+    // TR[i] = max(high-low, |high-prevClose|, |low-prevClose|),
+    // prevClose = rates[i+1].close. Initial ATR is the simple average of
+    // the oldest computable TRs, followed by Wilder smoothing.
+    int anchor = usableBars - 2;
+    double sum = 0.0;
+    for(int i = 0; i < atrPeriod; i++) {
+        int idx = anchor - i;
+        double tr = rates[idx].high - rates[idx].low;
+        double hc = MathAbs(rates[idx].high - rates[idx + 1].close);
+        if(hc > tr) tr = hc;
+        double lc = MathAbs(rates[idx].low - rates[idx + 1].close);
+        if(lc > tr) tr = lc;
+        sum += tr;
+    }
+
+    double atr = sum / atrPeriod;
+    for(int idx = anchor - 1; idx >= shift; idx--) {
+        double tr = rates[idx].high - rates[idx].low;
+        double hc = MathAbs(rates[idx].high - rates[idx + 1].close);
+        if(hc > tr) tr = hc;
+        double lc = MathAbs(rates[idx].low - rates[idx + 1].close);
+        if(lc > tr) tr = lc;
+        atr = (atr * (atrPeriod - 1) + tr) / atrPeriod;
+    }
+    return atr;
+}
+
+int FindATRFallbackValueSlot(const int atrPeriod)
+{
+    for(int i = 0; i < g_atrFallbackValueCount; i++) {
+        if(g_atrFallbackPeriods[i] == atrPeriod) return i;
+    }
+    if(g_atrFallbackValueCount >= ATR_FALLBACK_VALUE_SLOTS) return -1;
+    int slot = g_atrFallbackValueCount++;
+    g_atrFallbackPeriods[slot] = atrPeriod;
+    g_atrFallbackValues[slot] = 0.0;
+    g_atrFallbackValueValid[slot] = false;
+    return slot;
+}
+
+void ResetATRFallbackCache()
+{
+    g_atrFallbackRatesValid = false;
+    g_atrFallbackSymbol = "";
+    g_atrFallbackTimeframe = PERIOD_CURRENT;
+    g_atrFallbackShift = -1;
+    g_atrFallbackSourceBars = -1;
+    g_atrFallbackLatestBar = 0;
+    g_atrFallbackCopied = 0;
+    g_atrFallbackValueCount = 0;
+    ArrayFree(g_atrFallbackRates);
+}
+
 double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
 {
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = (int)Period();
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
-    if(!SymbolSelect(symbol, true)) {
-        LOG_E(LOG_CAT_ATR, "iATRMQL4: symbol is not selectable " + symbol);
-        return 0.0;
+    // SymbolSelect is a terminal-side operation; do it once per symbol rather
+    // than once for every period in the six-period weighted ATR batch.
+    if(g_atrSelectedSymbol != symbol) {
+        if(!SymbolSelect(symbol, true)) {
+            LOG_E(LOG_CAT_ATR, "iATRMQL4: symbol is not selectable " + symbol);
+            return 0.0;
+        }
+        g_atrSelectedSymbol = symbol;
     }
 
     int bars = iBars(symbol, timeframe);
@@ -228,37 +320,60 @@ double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrP
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
-    // Wilder's ATR converges after ~3x the period; request extra headroom.
-    int needBars = MathMax(atrPeriod * 3, 60) + shift + 2;
-    MqlRates rates[];
-    ArraySetAsSeries(rates, true);
-    int copied = CopyRates(symbol, tf, 0, needBars, rates);
-    if(copied < atrPeriod + shift + 2) return 0.0; // not enough data yet
+    // Shift 0 includes the forming candle and therefore must remain live.
+    // The weighted ATR path requests shift 1, which is stable until a new bar.
+    if(shift != 1) {
+        int needBars = MathMax(atrPeriod * 3, 60) + shift + 2;
+        MqlRates rates[];
+        ArraySetAsSeries(rates, true);
+        int copied = CopyRates(symbol, tf, 0, needBars, rates);
+        return CalculateATRFallbackFromRates(rates, copied, atrPeriod, shift);
+    }
 
-    // TR[i] = max(high-low, |high-prevClose|, |low-prevClose|), prevClose = rates[i+1]
-    // Initial ATR = simple average of the `atrPeriod` oldest computable TRs,
-    // then Wilder smoothing toward the requested shift (0 = forming bar).
-    int anchor = copied - 2; // oldest bar with a computable TR
-    double sum = 0.0;
-    for(int i = 0; i < atrPeriod; i++) {
-        int idx = anchor - i;
-        double tr = rates[idx].high - rates[idx].low;
-        double hc = MathAbs(rates[idx].high - rates[idx + 1].close);
-        if(hc > tr) tr = hc;
-        double lc = MathAbs(rates[idx].low - rates[idx + 1].close);
-        if(lc > tr) tr = lc;
-        sum += tr;
+    int sourceBars = iBars(symbol, tf);
+    datetime latestBar = iTime(symbol, tf, 0);
+    int requiredForCache = MathMax(atrPeriod * 3,
+                                   ATR_FALLBACK_CACHE_BASE_PERIOD * 3) + shift + 2;
+    bool cacheMatches = (g_atrFallbackRatesValid &&
+                         g_atrFallbackSymbol == symbol &&
+                         g_atrFallbackTimeframe == tf &&
+                         g_atrFallbackShift == shift &&
+                         g_atrFallbackSourceBars == sourceBars &&
+                         g_atrFallbackLatestBar == latestBar &&
+                         (g_atrFallbackCopied >= requiredForCache ||
+                          sourceBars <= g_atrFallbackCopied));
+
+    if(!cacheMatches) {
+        ArrayResize(g_atrFallbackRates, requiredForCache);
+        ArraySetAsSeries(g_atrFallbackRates, true);
+        int copied = CopyRates(symbol, tf, 0, requiredForCache, g_atrFallbackRates);
+        if(copied <= 0) {
+            ResetATRFallbackCache();
+            return 0.0;
+        }
+
+        g_atrFallbackSymbol = symbol;
+        g_atrFallbackTimeframe = tf;
+        g_atrFallbackShift = shift;
+        g_atrFallbackSourceBars = sourceBars;
+        g_atrFallbackLatestBar = latestBar;
+        g_atrFallbackCopied = copied;
+        g_atrFallbackRatesValid = true;
+        g_atrFallbackValueCount = 0;
     }
-    double atr = sum / atrPeriod;
-    for(int idx = anchor - 1; idx >= shift; idx--) {
-        double tr = rates[idx].high - rates[idx].low;
-        double hc = MathAbs(rates[idx].high - rates[idx + 1].close);
-        if(hc > tr) tr = hc;
-        double lc = MathAbs(rates[idx].low - rates[idx + 1].close);
-        if(lc > tr) tr = lc;
-        atr = (atr * (atrPeriod - 1) + tr) / atrPeriod;
+
+    int slot = FindATRFallbackValueSlot(atrPeriod);
+    if(slot >= 0 && g_atrFallbackValueValid[slot])
+        return g_atrFallbackValues[slot];
+
+    double result = CalculateATRFallbackFromRates(g_atrFallbackRates,
+                                                   g_atrFallbackCopied,
+                                                   atrPeriod, shift);
+    if(slot >= 0) {
+        g_atrFallbackValues[slot] = result;
+        g_atrFallbackValueValid[slot] = true;
     }
-    return atr;
+    return result;
 }
 
 void ReleaseATRHandleCache()
@@ -270,6 +385,8 @@ void ReleaseATRHandleCache()
         }
     }
     g_atrHandleCacheCount = 0;
+    g_atrSelectedSymbol = "";
+    ResetATRFallbackCache();
 }
 
 #define iATR iATRMQL4

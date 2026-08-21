@@ -75,8 +75,11 @@ struct ATRCacheEntry {
 struct ATRMultiTFCache {
     ENUM_TIMEFRAMES timeframe;   // Timeframe enum
     double atrValue;             // Cached ATR value
-    datetime lastUpdate;         // Last update time
+    datetime lastUpdate;         // Last successful update time
     int lastBarCount;            // Bar count at last update
+    datetime lastAttempt;         // Last failed/pending calculation attempt
+    int lastAttemptBarCount;      // Bar count at last attempt
+    bool attemptRecorded;         // Prevents repeated work while data is pending
     bool valid;                  // Is cache valid?
 };
 
@@ -108,6 +111,9 @@ void InitializeATRCache() {
         g_multiTFCache[i].atrValue = 0.0;
         g_multiTFCache[i].lastUpdate = 0;
         g_multiTFCache[i].lastBarCount = 0;
+        g_multiTFCache[i].lastAttempt = 0;
+        g_multiTFCache[i].lastAttemptBarCount = 0;
+        g_multiTFCache[i].attemptRecorded = false;
         g_multiTFCache[i].valid = false;
     }
     g_multiTFCacheCount = 0;
@@ -561,6 +567,11 @@ void CalculateATRFractalValues(double &structureValue, double &patternValue, dou
     }
 }
 
+// Pending/failed ATR calculations are retried periodically because MT5
+// history may still be downloading. Keep the retry path cheap between polls.
+#define ATR_PENDING_RETRY_SECONDS 1
+void MarkATRCalculationAttempt(const ENUM_TIMEFRAMES tf, const int barCount);
+
 //+------------------------------------------------------------------+
 //| Get ATR for Specific Timeframe (with direct calculation)         |
 //|        ATR                     (                      )          |
@@ -649,6 +660,26 @@ double GetATRForTimeframe(const int targetMinutes) {
     }
     
     double result = 0.0;
+    ENUM_TIMEFRAMES cacheTF = (targetTF != PERIOD_CURRENT) ?
+                              targetTF : (ENUM_TIMEFRAMES)targetMinutes;
+    int currentBars = iBars(Symbol(), cacheTF);
+
+    // A timeframe with insufficient history can return zero while its MT5
+    // handle is still warming up. Do not repeat six handle/rates operations
+    // every tick or timer cycle; retry after a short interval or a history
+    // change.
+    if(g_multiTFCacheInitialized) {
+        for(int i = 0; i < g_multiTFCacheCount; i++) {
+            if(g_multiTFCache[i].timeframe == cacheTF &&
+               !g_multiTFCache[i].valid &&
+               g_multiTFCache[i].attemptRecorded &&
+               g_multiTFCache[i].lastAttemptBarCount == currentBars &&
+               currentTime - g_multiTFCache[i].lastAttempt < ATR_PENDING_RETRY_SECONDS) {
+                return 0.0;
+            }
+        }
+        MarkATRCalculationAttempt(cacheTF, currentBars);
+    }
     
     if(targetTF == PERIOD_CURRENT) {
         // Truly unknown/custom timeframe - use scaling method as last resort
@@ -670,7 +701,7 @@ double GetATRForTimeframe(const int targetMinutes) {
     
     // Update cache
     if(g_multiTFCacheInitialized && !IsZero(result, EPSILON_PRICE)) {
-        UpdateMultiTFCache(targetTF != PERIOD_CURRENT ? targetTF : (ENUM_TIMEFRAMES)targetMinutes, result, iBars(Symbol(), targetTF));
+        UpdateMultiTFCache(cacheTF, result, currentBars);
     }
     
     return result;
@@ -720,7 +751,42 @@ void UpdateMultiTFCache(const ENUM_TIMEFRAMES tf, const double atrValue, const i
         g_multiTFCache[targetIndex].atrValue = atrValue;
         g_multiTFCache[targetIndex].lastUpdate = currentTime;
         g_multiTFCache[targetIndex].lastBarCount = barCount;
+        g_multiTFCache[targetIndex].lastAttempt = currentTime;
+        g_multiTFCache[targetIndex].lastAttemptBarCount = barCount;
+        g_multiTFCache[targetIndex].attemptRecorded = true;
         g_multiTFCache[targetIndex].valid = true;
+    }
+}
+
+// Record a zero/pending attempt without marking the value as valid. This uses
+// the same small cache so a missing long-timeframe history cannot trigger a
+// full six-period recalculation on every one-second timer event.
+void MarkATRCalculationAttempt(const ENUM_TIMEFRAMES tf, const int barCount)
+{
+    if(!g_multiTFCacheInitialized) InitializeATRCache();
+
+    datetime currentTime = TimeCurrent();
+    int targetIndex = -1;
+    for(int i = 0; i < g_multiTFCacheCount; i++) {
+        if(g_multiTFCache[i].timeframe == tf) {
+            targetIndex = i;
+            break;
+        }
+    }
+
+    if(targetIndex < 0 && g_multiTFCacheCount < MAX_TF_CACHE_SIZE) {
+        targetIndex = g_multiTFCacheCount++;
+        g_multiTFCache[targetIndex].timeframe = tf;
+        g_multiTFCache[targetIndex].atrValue = 0.0;
+        g_multiTFCache[targetIndex].lastUpdate = 0;
+        g_multiTFCache[targetIndex].lastBarCount = 0;
+        g_multiTFCache[targetIndex].valid = false;
+    }
+
+    if(targetIndex >= 0 && targetIndex < MAX_TF_CACHE_SIZE) {
+        g_multiTFCache[targetIndex].lastAttempt = currentTime;
+        g_multiTFCache[targetIndex].lastAttemptBarCount = barCount;
+        g_multiTFCache[targetIndex].attemptRecorded = true;
     }
 }
 
@@ -744,8 +810,9 @@ void InvalidateATRCache() {
     
     // AUDIT FIX: Invalidate multi-TF cache
     for(int i = 0; i < g_multiTFCacheCount; i++) {
-        if(g_multiTFCache[i].valid) {
+        if(g_multiTFCache[i].valid || g_multiTFCache[i].attemptRecorded) {
             g_multiTFCache[i].valid = false;
+            g_multiTFCache[i].attemptRecorded = false;
             #ifdef ENABLE_DEBUG_LOGS
             invalidatedCount++;
             #endif
