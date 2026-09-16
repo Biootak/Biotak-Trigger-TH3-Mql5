@@ -113,3 +113,6 @@ PERSISTENT_STORAGE_SUMMARY.md
 !WARP.md
 
 .kiro/
+# Shared source of truth (junctions into Biotak-Trigger-TH3-mql4)
+/Biotak/
+/Files/

@@ -1,26 +1,93 @@
-# Repository Guidelines
+# AGENTS.md — Biotak Trigger TH3 (MQL5 mirror)
 
-## Project Structure & Module Organization
-This repository contains an MT5 custom indicator for Biotak Trigger TH3. The main entry points are `Biotak Trigger TH3.mq5` and `Biotak Trigger TH3 Lite.mq5` at the repository root. Shared MQL5 modules live in `Biotak/` as `.mqh` files, grouped by responsibility such as calculation (`THCalculations.mqh`, `ATRCalculations.mqh`), rendering (`ZoneRenderer.mqh`, `DrawingPipeline.mqh`), state (`GlobalVariables.mqh`, `ObjectCache.mqh`), and event handling (`EventHandlers.mqh`). Documentation and analysis notes are in `docs/` and root Markdown files. Build outputs (`*.ex5`) and logs in `build-logs/` are generated artifacts.
+MT5 build of the Biotak Trigger TH3 indicator (Prof. Khakestar's TH levels).
+This repository is a **shell, not a fork**. The product code lives in the MQL4
+repository and is compiled by both terminals.
 
-## Build, Test, and Development Commands
-Use PowerShell from the repository root.
+## The one rule
 
-- `.\compile-th3.ps1` compiles the default workspace indicator.
-- `.\compile-th3.ps1 -Project all` compiles workspace and installed variants.
-- `.\compile-th3.ps1 -SourceFile "C:\path\to\file.mq5"` compiles a specific source file.
-- `.\compile-th3.ps1 -PrintLog $true -LogTailLines 120` prints the latest compile diagnostics.
+`Biotak/` is a **directory junction** into `../Biotak-Trigger-TH3-mql4/Biotak`.
+It is gitignored and must never be replaced by a copy. Both the MT4 and the MT5
+entry include the same 65 `.mqh` files, so the two platforms cannot drift: there
+is no second source to fall out of date. `Files/` is a junction to the same
+repository's icon assets for the same reason.
 
-Set `MT5_METAEDITOR` and `MT5_MQL5_DIR` if the script cannot auto-detect MetaEditor or the terminal MQL5 directory.
+Corollary: **never edit a module through this path.** An edit made here is an
+edit to the MT4 source, on a tree that may carry unrelated work in progress.
+Change `Biotak-Trigger-TH3-mql4/Biotak/*.mqh`, then rebuild both terminals.
 
-## Coding Style & Naming Conventions
-Follow existing MQL5 style. Use PascalCase for functions and module-level concepts, descriptive globals matching current `g_` patterns, and uppercase constants/enums where already established. Keep `.mqh` files focused on one domain and include only the dependencies they need. Prefer explicit bounds checks, clear error logging, and existing helpers over duplicating utility logic. Keep comments short and useful for trading logic, formula assumptions, or non-obvious platform behavior.
+## Layout
 
-## Testing Guidelines
-There is no standalone automated test suite. Treat a clean MetaEditor compile as the minimum validation step. For behavior changes, attach the compiled indicator in MT5 and verify chart rendering, timeframe changes, object cleanup, alerts, and runtime logs. Check `build-logs/` after compilation for warnings, errors, and runtime snapshots.
+- Entries: `Biotak Trigger TH3.mq5` (Full), `Biotak Trigger TH3 Lite.mq5`
+  (`#define BUILD_LITE` inside it). Both mirror their `.mq4` twin line for line:
+  same include order, same five handlers, same `P4Report*` ledgers, same UI-kit
+  half (`InitializeUIStates` / `InitializeBiotakKit` / `InitializeHTFCandles` /
+  `CreateMenu`, and the matching teardown).
+- `MT5Compat/MQL5Compat.mqh` — the **only** MT5-specific source. Every MQL4 API
+  the shared modules use is bridged here. Included immediately after
+  `Logger.mqh` and before every shared module.
+- `_retired/mql5-biotak-aug21/` — the stale divergent copy this repository used
+  to carry (frozen 2026-08-21). Kept for reference; never included.
+- `tools/mt5-build.ps1` — MetaEditor compile helper. `tools/check-pp-balance.py`
+  and `tools/pp-trace.py` — preprocessor balance checks (see below).
 
-## Commit & Pull Request Guidelines
-Recent history uses short messages plus conventional prefixes, for example `fix: enhance ATR fallback...`, `refactor: use built-in PeriodMinutes()...`, and `fix(visibility): ...`. Prefer `type(scope): summary` when practical. Pull requests should include the changed indicator/module area, compile results, manual MT5 validation notes, and screenshots or log excerpts for visual or runtime behavior changes.
+## Build
 
-## Agent-Specific Instructions
-Do not overwrite user work in modified `.mq5` or `.mqh` files. Before editing shared modules, inspect current includes and call sites with `rg`. Keep generated files, build logs, and compiled `.ex5` updates separate from source changes unless explicitly requested.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 -Source "Biotak Trigger TH3.mq5"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 -Source "Biotak Trigger TH3 Lite.mq5"
+# MT4 regression check (mandatory after any shared-module edit)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 `
+  -Source "..\Biotak-Trigger-TH3-mql4\Biotak Trigger TH3.mq4" `
+  -Compiler "C:\Program Files (x86)\RoboForex MT4 Terminal\metaeditor.exe"
+```
+
+Success = `Result: 0 errors` in `build-logs/`. **Both entries and both
+platforms must be green.** `compile-th3.ps1` also works but calls `Start-Process`
+without quoting, so paths containing spaces break it; `tools/mt5-build.ps1`
+quotes them and drops the duplicate `http_proxy`/`HTTP_PROXY` environment entry
+that makes `Start-Process` throw on this machine.
+
+Before compiling: the 244 icons must exist in the terminal data folder under
+`MQL5\Files\Icons` (253 `#resource "\\Files\\Icons\\*.bmp"` directives resolve
+there at compile time; the bytes are then embedded in the `.ex5`).
+
+## MT5 traps found the hard way
+
+- **A missing `#endif` is fatal here.** `ExtendedDrawingFunctions.mqh` shipped
+  with an unclosed `#ifndef EXTENDED_DRAWING_FUNCTIONS_MQH`; the MT4 compiler
+  auto-closes at EOF, MT5 reports `error 372` and then cascades **244 spurious
+  `invalid resource path` errors** on top. Always run `tools/check-pp-balance.py`
+  over `Biotak/*.mqh` before blaming a resource.
+- **`#define Bars <var>` clobbers the built-in `Bars(symbol, timeframe)`.** The
+  MQL4 predefined-array emulation defines `Bars`; every *function-form* call in
+  the shared source must therefore be written `iBars(...)`, which is valid on
+  both platforms.
+- **A one-parameter macro also matches an empty argument list.** `#define
+  PeriodSeconds(tf) …` rewrites the zero-argument `PeriodSeconds()` into
+  `PeriodSeconds((ENUM_TIMEFRAMES)())`. Do not define it; cast at the call site.
+- **`StringTrimLeft`/`StringTrimRight` differ in *meaning*, not just signature.**
+  MQL4 returns the trimmed string; MQL5 returns the number of characters removed
+  and trims in place. The shared source uses the MQL4 return-value form in eight
+  places, so `MQL5Compat.mqh` re-points the names at string-returning helpers.
+  Proven by compiling both forms against the MT4 compiler (`int n = …` warns
+  180, `string r = …` is clean).
+- **`int` timeframes need explicit casts.** `iBarShift`, `CopyTime`,
+  `PeriodSeconds` and `ObjectCreate`'s type argument accept a raw `int` in MQL4
+  and require `ENUM_TIMEFRAMES` / `ENUM_OBJECT` in MQL5. Cast at the call site
+  so both compilers accept the same line.
+- **MT5 additions to the entries are unavoidable and are marked `MT5-ONLY`:**
+  `ArraySetAsSeries` on the `OnCalculate` arrays, and `CompatRefreshChartData()`
+  in `OnCalculate`/`OnTimer` to feed the `Time[]/Open[]/…/Bars` emulation.
+  Nothing else in the entries is platform-specific.
+
+## Working rules
+
+- `git status` first. In *this* repository the tree is expected to be clean; in
+  the MT4 repository it often is not, so never commit shared-module edits from
+  here — hand them to the MT4 working session.
+- One user request = one commit. `feat(scope): …`, `fix(scope): …`.
+  Never commit `.ex5`, `build-logs/`, or the junction contents.
+- Performance law is inherited unchanged from the MT4 repository: never write a
+  chart property you would not change, teardown/show-hide are bulk operations,
+  every saver writes through a shadow, one `GlobalVariablesFlush` only.
