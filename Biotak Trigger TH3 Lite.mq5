@@ -212,6 +212,13 @@ void OnTimer()
     // MT5-ONLY: keep the MQL4 series-array emulation live on a tick-less chart.
     CompatRefreshChartData();
 
+    // MT5-ONLY: drive a staged rebuild DIRECTLY, never only through the pump -
+    // see the full note in "Biotak Trigger TH3.mq5". A starved rebuild is an
+    // empty chart after a timeframe switch; the frame's own gate still spaces
+    // the stages. Cost when nothing stages: one int compare.
+    if(g_buildStage != 0)
+        RedrawAllObjects(false);
+
     // FIX: If indicator is not yet fully initialized (e.g. waiting for history),
     // retry drawing periodically even without new ticks.
     // P-PERF-06: a staged post-wipe rebuild (attach / TF switch / topology

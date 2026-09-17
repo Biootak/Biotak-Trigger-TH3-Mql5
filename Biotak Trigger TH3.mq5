@@ -417,6 +417,17 @@ void OnTimer()
     // one is a bool read.
     MT5PrimitiveProbeRunOnce();
 
+    // MT5-ONLY: drive a staged rebuild DIRECTLY, never only through the pump.
+    // A post-wipe/post-switch rebuild (LINES->ZONES->LABELS->BLOCK) is the
+    // progress-maker: owed solely to CoopPump it runs last under a 12 ms slice
+    // on 15.6 ms-tick timing, and on a slow chart the three re-owed sweeps can
+    // starve it past every 250 ms tick - the chart then sits empty after a
+    // timeframe switch. The frame's own 60 ms gate still spaces the stages, so
+    // this only guarantees the call happens; the pump's pass right below then
+    // hits that gate and returns. Cost when nothing stages: one int compare.
+    if(g_buildStage != 0)
+        RedrawAllObjects(false);
+
     // P-PERF-16: the 250 ms safety refresh behind the cached UI metrics. Resizing
     // the chart also fires a chart-change event (which invalidates immediately);
     // this line covers a missed notification and costs two terminal reads per
