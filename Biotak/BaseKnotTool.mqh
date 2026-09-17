@@ -3615,7 +3615,7 @@ bool BaseKnotDotFollow(const string pfx, const datetime t1, const datetime t2,
 // of BK_GRIP_PX and re-adding the /2 offsets at the two PX sites.
 #define BK_GRIP_GLYPH   "○"          // U+25CB — hollow circle, in Arial on every Windows terminal
 #define BK_GRIP_FONT    "Arial Bold" // Bold = a ~2 px ring, like TradingView's own handles
-#define BK_GRIP_FONTSZ  16           // pt — clearly bigger than the old 9 px squares
+#define BK_GRIP_FONTSZ  20           // pt — chunky like TradingView's own handles (user: «کوچیک هم هستش»)
 #define BK_GRIP_BLUE    C'41,98,255' // TradingView blue
 #define BK_GRIP_COUNT 4   // BKMIDGRIP-OFF: the four corners. The count lives HERE so a
                           // restore is one number, and every sweep asks it, never an 8
@@ -3913,7 +3913,9 @@ bool BaseKnotSelectionMarkersWipe(const string id)
 //| can restyle. What an indicator CAN do is paint OVER them: a       |
 //| screen object sits above the whole chart layer (P-BK-59's ladder),|
 //| so a hollow blue circle bigger than the terminal's marker covers  |
-//| it whole. This keeper does exactly that for every SELECTED,      |
+//| it whole — over an opaque WHITE disc, so the marker can never     |
+//| show through the middle (the TradingView handle, pixel for pixel).|
+//| This keeper does exactly that for every SELECTED,                 |
 //| non-BK OBJ_TREND on the chart (plain trendlines first — rays and  |
 //| segments carry the same two anchors): two big end circles + one   |
 //| smaller middle circle, the TradingView selection look.            |
@@ -3934,15 +3936,27 @@ bool BaseKnotSelectionMarkersWipe(const string id)
 //| never walks the chart.                                            |
 //+------------------------------------------------------------------+
 #define TVH_TAG "TVH_"
-#define TVH_MID_FONTSZ 11   // the middle cover reads smaller, like TradingView's own
+#define TVH_MID_FONTSZ 13   // the middle cover reads smaller, like TradingView's own
+#define TVH_WHITE_SHRINK 3  // the white underlay is one step smaller, so no white fringe leaks past the ring
+#define TVH_WHITE C'255,255,255'
+#define BK_GRIP_GLYPH_FILL "●"   // U+25CF — the opaque white underlay (TV handles are white-filled, not transparent)
 static string s_tvhNames[]; // overlay covers created this attach (the sweep's whole world)
 static bool   s_tvhSwept = false;
+string TVHBase(const string trend)
+{
+   string t = trend;
+   if(StringLen(t) > 40) t = StringSubstr(t, 0, 40);   // object-name budget; the registry sweep below makes a collision harmless
+   return t;
+}
 string TVHOverlayName(const string trend, const int k)
 {
    if(StringLen(inpObjectPrefix) == 0 || trend == "") return "";
-   string t = trend;
-   if(StringLen(t) > 40) t = StringSubstr(t, 0, 40);   // object-name budget; the registry sweep below makes a collision harmless
-   return inpObjectPrefix + TVH_TAG + t + "_" + IntegerToString(k);
+   return inpObjectPrefix + TVH_TAG + TVHBase(trend) + "_" + IntegerToString(k);
+}
+string TVHWhiteName(const string trend, const int k)   // the opaque underlay of the same anchor
+{
+   if(StringLen(inpObjectPrefix) == 0 || trend == "") return "";
+   return inpObjectPrefix + TVH_TAG + TVHBase(trend) + "_W" + IntegerToString(k);
 }
 void TVHRegister(const string nm)
 {
@@ -3963,12 +3977,21 @@ void TVHUnregister(const string nm)
    }
 }
 // The trendline one cover belongs to — "" when the name is not ours.
+// Handles both layers: "..._<k>" (ring) and "..._W<k>" (white underlay).
 string TVHCoverTrend(const string nm)
 {
    string tag = inpObjectPrefix + TVH_TAG;
    if(StringLen(inpObjectPrefix) == 0 || StringFind(nm, tag) != 0) return "";
-   if(StringLen(nm) <= StringLen(tag) + 2) return "";
-   return StringSubstr(nm, StringLen(tag), StringLen(nm) - StringLen(tag) - 2);   // drop head + "_k"
+   int tail = StringLen(nm) - 1;                                  // the digit
+   if(tail - 1 >= StringLen(tag) && StringSubstr(nm, tail - 1, 1) == "W") tail--;   // white layer: drop the W too
+   if(tail - 1 < StringLen(tag) || StringSubstr(nm, tail - 1, 1) != "_") return "";
+   return StringSubstr(nm, StringLen(tag), tail - 1 - StringLen(tag));
+}
+// Delete + unregister ONE cover name. true = it deleted something.
+bool TVHDropCover(const string nm)
+{
+   if(nm != "" && ObjectFind(0, nm) >= 0) { ObjectDelete(0, nm); TVHUnregister(nm); return true; }
+   return false;
 }
 bool TVHCoverAlive(const string nm)
 {
@@ -3977,49 +4000,53 @@ bool TVHCoverAlive(const string nm)
    if(ObjectGetInteger(0, trend, OBJPROP_TYPE) != OBJ_TREND) return false;
    return (bool)ObjectGetInteger(0, trend, OBJPROP_SELECTED);
 }
-void TVHCoverCreate(const string name, const int fontSz, const long tfMask)
+void TVHCoverCreate(const string name, const string glyph, const int fontSz,
+                      const color clr, const int zord, const long tfMask)
 {
    if(ObjectFind(0, name) < 0) ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);   // XDISTANCE/YDISTANCE ARE the anchor
-   ObjectSetString(0, name, OBJPROP_TEXT, BK_GRIP_GLYPH);
+   ObjectSetString(0, name, OBJPROP_TEXT, glyph);
    ObjectSetString(0, name, OBJPROP_FONT, BK_GRIP_FONT);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSz);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, BK_GRIP_BLUE);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);   // the LINE is the handle — covers never intercept
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);        // no object-list clutter
-   ObjectSetInteger(0, name, OBJPROP_ZORDER, Z_BOX_GRIP);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, zord);
    ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tfMask);
    ObjectSetString(0, name, OBJPROP_TOOLTIP,
                    "Trendline selection cover (P-BK-69): MetaTrader's own anchor square hides under this " +
                    "TradingView-style circle — drag the LINE, never the circle");
    TVHRegister(name);
 }
-// Keep / place / retire ONE cover. true = wrote something (caller owes paint).
-bool TVHCoverPlace(const string name, const int cx, const int cy, const int fontSz, const long tfMask)
+// Keep / place / retire ONE cover layer. true = wrote something (caller owes paint).
+bool TVHCoverPlace(const string name, const int cx, const int cy, const string glyph, const int fontSz,
+                   const color clr, const int zord, const long tfMask)
 {
    if(name == "") return false;
    if(ObjectFind(0, name) < 0 || ObjectGetInteger(0, name, OBJPROP_TYPE) != OBJ_LABEL)
    {
       if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
-      TVHCoverCreate(name, fontSz, tfMask);
+      TVHCoverCreate(name, glyph, fontSz, clr, zord, tfMask);
       ObjectSetInteger(0, name, OBJPROP_XDISTANCE, cx);
       ObjectSetInteger(0, name, OBJPROP_YDISTANCE, cy);
       return true;
    }
    bool wrote = false;
-   if(ObjectGetString(0, name, OBJPROP_TEXT) != BK_GRIP_GLYPH ||
+   if(ObjectGetString(0, name, OBJPROP_TEXT) != glyph ||
       ObjectGetString(0, name, OBJPROP_FONT) != BK_GRIP_FONT ||
       (int)ObjectGetInteger(0, name, OBJPROP_FONTSIZE) != fontSz ||
-      (color)ObjectGetInteger(0, name, OBJPROP_COLOR) != BK_GRIP_BLUE ||
-      (int)ObjectGetInteger(0, name, OBJPROP_ANCHOR) != ANCHOR_CENTER)
+      (color)ObjectGetInteger(0, name, OBJPROP_COLOR) != clr ||
+      (int)ObjectGetInteger(0, name, OBJPROP_ANCHOR) != ANCHOR_CENTER ||
+      (int)ObjectGetInteger(0, name, OBJPROP_ZORDER) != zord)
    {
-      ObjectSetString(0, name, OBJPROP_TEXT, BK_GRIP_GLYPH);
+      ObjectSetString(0, name, OBJPROP_TEXT, glyph);
       ObjectSetString(0, name, OBJPROP_FONT, BK_GRIP_FONT);
       ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSz);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, BK_GRIP_BLUE);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
       ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
+      ObjectSetInteger(0, name, OBJPROP_ZORDER, zord);
       wrote = true;
    }
    if((long)ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES) != tfMask)
@@ -4059,10 +4086,12 @@ bool TVHFollowOne(const string trend)
    for(int k = 0; k < 3; k++)
    {
       string nm = TVHOverlayName(trend, k);
-      if(nm == "") continue;
-      if(!want)   // deselected / deleted / never coverable — the orphan path
+      string nw = TVHWhiteName(trend, k);
+      if(nm == "" || nw == "") continue;
+      if(!want)   // deselected / deleted / never coverable — the orphan path drops BOTH layers
       {
-         if(ObjectFind(0, nm) >= 0) { ObjectDelete(0, nm); TVHUnregister(nm); wrote = true; }
+         if(TVHDropCover(nm)) wrote = true;
+         if(TVHDropCover(nw)) wrote = true;
          continue;
       }
       int cx = 0, cy = 0; bool place = false;
@@ -4081,10 +4110,16 @@ bool TVHFollowOne(const string trend)
       }
       if(!place)
       {
-         if(ObjectFind(0, nm) >= 0) { ObjectDelete(0, nm); TVHUnregister(nm); wrote = true; }
+         if(TVHDropCover(nm)) wrote = true;
+         if(TVHDropCover(nw)) wrote = true;
          continue;
       }
-      if(TVHCoverPlace(nm, cx, cy, fsz, tfMask)) wrote = true;
+      // White opaque disc FIRST (below), blue ring on top: the terminal's own square
+      // can never show through the middle — the TradingView look, pixel for pixel.
+      if(TVHCoverPlace(nw, cx, cy, BK_GRIP_GLYPH_FILL, fsz - TVH_WHITE_SHRINK,
+                       TVH_WHITE, Z_BOX_DOT, tfMask)) wrote = true;
+      if(TVHCoverPlace(nm, cx, cy, BK_GRIP_GLYPH, fsz,
+                       BK_GRIP_BLUE, Z_BOX_GRIP, tfMask)) wrote = true;
    }
    return wrote;
 }
@@ -4107,12 +4142,21 @@ void TVHPump()
       wrote = true;
    }
    int total = ObjectsTotal(0, -1, OBJ_TREND);   // MT5-only type filter (see P-BK-69)
+   bool anySel = false;
    for(int i = 0; i < total; i++)
    {
       string nm = ObjectName(0, i, -1, OBJ_TREND);
       if(nm == "" || StringFind(nm, inpObjectPrefix) == 0) continue;   // ours need no covers
       if(!(bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED)) continue;   // one read; unselected is the common case
+      anySel = true;
       if(TVHFollowOne(nm)) wrote = true;
+   }
+   // Diag, once per attach: proves THIS build is the one running (Experts log).
+   static bool s_tvhLogged = false;
+   if(anySel && !s_tvhLogged)
+   {
+      s_tvhLogged = true;
+      Print("[TVH] circle covers ON for selected native trendlines (P-BK-69)");
    }
    for(int r = ArraySize(s_tvhNames) - 1; r >= 0; r--)   // orphans the scan above no longer feeds
    {
