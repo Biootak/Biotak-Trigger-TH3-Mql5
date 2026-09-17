@@ -113,9 +113,9 @@ PERSISTENT_STORAGE_SUMMARY.md
 !WARP.md
 
 .kiro/
-# Shared source of truth (junctions into Biotak-Trigger-TH3-mql4)
-/Biotak/
-/Files/
+# NOTE (2026-09-17): Biotak/ and Files/ used to be junctions into
+# Biotak-Trigger-TH3-mql4 and were gitignored. The projects are separated now:
+# this repo owns its copies, so they MUST be tracked. Do not re-ignore them.
 
 # Agent workspace data (memory, skills) - not product code
 .workbuddy-ai/
