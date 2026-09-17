@@ -274,12 +274,25 @@ SZoneCreationResult CreateZone(const SZoneCreationRequest &request)
         
         int startIndex = safeBars - 1;
         startTime = Time[startIndex];
-        
+
         if(startTime <= 0) {
             result.errorMessage = StringFormat("Invalid Time[%d]", startIndex);
             result.errorCode = ERR_ZONE_RENDER_FAILED;
             return result;
         }
+
+        // MT5-ONLY RENDER GUARD (proven 2026-09-17 by ZonePaintTest): a band
+        // anchored decades off-screen does not paint at all - same prices,
+        // same fill/back/zorder, same mask; anchored 1971 it is invisible,
+        // anchored 2020 it paints. Feeds with synthetic pre-history (this
+        // terminal's W1 starts 1971) therefore lose every zone band while MT4
+        // (history from 1999) keeps them. Clamp the auto anchor to the last
+        // 10 years: prices, extent and history are untouched, only the band's
+        // left edge moves, and ordinary histories never reach the clamp.
+        // Stable per bar (currentTime is the forming bar's open), so no
+        // per-tick churn: one rewrite when the clamp week rolls over.
+        datetime clampT1 = currentTime - (datetime)(10 * 365 * 86400);
+        if(startTime < clampT1) startTime = clampT1;
     }
     
     if(endTime == 0) {
