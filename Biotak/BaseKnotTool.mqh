@@ -3927,6 +3927,61 @@ bool BaseKnotDeselectOnChartClick(const int mx, const int my)
    BaseKnotSelectionMarkersWipe(sel);
    return true;
 }
+//+------------------------------------------------------------------+
+//| P-BK-68 (2026-09-17, user: «با یک کلیک چپ فعال بشه ... مثل        |
+//| تریدینگ ویو») — ONE LEFT CLICK INSIDE A BOX SELECTS IT.           |
+//|                                                                  |
+//| WHY THE BOX IGNORED INSIDE-CLICKS: a hollow box is only a border  |
+//| ring (P-BK-23) and a filled one sits behind the candles — so a    |
+//| click anywhere inside lands on the CHART (CHARTEVENT_CLICK), never |
+//| on the box, and the terminal selects nothing: the user had to aim |
+//| at the thin border. TradingView selects a shape on exactly that   |
+//| click, so this branch does what the terminal cannot: the click's  |
+//| own time/price is hit-tested (`BaseKnotBoxAt` exact, then         |
+//| `BaseKnotBoxAtPx` for the drawn border's slop — the same pair the |
+//| deselect above and every press path ask), and a hit SELECTS the   |
+//| box programmatically: every other selected box is dropped first   |
+//| (TV single-select), the hit is marked SELECTED, its INFO grace    |
+//| re-opens like the border's own click-to-recall, and one Sync shows|
+//| the circle handles on that very frame.                           |
+//|                                                                  |
+//| MIRROR, NOT A TAKEOVER: the guards are P-BK-63's own (IDLE only,  |
+//| the ONE button owner, never over UI), locked boxes stay untouched,|
+//| and the event is NOT consumed — the menu/panel halves read the    |
+//| click exactly as before. Clicks are rare; steady state is one     |
+//| hit-test walk of reads and zero writes.                          |
+//+------------------------------------------------------------------+
+bool BaseKnotSelectOnChartClick(const int mx, const int my)
+{
+   if(g_bkState != BK_IDLE || s_bkDragId != "") return false;   // a gesture owns the mouse
+   if(!UILeftButtonUp()) return false;   // the ONE button owner (P-UI-73), like the deselect below
+   if(UIPointerOverSurface(mx, my)) return false;               // P-UI-92: the UI is over the box
+   int sw = 0; datetime ct = 0; double cp = 0;
+   if(!(ChartXYToTimePrice(0, mx, my, sw, ct, cp) && sw == 0 && ct > 0 && cp > 0)) return false;
+   string hit = BaseKnotBoxAt(ct, cp);
+   if(hit == "") hit = BaseKnotBoxAtPx(mx, my);   // the drawn border is a target too (P-BK-24)
+   if(hit == "") return false;                    // outside every box — the deselect owns it
+   if(BaseKnotLocked(hit)) return false;          // locked boxes are not selectable
+   string box = BaseKnotBoxName(BaseKnotPrefix(hit));
+   if(box == "" || ObjectFind(0, box) < 0) return false;
+   for(int i = 0; i < ArraySize(g_bkBoxes); i++)   // TV single-select: the hit keeps it, the rest let go
+   {
+      if(g_bkBoxes[i].id == hit) continue;
+      string ob = BaseKnotBoxName(BaseKnotPrefix(g_bkBoxes[i].id));
+      if(ob == "" || ObjectFind(0, ob) < 0) continue;
+      if((bool)ObjectGetInteger(0, ob, OBJPROP_SELECTED))
+      {
+         BaseKnotDropSelection(g_bkBoxes[i].id);   // P-BK-26's ONE owner, per box
+         BaseKnotSelectionMarkersWipe(g_bkBoxes[i].id);
+      }
+   }
+   if(!(bool)ObjectGetInteger(0, box, OBJPROP_SELECTED))
+      ObjectSetInteger(0, box, OBJPROP_SELECTED, true);
+   int k = BaseKnotFind(hit);   // click-to-recall's own grace, like the border's click
+   if(k >= 0) g_bkBoxes[k].commitMs = GetTickCount();
+   BaseKnotSync(hit);           // the INSTANT half: handles on this very frame, not the pump's
+   return true;
+}
 // (Re)build every child of one box from its live anchors. Direction is read
 // from the registry — NEVER recomputed here (P-BK-13: the pump /
 // drag-release refresh it via BaseKnotRefreshDirection BEFORE calling Sync,
@@ -5476,6 +5531,16 @@ bool BaseKnotOnChartEvent(const int id, const long &lparam, const double &dparam
       }
    }
 
+   //--- P-BK-68: a left CLICK inside (or on the border slop of) a box SELECTS it —
+   //--- TradingView single-click select for a hollow box the terminal itself never
+   //--- hits. Runs BEFORE the deselect below: an inside-click is a select, never a
+   //--- drop. Like the deselect, the event is NOT consumed.
+   if(id == CHARTEVENT_CLICK && StringFind(sparam, "r") < 0 &&
+      BaseKnotSelectOnChartClick((int)lparam, (int)dparam))
+   {
+      ChartRedraw();
+      return false;
+   }
    //--- P-BK-63: a CLICK (id 4 = a click on the CHART; a click on a SELECTABLE
    //--- object arrives as OBJECT_CLICK, id 1, and the branches above own it)
    //--- that lands OUTSIDE every box lets the box' selection go — the mirror of
