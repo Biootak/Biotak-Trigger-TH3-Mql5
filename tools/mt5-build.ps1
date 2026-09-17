@@ -8,11 +8,16 @@
 # Usage:
 #   .\tools\mt5-build.ps1 -Source "Biotak Trigger TH3.mq5"
 #   .\tools\mt5-build.ps1 -Source "Biotak Trigger TH3 Lite.mq5" -ErrorsOnly
+#   .\tools\mt5-build.ps1 -Source "<terminal junction path>\Biotak Trigger TH3.mq5" -Tag junction
+#
+# A summary file is always written next to the log ("<name>-<stamp>.summary.txt")
+# so the outcome is readable even when this script's stdout is not captured.
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Source,
     [switch]$ErrorsOnly,
+    [string]$Tag = "",
     [string]$Compiler = "C:\Program Files\Vittaverse  MT5 Terminal\MetaEditor64.exe"
 )
 
@@ -35,9 +40,11 @@ if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out
 # Names carry spaces ("Biotak Trigger TH3"); Start-Process splits ArgumentList on
 # whitespace, so the log path must be quote-free. Sanitise it.
 $name = [System.IO.Path]::GetFileNameWithoutExtension($src) -replace '\s+', '-'
+if ($Tag) { $name = "$name--$Tag" }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $raw = Join-Path $logDir "_raw-$name-$stamp.log"
 $txt = Join-Path $logDir "$name-$stamp.log"
+$summaryPath = Join-Path $logDir "$name-$stamp.summary.txt"
 
 # Start-Process joins the array with spaces WITHOUT quoting, so both paths are
 # wrapped explicitly - "Biotak Trigger TH3.mq5" is two arguments otherwise.
@@ -52,6 +59,25 @@ $errs = @($lines | Where-Object { $_ -match ':\s*error\s+\d+:' })
 $warns = @($lines | Where-Object { $_ -match ':\s*warning\s+\d+:' })
 $result = @($lines | Where-Object { $_ -match '^Result:' }) | Select-Object -Last 1
 
+# The .ex5 is emitted next to the source. Report it so a junction build can be
+# told apart from a workspace build by more than the log name.
+$ex5 = [System.IO.Path]::ChangeExtension($src, '.ex5')
+$ex5Info = if (Test-Path $ex5) {
+    $f = Get-Item $ex5
+    "$($f.FullName)  [$($f.Length) bytes, $($f.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))]"
+} else { "(no .ex5 produced)" }
+
+$report = @()
+$report += "source : $src"
+$report += "log    : $txt"
+$report += "ex5    : $ex5Info"
+$report += "errors : $($errs.Count)"
+$report += "warns  : $($warns.Count)"
+$report += "result : $result"
+$errs   | ForEach-Object { $report += "ERR  $_" }
+$warns  | ForEach-Object { $report += "WARN $_" }
+$report | Set-Content -Path $summaryPath -Encoding UTF8
+
 if ($ErrorsOnly) {
     $errs | ForEach-Object { $_ }
 } else {
@@ -61,6 +87,8 @@ if ($ErrorsOnly) {
 "----"
 "source : $src"
 "log    : $txt"
+"summary: $summaryPath"
+"ex5    : $ex5Info"
 "errors : $($errs.Count)"
 "warns  : $($warns.Count)"
 "result : $result"

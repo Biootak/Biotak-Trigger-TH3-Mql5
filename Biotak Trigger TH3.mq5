@@ -118,11 +118,47 @@
 #include "Biotak\BiotakMenu.mqh"
 #include "Biotak\BiotakPanels.mqh"
 
+// MT5-ONLY DIAGNOSTIC (compiles to nothing unless its own switch is on).
+// Included LAST: it times the interaction path, so it needs every UI owner.
+#include "MT5Compat\MT5PrimitiveProbe.mqh"
+// MT5-ONLY DIAGNOSTIC (compiles to nothing unless its own switch is on).
+// Dumps every object on this chart to MQL5/Files/biotak-level-dump.txt so
+// "the levels are absent" and "the levels are present but masked off" can be
+// told apart - see the file header for why reading the code cannot decide it.
+#include "MT5Compat\MT5LevelDump.mqh"
+
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+    // MT5-ONLY, AND IT MUST BE THE FIRST STATEMENT.
+    //
+    // MQL4 populates the predefined series arrays (Bars, Time[], Open[],
+    // High[], Low[], Close[]) before OnInit is entered. MQL5 has no such
+    // arrays, so MT5Compat emulates them and something has to fill them.
+    // It used to happen only in OnCalculate and OnTimer - which run AFTER
+    // OnInit - so for the whole of OnInit `Bars` was 0 and every series
+    // array was empty. The shared modules read those values during init and
+    // do not all guard for zero:
+    //
+    //   ZoneFactory::CreateZone        - "safeBars < 1" -> returns
+    //                                    ERR_ZONE_RENDER_FAILED, so no zone
+    //   ExtendedDrawingFunctions       - startTime falls back to TimeCurrent()
+    //                                    instead of Time[Bars-1], so the box
+    //                                    spans a sliver instead of the chart
+    //   BaseKnotTool::...SpanFromTimes - "s >= total" with total == 0 -> 0 bars
+    //   ATRCalculations::GetEffectiveBars / CalculateTrueRange -> 0.0
+    //
+    // The result was a first paint that did not match MT4. Refreshing here
+    // makes the emulation available exactly when MQL4's arrays are.
+    CompatRefreshChartData();
+
+    // MT5-ONLY: start the redundant-object-write memo from a clean slate. A
+    // re-attach reuses a chart the previous instance drew on, so the previous
+    // instance's facts must never be inherited.
+    MT5ObjWriteFilterReset();
+
     // P-PERF-04: attach / timeframe switch budget (both halves are measured:
     // OnInitHandler is the indicator, the UI kit restores menu + panels).
     // P-PERF-10: this entry measures BOTH halves of the init budget (the
@@ -208,7 +244,16 @@ void OnDeinit(const int reason)
               " htf w=", GVLedgerWrites(GV_BLOCK_HTF), "/",
               (GVLedgerWrites(GV_BLOCK_HTF) + GVLedgerSkipped(GV_BLOCK_HTF)),
               " flush=", GVFlushRuns(),
-              " first=", RSSaveNamed(0), ",", RSSaveNamed(1), ",", RSSaveNamed(2));
+              " first=", RSSaveNamed(0), ",", RSSaveNamed(1), ",", RSSaveNamed(2),
+              // MT5-ONLY: what the redundant-object-write filter actually saved
+              // this session, so the next MT4-vs-MT5 comparison has a number.
+              " | objw skip=", MT5ObjWriteFilterSkips(), "/",
+              (MT5ObjWriteFilterSkips() + MT5ObjWriteFilterWrites()),
+              // P-PERF-45 evidence: frames that actually ran, over the ticks that
+              // ended with the frame still owed (the starvation count). `starved`
+              // must read ~0 - a number tracking the frame count means the pump is
+              // starving the progress-maker again.
+              " | coop frame=", CoopFrameRuns(), "/", (CoopFrameRuns() + CoopFrameStarved()));
 }
 
 //+------------------------------------------------------------------+
@@ -241,6 +286,25 @@ int OnCalculate(const int rates_total,
     // that the shared modules read as MQL4 predefined series arrays.
     CompatRefreshChartData();
 
+    // MT5-ONLY DIAGNOSTIC: snapshot the chart's object population to a file.
+    // Reads only; compiles to nothing when its switch is off.
+    MT5LevelDumpTick();
+
+    // MT5-ONLY DIAGNOSTIC: the phase-2 primitive cost table.
+    //
+    // This call site is the one the probe was MISSING. The probe file defined
+    // MT5PrimitiveProbeRunOnce() and an empty fallback macro, but nothing ever
+    // called it - so the cost table phase 2 depends on had never once been
+    // produced, and the MT5 slowness work was running on a hypothesis instead
+    // of a number.
+    //
+    // Safe to call unconditionally: it self-arms (a 1500 ms settle, so it
+    // measures the steady state rather than the init churn), self-latches
+    // (one run per terminal burst, latched in the terminal's global-variable
+    // table so four charts produce ONE table, expiring after a minute), and
+    // compiles to nothing when ENABLE_MT5_PRIMITIVE_PROBE is off.
+    MT5PrimitiveProbeRunOnce();
+
     int result = OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
     // --- UI kit: HTF forming-candle live update + new-bar redraw ---
     RefreshKitOnBar();
@@ -262,6 +326,14 @@ void OnChartEvent(const int id,
   // the flag here (not in the handlers) is what makes the guarantee hold for
   // every path they call, including ones added later.
   g_inChartEvent = true;
+  // MT5-ONLY: an object that APPEARED or VANISHED on this chart - ours or anyone
+  // else's (a template load, the terminal's "remove all objects", another
+  // program) - is proof that the redundant-write memo's facts may be stale. Two
+  // int compares, one uint increment, and the memo can never outlive its truth.
+  // Our own ObjectCreate/ObjectDelete already bump this; the hook exists for the
+  // changes we do not make.
+  if(id == CHARTEVENT_OBJECT_CREATE || id == CHARTEVENT_OBJECT_DELETE)
+     MT5ObjWriteFilterInvalidate();
   uint p4t = GetTickCount();
   OnChartEventHandler(id,lparam,dparam,sparam);
   uint p4a = GetTickCount() - p4t;
@@ -334,6 +406,16 @@ void OnTimer()
 {
     // MT5-ONLY: keep the MQL4 series-array emulation live on a tick-less chart.
     CompatRefreshChartData();
+
+    // MT5-ONLY DIAGNOSTIC: the timer is what makes the dump land even on a
+    // chart that is not ticking.
+    MT5LevelDumpTick();
+
+    // MT5-ONLY DIAGNOSTIC: and the same reason applies to the probe - a closed
+    // market is exactly when a measurement is most useful, and OnCalculate
+    // never runs then. Both calls share the probe's own latch, so the second
+    // one is a bool read.
+    MT5PrimitiveProbeRunOnce();
 
     // P-PERF-16: the 250 ms safety refresh behind the cached UI metrics. Resizing
     // the chart also fires a chart-change event (which invalidates immediately);

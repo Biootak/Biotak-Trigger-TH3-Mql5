@@ -9,16 +9,27 @@
 // MQL5 has no Symbol(); the shared MQL4 modules call it 110 times.
 #define Symbol() _Symbol
 
-// MQL4 series-function bridges: MQL5's iHigh/iLow/iOpen/iClose/iTime/
-// iBars take ENUM_TIMEFRAMES, while the shared MQL4 modules pass int
-// timeframes (e.g. from GetEffectiveTimeframe()). The self-referential
-// macros insert the cast without infinite expansion.
-#define iBars(sym, tf)  iBars(sym, (ENUM_TIMEFRAMES)(tf))
-#define iTime(sym, tf, sh)  iTime(sym, (ENUM_TIMEFRAMES)(tf), sh)
-#define iHigh(sym, tf, sh)  iHigh(sym, (ENUM_TIMEFRAMES)(tf), sh)
-#define iLow(sym, tf, sh)   iLow(sym, (ENUM_TIMEFRAMES)(tf), sh)
-#define iOpen(sym, tf, sh)  iOpen(sym, (ENUM_TIMEFRAMES)(tf), sh)
-#define iClose(sym, tf, sh) iClose(sym, (ENUM_TIMEFRAMES)(tf), sh)
+// MQL4 series-function bridges: MQL5's iHigh/iLow/iOpen/iClose/iTime/iBars
+// take ENUM_TIMEFRAMES, while the shared MQL4 modules pass a timeframe in
+// MINUTES (the MQL4 model - see R-TF-UNIT in Biotak/BuildConfig.mqh). The
+// self-referential macros route the argument through CompatTF() without
+// infinite expansion.
+//
+// This used to be a bare "(ENUM_TIMEFRAMES)(tf)" cast, which was harmless only
+// for as long as every caller happened to pass a value that was already an enum
+// constant. Once the minutes model is made explicit that cast would turn 60
+// into an invalid timeframe instead of H1, so the conversion is the point.
+#define iBars(sym, tf)  iBars(sym, CompatTF(tf))
+#define iTime(sym, tf, sh)  iTime(sym, CompatTF(tf), sh)
+#define iHigh(sym, tf, sh)  iHigh(sym, CompatTF(tf), sh)
+#define iLow(sym, tf, sh)   iLow(sym, CompatTF(tf), sh)
+#define iOpen(sym, tf, sh)  iOpen(sym, CompatTF(tf), sh)
+#define iClose(sym, tf, sh) iClose(sym, CompatTF(tf), sh)
+
+// The raw builtin, reachable from anywhere in this shim that genuinely needs
+// the ENUM_TIMEFRAMES rather than the minute count. It must stay ABOVE the
+// "#define Period()" at the foot of this file, where the builtin still exists.
+ENUM_TIMEFRAMES CompatRawPeriod() { return Period(); }
 
 // NOTE: no PeriodSeconds() macro here. MQL5's preprocessor expands a
 // one-parameter macro even when it is invoked with an empty argument list, so
@@ -32,7 +43,14 @@ double WindowPriceMin(const int window = 0) { return ChartGetDouble(0, CHART_PRI
 double WindowPriceMax(const int window = 0) { return ChartGetDouble(0, CHART_PRICE_MAX, window); }
 
 // MQL4 ObjectType(name) -> MQL5 OBJPROP_TYPE.
-int ObjectType(const string name) { return (int)ObjectGetInteger(0, name, OBJPROP_TYPE); }
+// MQL4 returns -1 when the object does not exist. MQL5's ObjectGetInteger
+// returns 0 on failure, and 0 is a REAL object type (OBJ_VLINE), so without
+// the existence test a missing object would read as a live vertical line.
+int ObjectType(const string name)
+{
+    if(ObjectFind(0, name) < 0) return -1;
+    return (int)ObjectGetInteger(0, name, OBJPROP_TYPE);
+}
 
 // MQL4 DoubleToStr(value, digits) -> MQL5 DoubleToString(value, digits).
 string DoubleToStr(const double value, const int digits = 8) { return DoubleToString(value, digits); }
@@ -136,7 +154,7 @@ int TimeDayOfWeek(datetime time) { TimeToStruct(time, g_tempDt); return g_tempDt
 
 int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT)
 {
-    if(tf == PERIOD_CURRENT || tf == 0) tf = (ENUM_TIMEFRAMES)Period();
+    if(tf == PERIOD_CURRENT || tf == 0) tf = CompatRawPeriod();
     int seconds = PeriodSeconds(tf);
     if(seconds > 0) return seconds / 60;
 
@@ -271,7 +289,13 @@ void ResetATRFallbackCache()
 double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
 {
     if(symbol == NULL || symbol == "") symbol = _Symbol;
-    if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = (int)Period();
+    // `timeframe` arrives in EITHER unit: the shared ATR modules pass minutes
+    // (the MQL4 model - ATRCalculations' own ladders are built on it) while
+    // CalculateATRBatchTrex/GetTriggerDurationSeconds pass a real
+    // ENUM_TIMEFRAMES. CompatTF() resolves both, which is why every handoff
+    // below goes through it rather than through a bare cast. The bare cast used
+    // to be harmless purely by accident: callers were passing enum constants.
+    if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = CompatPeriodMinutes();
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
     // SymbolSelect is a terminal-side operation; do it once per symbol rather
@@ -299,7 +323,7 @@ double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
     int cacheIndex = -1;
     for(int i = 0; i < g_atrHandleCacheCount; i++) {
         if(g_atrHandleCache[i].symbol == symbol &&
-           g_atrHandleCache[i].timeframe == (ENUM_TIMEFRAMES)timeframe &&
+           g_atrHandleCache[i].timeframe == CompatTF(timeframe) &&
            g_atrHandleCache[i].period == atrPeriod) {
             handle = g_atrHandleCache[i].handle;
             cacheIndex = i;
@@ -313,10 +337,10 @@ double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
     // W1, D1 - synthesized from M1 on demand) never finish calculating. Keep
     // the handle and serve instant rates-based values until it is ready.
     if(handle == INVALID_HANDLE) {
-        handle = iATR(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod);
+        handle = iATR(symbol, CompatTF(timeframe), atrPeriod);
         if(handle == INVALID_HANDLE) {
-            LOG_E(LOG_CAT_ATR, "iATRMQL4: failed ATR handle " + symbol + "/" + EnumToString((ENUM_TIMEFRAMES)timeframe));
-            return iATRRatesFallback(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod, shift);
+            LOG_E(LOG_CAT_ATR, "iATRMQL4: failed ATR handle " + symbol + "/" + EnumToString(CompatTF(timeframe)));
+            return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
         }
 
         static int s_atrEvictSlot = 0;
@@ -332,14 +356,14 @@ double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
 
         g_atrHandleCache[slot].handle = handle;
         g_atrHandleCache[slot].symbol = symbol;
-        g_atrHandleCache[slot].timeframe = (ENUM_TIMEFRAMES)timeframe;
+        g_atrHandleCache[slot].timeframe = CompatTF(timeframe);
         g_atrHandleCache[slot].period = atrPeriod;
     }
 
     // While the handle is still calculating, return an identical value
     // computed directly from CopyRates (instant, MT4-like) instead of 0.
     if(BarsCalculated(handle) <= 0) {
-        return iATRRatesFallback(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod, shift);
+        return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
     }
 
     static double s_atrBuffer[];
@@ -353,11 +377,11 @@ double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
     ResetLastError();
     if(CopyBuffer(handle, 0, shift, 1, s_atrBuffer) <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
-        Print("iATRMQL4: CopyBuffer failed for ", symbol, "/", EnumToString(timeframe),
+        Print("iATRMQL4: CopyBuffer failed for ", symbol, "/", EnumToString(CompatTF(timeframe)),
               " period=", atrPeriod, " shift=", shift, " error=", GetLastError());
         #endif
         // Transient data rebuild - serve the rates-based value meanwhile.
-        return iATRRatesFallback(symbol, (ENUM_TIMEFRAMES)timeframe, atrPeriod, shift);
+        return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
     }
     return s_atrBuffer[0];
 }
@@ -476,7 +500,8 @@ bool ObjectSetText(string name, string text, int fontSize = 0, string fontName =
 //| exactly like MQL4). CompatRefreshChartData() must be called from  |
 //| the indicator main file on every OnCalculate and OnTimer.        |
 //+------------------------------------------------------------------+
-static MqlRates   g_seriesRates[];
+// P-MT5-01: the MqlRates staging array is GONE with the CopyRates path it
+// existed for - five native Copy* calls fill the arrays below directly.
 static datetime   g_seriesTime[];
 static double     g_seriesOpen[];
 static double     g_seriesHigh[];
@@ -492,48 +517,88 @@ static int        g_seriesSyncedAt = -1;
 #define Close g_seriesClose
 #define Bars  g_seriesBars
 
+// P-MT5-01 (2026-09-16) - THE FULL RE-SYNC WAS THE EXPENSIVE HALF, AND IT
+// COULD RUN ON EVERY TICK.
+//
+// The full re-sync used to be
+//     CopyRates(..., bars, g_seriesRates)   +   a 5-array per-element copy loop
+// which on a 100k-bar chart allocated a ~6 MB MqlRates array and then ran
+// 500,000 interpreter-level assignments. Worse, it re-ran on EVERY CALL while
+// the copy kept failing or while history was still arriving: the bar count
+// changes as history downloads, and a FAILED copy deliberately leaves
+// `g_seriesSyncedAt` untouched so the next call tries the whole thing again.
+// `OnCalculate` calls this once per tick - and this terminal is exactly the
+// case that trips it, logging "Waiting for historical data (PERIOD_MN1)" and
+// error 4401. MT4 has no equivalent cost at all: its series arrays are native.
+//
+// Two changes, both MT5-only:
+//
+//   1. FIVE NATIVE Copy* CALLS instead of CopyRates + the element loop. Same
+//      values, same series order (the AS_SERIES flag is set before the copy,
+//      exactly as the rates array always had it), but no 6 MB intermediate and
+//      no 500k-statement loop.
+//
+//   2. A FLOOR BETWEEN FULL-SYNC ATTEMPTS. A failing or still-growing history
+//      can no longer turn every tick into a full-history copy attempt. A
+//      legitimate new bar is therefore delayed by at most this floor, which is
+//      invisible next to a 15.6 ms tick - and the forming-bar refresh below
+//      keeps the current bar live on every call either way.
+#define COMPAT_FULL_SYNC_MIN_MS 500
+
 void CompatRefreshChartData()
 {
     int bars = iBars(_Symbol, PERIOD_CURRENT);
     if(bars <= 0) return;
 
-    // Full re-sync whenever the visible bar count changes (new bar /
-    // history download). Otherwise only the forming bar (index 0) moves.
+    // Full re-sync whenever the bar count changes (new bar / history
+    // download). Otherwise only the forming bar (index 0) moves.
     if(bars != g_seriesSyncedAt)
     {
-        ResetLastError();
-        ArraySetAsSeries(g_seriesRates, true);
-        int copied = CopyRates(_Symbol, PERIOD_CURRENT, 0, bars, g_seriesRates);
-        if(copied > 0)
+        static uint s_lastFullSyncMs = 0;
+        const uint nowMs = GetTickCount();
+        const bool due = (s_lastFullSyncMs == 0) ||
+                         ((nowMs - s_lastFullSyncMs) >= (uint)COMPAT_FULL_SYNC_MIN_MS);
+        if(due)
         {
-            ArrayResize(g_seriesTime, copied);
-            ArrayResize(g_seriesOpen, copied);
-            ArrayResize(g_seriesHigh, copied);
-            ArrayResize(g_seriesLow, copied);
-            ArrayResize(g_seriesClose, copied);
+            s_lastFullSyncMs = nowMs;
+            ResetLastError();
+            // The AS_SERIES flag must be set BEFORE the copy so the copied
+            // data lands in timeseries order (index 0 = current bar) - the
+            // same contract the old rates array was given.
             ArraySetAsSeries(g_seriesTime, true);
             ArraySetAsSeries(g_seriesOpen, true);
             ArraySetAsSeries(g_seriesHigh, true);
             ArraySetAsSeries(g_seriesLow, true);
             ArraySetAsSeries(g_seriesClose, true);
-            for(int i = 0; i < copied; i++)
+
+            const int cT  = CopyTime (_Symbol, PERIOD_CURRENT, 0, bars, g_seriesTime);
+            const int cO  = CopyOpen (_Symbol, PERIOD_CURRENT, 0, bars, g_seriesOpen);
+            const int cH  = CopyHigh (_Symbol, PERIOD_CURRENT, 0, bars, g_seriesHigh);
+            const int cL  = CopyLow  (_Symbol, PERIOD_CURRENT, 0, bars, g_seriesLow);
+            const int cC  = CopyClose(_Symbol, PERIOD_CURRENT, 0, bars, g_seriesClose);
+
+            // All five must describe the SAME bars, because every consumer
+            // indexes all of them with one index. Trim to the shortest.
+            const int copied = MathMin(cT, MathMin(cO, MathMin(cH, MathMin(cL, cC))));
+            if(copied > 0)
             {
-                g_seriesTime[i]  = g_seriesRates[i].time;
-                g_seriesOpen[i]  = g_seriesRates[i].open;
-                g_seriesHigh[i]  = g_seriesRates[i].high;
-                g_seriesLow[i]   = g_seriesRates[i].low;
-                g_seriesClose[i] = g_seriesRates[i].close;
+                ArrayResize(g_seriesTime,  copied);
+                ArrayResize(g_seriesOpen,  copied);
+                ArrayResize(g_seriesHigh,  copied);
+                ArrayResize(g_seriesLow,   copied);
+                ArrayResize(g_seriesClose, copied);
+                g_seriesBars     = copied;
+                g_seriesSyncedAt = bars;
+                return;
             }
-            g_seriesBars = copied;
-            g_seriesSyncedAt = bars;
-            return;
+            // Copy failed (history still loading) - keep the old arrays and
+            // retry after the floor above, not on the next tick.
         }
-        // CopyRates failed (history still loading) - keep old arrays,
-        // refresh only the current bar below and retry next call.
     }
 
-    // Same bar count (or failed full sync): refresh only the forming bar's
-    // moving values (Time[0]/Open[0] are fixed once a bar starts).
+    // Same bar count (or a full sync not yet due / just failed): refresh only
+    // the forming bar's moving values (Time[0]/Open[0] are fixed once a bar
+    // starts).
     if(g_seriesBars > 0)
     {
         g_seriesHigh[0]  = iHigh(_Symbol, PERIOD_CURRENT, 0);
@@ -550,6 +615,17 @@ void CompatRefreshChartData()
 //| provided via rename macros; the built-ins stay reachable through |
 //| the *_Real helpers defined before the renames.                   |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| MT5-ONLY: redundant-property-write filter.                        |
+//|                                                                  |
+//| Included HERE, before the ObjectSet* shims below, because those   |
+//| shims are its call sites - and before every shared module, so the  |
+//| whole codebase's object writes pass through it on MT5 while MT4    |
+//| (which never includes this folder) is untouched by construction.   |
+//| See the file's own header for why this is safe and what it fixes.  |
+//+------------------------------------------------------------------+
+#include "MT5ObjWriteFilter.mqh"
+
 #ifndef OBJPROP_TIME1
 #define OBJPROP_TIME1  ((ENUM_OBJECT_PROPERTY_INTEGER)2010)
 #endif
@@ -579,12 +655,21 @@ bool ObjectSetDoubleCompat(const long chart_id, const string name, const ENUM_OB
 {
     if(prop == OBJPROP_PRICE1) return ObjectSetDoubleRealMod(chart_id, name, OBJPROP_PRICE, 0, value);
     if(prop == OBJPROP_PRICE2) return ObjectSetDoubleRealMod(chart_id, name, OBJPROP_PRICE, 1, value);
-    return ObjectSetDoubleReal(chart_id, name, prop, value);
+    // MT5-ONLY: a write of the value we already wrote is redundant, so the
+    // terminal call is skipped and `true` (the state the caller asked for)
+    // is returned. See MT5ObjWriteFilter.mqh for the safety argument.
+    if(OwSkipDbl(chart_id, name, (int)prop, 0, value)) return true;
+    const bool ok = ObjectSetDoubleReal(chart_id, name, prop, value);
+    if(ok) OwNoteDbl(chart_id, name, (int)prop, 0, value);
+    return ok;
 }
 
 bool ObjectSetDoubleCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier, const double value)
 {
-    return ObjectSetDoubleRealMod(chart_id, name, prop, modifier, value);
+    if(OwSkipDbl(chart_id, name, (int)prop, modifier, value)) return true;
+    const bool ok = ObjectSetDoubleRealMod(chart_id, name, prop, modifier, value);
+    if(ok) OwNoteDbl(chart_id, name, (int)prop, modifier, value);
+    return ok;
 }
 
 double ObjectGetDoubleReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier)
@@ -617,29 +702,65 @@ bool ObjectSetIntegerCompat(const long chart_id, const string name, const ENUM_O
 {
     if(prop == OBJPROP_TIME1) return ObjectSetIntegerRealMod(chart_id, name, OBJPROP_TIME, 0, value);
     if(prop == OBJPROP_TIME2) return ObjectSetIntegerRealMod(chart_id, name, OBJPROP_TIME, 1, value);
-    return ObjectSetIntegerReal(chart_id, name, prop, value);
+    // MT5-ONLY redundant-write filter (MT5ObjWriteFilter.mqh). Properties the
+    // terminal or the user can change (STATE, SELECTED, TIME*, PRICE*) are not
+    // in its allowlist, so this can never mask a write that was still needed.
+    if(OwSkipInt(chart_id, name, (int)prop, 0, value)) return true;
+    const bool ok = ObjectSetIntegerReal(chart_id, name, prop, value);
+    if(ok) OwNoteInt(chart_id, name, (int)prop, 0, value);
+    return ok;
 }
 
 bool ObjectSetIntegerCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier, const long value)
 {
-    return ObjectSetIntegerRealMod(chart_id, name, prop, modifier, value);
+    if(OwSkipInt(chart_id, name, (int)prop, modifier, value)) return true;
+    const bool ok = ObjectSetIntegerRealMod(chart_id, name, prop, modifier, value);
+    if(ok) OwNoteInt(chart_id, name, (int)prop, modifier, value);
+    return ok;
 }
 
-int ObjectsTotalReal(const long chart_id, const int type, const bool selected)
+//+------------------------------------------------------------------+
+//| ObjectsTotal - the previous shim was CORRUPTING the object count. |
+//|                                                                  |
+//| MQL5 signature:                                                   |
+//|     int ObjectsTotal(long chart_id, int sub_window=-1, int type=-1) |
+//| The THIRD parameter is the object TYPE.                           |
+//|                                                                  |
+//| The old shim declared it as                                    |
+//|     ObjectsTotalCompat(chart_id, type, selected)                  |
+//|     { return ObjectsTotal(chart_id, type, selected != 0); }       |
+//| so the call ObjectsTotal(0, -1, -1) - the form used by all 45 live |
+//| call sites - became ObjectsTotal(0, -1, true) and `true` decayed to|
+//| int 1. The function therefore returned the number of OBJ_HLINE     |
+//| objects ONLY (OBJ_VLINE=0, OBJ_HLINE=1), not all objects.          |
+//|                                                                  |
+//| Every consumer then walked the chart with a truncated bound while  |
+//| ObjectName(0, i) still indexed the FULL object list, so the count  |
+//| and the enumeration disagreed:                                      |
+//|   ObjectCache::CacheRebuild          - cached a fraction of objects |
+//|   VisibilityManager::HideAllLegacyScan - hid only the first N,      |
+//|                                          leaving ghost levels       |
+//|   ObjectCountManager / MemoryManager  - budget and accounting wrong |
+//|                                                                  |
+//| The fix passes every argument through untouched, so the built-in    |
+//| semantics apply and MT4 and MT5 agree. The zero-argument MQL4 form  |
+//| is kept (MQL5 requires chart_id) and now means ALL objects.         |
+//+------------------------------------------------------------------+
+int ObjectsTotalReal(const long chart_id, const int sub_window, const int type)
 {
-    return ObjectsTotal(chart_id, type, selected);
+    return ObjectsTotal(chart_id, sub_window, type);
 }
 
 #define ObjectsTotal ObjectsTotalCompat
 
 int ObjectsTotalCompat()
 {
-    return ObjectsTotalReal(0, -1, false);
+    return ObjectsTotalReal(0, -1, -1);
 }
 
-int ObjectsTotalCompat(const long chart_id, const int type, const int selected)
+int ObjectsTotalCompat(const long chart_id, const int sub_window, const int type)
 {
-    return ObjectsTotalReal(chart_id, type, selected != 0);
+    return ObjectsTotalReal(chart_id, sub_window, type);
 }
 
 string ObjectNameReal(const long chart_id, const int pos, const int sub_window, const int type)
@@ -680,5 +801,30 @@ int ObjectFindCompat(const long chart_id, const string name)
 {
     return ObjectFindReal(chart_id, name);
 }
+
+//+------------------------------------------------------------------+
+//| R-TF-UNIT, the MT5 half: make Period() mean what it means on MT4. |
+//|                                                                  |
+//| MQL5's Period() returns an ENUM_TIMEFRAMES (H1 == 16385). MQL4's  |
+//| returned the length in minutes (H1 == 60). The shared source is   |
+//| written against the MQL4 meaning in ~60 places - plain            |
+//| comparisons, arithmetic, cache keys, BaseKnotTFName(), the ATR    |
+//| timeframe ladders, the HTF snap ladder - and every one of those   |
+//| is silently wrong on MT5 while still being a perfectly valid       |
+//| integer.                                                          |
+//|                                                                  |
+//| Restoring the meaning here, once, is what makes the mirror         |
+//| genuinely a mirror: it fixes all of those call sites without       |
+//| touching a single shared line, and it keeps them fixed if someone  |
+//| adds another one tomorrow.                                         |
+//|                                                                  |
+//| This MUST stay at the foot of this file: everything above it that  |
+//| needs the raw builtin (PeriodMinutes(), CompatRawPeriod()) is      |
+//| already compiled by the time the macro exists.                     |
+//|                                                                  |
+//| Anywhere that genuinely needs an ENUM_TIMEFRAMES goes through      |
+//| CompatTF() - that is the one sanctioned crossing.                  |
+//+------------------------------------------------------------------+
+#define Period() CompatPeriodMinutes()
 
 #endif // MQL5_COMPAT_MQH

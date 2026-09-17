@@ -112,6 +112,14 @@
 //+------------------------------------------------------------------+
 int OnInit()
 {
+    // MT5-ONLY, AND IT MUST BE THE FIRST STATEMENT - see the Full entry for
+    // the full reasoning. MQL4 has Bars/Time[]/Open[]/High[]/Low[]/Close[]
+    // populated before OnInit; the MT5 emulation was only refreshed from
+    // OnCalculate and OnTimer, so during init Bars was 0 and the series
+    // arrays were empty. Shared modules read them (ZoneFactory, the drawing
+    // path, BaseKnotTool, ATR) and several do not guard for zero.
+    CompatRefreshChartData();
+
     // P-PERF-04: attach / timeframe-switch budget (silent unless it overruns).
     // P-PERF-10: Lite has no UI half, but it carries the same domain phases
     // (settings / history / base-price file load / ATR) in the report.
