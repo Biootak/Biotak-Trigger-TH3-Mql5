@@ -3904,6 +3904,225 @@ bool BaseKnotSelectionMarkersWipe(const string id)
    }
    return wrote;
 }
+//+------------------------------------------------------------------+
+//| P-BK-69 (2026-09-17, user: «دوسر ترندلاین دایره بزرگ باشه مثل     |
+//| تریدینگ ویو») — TV CIRCLES OVER NATIVE TRENDLINES.                |
+//|                                                                  |
+//| THE LIMIT, STATED HONESTLY: MetaTrader paints a selected          |
+//| trendline's own anchors ITSELF — small squares no indicator call  |
+//| can restyle. What an indicator CAN do is paint OVER them: a       |
+//| screen object sits above the whole chart layer (P-BK-59's ladder),|
+//| so a hollow blue circle bigger than the terminal's marker covers  |
+//| it whole. This keeper does exactly that for every SELECTED,      |
+//| non-BK OBJ_TREND on the chart (plain trendlines first — rays and  |
+//| segments carry the same two anchors): two big end circles + one   |
+//| smaller middle circle, the TradingView selection look.            |
+//|                                                                  |
+//| FOLLOW + CLEANUP: the 500 ms pump repositions on scroll/zoom and  |
+//| wipes orphans (deselected / deleted trend) within one round; an   |
+//| OBJECT_DRAG carries the covers live with the hand and an          |
+//| OBJECT_CLICK shows them on the select frame — both write ONLY the |
+//| covers, never the dragged/clicked line (P-BK-15). The covers are   |
+//| never selectable, so the hand always grabs the line itself, and   |
+//| they wear the line's own TF mask, so a line hidden on this TF     |
+//| carries no circles either.                                        |
+//|                                                                  |
+//| COST: one pump scan of trendlines only (the MT5-only type filter  |
+//| below — an MT4 port walks all objects and checks OBJPROP_TYPE)   |
+//| with a single SELECTED read each; every write is compare-guarded. |
+//| `s_tvhNames` tracks only covers WE created, so the orphan sweep   |
+//| never walks the chart.                                            |
+//+------------------------------------------------------------------+
+#define TVH_TAG "TVH_"
+#define TVH_MID_FONTSZ 11   // the middle cover reads smaller, like TradingView's own
+static string s_tvhNames[]; // overlay covers created this attach (the sweep's whole world)
+static bool   s_tvhSwept = false;
+string TVHOverlayName(const string trend, const int k)
+{
+   if(StringLen(inpObjectPrefix) == 0 || trend == "") return "";
+   string t = trend;
+   if(StringLen(t) > 40) t = StringSubstr(t, 0, 40);   // object-name budget; the registry sweep below makes a collision harmless
+   return inpObjectPrefix + TVH_TAG + t + "_" + IntegerToString(k);
+}
+void TVHRegister(const string nm)
+{
+   if(nm == "") return;
+   for(int i = 0; i < ArraySize(s_tvhNames); i++) if(s_tvhNames[i] == nm) return;
+   int n = ArraySize(s_tvhNames);
+   ArrayResize(s_tvhNames, n + 1);
+   s_tvhNames[n] = nm;
+}
+void TVHUnregister(const string nm)
+{
+   for(int i = 0; i < ArraySize(s_tvhNames); i++)
+   {
+      if(s_tvhNames[i] != nm) continue;
+      for(int j = i; j < ArraySize(s_tvhNames) - 1; j++) s_tvhNames[j] = s_tvhNames[j + 1];
+      ArrayResize(s_tvhNames, ArraySize(s_tvhNames) - 1);
+      return;
+   }
+}
+// The trendline one cover belongs to — "" when the name is not ours.
+string TVHCoverTrend(const string nm)
+{
+   string tag = inpObjectPrefix + TVH_TAG;
+   if(StringLen(inpObjectPrefix) == 0 || StringFind(nm, tag) != 0) return "";
+   if(StringLen(nm) <= StringLen(tag) + 2) return "";
+   return StringSubstr(nm, StringLen(tag), StringLen(nm) - StringLen(tag) - 2);   // drop head + "_k"
+}
+bool TVHCoverAlive(const string nm)
+{
+   string trend = TVHCoverTrend(nm);
+   if(trend == "" || ObjectFind(0, trend) < 0) return false;
+   if(ObjectGetInteger(0, trend, OBJPROP_TYPE) != OBJ_TREND) return false;
+   return (bool)ObjectGetInteger(0, trend, OBJPROP_SELECTED);
+}
+void TVHCoverCreate(const string name, const int fontSz, const long tfMask)
+{
+   if(ObjectFind(0, name) < 0) ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);   // XDISTANCE/YDISTANCE ARE the anchor
+   ObjectSetString(0, name, OBJPROP_TEXT, BK_GRIP_GLYPH);
+   ObjectSetString(0, name, OBJPROP_FONT, BK_GRIP_FONT);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSz);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, BK_GRIP_BLUE);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);   // the LINE is the handle — covers never intercept
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);        // no object-list clutter
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, Z_BOX_GRIP);
+   ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tfMask);
+   ObjectSetString(0, name, OBJPROP_TOOLTIP,
+                   "Trendline selection cover (P-BK-69): MetaTrader's own anchor square hides under this " +
+                   "TradingView-style circle — drag the LINE, never the circle");
+   TVHRegister(name);
+}
+// Keep / place / retire ONE cover. true = wrote something (caller owes paint).
+bool TVHCoverPlace(const string name, const int cx, const int cy, const int fontSz, const long tfMask)
+{
+   if(name == "") return false;
+   if(ObjectFind(0, name) < 0 || ObjectGetInteger(0, name, OBJPROP_TYPE) != OBJ_LABEL)
+   {
+      if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
+      TVHCoverCreate(name, fontSz, tfMask);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, cx);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, cy);
+      return true;
+   }
+   bool wrote = false;
+   if(ObjectGetString(0, name, OBJPROP_TEXT) != BK_GRIP_GLYPH ||
+      ObjectGetString(0, name, OBJPROP_FONT) != BK_GRIP_FONT ||
+      (int)ObjectGetInteger(0, name, OBJPROP_FONTSIZE) != fontSz ||
+      (color)ObjectGetInteger(0, name, OBJPROP_COLOR) != BK_GRIP_BLUE ||
+      (int)ObjectGetInteger(0, name, OBJPROP_ANCHOR) != ANCHOR_CENTER)
+   {
+      ObjectSetString(0, name, OBJPROP_TEXT, BK_GRIP_GLYPH);
+      ObjectSetString(0, name, OBJPROP_FONT, BK_GRIP_FONT);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSz);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, BK_GRIP_BLUE);
+      ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
+      wrote = true;
+   }
+   if((long)ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES) != tfMask)
+   {
+      ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, tfMask);
+      wrote = true;
+   }
+   if((int)ObjectGetInteger(0, name, OBJPROP_XDISTANCE) != cx ||
+      (int)ObjectGetInteger(0, name, OBJPROP_YDISTANCE) != cy)
+   {
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, cx);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, cy);
+      wrote = true;
+   }
+   return wrote;
+}
+// Covers for ONE native trendline (k = 0/1 ends, 2 middle). true = wrote something.
+// false = nothing to cover (missing, unselected, ours, unselectable) — existing covers removed.
+bool TVHFollowOne(const string trend)
+{
+   if(trend == "" || StringLen(inpObjectPrefix) == 0) return false;
+   bool want = false;
+   datetime t0 = 0, t1 = 0; double p0 = 0.0, p1 = 0.0; long tfMask = 0;
+   if(ObjectFind(0, trend) >= 0 &&
+      ObjectGetInteger(0, trend, OBJPROP_TYPE) == OBJ_TREND &&
+      StringFind(trend, inpObjectPrefix) != 0 &&   // never our own edges/rays
+      (bool)ObjectGetInteger(0, trend, OBJPROP_SELECTED))
+   {
+      t0 = (datetime)ObjectGetInteger(0, trend, OBJPROP_TIME, 0);
+      t1 = (datetime)ObjectGetInteger(0, trend, OBJPROP_TIME, 1);
+      p0 = ObjectGetDouble(0, trend, OBJPROP_PRICE, 0);
+      p1 = ObjectGetDouble(0, trend, OBJPROP_PRICE, 1);
+      tfMask = ObjectGetInteger(0, trend, OBJPROP_TIMEFRAMES);
+      want = true;
+   }
+   bool wrote = false;
+   for(int k = 0; k < 3; k++)
+   {
+      string nm = TVHOverlayName(trend, k);
+      if(nm == "") continue;
+      if(!want)   // deselected / deleted / never coverable — the orphan path
+      {
+         if(ObjectFind(0, nm) >= 0) { ObjectDelete(0, nm); TVHUnregister(nm); wrote = true; }
+         continue;
+      }
+      int cx = 0, cy = 0; bool place = false;
+      int fsz = (k == 2 ? TVH_MID_FONTSZ : BK_GRIP_FONTSZ);
+      if(k < 2)
+      {
+         datetime tt = (k == 0 ? t0 : t1);
+         double   pp = (k == 0 ? p0 : p1);
+         place = ChartTimePriceToXY(0, 0, tt, pp, cx, cy);   // off-window anchor: no cover for it
+      }
+      else
+      {
+         int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+         if(ChartTimePriceToXY(0, 0, t0, p0, x0, y0) && ChartTimePriceToXY(0, 0, t1, p1, x1, y1))
+         { cx = (x0 + x1) / 2; cy = (y0 + y1) / 2; place = true; }
+      }
+      if(!place)
+      {
+         if(ObjectFind(0, nm) >= 0) { ObjectDelete(0, nm); TVHUnregister(nm); wrote = true; }
+         continue;
+      }
+      if(TVHCoverPlace(nm, cx, cy, fsz, tfMask)) wrote = true;
+   }
+   return wrote;
+}
+// The keeper: covers for every selected native trendline, orphans wiped.
+// Called from the 500 ms pump (BaseKnotSyncBadges) — runs with zero boxes too.
+void TVHPump()
+{
+   if(StringLen(inpObjectPrefix) == 0) return;
+   bool wrote = false;
+   if(!s_tvhSwept)   // once per attach: a previous instance's covers are never inherited
+   {
+      s_tvhSwept = true;
+      string tag = inpObjectPrefix + TVH_TAG;
+      for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+      {
+         string onm = ObjectName(0, i, -1, -1);
+         if(StringFind(onm, tag) == 0) ObjectDelete(0, onm);
+      }
+      ArrayResize(s_tvhNames, 0);
+      wrote = true;
+   }
+   int total = ObjectsTotal(0, -1, OBJ_TREND);   // MT5-only type filter (see P-BK-69)
+   for(int i = 0; i < total; i++)
+   {
+      string nm = ObjectName(0, i, -1, OBJ_TREND);
+      if(nm == "" || StringFind(nm, inpObjectPrefix) == 0) continue;   // ours need no covers
+      if(!(bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED)) continue;   // one read; unselected is the common case
+      if(TVHFollowOne(nm)) wrote = true;
+   }
+   for(int r = ArraySize(s_tvhNames) - 1; r >= 0; r--)   // orphans the scan above no longer feeds
+   {
+      if(TVHCoverAlive(s_tvhNames[r])) continue;
+      ObjectDelete(0, s_tvhNames[r]);
+      TVHUnregister(s_tvhNames[r]);
+      wrote = true;
+   }
+   if(wrote) ChartRedraw();
+}
 // THE entry, called from `BaseKnotOnChartEvent`'s CLICK branch (id 4 — the event
 // MT4 sends for a click on the CHART; a click on a SELECTABLE object is
 // CHARTEVENT_OBJECT_CLICK, id 1, and the branches above own it). true = it
@@ -4821,6 +5040,7 @@ void BaseKnotSyncBadges()
    // noticed here, without a second event path of its own. NOTHING is written while nothing
    // changed — steady state is a compare (see BaseKnotNoteCornerRefresh).
    BaseKnotNoteCornerRefresh();
+   TVHPump();   // P-BK-69: native-trendline circle covers — runs with zero boxes too
    if(BaseKnotSessionActive()) BaseKnotReassertLock(true);   // P-BK-14: pump drift-heal (timer path, tick-less charts)
    if(s_bkDragLock && g_bkState == BK_IDLE &&
       UILeftButtonUp() &&          // the ONE button owner (P-UI-73): both MQL4
@@ -5197,6 +5417,27 @@ bool BaseKnotOnChartEvent(const int id, const long &lparam, const double &dparam
             ChartRedraw();
          }
          return true;   // clicks on box/lines/info text die here — never reach menus
+      }
+      //--- P-BK-69: select-click on a NATIVE trendline shows its circle covers on this
+      //--- frame (the pump would pop them in half a second later). Never consumed, and
+      //--- the line itself is never written — deselect-side cleanup stays on the pump.
+      if(StringFind(sparam, tag) != 0 &&
+         ObjectGetInteger(0, sparam, OBJPROP_TYPE) == OBJ_TREND)
+      {
+         if(TVHFollowOne(sparam)) ChartRedraw();
+      }
+   }
+
+   //--- P-BK-69: a NATIVE trendline drag carries its covers live with the hand (the
+   //--- pump would lag half a second behind it). Foreign objects only — ours never
+   //--- reach here (the prefix branches own them) — and the dragged line itself is
+   //--- never written (P-BK-15). Never consumed: the gesture is the terminal's.
+   if(id == CHARTEVENT_OBJECT_DRAG && tag != "" && StringFind(sparam, tag) != 0)
+   {
+      if(ObjectGetInteger(0, sparam, OBJPROP_TYPE) == OBJ_TREND)
+      {
+         if(TVHFollowOne(sparam)) BaseKnotDragPaint();   // the shared 30 ms paint budget
+         return false;
       }
    }
 
