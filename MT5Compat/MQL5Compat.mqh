@@ -636,7 +636,15 @@ void CompatRefreshChartData()
                          ((nowMs - s_lastFullSyncMs) >= (uint)COMPAT_FULL_SYNC_MIN_MS);
         if(due)
         {
-            s_lastFullSyncMs = nowMs;
+            // R-TF-UNIT: stamp AFTER a successful copy, not before.
+            // Stamping before meant: if CopyRates fails (history still
+            // downloading on a TF switch), the 500 ms throttle fires and
+            // every OnCalculate call within that window skips the retry.
+            // The indicator then runs with g_seriesBars = 0 (arrays empty)
+            // until a new bar arrives — on H4 that can be hours.
+            // Stamping after success means a failed attempt is retried on
+            // the very next tick, while a successful one is throttled
+            // normally so history-churn cannot monopolise the CPU.
             ResetLastError();
             // P-MT5-TF-SPEED: copy only the working window, not the entire history.
             const int copyCount = (bars < COMPAT_SERIES_WINDOW) ? bars : COMPAT_SERIES_WINDOW;
@@ -644,6 +652,7 @@ void CompatRefreshChartData()
             const int copied = CopyRates(_Symbol, PERIOD_CURRENT, 0, copyCount, g_seriesRates);
             if(copied > 0)
             {
+                s_lastFullSyncMs = nowMs;   // throttle ONLY after success
                 // Unpack MqlRates into the five named series arrays.
                 // ArrayResize with the exact count avoids reallocating on every
                 // tick when the count is stable (MQL5 only grows, never shrinks).
@@ -674,8 +683,9 @@ void CompatRefreshChartData()
                 ArrayFree(g_seriesRates);   // release staging memory immediately
                 return;
             }
-            // Copy failed (history still loading) - keep old arrays, retry
-            // after the floor above, not on the next tick.
+            // Copy failed (history still loading) — do NOT stamp s_lastFullSyncMs.
+            // The next tick will retry immediately (due = true again) until the
+            // history arrives. Once it does, the stamp fires and throttling begins.
         }
     }
 
