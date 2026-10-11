@@ -531,18 +531,14 @@ int OnCalculate(const int rates_total,
                 const int &spread[])
 {
 
-    // MT5-ONLY PLATFORM CALLS - MQL4 always hands these arrays over as
-    // timeseries (index 0 = current bar) and there is no first-bar race; MQL5
-    // makes no such promise, so the direction is forced and the emulated series
-    // arrays are refilled before the shared handler reads them.
-    ArraySetAsSeries(time, true);
-    ArraySetAsSeries(open, true);
-    ArraySetAsSeries(high, true);
-    ArraySetAsSeries(low, true);
-    ArraySetAsSeries(close, true);
-    ArraySetAsSeries(tick_volume, true);
-    ArraySetAsSeries(real_volume, true);
-    ArraySetAsSeries(spread, true);
+    // MT5-ONLY PLATFORM CALL: fill the global Time[]/Open[]/High[]/Low[]/Close[]
+    // emulated series (index 0 = current bar) used by the shared modules.
+    // NOTE: ArraySetAsSeries is NOT called on the OnCalculate parameter arrays.
+    // The shared OnCalculateHandler was written for MQL4 convention where these
+    // parameters are NOT timeseries: close[0]=oldest, close[rates_total-1]=current.
+    // Reversing them would make close[rates_total-1] point to the OLDEST bar,
+    // causing currentPrice/currentBarTime to read the wrong end of history.
+    // MT5-ONLY fix.
     CompatRefreshChartData();
     int result = OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
 
