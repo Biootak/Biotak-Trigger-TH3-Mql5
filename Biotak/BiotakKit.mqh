@@ -96,7 +96,7 @@ string GetGVName(string key) { return g_UI.gvPrefix + key; }
 static int  g_PnlX[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static int  g_PnlY[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
-static bool g_PnlPinSpot = false;   // P-UI-142: restore-to-exact-saved-position flag
+static bool g_PnlPinSpot = false;
 
 //==============================================================================
 // PALETTE COLOR KINDS — one kind per colorable setting of THIS indicator.
@@ -302,6 +302,7 @@ void InitializeUISupport()
 {
    RuntimeSettingsLoadOverrides();
    SyncTHFlagsFromMode();   // OV-loaded flags must match the restored g_thLabelsMode
+   RestoreDiscreteToggles();   // P-UI-142: chart key, else the OV_-seeded mirror (restart-durable; the early dialog-fallback block stays for Lite)
    LoadPalRecent();
 
    // panel drag positions (persisted per chart)
@@ -355,7 +356,7 @@ void RefreshUIPerTick()
       // and TH lives in THCalculations (below this file), so the pump pushes it in
       // and the domain never reads it (layer law). Change-guarded inside: one cached
       // TH read and one compare per round, and only a value that MOVED re-arms the re-read.
-      BaseKnotStepPush(THAbilityPriceNorm(inpTHVolNorm, Period(), 0));
+       BaseKnotStepPush(THAbilityPriceNorm(inpTHVolNorm, Period(), 0));
       // P-BK-46: the knot's trade is measured in EngSL of ITS OWN TF, and EngSL is
       // trade-plan math (TradePlanFormulas, above this file too) — the same pump
       // hands it in: it asks the tool which TFs its boxes call their own, computes

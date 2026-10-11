@@ -17,953 +17,29 @@
 #ifndef EVENT_HANDLERS_MQH
 #define EVENT_HANDLERS_MQH
 
-// EventHandlers_Init.mqh - EventHandlers split 2026-09-29: exact lines 7-1496 of EventHandlers.mqh, byte-identical, zero renames.
-#ifndef EVENT_HANDLERS_INIT_MQH
-#define EVENT_HANDLERS_INIT_MQH
-
-#property strict
-
-//==============================================================================
-// P-PERF-38c — ONE-TIME MIGRATION OFF THE TIMEFRAME-NAMED SCHEME
-//
-// P-PERF-38 made the level-object prefix timeframe-free, so a chart that had
-// been drawn by an older build still holds one whole namespace per timeframe it
-// ever visited (`THLevels_H1_*`, `THLevels_M15_*`, ...). The old teardown swept
-// all eleven of those on EVERY timeframe switch - eleven full-chart prefix scans
-// for objects that, after this migration, do not exist at all.
-//
-// So the sweep is not deleted; it is MOVED OUT OF THE SWITCH and gated on a
-// per-chart stamp. It runs exactly once per chart, ever. Steady state: one
-// GlobalVariableCheck. That is the difference between "cleanup that scales with
-// how often you press H1" and "cleanup that happens once".
-void MigrateTimeframeNamedObjects()
-{
-   // P-PERF-38f: the stamp has ONE owner (GlobalVariables), shared with the label
-   // sweep that must stop doing this work on every timeframe switch.
-   string stamp = NameSchemeStampName();
-   if(LegacyNameSchemeMigrated()) return;   // this chart is already migrated
-
-   // Every string GetCurrentTimeframe() can return, plus the two legacy
-   // spellings ("MN" from ClearAllLabels, "UNKNOWN" for a CUSTOM period).
-   static string s_tfNs[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN", "MN1", "UNKNOWN"};
-   g_suppressDeleteEvents = true;
-   int removed = 0;
-   for(int n = 0; n < ArraySize(s_tfNs); n++)
-      removed += ObjectsDeleteAll(0, inpObjectPrefix + "_" + s_tfNs[n] + "_");
-   // The ATR/TH label families also exist WITHOUT a TF namespace
-   // (`inpObjectPrefix + "ATR_*" / "TH_*"`), and the legacy shared-pattern ones
-   // carry `inpObjectPrefix + "SharedPattern_"`.
-   removed += ObjectsDeleteAll(0, inpObjectPrefix + "ATR_");
-   removed += ObjectsDeleteAll(0, inpObjectPrefix + "TH_");
-   removed += ObjectsDeleteAll(0, inpObjectPrefix + "SharedPattern_");
-   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
-   g_suppressDeleteEvents = false;
-   InvalidateObjectCountCache();
-   GlobalVariableSet(stamp, 1.0);
-   // Named, once, only when it actually did something - so the log shows the
-   // upgrade happened and never repeats.
-   if(removed > 0)
-      _LOG_GATE_I Print("[I][GEN] P-PERF-38 migration: removed ", removed,
-                        " legacy timeframe-named object(s) - this runs once per chart");
-}
-
-//==============================================================================
-// P-PERF-38d — TOPOLOGY ADOPTION ACROSS MT4'S FORCED RELOAD
-//
-// P-PERF-38 named the level family without the timeframe and P-PERF-38b stopped
-// the teardown from deleting it. On their own those two are NOT enough, and the
-// reason is subtle: a chart period change makes MT4 unload and RELOAD the
-// indicator, so the new instance starts with an EMPTY stored signature
-// (`s_lastLevelSig == ""`). The first comparison is therefore trivially true ->
-// `levelTopologyChanged` -> `shouldClearLevels` -> a full `ClearAllLevels` of the
-// whole family, immediately followed by the staged rebuild that creates it all
-// again. That delete+create pair IS the "changing the timeframe recomputes and
-// redraws my levels" the user reports, and it survived the naming fix because
-// nothing carried the fact that the chart is already drawn.
-//
-// So the new instance is TOLD. At teardown an ordinary timeframe change writes
-// ONE per-chart fingerprint of the inputs that decide WHICH objects may exist
-// (the naming scheme, the mode, and the other structure-defining inputs) — never
-// the prices, which genuinely do change per timeframe. At init that fingerprint
-// is compared, and on a match the first pass adopts the previous instance's
-// topology: no wipe, no staging restart, and the timeframe change reduces to a
-// single in-place property pass. The prices are still re-derived (`thValue`
-// comes from `GetTimeframeTH()`), but they now arrive through the RENDER
-// signature, which re-asserts in place, instead of through the NAME, which
-// forced a destroy-and-build.
-//
-// Conservative by construction: no stamp (a first attach, an older build, a
-// chart the indicator was just REMOVEd from) means no adoption, i.e. exactly the
-// old behaviour. A wrong "same" can only ever skip a wipe, and a skipped wipe is
-// safe here because every object the render does not produce is still swept by
-// CleanupSurplusPipeline and the label generation sweep — both run on every
-// render.
-#define NAME_SCHEME_ID 40
-
-string AdoptionStampName() { return "Biotak_AdoptTopology_" + GetCachedChartIdStr(); }
-
-// The topology stamp is a CLAIM (written at teardown, compared at init) that the
-// objects already on the chart are still correct: on a match the first pass
-// ADOPTS them, so a timeframe switch is one in-place property pass instead of a
-// wipe and a staged rebuild. It names every input that decides WHICH NAMES may
-// exist — naming scheme, mode, level count, start-point type, LS-first, harmonic
-// pair — because a name mismatch is never repaired in place (a mode change renames
-// the whole family). P-LEVEL-FOREIGN-02 — the PRICES left the stamp: a stale price
-// is repaired by `SweepForeignLadderObjects()` (LevelPipeline) on the one frame the
-// ladder PITCH changed (measured: 250-300 ms teardown + four 60-95 ms frames per
-// switch on MT5, ~30 ms on MT4). NAME_SCHEME_ID 39 -> 40 refuses every stamp a
-// previous build wrote.
-int AdoptionFingerprint()
-{
-   int fp = NAME_SCHEME_ID;
-   fp = fp * 31 + (int)GetCurrentStepMode();
-   fp = fp * 31 + inpMaxLevels;
-   fp = fp * 31 + (int)g_thStartPointType;
-   fp = fp * 31 + (inpLSFirst ? 1 : 0);
-#ifndef BUILD_LITE
-   fp = fp * 31 + (inpEnableHarmonicPattern ? 1 : 0);
-   fp = fp * 31 + (int)MathRound(inpHarmonicRatio * 1000.0);
-#endif
-   // P-LEVEL-FOREIGN-02: and NOT the prices - the note above this function is
-   // the whole argument. A price that moved is repaired IN PLACE by the pitch
-   // sweep; a NAME that moved is not, which is the only distinction that
-   // belongs in a stamp.
-   return fp;
-}
-
-// Written by the teardown of a timeframe switch: the objects are staying on the
-// chart, so the next instance is allowed to adopt them.
-void SaveTopologyAdoptionStamp()
-{
-   GlobalVariableSet(AdoptionStampName(), (double)AdoptionFingerprint());
-}
-
-// Called by every teardown path that really deletes the family. Without the
-// stamp the next instance wipes and rebuilds, which is the correct answer when
-// the objects are genuinely gone.
-void ClearTopologyAdoptionStamp()
-{
-   string n = AdoptionStampName();
-   if(GlobalVariableCheck(n)) GlobalVariableDel(n);
-}
-
-// Resolved ONCE per instance, at the end of OnInitHandler — after the custom-
-// price restore has had its say about `g_thStartPointType`, which is one of the
-// fingerprint's inputs. The VALUE itself lives in GlobalVariables.mqh: the
-// pipeline's ladder sweep reads it too, and LevelPipeline.mqh is included
-// BEFORE this file (entry lines 93 and 99), where MQL4 has no forward reference
-// for a global.
-
-//==============================================================================
-// P-VIEW-05 (2026-09-30) — THE CHART IS THE WITNESS; THE STAMP IS ONLY A CLAIM.
-//
-// The user's report, third time: «هنوز موقع تعویض تایم فریم سطوح حذف و رسم مجدد داره»
-// — on a timeframe switch the levels are deleted and drawn again from zero. The
-// wipe on that path has ONE author (`shouldClearLevels`), and it can only be true
-// on a freshly reloaded instance for one of two reasons: `g_forceClearOnNextDraw`
-// (raised by the frame when `!g_adoptPreviousTopology`) or a topology-signature
-// difference. Both reduce to the SAME fact: this function said NO.
-//
-// And it can say NO without a word. The old body opened with
-// `if(!GlobalVariableCheck(n)) return;` — a GlobalVariable that is not there (a
-// first attach, a stamp a removing teardown deleted, the terminal's own variable
-// store having been rewritten) returned with `adopt = false` and printed
-// NOTHING, because the warning below is in the OTHER branch. So a timeframe
-// switch could wipe ~900 objects with no line in the log naming it, which is
-// exactly the "who deletes my levels" question this project keeps re-opening.
-//
-// Two changes, both measured by the one line below:
-//
-//   1. THE OBJECTS THEMSELVES ARE THE SECOND WITNESS. "Adopt" means one thing -
-//      do NOT delete the family before re-asserting it - and its safety does not
-//      depend on the inputs matching, because every render sweeps what it did not
-//      produce (`CleanupSurplusPipeline`, `SweepForeignLadderObjects`, the label
-//      sweep). A chart that is still HOLDING the family is therefore proof
-//      enough: a wipe would delete objects that are about to be re-priced in
-//      place, which is precisely the delete+draw the user sees. `preexist > 0`,
-//      read off the chart, is that proof; the input fingerprint is kept as the
-//      second (cheaper) way to reach the same verdict.
-//   2. THE VERDICT IS ALWAYS PRINTED. One line per attach, so the next report is
-//      `preexist=577 adopted=1` or `preexist=0 adopted=0` instead of a wipe with
-//      no author. Cost: ONE chart-object walk per instance, at attach.
-//
-// The handoff side prints its own `probe=handoff` line from the teardown, so the
-// pair "what the chart held when we left" / "what it holds when we come back" is
-// two numbers in one log — which is also the only honest way to answer "does the
-// terminal delete our objects on a period change, or do we".
-//==============================================================================
-int LevelFamilyObjectsOnChart()
-{
-   // ONE walk of the chart's object list, ONCE per instance (attach and, with the
-   // handoff line, once per timeframe switch). The prefix is the timeframe-free
-   // level namespace, so the count is the level family and nothing else.
-   int total = ObjectsTotal(0, -1, -1);
-   if(total <= 0) return 0;
-   string prefix = GetLevelObjectPrefix();
-   if(StringLen(prefix) <= 0) return 0;
-   int found = 0;
-   for(int i = 0; i < total; i++)
-   {
-      string nm = ObjectName(0, i, -1, -1);
-      if(StringLen(nm) <= 0) continue;
-      if(StringFind(nm, prefix) != 0) continue;
-      found++;
-   }
-   return found;
-}
-
-void ResolveTopologyAdoption()
-{
-   g_adoptPreviousTopology = false;
-   string n = AdoptionStampName();
-   bool haveStamp = GlobalVariableCheck(n);
-   int stored = haveStamp ? (int)GlobalVariableGet(n) : 0;
-   int live = AdoptionFingerprint();
-   bool stampOk = (haveStamp && stored == live);
-   // The chart's own answer, independent of every GlobalVariable above.
-   int preexist = LevelFamilyObjectsOnChart();
-   // The chart-truth witness is used for the branch the report is about: the
-   // levels are SHOWN and the indicator is not hidden, so "the family is on the
-   // chart" can only mean "do not delete it". The hidden/levels-off states keep
-   // their previous (stamp-only) verdict: they own their objects through masks and
-   // an explicit clear, and this probe has no business rewriting that path.
-   bool familyHere = (preexist > 0 && inpShowTHLevels && !IsIndicatorHidden());
-   g_adoptPreviousTopology = (stampOk || familyHere);
-   // P-PERF-38e: a stamp that is PRESENT and mismatched still names its terms —
-   // that is a genuine input change (mode, max levels, start point, LS-first,
-   // harmonic pair) and the wipe is the correct answer for it.
-   if(haveStamp && !stampOk)
-      _LOG_GATE_W Print("[W][GEN] P-PERF-38e: topology stamp mismatch (stored fp=", stored,
-                        " live fp=", live, " mode=", (int)GetCurrentStepMode(),
-                        " maxLv=", inpMaxLevels, " sp=", (int)g_thStartPointType,
-                        " lsFirst=", (inpLSFirst ? 1 : 0), ")");
-   // UNGATED on purpose: this line is the author of the wipe, or the proof there
-   // was none. See the block comment above.
-   Print("[P-VIEW] probe=adopt stamp=", (haveStamp ? 1 : 0), " stored=", stored,
-         " live=", live, " preexist=", preexist, " adopted=", (g_adoptPreviousTopology ? 1 : 0),
-         " total=", ObjectsTotal(0, -1, -1));
-}
-
-//==============================================================================
-// P-UI-56 — the custom-price SOURCE has ONE owner and ONE precedence. The whole
-// level family is anchored on `GetMidpointPrice(g_thStartPointType)` ->
-// `g_customTHStartPrice`, and it was resolved by TWO copies of the same
-// three-branch chain (here and in RedrawAllObjects) carrying two defects that only
-// a used chart shows: (1) the persisted placement was keyed per SYMBOL, so two
-// charts of one symbol shared one price; (2) the INPUT silently outranked and
-// OVERWROTE the placement keys. ONE owner answers "what is the custom price of
-// THIS chart?": the user's own chart-keyed placement BEATS the static input, and
-// the input is only the seed when the chart has no placement of its own — it never
-// writes the placement keys (so the OFF paths still return to the input).
-//==============================================================================
-string CustomPriceGVName()         { return "Biotak_CustomPrice_" + GetCachedChartIdStr(); }
-string CustomPriceOverrideGVName() { return "Biotak_CustomPriceOverride_" + GetCachedChartIdStr(); }
-// The PREVIOUS scheme's keys (symbol-scoped). Read once, ONLY to adopt a price an
-// older build left behind; never written again (only purged on REASON_REMOVE).
-string CustomPriceLegacyGVName()         { return "Biotak_CustomPrice_" + GetCachedSymbol(); }
-string CustomPriceLegacyOverrideGVName() { return "Biotak_CustomPriceOverride_" + GetCachedSymbol(); }
-
-void CustomPriceMigrateLegacyKeys()
-{
-    static bool s_migrationDone = false;
-    if(s_migrationDone) return;
-    s_migrationDone = true;                                  // one probe per instance, never per frame
-    if(GlobalVariableCheck(CustomPriceGVName())) return;     // this chart owns a price already
-    string legacy = CustomPriceLegacyGVName();
-    if(!GlobalVariableCheck(legacy)) return;
-    double legacyPrice = GlobalVariableGet(legacy);
-    if(!(legacyPrice > 0.0) || !MathIsValidNumber(legacyPrice)) return;
-    // Is the legacy price a USER PLACEMENT or an input-seeded copy? It matters:
-    // a placement must outrank the input, an input seed must not. Provable from the
-    // old writers - only ONE of them wrote the price key from a non-user source,
-    // and that one (the init/frame INPUT branch) wrote `inpCustomTHStartPrice`
-    // itself. So: with the input unset the legacy price can only be a placement;
-    // with the input set, the legacy override flag is the only trustworthy witness.
-    string legacyFlag = CustomPriceLegacyOverrideGVName();
-    bool legacyOverride = GlobalVariableCheck(legacyFlag) ? (GlobalVariableGet(legacyFlag) != 0.0) : false;
-    bool legacyIsPlacement = legacyOverride || !(inpCustomTHStartPrice > 0.0);
-    GlobalVariableSet(CustomPriceGVName(), legacyPrice);
-    GlobalVariableSet(CustomPriceOverrideGVName(), legacyIsPlacement ? 1.0 : 0.0);
-    _LOG_GATE_I Print("[I][GEN] P-UI-56: adopted the symbol-scoped custom price ",
-                      DoubleToString(legacyPrice, Digits), " as this chart's own (",
-                      legacyIsPlacement ? "placement" : "input seed", ")");
-}
-
-// ONE writer for "the user placed / moved the line on THIS chart".
-void CustomPricePersistPlacement(const double price)
-{
-    if(!(price > 0.0) || !MathIsValidNumber(price)) return;
-    GlobalVariableSet(CustomPriceGVName(), price);
-    GlobalVariableSet(CustomPriceOverrideGVName(), 1.0);
-}
-
-// ONE writer for "this chart has no placement of its own" (the OFF paths).
-void CustomPriceForgetPlacement()
-{
-    GlobalVariableDel(CustomPriceGVName());
-    GlobalVariableSet(CustomPriceOverrideGVName(), 0.0);
-}
-
-// The resolver's result. Ints, not an enum: both call sites are ABOVE this block
-// in the translation unit, and MQL4 type resolution is positional.
-#define CPSRC_NONE   0   // no placement and no input price → not the custom-price start point
-#define CPSRC_PLACED 1   // the user's own price on this chart (wins over the input)
-#define CPSRC_INPUT  2   // the Input's seed price (the "default state")
-
-int CustomPriceResolveSource(double &priceOut, bool &overrideFlagOut)
-{
-    priceOut = 0.0;
-    overrideFlagOut = false;
-    CustomPriceMigrateLegacyKeys();
-
-    string priceKey = CustomPriceGVName();
-    string flagKey  = CustomPriceOverrideGVName();
-    double placed = GlobalVariableCheck(priceKey) ? GlobalVariableGet(priceKey) : 0.0;
-    bool   placedFlag = GlobalVariableCheck(flagKey) ? (GlobalVariableGet(flagKey) != 0.0) : false;
-    if(placed > 0.0 && MathIsValidNumber(placed)) {
-        // The flag only decides WHO WINS (this chart's placement or the Input) - the
-        // stored price is honoured either way, exactly like the old chain, whose
-        // branch 1 and branch 3 restored the SAME price and differed only by that
-        // flag. Keeping that asymmetry is what lets a parameter change put the start
-        // point back on the Input default while the price survives for later.
-        if(placedFlag) {
-            priceOut = placed;
-            overrideFlagOut = true;
-            return CPSRC_PLACED;
-        }
-        if(inpCustomTHStartPrice > 0.0 && MathIsValidNumber(inpCustomTHStartPrice)) {
-            priceOut = inpCustomTHStartPrice;
-            return CPSRC_INPUT;
-        }
-        priceOut = placed;
-        return CPSRC_PLACED;
-    }
-    if(inpCustomTHStartPrice > 0.0 && MathIsValidNumber(inpCustomTHStartPrice)) {
-        priceOut = inpCustomTHStartPrice;
-        return CPSRC_INPUT;
-    }
-    return CPSRC_NONE;
-}
-
+// P-SIZE-1500 (2026-10-04): the two owners that drifted back over the ceiling were
+// split along seams they already had. ORDER IS THE COMPILER'S: MQL4 resolves a call
+// top-down, so each new half is included ABOVE the file that calls it.
 //+------------------------------------------------------------------+
-//| P-ARCH-03 (2026-09-29) — TWO BUILDS, ONE CHART, ONE SET OF NAMES.|
+//| EventHandlers_CustomPrice.mqh                                    |
 //|                                                                  |
-//| Lite is Full minus features, NOT a differently named family:     |
-//| both units paint the SAME object names (that is what makes a     |
-//| switch between them keep the chart). Two of them on one chart is  |
-//| therefore two writers per name — one deletes what the other drew, |
-//| the countdown is re-created twice a second, the TRex card's inks  |
-//| have two owners, and a whole price band can stay missing while    |
-//| the other half is drawn correctly. That is exactly the report     |
-//| this session chased: «سطوح حذف میشه ولی دیگه نمیاد» + «ثانیه شمار  |
-//| هی حذف و رسم میشه» + «رنگ آبی TR عوض میشه» + the empty band in   |
-//| the user's screenshot — ALL ONE CAUSE, and the user FOUND it by   |
-//| removing the Lite unit from the chart. MEASURED, from the         |
-//| terminal's own log (EURUSD,M15):                                  |
-//|   23:23:44.792  BiotakProject\Biotak Trigger TH3 Lite  loaded     |
-//|   23:23:44.875  BiotakProject\Biotak Trigger TH3       loaded     |
+//| P-SIZE-1500 (2026-10-04) - the custom price line's own owner.     |
 //|                                                                  |
-//| The oracle is the CHART's own list, never a global variable and   |
-//| never a marker object: it cannot go stale, it cannot survive a    |
-//| crash, and it is the same list the Navigator shows. A unit that   |
-//| finds a second one REFUSES to initialise, so the chart says so    |
-//| instead of quietly painting a wrong picture.                      |
+//| Exact lines 942-1748 of EventHandlers_Init.mqh, moved verbatim,   |
+//| zero renames: the line's construction (CreateCustomPriceLine),    |
+//| the selection it drops, the marker census, the handset pair's     |
+//| reveal/arms, the drag lock and its heal, the tooltip, and the     |
+//| Hide/Show All surface.                                            |
 //|                                                                  |
-//| Cost: one chart enumeration at init only (no per-frame work).     |
+//| WHY IT PRECEDES EventHandlers_Init.mqh in the hub: this half      |
+//| calls NOTHING in Init (measured: 0 calls), while Init calls in    |
+//| (CreateCustomPriceLine, ResetHideAllState) - and MQL4 resolves a  |
+//| call top-down, so this order owes no prototype and adds no        |
+//| warning 46 (the cross-file prototypes elsewhere in the tree are   |
+//| exactly the ones that order could not avoid).                     |
 //+------------------------------------------------------------------+
-bool TH3SiblingUnitOnChart()
-{
-   string mine = "Biotak Trigger TH3";
-   #ifdef BUILD_LITE
-      mine = mine + " Lite";
-   #endif
-   int total = ChartIndicatorsTotal(0, 0);
-   int th3 = 0, other = 0;
-   string names = "";
-   int mineLen = StringLen(mine);
-   for(int i = 0; i < total; i++)
-   {
-      string nm = ChartIndicatorName(0, 0, i);
-      if(nm == "") continue;
-      if(StringFind(nm, "Biotak Trigger TH3") < 0) continue;   // not our family
-      th3++;
-      if(names != "") names += " + ";
-      names += nm;
-      // A DIFFERENT UNIT is a name that does not end with ours. The folder prefix
-      // (`BiotakProject\`) is not part of the identity, the tail is.
-      if(StringLen(nm) < mineLen || StringSubstr(nm, StringLen(nm) - mineLen) != mine) other++;
-   }
-   // `other > 0`: a sibling of the other unit (or the same-name file from another
-   // folder) is attached. `th3 > 1`: two entries that BOTH spell our own name —
-   // that is two attachments of one unit and the same interference.
-   if(other > 0 || th3 > 1)
-   {
-      Print("[E][ARCH] P-ARCH-03: ", th3, " builds of this indicator on ONE chart: ", names,
-            " — they paint the SAME object names, so each one deletes what the other drew "
-            "(missing price bands, a countdown re-created every second, two writers on the "
-            "TRex card's colours). This unit will not load. Remove all but ONE and re-add it.");
-      return true;
-   }
-   return false;
-}
-
-int OnInitHandler() {
-    // P-ARCH-03: the one-chart-one-unit rule lands before ANY observable work — before
-    // the legacy sweep, before the settings seed, before a single object. A refused
-    // unit must not have touched the chart it refuses to share.
-    if(TH3SiblingUnitOnChart()) return INIT_FAILED;
-    // P-PERF-38c: the one-time legacy sweep must land before the first render, so
-    // a chart drawn by an older build cannot blend two naming schemes.
-    MigrateTimeframeNamedObjects();
-    // P-PERF-10: phase ledger for the init path (see g_pInitMs* in GlobalVariables).
-    uint pInitTick = GetTickCount();
-    // Seed runtime settings from the real MT4 Inputs-dialog values FIRST:
-    // every inpX read from here on is the runtime copy (see RuntimeSettings.mqh).
-    RuntimeSettingsInit();
-    //--- P-BUILD-08 (2026-09-29, supersedes P-UI-134/134b/134c) — THE LINE IS THE
-    //--- CODE, BEFORE ANY CLOCK OR TAG CAN LIE ABOUT IT.
-    //--- The old tag was a hand-typed word ("T2") that stayed "T2" across every
-    //--- build of 09-29, so a chart holding an hours-old ex4 printed the same line
-    //--- as the fresh one — measured: the tab track read -16924895 (0xFEFDBF21) on
-    //--- an ex4 that predated the P-DRAW-89 tone fix while this tree computes
-    //--- 2892316 = RGB(28,34,44). `TH3_BUILD_TAG` is now `TH3_SRC_HASH`, a SHA-256
-    //--- over the bytes this unit compiles (Biotak/BuildHash.mqh, generated by the
-    //--- build), so the stamp changes when and only when the code does; `srcfile=`
-    //--- prints the hash the last build wrote beside this terminal and `match=NO`
-    //--- is a chart running an older ex4, said out loud instead of inferred.
-    //--- `__DATETIME__` answers "when was this compiled" and is kept as the clock;
-    //--- it cannot answer "which code" — a compile fed a stale DrawStrip.mqh
-    //--- answers "now" (measured on the 19:02:42 ex4, whose TABCENSUS printed a
-    //--- tone the current StrapBodyTone cannot produce: its whole output space is
-    //--- R 18-29, G 22-35, B 29-46).
-#ifndef BUILD_LITE
-    // P-BUILD-01: the strip is a Full surface, so the Lite unit has neither the
-    // names nor the functions — the probe lives where the strip does (compile error
-    // 256/168 on the 2026-09-29 Lite build was this line read without the guard).
-    int probeTone = (int)StrapBodyTone(DSTRIP_BODY_TOP, DSTRIP_GEAR_GRID_TOP - DSTRIP_BODY_TOP, 314);
-    int probeFill = (int)DrawStripPlateFill();
-    //--- P-UI-134c: the probe now prints the PARTS, not only the answer. Measured
-    //--- 2026-09-29 19:28: the same build printed `tracktone=-16924895` while this
-    //--- file's arithmetic for `StrapBodyTone(2,96,314)` is 2892316 = RGB(28,34,44),
-    //--- and the compiler's own include trail named this repo's DrawStrip.mqh. So one
-    //--- of the three inputs is not what the source says — the stops, the ramp, or the
-    //--- plate fill — and these five numbers name WHICH one. `rampAt159` is 2892316
-    //--- when the ramp is the cards' own; `cardTop/panel/foot` are 1971742/2432023/
-    //--- 1906194 when the stops are BIO_CLR_CARD_TOP/PANEL/FOOT.
-    int probeMid  = (int)BioCardTone(0.1592);
-    int probeTop  = (int)BIO_CLR_CARD_TOP;
-    int probePan  = (int)BIO_CLR_PANEL;
-    int probeFoot = (int)BIO_CLR_FOOT;
-    int probeCard = (int)BIO_CLR_CARD;
-    //--- P-BUILD-10: the three INKS the report names, read out of the runtime copies
-    //--- the card and the countdown actually paint with. clrBlue is 255 (0x0000FF) and
-    //--- clrRed is 255<<0... `tr=255` is the shipped bold blue the user asked for; any
-    //--- other number here is the ink the label will wear, said out loud at attach.
-    int probeTR   = (int)g_atrTradeTRColor;
-    int probeEX   = (int)g_atrTradeExColor;
-    int probeCD   = (int)g_countdownColor;
-#endif
-#ifdef BUILD_LITE
-    Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " LITE compiled=",
-          TimeToString(__DATETIME__, TIME_DATE|TIME_SECONDS),
-          TH3SourceStampTail());
-#else
-    //--- the probe numbers stay: they are READ OUT OF THE COMPILED FUNCTIONS at the
-    //--- arguments the tab track itself asks for, so a compile that shipped stale
-    //--- strip code under a fresh stamp still shows it here —
-    //--- StrapBodyTone(2,96,314)=2892316 = RGB(28,34,44), plateFill=2432023, and
-    //--- the five stop/ramp values name WHICH input drifted.
-    Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " FULL compiled=",
-          TimeToString(__DATETIME__, TIME_DATE|TIME_SECONDS),
-          TH3SourceStampTail(),
-          " tracktone=", probeTone, " plateFill=", probeFill,
-          " rampAt159=", probeMid, " cardTop=", probeTop, " panel=", probePan,
-          " foot=", probeFoot, " card=", probeCard,
-          " tr=", probeTR, " ex=", probeEX, " cd=", probeCD);
-    //--- P-BUILD-09 (2026-09-29) — THE RAMP, SAMPLED. Measured with the stamp above:
-    //--- `rampAt159=2138660689` = 0x7F795F51 and `tracktone=-16924895` = 0xFEFDBF21
-    //--- both carry a NON-ZERO alpha byte, which `return (color)(r | (g << 8) |
-    //--- (bl << 16))` cannot produce from three byte-sized channels (ConstantsAndEnums
-    //--- 1141). The stops themselves are correct in the same run (cardTop=3089438 =
-    //--- C'30,36,47', panel=2432023 = C'23,28,37', foot=1906194 = C'18,22,29'), so the
-    //--- defect is in the ramp's own arithmetic — and a value nobody measured cannot
-    //--- be fixed. These seven numbers are that measurement: four points ON the stops
-    //--- must come back as the stop itself (t=0 -> cardTop, t=0.52 -> panel,
-    //--- t=1 -> foot) and `mid100` must read 52 (BIO_CARD_MID_T x 100).
-    Print("[BUILD] ramp t0=", (int)BioCardTone(0.0),
-          " t26=", (int)BioCardTone(0.26), " t52=", (int)BioCardTone(0.52),
-          " t76=", (int)BioCardTone(0.76), " t100=", (int)BioCardTone(1.0),
-          " mid100=", (int)(BIO_CARD_MID_T * 100.0));
-#endif
-    InitializeGlobalCache();
-    LoggerSetLevel(inpLogLevel);
-    // P-UI-90: resolve "what is the user's view pair on THIS chart?" before any
-    // owner can take the lock, and heal a chart an older build left locked (see
-    // the block note in GlobalVariables.mqh). Two chart reads + three GVar reads.
-    ChartViewLockInit();
-    // P-PERF-02: a fresh instance knows nothing about the visibility masks the
-    // previous one left on the chart (and re-attach / TF switch reuses the same
-    // chart objects), so every guarded mask write must land once. The
-    // hide-once state starts clean for the same reason.
-    BumpTfEpoch();
-    ResetHideAllState();
-    // P-PERF-07: a fresh instance can see objects the previous one left on the
-    // chart (re-attach / TF switch reuses the same chart), so the previous
-    // instance's "this name is absent" facts are not trustworthy yet.
-    CacheAbsentResetAll();
-    HRayOnInit(); PathOnInit();   // P-HR-06 / P-UI-136: adopt the chart's drawings into the registry (idempotent)
-
-    // Restore hidden state
-    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
-    bool shouldBeHidden = RestoreBoolGlobalVar(gvar_name, false);
-    DEBUG_PRINTF("OnInit: shouldBeHidden=", shouldBeHidden);
-
-    string chartIdStr = GetCachedChartIdStr();
-    datetime initNow = TimeCurrent();
-
-    // Timeframe-switch debounce: detect recent TF change (within 20s)
-    string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + chartIdStr;
-    bool recentTimeframeSwitch = false;
-    if(GlobalVariableCheck(tfSwitchStampGvar)) {
-        datetime lastTFSwitch = (datetime)GlobalVariableGet(tfSwitchStampGvar);
-        if(initNow > 0 && lastTFSwitch > 0 && (initNow - lastTFSwitch) <= 20)
-            recentTimeframeSwitch = true;
-    }
-
-    // Restore toggle states (early, before validation)
-    g_triggerLevelsEnabled = RestoreBoolGlobalVar("Biotak_TriggerLevels_" + chartIdStr, inpShowTrigger);
-    g_linesVisible = RestoreBoolGlobalVar("Biotak_LinesVisible_" + chartIdStr, inpShowLines);
-
-    // Restore ATR labels visibility (Default to OFF on first load)
-    g_atrLabelsVisible = RestoreBoolGlobalVar("Biotak_ATRLabels_" + chartIdStr, false);
-
-    // Restore TH labels mode (Default OFF: 0=OFF, 1=FRACTAL, 2=STANDARD exclusive)
-    string thLabelsGvarName = "Biotak_THLabels_" + chartIdStr;
-    if(GlobalVariableCheck(thLabelsGvarName)) {
-        double gvarValue = GlobalVariableGet(thLabelsGvarName);
-        bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
-        bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
-        bool isTwo = MathAbs(gvarValue - 2.0) < EPSILON_GENERAL;
-        bool isThree = MathAbs(gvarValue - 3.0) < EPSILON_GENERAL;
-        if(isZero || isOne || isTwo || isThree) {
-            g_thLabelsMode = (int)gvarValue;
-            if(g_thLabelsMode == 3) g_thLabelsMode = 2; // legacy BOTH -> STANDARD
-            SyncTHFlagsFromMode();   // flags follow the restored mode
-        } else {
-            _LOG_GATE_E Print("[E][GEN] OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting");
-            g_thLabelsMode = 0; // Default to OFF
-            GlobalVariableSet(thLabelsGvarName, 0.0);
-            g_thLabelsVisible = false;
-        }
-    } else {
-        // First attach: honor the Inputs-dialog TH flags, default ON is STANDARD.
-        g_thLabelsMode = THModeFromFlags();
-        if(g_showTHLabels && g_thLabelsMode == 0) g_thLabelsMode = 2;
-        SyncTHFlagsFromMode();
-    }
-
-    //+------------------------------------------------------------------+
-    //| P-UI-119 (2026-09-25) — THE LEVEL AND ZONE FAMILIES START OFF,    |
-    //| ONCE PER CHART (user order «سطوح هم پیش فرض خاموش باشه»).           |
-    //|                                                                  |
-    //| The INPUTS default every one of them off now, but the states     |
-    //| restored just above are PER CHART — so a chart that ever had a   |
-    //| family on keeps it on for ever, and the new default would never  |
-    //| be visible to anyone who has used the chart before. A default is |
-    //| only real when it is applied to what is ALREADY stored, so this  |
-    //| runs once per chart (the stamp idiom the timeframe-name migration|
-    //| above uses) and then never again: from the next attach on the    |
-    //| saved state is the user's own again.                             |
-    //|                                                                  |
-    //| What it covers — the level/zone families the loader above reads   |
-    //| KEYS for: the trigger ladder, the hand-drawn level LINES           |
-    //| (`inpShowLines`' own label), the TH labels and the mid-zone band  |
-    //| (whose key spelling belongs to RuntimeSettings, so the asking is   |
-    //| delegated — one owner per key). The ATR/trade LABEL blocks are    |
-    //| not levels and are left exactly as the user set them.             |
-    //+------------------------------------------------------------------+
-    string levelsOffStamp = "Biotak_LevelsOffDefault_" + chartIdStr;
-    if(!GlobalVariableCheck(levelsOffStamp)) {
-        GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
-        GlobalVariableDel("Biotak_LinesVisible_"  + chartIdStr);
-        GlobalVariableDel("Biotak_THLabels_"      + chartIdStr);
-        MidZonesStateForget();          // the mid-zone band's own key (RuntimeSettings owner)
-        g_triggerLevelsEnabled = false; // ...and the runtime copies, so THIS attach is clean too
-        g_linesVisible         = false;
-        g_thLabelsMode         = 0;
-        SyncTHFlagsFromMode();          // the TH flag mirrors follow the single source of truth
-        g_showMidZones         = false;
-        GlobalVariableSet(levelsOffStamp, 1.0);
-    }
-
-    int validationResult = ValidateInputs();
-    if(validationResult != INIT_SUCCEEDED) return validationResult;
-    g_pInitMsSettings = GetTickCount() - pInitTick;   // P-PERF-10
-    pInitTick = GetTickCount();
-
-    ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
-    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
-    // P-UI-127 (2026-09-25): THE CREATE CHANNEL IS SUBSCRIBED AT LAST. MT4 sends
-    // no CHARTEVENT_OBJECT_CREATE until this flag is set, and the handler's whole
-    // `if(id == CHARTEVENT_OBJECT_CREATE)` branch (P-UI-100b's "this gesture is a
-    // DRAW, not a grab" and P-DRAW-01's `DrawStyleApplyOnCreate`) had therefore
-    // never run in any build: `s_drawNotGrab`'s only writer is unreachable without
-    // it. The branch's own cost is one prefix test per foreign create, which is
-    // exactly what the flag limits it to — our own objects never reach it.
-    ChartSetInteger(0, CHART_EVENT_OBJECT_CREATE, true);
-    ChartSetInteger(0, CHART_SHOW_GRID, false);
-    // 250 ms cadence (not 1 s): hold-to-open polling + hint pumps stay
-    // responsive on tick-less charts (weekends). Every OnTimer callee is
-    // time-gated / change-guarded / idempotent, so 4 Hz is free.
-    EventSetMillisecondTimer(250);
-    CheckArraySizes();
-
-    // Deferred init: skip heavy historical load on recent TF switch
-    bool deferHeavyInit = recentTimeframeSwitch;
-    if(!deferHeavyInit) {
-        if(!UpdateHistoricalValues()) {
-            // P-MT5-01b (2026-09-16): A NOT-YET-LOADED HISTORY IS A DEFERRAL, NOT A FATAL.
-            //
-            // This used to `return INIT_FAILED`. That aborts the whole
-            // initialisation, so the terminal renders an indicator that never
-            // draws anything - and the live MT5 log carries precisely that
-            // abort 17 times in one day, as "[E][GEN] OnInit:
-            // UpdateHistoricalValues failed. Error: 4401"
-            // (ERR_HISTORY_NOT_FOUND), on the symbols whose top timeframe the
-            // terminal had not built yet (SPXUSD-ECN H1 among them).
-            //
-            // MT4 CANNOT REACH THIS BRANCH: its series are resident, so iBars()
-            // never answers 0. The MT4-observable behaviour is therefore "init
-            // succeeds and the levels appear", and that is what MT5 must show
-            // too. So rather than invent a recovery path, fall through to the
-            // deferral the recent-TF-switch branch beside it already uses:
-            // g_initialized stays false, and RedrawAllObjects - which tests
-            // exactly that flag - retries this call every frame, logs that it is
-            // retrying, and draws the moment the data lands.
-            //
-            // The warning is rate-limited so a genuinely unavailable symbol
-            // cannot flood Experts; a re-request is issued by
-            // UpdateHistoricalValues itself (P-MT5-01b), so the retry converges
-            // instead of polling a series nobody asked for.
-            static uint s_lastHistInitWarnMs = 0;
-            uint histInitNowMs = GetTickCount();
-            if(histInitNowMs - s_lastHistInitWarnMs > 30000) {
-                _LOG_GATE_W Print("[W][GEN] OnInit: historical data not ready (err ",
-                                  GetLastError(), ") - deferring; the redraw path retries");
-                s_lastHistInitWarnMs = histInitNowMs;
-            }
-            g_initialized = false;
-        } else {
-            g_initialized = true;
-        }
-    } else {
-        g_initialized = false;
-    }
-    g_calculatedOnce = false;
-    InitializeAdaptiveScaling();
-
-    g_dailyClosePriceForTH = GetPriceForPreviousDay(inpTHPriceType);
-    if(g_dailyClosePriceForTH == EMPTY_VALUE || !MathIsValidNumber(g_dailyClosePriceForTH) || g_dailyClosePriceForTH <= 0) {
-        // P-MT5-01b (2026-09-16): DEFER, DO NOT ABORT.
-        //
-        // GetPriceForPreviousDay now answers EMPTY_VALUE while the D1 series has
-        // never been readable (MT5 synthesises it on demand; see the guard in
-        // HistoricalDataFunctions.mqh), because the alternative was worse: it
-        // used to return a stamped 0 for a full day, which made the TH base
-        // price - and therefore the whole level family - zero.
-        //
-        // Returning INIT_FAILED here would just move the failure, so this takes
-        // the same deferral the history branch above takes: g_initialized stays
-        // false, RedrawAllObjects retries, and the first redraw frame runs
-        // UpdateBasePrice() (its 30-minute gate is empty on a fresh instance,
-        // so it fires immediately and fills g_basePriceCached), which is what
-        // GetBasePriceForTH() reads. No new recovery path - the one that already
-        // exists is simply no longer bypassed by an aborted init.
-        //
-        // The wider test (non-finite, negative, zero) is the P-UI-57 discipline:
-        // a NaN is neither > 0 nor < 0, so a strict `== EMPTY_VALUE` would let
-        // it through and it would become the anchor of every level.
-        g_dailyClosePriceForTH = 0.0;
-        g_initialized = false;
-        static uint s_lastPrevDayWarnMs = 0;
-        uint prevDayNowMs = GetTickCount();
-        if(prevDayNowMs - s_lastPrevDayWarnMs > 30000) {
-            _LOG_GATE_W Print("[W][GEN] OnInit: previous-day prices not ready (D1 series still loading) - deferring");
-            s_lastPrevDayWarnMs = prevDayNowMs;
-        }
-    }
-    g_pInitMsHistory = GetTickCount() - pInitTick;   // P-PERF-10
-    pInitTick = GetTickCount();
-
-    // P-UI-56: no local GVar names here any more - the custom-price source (and its
-    // keys) have ONE owner in this file (see the P-UI-56 block above), and the
-    // resolution below asks it instead of re-implementing the chain.
-    int digits = Digits;
-
-    // Validate custom price input
-    double validatedCustomPrice = inpCustomTHStartPrice;
-    // P-UI-57: a non-finite input price is not "negative" and not "too large" —
-    // every comparison against NaN is false, so it would sail through both checks
-    // below and become the anchor of the whole level family.
-    if(!MathIsValidNumber(validatedCustomPrice)) {
-        _LOG_GATE_E Print("[E][GEN] OnInit: Invalid custom price (not a number)");
-        validatedCustomPrice = 0.0;
-    }
-    if(validatedCustomPrice < 0.0) {
-        _LOG_GATE_E Print("[E][GEN] OnInit: Invalid custom price (negative): ", validatedCustomPrice);
-        validatedCustomPrice = 0.0;
-    }
-    if(validatedCustomPrice > 1000000.0) {
-        _LOG_GATE_E Print("[E][GEN] OnInit: Invalid custom price (too large): ", validatedCustomPrice);
-        validatedCustomPrice = 0.0;
-    }
-
-    // P-UI-56: the source of the drawing price is resolved by ONE owner, shared
-    // with the per-frame path (`RedrawAllObjects`): THIS chart's placement first,
-    // the Input's seed second, nothing third - and the Input NEVER writes the
-    // placement keys, so a price the user dragged can no longer be replaced by the
-    // value in the Inputs dialog on the next attach.
-    //
-    // The old init chain also wrote `GlobalVariableSet(gvarName, input)` in its
-    // input branch while the per-symbol keys were shared by every chart of the
-    // symbol - the mechanism behind "each time the levels go somewhere else".
-    double srcPrice = 0.0;
-    bool   srcOverride = false;
-    int    srcKind = CustomPriceResolveSource(srcPrice, srcOverride);
-    g_customPriceKeyboardOverride = srcOverride;
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[D][GEN] === Custom Price Debug (OnInit) ===");
-    Print("[D][GEN] inpCustomTHStartPrice: ", inpCustomTHStartPrice, " validated: ", validatedCustomPrice);
-    Print("[D][GEN] resolved price: ", srcPrice, " kind: ", srcKind);
-    #endif
-    if(srcKind != CPSRC_NONE) {
-        g_customTHStartPrice = srcPrice;
-        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-        _LOG_GATE_I Print("[I][GEN] OnInit: custom price source=",
-                          (srcKind == CPSRC_PLACED ? "this chart's placement" : "Input seed"),
-                          " at ", DoubleToString(g_customTHStartPrice, digits));
-        CreateCustomPriceLine(g_customTHStartPrice, digits);
-    } else {
-        g_customTHStartPrice = 0.0;
-        g_thStartPointType = inpTHStartPointType;
-        g_customPriceKeyboardOverride = false;
-        CustomPriceForgetPlacement();
-        DEBUG_PRINT("OnInit: Using default mode (no custom price)");
-    }
-
-    g_redrawTHLevelsNeeded = true;
-
-    // Base price init debounce: skip if recently initialized during TF switch
-    string baseInitStampGvar = "Biotak_BaseInit_" + chartIdStr;
-    bool shouldInitBasePrice = true;
-    if(deferHeavyInit && GlobalVariableCheck(baseInitStampGvar)) {
-        datetime lastBaseInit = (datetime)GlobalVariableGet(baseInitStampGvar);
-        if(initNow > 0 && lastBaseInit > 0 && (initNow - lastBaseInit) <= 120)
-            shouldInitBasePrice = false;
-    }
-    if(shouldInitBasePrice) {
-        InitializeBasePriceSystem();
-        if(initNow > 0) GlobalVariableSet(baseInitStampGvar, (double)initNow);
-    } else {
-        g_systemInitialized = false;
-    }
-    g_pInitMsBase = GetTickCount() - pInitTick;   // P-PERF-10
-    pInitTick = GetTickCount();
-
-    // Restore timeframe lock state
-    string lockFlagName = "Biotak_LockTF_" + chartIdStr;
-    if(GlobalVariableCheck(lockFlagName)) {
-        g_timeframeLocked = (bool)GlobalVariableGet(lockFlagName);
-    }
-    string lockPeriodName = "Biotak_LockTFPeriod_" + chartIdStr;
-    if(GlobalVariableCheck(lockPeriodName)) {
-        // R-TF-UNIT: this value outlives the process that wrote it. An MT5 build
-        // from before the unit fix persisted an ENUM_TIMEFRAMES constant here
-        // (16385 for H1), which would restore as a lock on a timeframe that does
-        // not exist - the badge reading "16385" and every `tf == Period()` test
-        // failing. CompatMinutes() normalises whatever is on disk to minutes, so
-        // the upgrade is invisible to the user.
-        g_lockedPeriod = CompatMinutes((int)GlobalVariableGet(lockPeriodName));
-    }
-
-    // VIEWLOCK-OFF: view-lock restore retired —
-    //string viewFlagName = "Biotak_ViewLock_" + chartIdStr;
-    //if(GlobalVariableCheck(viewFlagName)) {
-    //    g_viewLockEnabled = (GlobalVariableGet(viewFlagName) > 0.5);
-    //}
-    //if(GlobalVariableCheck("Biotak_ViewAnchorT_" + chartIdStr)) {
-    //    g_viewAnchorTime = (datetime)GlobalVariableGet("Biotak_ViewAnchorT_" + chartIdStr);
-    //    g_viewAnchorMin = GlobalVariableGet("Biotak_ViewAnchorMin_" + chartIdStr);
-    //    g_viewAnchorMax = GlobalVariableGet("Biotak_ViewAnchorMax_" + chartIdStr);
-    //}
-    //if(g_viewLockEnabled) {
-    //    if(recentTimeframeSwitch && g_viewAnchorTime > 0) g_viewRestorePending = true;
-    //    else { ViewLockCapture(); ViewAnchorLineEnsure(); }   // fresh attach: anchor = current view
-    //}
-
-    // STEPOVERRIDE-OFF: one-time migration — the retired override key becomes
-    // the single base mode. (If the chart ALSO has an OV_ SM panel value, that
-    // loads later in RuntimeSettingsLoadOverrides and wins — it is the newer
-    // explicit choice.) The key is deleted and never read again.
-    string stepModeGvarName = "Biotak_StepMode_" + chartIdStr;
-    if(GlobalVariableCheck(stepModeGvarName)) {
-        int migratedMode = (int)GlobalVariableGet(stepModeGvarName);
-        if(migratedMode >= 0 && migratedMode <= 3) {
-            g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)migratedMode;
-        } else {
-            _LOG_GATE_W Print("[W][GEN] OnInit: Corrupted StepMode (", migratedMode, "), resetting.");
-        }
-        GlobalVariableDel(stepModeGvarName);
-    }
-
-    // Restore SS/LS sequence origin selected from the Custom Price menu
-    // (0 = SS first, 1 = LS first, any other value = use input).
-    // P-UI-67: the restore ADOPTS the persisted answer, through the owners - the
-    // read happens first because the clear (which owns the key) deletes it, and an
-    // absent or corrupt key must end as "the input answers", never as a bare
-    // `= -1` that leaves the persisted value behind for the next attach to read.
-    string sslsFirstGvarName = "Biotak_SSLSFirst_" + chartIdStr;
-    bool sslsKeyPresent = GlobalVariableCheck(sslsFirstGvarName);
-    int restoredSSLSFirst = sslsKeyPresent ? (int)GlobalVariableGet(sslsFirstGvarName) : -1;
-    SSLSOrderOverrideClear();
-    if(restoredSSLSFirst == 0 || restoredSSLSFirst == 1)
-        SSLSOrderOverrideSet(restoredSSLSFirst);
-
-    // Restore factor with validation (0 < val <= MAX_SAFE_FACTOR)
-    string factorGvarName = "Biotak_Factor_" + chartIdStr;
-    if(GlobalVariableCheck(factorGvarName)) {
-        double val = GlobalVariableGet(factorGvarName);
-        if(val > 0 && val <= MAX_SAFE_FACTOR) {
-            g_factorValueOverride = val;
-        } else {
-            _LOG_GATE_E Print("[E][GEN] OnInit: Invalid Factor (", val, "), resetting.");
-            GlobalVariableDel(factorGvarName);
-            g_factorValueOverride = 0.0;
-        }
-    } else {
-        g_factorValueOverride = 0.0;
-    }
-    // Manual mode factor clamping
-    if(inpFactorMode == FACTOR_MODE_MANUAL) {
-        if(inpFactorValue <= 0 || inpFactorValue > MAX_SAFE_FACTOR) {
-            _LOG_GATE_E Print("[E][GEN] OnInit: Invalid inpFactorValue (", inpFactorValue, "), clamping to 50.0");
-            g_factorValueOverride = 50.0;
-        }
-    }
-
-    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-    // Restore TH3 frequency with dynamic max validation (binary subdivision)
-    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
-    if(GlobalVariableCheck(freqGvarName)) {
-        double restoredFreq = GlobalVariableGet(freqGvarName);
-        double maxFreq = GetFrequencyByIndex(MAX_TH3_FREQ_INDEX);
-        if(restoredFreq > 0 && restoredFreq <= maxFreq) {
-            g_th3FreqOverride = restoredFreq;
-        } else {
-            g_th3FreqOverride = 0;
-            GlobalVariableDel(freqGvarName);
-        }
-    }
-    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
-    if(GlobalVariableCheck(indexGvarName)) {
-        int restoredIndex = (int)GlobalVariableGet(indexGvarName);
-        if(restoredIndex >= MIN_TH3_FREQ_INDEX && restoredIndex <= MAX_TH3_FREQ_INDEX) {
-            g_th3FreqIndex = restoredIndex;
-        } else {
-            g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
-            GlobalVariableDel(indexGvarName);
-        }
-    }
-    // Binary subdivision migration: sync index with saved frequency (old GM -> binary)
-    if(g_th3FreqOverride > 0) {
-        double expectedFreq = GetFrequencyByIndex(g_th3FreqIndex);
-        if(MathAbs(expectedFreq - g_th3FreqOverride) > 0.01) {
-            g_th3FreqIndex = FindNearestFreqIndex(g_th3FreqOverride);
-            g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
-            GlobalVariableSet(freqGvarName, g_th3FreqOverride);
-            GlobalVariableSet(indexGvarName, (double)g_th3FreqIndex);
-            _LOG_GATE_I Print("[I][GEN] OnInit: TH3 Freq migrated to binary subdivision: idx=", g_th3FreqIndex,
-                              " freq=", DoubleToString(g_th3FreqOverride, 4));
-        }
-    }
-#endif
-
-    InitializeATRCache();
-
-    // P-PERF-MT5-03 (2026-10-11): ATR warmup is UNCONDITIONAL on MT5.
-    // iATR handles are async — they calculate in the background after creation.
-    // Until BarsCalculated() > 0, every CalculateWeightedATR call falls back to
-    // CopyRates(3000 bar) per timeframe. The 8-TF warmup QUEUES handle creation
-    // for all timeframes at attach time, so by the first tick they are warm
-    // (or nearly warm) regardless of whether ATR labels are visible.
-    // The debounce gvar is kept to avoid re-queueing on a TF switch that
-    // happens within 90 s of the previous attach on the same chart.
-    {
-        datetime nowWarmup = TimeCurrent();
-        string warmupGvar = "Biotak_ATRWarmup_" + chartIdStr;
-        datetime lastWarmup = 0;
-        if(GlobalVariableCheck(warmupGvar)) {
-            lastWarmup = (datetime)GlobalVariableGet(warmupGvar);
-        }
-        if(lastWarmup <= 0 || nowWarmup <= 0 || (nowWarmup - lastWarmup) > 90) {
-            WarmupATRMultiTFCache();
-            if(nowWarmup > 0) GlobalVariableSet(warmupGvar, (double)nowWarmup);
-        }
-    }
-
-    g_pInitMsAtr = GetTickCount() - pInitTick;   // P-PERF-10 (ATR cache init + warmup)
-
-    PrintBuildInfo();
-
-    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-    // P-LM-04: a leg measurement drawn by an older build carries loose labels and
-    // no plate; its readout is recomputed into today's box here — the same slot,
-    // and the same rule, as the pattern restore below: legacy chart objects take
-    // the current build's shape before the first render. It runs AFTER the ATR
-    // warmup above on purpose: at attach a TF whose history is not loaded yet gives
-    // no ATR, and the sweep refuses to write a box built on a guessed one.
-    LegMeasureUpgradeLegacy();
-    // P-TH3-D4h: legacy chart objects repaint with the current build first;
-    // only when nothing was restored does the settings-change flag matter.
-    int th3Restored = TH3RestorePatternsFromChart();
-    // Check if TH3 objects need update (after settings change)
-    string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
-    if(GlobalVariableCheck(th3UpdateFlag) && GlobalVariableGet(th3UpdateFlag) > 0) {
-        if(th3Restored <= 0) UpdateAllTH3Objects();
-        GlobalVariableDel(th3UpdateFlag);
-    }
-#endif
-
-    #ifdef ENABLE_DEBUG_LOGS
-    Print("[D][GEN] OnInit complete: deferred=", deferHeavyInit, " hidden=", shouldBeHidden);
-    #endif
-
-    // Hidden state: set flags (objects created later in OnCalculate/RedrawAllObjects)
-    if(shouldBeHidden) {
-        g_redrawTHLevelsNeeded = false;
-    } else {
-        g_redrawTHLevelsNeeded = true;
-    }
-
-    #ifdef ENABLE_ASSERTIONS
-    FactorModeSanityCheck();
-    #endif
-
-    // P-PERF-38d: LAST thing before the first frame — every fingerprint input
-    // (mode, max levels, start point, LS-first, harmonic) is final by now.
-    ResolveTopologyAdoption();
-
-    // P-DRAW-01/02 (2026-09-22): the drawing toolbar's own two tables — the
-    // per-kind style memory and the preset slots (the built-in suggestions the
-    // user overwrites). Seeded once per instance, before any drawing can exist.
-    DrawStyleInit();
-    DrawPresetsInit();
-    DrawPresetsLoad();   // P-DRAW-05: the user's own templates survive the session
-
-    return INIT_SUCCEEDED;
-}
+#ifndef EVENT_HANDLERS_CUSTOMPRICE_MQH
+#define EVENT_HANDLERS_CUSTOMPRICE_MQH
 
 // Helper function to create custom price horizontal line (DRY)
 //
@@ -1772,6 +848,1004 @@ bool HideAllTHObjects()
     BumpTfEpoch();
     return true;
 }
+#endif // EVENT_HANDLERS_CUSTOMPRICE_MQH
+// EventHandlers_Init.mqh - EventHandlers split 2026-09-29: exact lines 7-1496 of EventHandlers.mqh, byte-identical, zero renames.
+// P-SIZE-1500 (2026-10-04): the file drifted back over the ceiling (1749 lines) and was
+// split again along the seam it already had - everything from `CreateCustomPriceLine`
+// down is the custom price line's own half and lives in EventHandlers_CustomPrice.mqh,
+// included ABOVE this one (nothing there calls in here; this file calls out to it).
+#ifndef EVENT_HANDLERS_INIT_MQH
+#define EVENT_HANDLERS_INIT_MQH
+
+#property strict
+
+//==============================================================================
+// P-PERF-38c — ONE-TIME MIGRATION OFF THE TIMEFRAME-NAMED SCHEME
+//
+// P-PERF-38 made the level-object prefix timeframe-free, so a chart that had
+// been drawn by an older build still holds one whole namespace per timeframe it
+// ever visited (`THLevels_H1_*`, `THLevels_M15_*`, ...). The old teardown swept
+// all eleven of those on EVERY timeframe switch - eleven full-chart prefix scans
+// for objects that, after this migration, do not exist at all.
+//
+// So the sweep is not deleted; it is MOVED OUT OF THE SWITCH and gated on a
+// per-chart stamp. It runs exactly once per chart, ever. Steady state: one
+// GlobalVariableCheck. That is the difference between "cleanup that scales with
+// how often you press H1" and "cleanup that happens once".
+void MigrateTimeframeNamedObjects()
+{
+   // P-PERF-38f: the stamp has ONE owner (GlobalVariables), shared with the label
+   // sweep that must stop doing this work on every timeframe switch.
+   string stamp = NameSchemeStampName();
+   if(LegacyNameSchemeMigrated()) return;   // this chart is already migrated
+
+   // Every string GetCurrentTimeframe() can return, plus the two legacy
+   // spellings ("MN" from ClearAllLabels, "UNKNOWN" for a CUSTOM period).
+   static string s_tfNs[] = {"M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN", "MN1", "UNKNOWN"};
+   g_suppressDeleteEvents = true;
+   int removed = 0;
+   for(int n = 0; n < ArraySize(s_tfNs); n++)
+      removed += ObjectsDeleteAll(0, inpObjectPrefix + "_" + s_tfNs[n] + "_");
+   // The ATR/TH label families also exist WITHOUT a TF namespace
+   // (`inpObjectPrefix + "ATR_*" / "TH_*"`), and the legacy shared-pattern ones
+   // carry `inpObjectPrefix + "SharedPattern_"`.
+   removed += ObjectsDeleteAll(0, inpObjectPrefix + "ATR_");
+   removed += ObjectsDeleteAll(0, inpObjectPrefix + "TH_");
+   removed += ObjectsDeleteAll(0, inpObjectPrefix + "SharedPattern_");
+   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+   g_suppressDeleteEvents = false;
+   InvalidateObjectCountCache();
+   GlobalVariableSet(stamp, 1.0);
+   // Named, once, only when it actually did something - so the log shows the
+   // upgrade happened and never repeats.
+   if(removed > 0)
+      _LOG_GATE_I Print("[I][GEN] P-PERF-38 migration: removed ", removed,
+                        " legacy timeframe-named object(s) - this runs once per chart");
+}
+
+//==============================================================================
+// P-PERF-38d — TOPOLOGY ADOPTION ACROSS MT4'S FORCED RELOAD
+//
+// P-PERF-38 named the level family without the timeframe and P-PERF-38b stopped
+// the teardown from deleting it. On their own those two are NOT enough, and the
+// reason is subtle: a chart period change makes MT4 unload and RELOAD the
+// indicator, so the new instance starts with an EMPTY stored signature
+// (`s_lastLevelSig == ""`). The first comparison is therefore trivially true ->
+// `levelTopologyChanged` -> `shouldClearLevels` -> a full `ClearAllLevels` of the
+// whole family, immediately followed by the staged rebuild that creates it all
+// again. That delete+create pair IS the "changing the timeframe recomputes and
+// redraws my levels" the user reports, and it survived the naming fix because
+// nothing carried the fact that the chart is already drawn.
+//
+// So the new instance is TOLD. At teardown an ordinary timeframe change writes
+// ONE per-chart fingerprint of the inputs that decide WHICH objects may exist
+// (the naming scheme, the mode, and the other structure-defining inputs) — never
+// the prices, which genuinely do change per timeframe. At init that fingerprint
+// is compared, and on a match the first pass adopts the previous instance's
+// topology: no wipe, no staging restart, and the timeframe change reduces to a
+// single in-place property pass. The prices are still re-derived (`thValue`
+// comes from `GetTimeframeTH()`), but they now arrive through the RENDER
+// signature, which re-asserts in place, instead of through the NAME, which
+// forced a destroy-and-build.
+//
+// Conservative by construction: no stamp (a first attach, an older build, a
+// chart the indicator was just REMOVEd from) means no adoption, i.e. exactly the
+// old behaviour. A wrong "same" can only ever skip a wipe, and a skipped wipe is
+// safe here because every object the render does not produce is still swept by
+// CleanupSurplusPipeline and the label generation sweep — both run on every
+// render.
+#define NAME_SCHEME_ID 40
+
+string AdoptionStampName() { return "Biotak_AdoptTopology_" + GetCachedChartIdStr(); }
+
+// The topology stamp is a CLAIM (written at teardown, compared at init) that the
+// objects already on the chart are still correct: on a match the first pass
+// ADOPTS them, so a timeframe switch is one in-place property pass instead of a
+// wipe and a staged rebuild. It names every input that decides WHICH NAMES may
+// exist — naming scheme, mode, level count, start-point type, LS-first, harmonic
+// pair — because a name mismatch is never repaired in place (a mode change renames
+// the whole family). P-LEVEL-FOREIGN-02 — the PRICES left the stamp: a stale price
+// is repaired by `SweepForeignLadderObjects()` (LevelPipeline) on the one frame the
+// ladder PITCH changed (measured: 250-300 ms teardown + four 60-95 ms frames per
+// switch on MT5, ~30 ms on MT4). NAME_SCHEME_ID 39 -> 40 refuses every stamp a
+// previous build wrote.
+int AdoptionFingerprint()
+{
+   int fp = NAME_SCHEME_ID;
+   fp = fp * 31 + (int)GetCurrentStepMode();
+   fp = fp * 31 + inpMaxLevels;
+   fp = fp * 31 + (int)g_thStartPointType;
+   fp = fp * 31 + (inpLSFirst ? 1 : 0);
+#ifndef BUILD_LITE
+   fp = fp * 31 + (inpEnableHarmonicPattern ? 1 : 0);
+   fp = fp * 31 + (int)MathRound(inpHarmonicRatio * 1000.0);
+#endif
+   // P-LEVEL-FOREIGN-02: and NOT the prices - the note above this function is
+   // the whole argument. A price that moved is repaired IN PLACE by the pitch
+   // sweep; a NAME that moved is not, which is the only distinction that
+   // belongs in a stamp.
+   return fp;
+}
+
+// Written by the teardown of a timeframe switch: the objects are staying on the
+// chart, so the next instance is allowed to adopt them.
+void SaveTopologyAdoptionStamp()
+{
+   GlobalVariableSet(AdoptionStampName(), (double)AdoptionFingerprint());
+}
+
+// Called by every teardown path that really deletes the family. Without the
+// stamp the next instance wipes and rebuilds, which is the correct answer when
+// the objects are genuinely gone.
+void ClearTopologyAdoptionStamp()
+{
+   string n = AdoptionStampName();
+   if(GlobalVariableCheck(n)) GlobalVariableDel(n);
+}
+
+// Resolved ONCE per instance, at the end of OnInitHandler — after the custom-
+// price restore has had its say about `g_thStartPointType`, which is one of the
+// fingerprint's inputs. The VALUE itself lives in GlobalVariables.mqh: the
+// pipeline's ladder sweep reads it too, and LevelPipeline.mqh is included
+// BEFORE this file (entry lines 93 and 99), where MQL4 has no forward reference
+// for a global.
+
+//==============================================================================
+// P-VIEW-05 (2026-09-30) — THE CHART IS THE WITNESS; THE STAMP IS ONLY A CLAIM.
+//
+// The user's report, third time: «هنوز موقع تعویض تایم فریم سطوح حذف و رسم مجدد داره»
+// — on a timeframe switch the levels are deleted and drawn again from zero. The
+// wipe on that path has ONE author (`shouldClearLevels`), and it can only be true
+// on a freshly reloaded instance for one of two reasons: `g_forceClearOnNextDraw`
+// (raised by the frame when `!g_adoptPreviousTopology`) or a topology-signature
+// difference. Both reduce to the SAME fact: this function said NO.
+//
+// And it can say NO without a word. The old body opened with
+// `if(!GlobalVariableCheck(n)) return;` — a GlobalVariable that is not there (a
+// first attach, a stamp a removing teardown deleted, the terminal's own variable
+// store having been rewritten) returned with `adopt = false` and printed
+// NOTHING, because the warning below is in the OTHER branch. So a timeframe
+// switch could wipe ~900 objects with no line in the log naming it, which is
+// exactly the "who deletes my levels" question this project keeps re-opening.
+//
+// Two changes, both measured by the one line below:
+//
+//   1. THE OBJECTS THEMSELVES ARE THE SECOND WITNESS. "Adopt" means one thing -
+//      do NOT delete the family before re-asserting it - and its safety does not
+//      depend on the inputs matching, because every render sweeps what it did not
+//      produce (`CleanupSurplusPipeline`, `SweepForeignLadderObjects`, the label
+//      sweep). A chart that is still HOLDING the family is therefore proof
+//      enough: a wipe would delete objects that are about to be re-priced in
+//      place, which is precisely the delete+draw the user sees. `preexist > 0`,
+//      read off the chart, is that proof; the input fingerprint is kept as the
+//      second (cheaper) way to reach the same verdict.
+//   2. THE VERDICT IS ALWAYS PRINTED. One line per attach, so the next report is
+//      `preexist=577 adopted=1` or `preexist=0 adopted=0` instead of a wipe with
+//      no author. Cost: ONE chart-object walk per instance, at attach.
+//
+// The handoff side prints its own `probe=handoff` line from the teardown, so the
+// pair "what the chart held when we left" / "what it holds when we come back" is
+// two numbers in one log — which is also the only honest way to answer "does the
+// terminal delete our objects on a period change, or do we".
+//==============================================================================
+int LevelFamilyObjectsOnChart()
+{
+   // ONE walk of the chart's object list, ONCE per instance (attach and, with the
+   // handoff line, once per timeframe switch). The prefix is the timeframe-free
+   // level namespace, so the count is the level family and nothing else.
+   int total = ObjectsTotal(0, -1, -1);
+   if(total <= 0) return 0;
+   string prefix = GetLevelObjectPrefix();
+   if(StringLen(prefix) <= 0) return 0;
+   int found = 0;
+   for(int i = 0; i < total; i++)
+   {
+      string nm = ObjectName(0, i, -1, -1);
+      if(StringLen(nm) <= 0) continue;
+      if(StringFind(nm, prefix) != 0) continue;
+      found++;
+   }
+   return found;
+}
+
+void ResolveTopologyAdoption()
+{
+   g_adoptPreviousTopology = false;
+   string n = AdoptionStampName();
+   bool haveStamp = GlobalVariableCheck(n);
+   int stored = haveStamp ? (int)GlobalVariableGet(n) : 0;
+   int live = AdoptionFingerprint();
+   bool stampOk = (haveStamp && stored == live);
+   // The chart's own answer, independent of every GlobalVariable above.
+   int preexist = LevelFamilyObjectsOnChart();
+   // The chart-truth witness is used for the branch the report is about: the
+   // levels are SHOWN and the indicator is not hidden, so "the family is on the
+   // chart" can only mean "do not delete it". The hidden/levels-off states keep
+   // their previous (stamp-only) verdict: they own their objects through masks and
+   // an explicit clear, and this probe has no business rewriting that path.
+   bool familyHere = (preexist > 0 && inpShowTHLevels && !IsIndicatorHidden());
+   g_adoptPreviousTopology = (stampOk || familyHere);
+   // P-PERF-38e: a stamp that is PRESENT and mismatched still names its terms —
+   // that is a genuine input change (mode, max levels, start point, LS-first,
+   // harmonic pair) and the wipe is the correct answer for it.
+   if(haveStamp && !stampOk)
+      _LOG_GATE_W Print("[W][GEN] P-PERF-38e: topology stamp mismatch (stored fp=", stored,
+                        " live fp=", live, " mode=", (int)GetCurrentStepMode(),
+                        " maxLv=", inpMaxLevels, " sp=", (int)g_thStartPointType,
+                        " lsFirst=", (inpLSFirst ? 1 : 0), ")");
+   // UNGATED on purpose: this line is the author of the wipe, or the proof there
+   // was none. See the block comment above.
+   Print("[P-VIEW] probe=adopt stamp=", (haveStamp ? 1 : 0), " stored=", stored,
+         " live=", live, " preexist=", preexist, " adopted=", (g_adoptPreviousTopology ? 1 : 0),
+         " total=", ObjectsTotal(0, -1, -1));
+}
+
+//==============================================================================
+// P-UI-56 — the custom-price SOURCE has ONE owner and ONE precedence. The whole
+// level family is anchored on `GetMidpointPrice(g_thStartPointType)` ->
+// `g_customTHStartPrice`, and it was resolved by TWO copies of the same
+// three-branch chain (here and in RedrawAllObjects) carrying two defects that only
+// a used chart shows: (1) the persisted placement was keyed per SYMBOL, so two
+// charts of one symbol shared one price; (2) the INPUT silently outranked and
+// OVERWROTE the placement keys. ONE owner answers "what is the custom price of
+// THIS chart?": the user's own chart-keyed placement BEATS the static input, and
+// the input is only the seed when the chart has no placement of its own — it never
+// writes the placement keys (so the OFF paths still return to the input).
+//==============================================================================
+string CustomPriceGVName()         { return "Biotak_CustomPrice_" + GetCachedChartIdStr(); }
+string CustomPriceOverrideGVName() { return "Biotak_CustomPriceOverride_" + GetCachedChartIdStr(); }
+// The PREVIOUS scheme's keys (symbol-scoped). P-UI-142: they double as the live
+// symbol twin now (chart ids are per-session), adopted by the migrate below on
+// fresh ids; still purged on REASON_REMOVE.
+string CustomPriceLegacyGVName()         { return "Biotak_CustomPrice_" + GetCachedSymbol(); }
+string CustomPriceLegacyOverrideGVName() { return "Biotak_CustomPriceOverride_" + GetCachedSymbol(); }
+
+void CustomPriceMigrateLegacyKeys()
+{
+    static bool s_migrationDone = false;
+    if(s_migrationDone) return;
+    s_migrationDone = true;                                  // one probe per instance, never per frame
+    if(GlobalVariableCheck(CustomPriceGVName())) return;     // this chart owns a price already
+    string legacy = CustomPriceLegacyGVName();
+    if(!GlobalVariableCheck(legacy)) return;
+    double legacyPrice = GlobalVariableGet(legacy);
+    if(!(legacyPrice > 0.0) || !MathIsValidNumber(legacyPrice)) return;
+    // Is the legacy price a USER PLACEMENT or an input-seeded copy? It matters:
+    // a placement must outrank the input, an input seed must not. Provable from the
+    // old writers - only ONE of them wrote the price key from a non-user source,
+    // and that one (the init/frame INPUT branch) wrote `inpCustomTHStartPrice`
+    // itself. So: with the input unset the legacy price can only be a placement;
+    // with the input set, the legacy override flag is the only trustworthy witness.
+    string legacyFlag = CustomPriceLegacyOverrideGVName();
+    bool legacyOverride = GlobalVariableCheck(legacyFlag) ? (GlobalVariableGet(legacyFlag) != 0.0) : false;
+    bool legacyIsPlacement = legacyOverride || !(inpCustomTHStartPrice > 0.0);
+    GlobalVariableSet(CustomPriceGVName(), legacyPrice);
+    GlobalVariableSet(CustomPriceOverrideGVName(), legacyIsPlacement ? 1.0 : 0.0);
+    _LOG_GATE_I Print("[I][GEN] P-UI-56: adopted the symbol-scoped custom price ",
+                      DoubleToString(legacyPrice, Digits), " as this chart's own (",
+                      legacyIsPlacement ? "placement" : "input seed", ")");
+}
+
+// ONE writer for "the user placed / moved the line on THIS chart".
+// P-UI-142: the symbol twin rides along (chart ids are per-session: the twin is
+// what a restart restores from; the migrate below adopts it on fresh ids).
+void CustomPricePersistPlacement(const double price)
+{
+    if(!(price > 0.0) || !MathIsValidNumber(price)) return;
+    GlobalVariableSet(CustomPriceGVName(), price);
+    GlobalVariableSet(CustomPriceOverrideGVName(), 1.0);
+    GlobalVariableSet(CustomPriceLegacyGVName(), price);
+    GlobalVariableSet(CustomPriceLegacyOverrideGVName(), 1.0);
+}
+
+// ONE writer for "this chart has no placement of its own" (the OFF paths).
+void CustomPriceForgetPlacement()
+{
+    GlobalVariableDel(CustomPriceGVName());
+    GlobalVariableSet(CustomPriceOverrideGVName(), 0.0);
+    GlobalVariableDel(CustomPriceLegacyGVName());
+    GlobalVariableSet(CustomPriceLegacyOverrideGVName(), 0.0);
+}
+
+// The resolver's result. Ints, not an enum: both call sites are ABOVE this block
+// in the translation unit, and MQL4 type resolution is positional.
+#define CPSRC_NONE   0   // no placement and no input price → not the custom-price start point
+#define CPSRC_PLACED 1   // the user's own price on this chart (wins over the input)
+#define CPSRC_INPUT  2   // the Input's seed price (the "default state")
+
+int CustomPriceResolveSource(double &priceOut, bool &overrideFlagOut)
+{
+    priceOut = 0.0;
+    overrideFlagOut = false;
+    CustomPriceMigrateLegacyKeys();
+
+    string priceKey = CustomPriceGVName();
+    string flagKey  = CustomPriceOverrideGVName();
+    double placed = GlobalVariableCheck(priceKey) ? GlobalVariableGet(priceKey) : 0.0;
+    bool   placedFlag = GlobalVariableCheck(flagKey) ? (GlobalVariableGet(flagKey) != 0.0) : false;
+    if(placed > 0.0 && MathIsValidNumber(placed)) {
+        // The flag only decides WHO WINS (this chart's placement or the Input) - the
+        // stored price is honoured either way, exactly like the old chain, whose
+        // branch 1 and branch 3 restored the SAME price and differed only by that
+        // flag. Keeping that asymmetry is what lets a parameter change put the start
+        // point back on the Input default while the price survives for later.
+        if(placedFlag) {
+            priceOut = placed;
+            overrideFlagOut = true;
+            return CPSRC_PLACED;
+        }
+        if(inpCustomTHStartPrice > 0.0 && MathIsValidNumber(inpCustomTHStartPrice)) {
+            priceOut = inpCustomTHStartPrice;
+            return CPSRC_INPUT;
+        }
+        priceOut = placed;
+        return CPSRC_PLACED;
+    }
+    if(inpCustomTHStartPrice > 0.0 && MathIsValidNumber(inpCustomTHStartPrice)) {
+        priceOut = inpCustomTHStartPrice;
+        return CPSRC_INPUT;
+    }
+    return CPSRC_NONE;
+}
+
+//+------------------------------------------------------------------+
+//| P-ARCH-03 (2026-09-29) — TWO BUILDS, ONE CHART, ONE SET OF NAMES.|
+//|                                                                  |
+//| Lite is Full minus features, NOT a differently named family:     |
+//| both units paint the SAME object names (that is what makes a     |
+//| switch between them keep the chart). Two of them on one chart is  |
+//| therefore two writers per name — one deletes what the other drew, |
+//| the countdown is re-created twice a second, the TRex card's inks  |
+//| have two owners, and a whole price band can stay missing while    |
+//| the other half is drawn correctly. That is exactly the report     |
+//| this session chased: «سطوح حذف میشه ولی دیگه نمیاد» + «ثانیه شمار  |
+//| هی حذف و رسم میشه» + «رنگ آبی TR عوض میشه» + the empty band in   |
+//| the user's screenshot — ALL ONE CAUSE, and the user FOUND it by   |
+//| removing the Lite unit from the chart. MEASURED, from the         |
+//| terminal's own log (EURUSD,M15):                                  |
+//|   23:23:44.792  BiotakProject\Biotak Trigger TH3 Lite  loaded     |
+//|   23:23:44.875  BiotakProject\Biotak Trigger TH3       loaded     |
+//|                                                                  |
+//| The oracle is the CHART's own list, never a global variable and   |
+//| never a marker object: it cannot go stale, it cannot survive a    |
+//| crash, and it is the same list the Navigator shows. A unit that   |
+//| finds a second one REFUSES to initialise, so the chart says so    |
+//| instead of quietly painting a wrong picture.                      |
+//|                                                                  |
+//| Cost: one chart enumeration at init only (no per-frame work).     |
+//+------------------------------------------------------------------+
+bool TH3SiblingUnitOnChart()
+{
+   string mine = "Biotak Trigger TH3";
+   #ifdef BUILD_LITE
+      mine = mine + " Lite";
+   #endif
+   int total = ChartIndicatorsTotal(0, 0);
+   int th3 = 0, other = 0;
+   string names = "";
+   int mineLen = StringLen(mine);
+   for(int i = 0; i < total; i++)
+   {
+      string nm = ChartIndicatorName(0, 0, i);
+      if(nm == "") continue;
+      if(StringFind(nm, "Biotak Trigger TH3") < 0) continue;   // not our family
+      th3++;
+      if(names != "") names += " + ";
+      names += nm;
+      // A DIFFERENT UNIT is a name that does not end with ours. The folder prefix
+      // (`BiotakProject\`) is not part of the identity, the tail is.
+      if(StringLen(nm) < mineLen || StringSubstr(nm, StringLen(nm) - mineLen) != mine) other++;
+   }
+   // `other > 0`: a sibling of the other unit (or the same-name file from another
+   // folder) is attached. `th3 > 1`: two entries that BOTH spell our own name —
+   // that is two attachments of one unit and the same interference.
+   if(other > 0 || th3 > 1)
+   {
+      Print("[E][ARCH] P-ARCH-03: ", th3, " builds of this indicator on ONE chart: ", names,
+            " — they paint the SAME object names, so each one deletes what the other drew "
+            "(missing price bands, a countdown re-created every second, two writers on the "
+            "TRex card's colours). This unit will not load. Remove all but ONE and re-add it.");
+      return true;
+   }
+   return false;
+}
+
+// P-UI-142 — LATE discrete restore (Full only, from InitializeUISupport AFTER the
+// OV_ overrides are loaded). The early block above restores chart-key-else-dialog
+// (Lite keeps it: no kit there); this one restores chart-key-else-OV_-mirror, so a
+// toggle the panel wrote survives the restart instead of disagreeing with its own
+// row. Same keys, same single-owner apply paths — only the fallback got durable.
+void RestoreDiscreteToggles()
+{
+   string cid = GetCachedChartIdStr();
+   g_triggerLevelsEnabled = RestoreBoolGlobalVar("Biotak_TriggerLevels_" + cid, g_triggerLevelsEnabled);
+   g_linesVisible = RestoreBoolGlobalVar("Biotak_LinesVisible_" + cid, g_showLines);
+   g_atrLabelsVisible = RestoreBoolGlobalVar("Biotak_ATRLabels_" + cid, g_showATRLabels);
+   string thk = "Biotak_THLabels_" + cid;
+   if(GlobalVariableCheck(thk))
+   {
+      double gv = GlobalVariableGet(thk);
+      bool ok = (MathAbs(gv - 0.0) < EPSILON_GENERAL || MathAbs(gv - 1.0) < EPSILON_GENERAL ||
+                 MathAbs(gv - 2.0) < EPSILON_GENERAL || MathAbs(gv - 3.0) < EPSILON_GENERAL);
+      if(ok)
+      {
+         g_thLabelsMode = (int)gv;
+         if(g_thLabelsMode == 3) g_thLabelsMode = 2;   // legacy BOTH -> STANDARD
+      }
+      else
+      {
+         GlobalVariableSet(thk, 0.0);
+         g_thLabelsMode = 0;
+         g_thLabelsVisible = false;
+      }
+   }
+   else
+   {
+      g_thLabelsMode = THModeFromFlags();
+      if(g_showTHLabels && g_thLabelsMode == 0) g_thLabelsMode = 2;
+   }
+   SyncTHFlagsFromMode();
+}
+
+int OnInitHandler() {
+    // P-ARCH-03: the one-chart-one-unit rule lands before ANY observable work — before
+    // the legacy sweep, before the settings seed, before a single object. A refused
+    // unit must not have touched the chart it refuses to share.
+    if(TH3SiblingUnitOnChart()) return INIT_FAILED;
+    // P-PERF-38c: the one-time legacy sweep must land before the first render, so
+    // a chart drawn by an older build cannot blend two naming schemes.
+    MigrateTimeframeNamedObjects();
+    // P-PERF-10: phase ledger for the init path (see g_pInitMs* in GlobalVariables).
+    uint pInitTick = GetTickCount();
+    // Seed runtime settings from the real MT4 Inputs-dialog values FIRST:
+    // every inpX read from here on is the runtime copy (see RuntimeSettings.mqh).
+    RuntimeSettingsInit();
+    //--- P-BUILD-08 (2026-09-29, supersedes P-UI-134/134b/134c) — THE LINE IS THE
+    //--- CODE, BEFORE ANY CLOCK OR TAG CAN LIE ABOUT IT.
+    //--- The old tag was a hand-typed word ("T2") that stayed "T2" across every
+    //--- build of 09-29, so a chart holding an hours-old ex4 printed the same line
+    //--- as the fresh one — measured: the tab track read -16924895 (0xFEFDBF21) on
+    //--- an ex4 that predated the P-DRAW-89 tone fix while this tree computes
+    //--- 2892316 = RGB(28,34,44). `TH3_BUILD_TAG` is now `TH3_SRC_HASH`, a SHA-256
+    //--- over the bytes this unit compiles (Biotak/BuildHash.mqh, generated by the
+    //--- build), so the stamp changes when and only when the code does; `srcfile=`
+    //--- prints the hash the last build wrote beside this terminal and `match=NO`
+    //--- is a chart running an older ex4, said out loud instead of inferred.
+    //--- `__DATETIME__` answers "when was this compiled" and is kept as the clock;
+    //--- it cannot answer "which code" — a compile fed a stale DrawStrip.mqh
+    //--- answers "now" (measured on the 19:02:42 ex4, whose TABCENSUS printed a
+    //--- tone the current StrapBodyTone cannot produce: its whole output space is
+    //--- R 18-29, G 22-35, B 29-46).
+#ifndef BUILD_LITE
+    // P-BUILD-01: the strip is a Full surface, so the Lite unit has neither the
+    // names nor the functions — the probe lives where the strip does (compile error
+    // 256/168 on the 2026-09-29 Lite build was this line read without the guard).
+    int probeTone = (int)StrapBodyTone(DSTRIP_BODY_TOP, DSTRIP_GEAR_GRID_TOP - DSTRIP_BODY_TOP, 314);
+    int probeFill = (int)DrawStripPlateFill();
+    //--- P-UI-134c: the probe now prints the PARTS, not only the answer. Measured
+    //--- 2026-09-29 19:28: the same build printed `tracktone=-16924895` while this
+    //--- file's arithmetic for `StrapBodyTone(2,96,314)` is 2892316 = RGB(28,34,44),
+    //--- and the compiler's own include trail named this repo's DrawStrip.mqh. So one
+    //--- of the three inputs is not what the source says — the stops, the ramp, or the
+    //--- plate fill — and these five numbers name WHICH one. `rampAt159` is 2892316
+    //--- when the ramp is the cards' own; `cardTop/panel/foot` are 1971742/2432023/
+    //--- 1906194 when the stops are BIO_CLR_CARD_TOP/PANEL/FOOT.
+    int probeMid  = (int)BioCardTone(0.1592);
+    int probeTop  = (int)BIO_CLR_CARD_TOP;
+    int probePan  = (int)BIO_CLR_PANEL;
+    int probeFoot = (int)BIO_CLR_FOOT;
+    int probeCard = (int)BIO_CLR_CARD;
+    //--- P-BUILD-10: the three INKS the report names, read out of the runtime copies
+    //--- the card and the countdown actually paint with. clrBlue is 255 (0x0000FF) and
+    //--- clrRed is 255<<0... `tr=255` is the shipped bold blue the user asked for; any
+    //--- other number here is the ink the label will wear, said out loud at attach.
+    int probeTR   = (int)g_atrTradeTRColor;
+    int probeEX   = (int)g_atrTradeExColor;
+    int probeCD   = (int)g_countdownColor;
+#endif
+#ifdef BUILD_LITE
+    Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " LITE compiled=",
+          TimeToString(__DATETIME__, TIME_DATE|TIME_SECONDS),
+          TH3SourceStampTail());
+#else
+    //--- the probe numbers stay: they are READ OUT OF THE COMPILED FUNCTIONS at the
+    //--- arguments the tab track itself asks for, so a compile that shipped stale
+    //--- strip code under a fresh stamp still shows it here —
+    //--- StrapBodyTone(2,96,314)=2892316 = RGB(28,34,44), plateFill=2432023, and
+    //--- the five stop/ramp values name WHICH input drifted.
+    Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " FULL compiled=",
+          TimeToString(__DATETIME__, TIME_DATE|TIME_SECONDS),
+          TH3SourceStampTail(),
+          " tracktone=", probeTone, " plateFill=", probeFill,
+          " rampAt159=", probeMid, " cardTop=", probeTop, " panel=", probePan,
+          " foot=", probeFoot, " card=", probeCard,
+          " tr=", probeTR, " ex=", probeEX, " cd=", probeCD);
+    //--- P-BUILD-09 (2026-09-29) — THE RAMP, SAMPLED. Measured with the stamp above:
+    //--- `rampAt159=2138660689` = 0x7F795F51 and `tracktone=-16924895` = 0xFEFDBF21
+    //--- both carry a NON-ZERO alpha byte, which `return (color)(r | (g << 8) |
+    //--- (bl << 16))` cannot produce from three byte-sized channels (ConstantsAndEnums
+    //--- 1141). The stops themselves are correct in the same run (cardTop=3089438 =
+    //--- C'30,36,47', panel=2432023 = C'23,28,37', foot=1906194 = C'18,22,29'), so the
+    //--- defect is in the ramp's own arithmetic — and a value nobody measured cannot
+    //--- be fixed. These seven numbers are that measurement: four points ON the stops
+    //--- must come back as the stop itself (t=0 -> cardTop, t=0.52 -> panel,
+    //--- t=1 -> foot) and `mid100` must read 52 (BIO_CARD_MID_T x 100).
+    Print("[BUILD] ramp t0=", (int)BioCardTone(0.0),
+          " t26=", (int)BioCardTone(0.26), " t52=", (int)BioCardTone(0.52),
+          " t76=", (int)BioCardTone(0.76), " t100=", (int)BioCardTone(1.0),
+          " mid100=", (int)(BIO_CARD_MID_T * 100.0));
+#endif
+    InitializeGlobalCache();
+    LoggerSetLevel(inpLogLevel);
+    // P-UI-90: resolve "what is the user's view pair on THIS chart?" before any
+    // owner can take the lock, and heal a chart an older build left locked (see
+    // the block note in GlobalVariables.mqh). Two chart reads + three GVar reads.
+    ChartViewLockInit();
+    // P-PERF-02: a fresh instance knows nothing about the visibility masks the
+    // previous one left on the chart (and re-attach / TF switch reuses the same
+    // chart objects), so every guarded mask write must land once. The
+    // hide-once state starts clean for the same reason.
+    BumpTfEpoch();
+    ResetHideAllState();
+    // P-PERF-07: a fresh instance can see objects the previous one left on the
+    // chart (re-attach / TF switch reuses the same chart), so the previous
+    // instance's "this name is absent" facts are not trustworthy yet.
+    CacheAbsentResetAll();
+    HRayOnInit(); PathOnInit();   // P-HR-06 / P-UI-136: adopt the chart's drawings into the registry (idempotent)
+
+    // Restore hidden state
+    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+    bool shouldBeHidden = RestoreBoolGlobalVar(gvar_name, false);
+    DEBUG_PRINTF("OnInit: shouldBeHidden=", shouldBeHidden);
+
+    string chartIdStr = GetCachedChartIdStr();
+    datetime initNow = TimeCurrent();
+
+    // Timeframe-switch debounce: detect recent TF change (within 20s)
+    string tfSwitchStampGvar = "Biotak_LastTFSwitch_" + chartIdStr;
+    bool recentTimeframeSwitch = false;
+    if(GlobalVariableCheck(tfSwitchStampGvar)) {
+        datetime lastTFSwitch = (datetime)GlobalVariableGet(tfSwitchStampGvar);
+        if(initNow > 0 && lastTFSwitch > 0 && (initNow - lastTFSwitch) <= 20)
+            recentTimeframeSwitch = true;
+    }
+
+    // Restore toggle states (early, before validation)
+    g_triggerLevelsEnabled = RestoreBoolGlobalVar("Biotak_TriggerLevels_" + chartIdStr, inpShowTrigger);
+    g_linesVisible = RestoreBoolGlobalVar("Biotak_LinesVisible_" + chartIdStr, inpShowLines);
+
+    // Restore ATR labels visibility (Default to OFF on first load)
+    g_atrLabelsVisible = RestoreBoolGlobalVar("Biotak_ATRLabels_" + chartIdStr, false);
+
+    // Restore TH labels mode (Default OFF: 0=OFF, 1=FRACTAL, 2=STANDARD exclusive)
+    string thLabelsGvarName = "Biotak_THLabels_" + chartIdStr;
+    if(GlobalVariableCheck(thLabelsGvarName)) {
+        double gvarValue = GlobalVariableGet(thLabelsGvarName);
+        bool isZero = MathAbs(gvarValue - 0.0) < EPSILON_GENERAL;
+        bool isOne = MathAbs(gvarValue - 1.0) < EPSILON_GENERAL;
+        bool isTwo = MathAbs(gvarValue - 2.0) < EPSILON_GENERAL;
+        bool isThree = MathAbs(gvarValue - 3.0) < EPSILON_GENERAL;
+        if(isZero || isOne || isTwo || isThree) {
+            g_thLabelsMode = (int)gvarValue;
+            if(g_thLabelsMode == 3) g_thLabelsMode = 2; // legacy BOTH -> STANDARD
+            SyncTHFlagsFromMode();   // flags follow the restored mode
+        } else {
+            _LOG_GATE_E Print("[E][GEN] OnInit: Corrupted TH labels state (", DoubleToString(gvarValue, 10), "), resetting");
+            g_thLabelsMode = 0; // Default to OFF
+            GlobalVariableSet(thLabelsGvarName, 0.0);
+            g_thLabelsVisible = false;
+        }
+    } else {
+        // First attach: honor the Inputs-dialog TH flags, default ON is STANDARD.
+        g_thLabelsMode = THModeFromFlags();
+        if(g_showTHLabels && g_thLabelsMode == 0) g_thLabelsMode = 2;
+        SyncTHFlagsFromMode();
+    }
+
+    //+------------------------------------------------------------------+
+    //| P-UI-119 (2026-09-25) — THE LEVEL AND ZONE FAMILIES START OFF,    |
+    //| ONCE PER CHART (user order «سطوح هم پیش فرض خاموش باشه»).           |
+    //|                                                                  |
+    //| The INPUTS default every one of them off now, but the states     |
+    //| restored just above are PER CHART — so a chart that ever had a   |
+    //| family on keeps it on for ever, and the new default would never  |
+    //| be visible to anyone who has used the chart before. A default is |
+    //| only real when it is applied to what is ALREADY stored, so this  |
+    //| runs once per chart (the stamp idiom the timeframe-name migration|
+    //| above uses) and then never again: from the next attach on the    |
+    //| saved state is the user's own again.                             |
+    //|                                                                  |
+    //| What it covers — the level/zone families the loader above reads   |
+    //| KEYS for: the trigger ladder, the hand-drawn level LINES           |
+    //| (`inpShowLines`' own label), the TH labels and the mid-zone band  |
+    //| (whose key spelling belongs to RuntimeSettings, so the asking is   |
+    //| delegated — one owner per key). The ATR/trade LABEL blocks are    |
+    //| not levels and are left exactly as the user set them.             |
+    //+------------------------------------------------------------------+
+    string levelsOffStamp = "Biotak_LevelsOffDefault_" + chartIdStr;
+    if(!GlobalVariableCheck(levelsOffStamp)) {
+        GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
+        GlobalVariableDel("Biotak_LinesVisible_"  + chartIdStr);
+        GlobalVariableDel("Biotak_THLabels_"      + chartIdStr);
+        MidZonesStateForget();          // the mid-zone band's own key (RuntimeSettings owner)
+        g_triggerLevelsEnabled = false; // ...and the runtime copies, so THIS attach is clean too
+        g_linesVisible         = false;
+        g_thLabelsMode         = 0;
+        SyncTHFlagsFromMode();          // the TH flag mirrors follow the single source of truth
+        g_showMidZones         = false;
+        GlobalVariableSet(levelsOffStamp, 1.0);
+    }
+
+    int validationResult = ValidateInputs();
+    if(validationResult != INIT_SUCCEEDED) return validationResult;
+    g_pInitMsSettings = GetTickCount() - pInitTick;   // P-PERF-10
+    pInitTick = GetTickCount();
+
+    ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
+    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
+    // P-UI-127 (2026-09-25): THE CREATE CHANNEL IS SUBSCRIBED AT LAST. MT4 sends
+    // no CHARTEVENT_OBJECT_CREATE until this flag is set, and the handler's whole
+    // `if(id == CHARTEVENT_OBJECT_CREATE)` branch (P-UI-100b's "this gesture is a
+    // DRAW, not a grab" and P-DRAW-01's `DrawStyleApplyOnCreate`) had therefore
+    // never run in any build: `s_drawNotGrab`'s only writer is unreachable without
+    // it. The branch's own cost is one prefix test per foreign create, which is
+    // exactly what the flag limits it to — our own objects never reach it.
+    ChartSetInteger(0, CHART_EVENT_OBJECT_CREATE, true);
+    ChartSetInteger(0, CHART_SHOW_GRID, false);
+    // 250 ms cadence (not 1 s): hold-to-open polling + hint pumps stay
+    // responsive on tick-less charts (weekends). Every OnTimer callee is
+    // time-gated / change-guarded / idempotent, so 4 Hz is free.
+    EventSetMillisecondTimer(250);
+    CheckArraySizes();
+
+    // Deferred init: skip heavy historical load on recent TF switch
+    bool deferHeavyInit = recentTimeframeSwitch;
+    if(!deferHeavyInit) {
+        if(!UpdateHistoricalValues()) {
+            // P-MT5-01b (2026-09-16): A NOT-YET-LOADED HISTORY IS A DEFERRAL, NOT A FATAL.
+            //
+            // This used to `return INIT_FAILED`. That aborts the whole
+            // initialisation, so the terminal renders an indicator that never
+            // draws anything - and the live MT5 log carries precisely that
+            // abort 17 times in one day, as "[E][GEN] OnInit:
+            // UpdateHistoricalValues failed. Error: 4401"
+            // (ERR_HISTORY_NOT_FOUND), on the symbols whose top timeframe the
+            // terminal had not built yet (SPXUSD-ECN H1 among them).
+            //
+            // MT4 CANNOT REACH THIS BRANCH: its series are resident, so iBars()
+            // never answers 0. The MT4-observable behaviour is therefore "init
+            // succeeds and the levels appear", and that is what MT5 must show
+            // too. So rather than invent a recovery path, fall through to the
+            // deferral the recent-TF-switch branch beside it already uses:
+            // g_initialized stays false, and RedrawAllObjects - which tests
+            // exactly that flag - retries this call every frame, logs that it is
+            // retrying, and draws the moment the data lands.
+            //
+            // The warning is rate-limited so a genuinely unavailable symbol
+            // cannot flood Experts; a re-request is issued by
+            // UpdateHistoricalValues itself (P-MT5-01b), so the retry converges
+            // instead of polling a series nobody asked for.
+            static uint s_lastHistInitWarnMs = 0;
+            uint histInitNowMs = GetTickCount();
+            if(histInitNowMs - s_lastHistInitWarnMs > 30000) {
+                _LOG_GATE_W Print("[W][GEN] OnInit: historical data not ready (err ",
+                                  GetLastError(), ") - deferring; the redraw path retries");
+                s_lastHistInitWarnMs = histInitNowMs;
+            }
+            g_initialized = false;
+        } else {
+            g_initialized = true;
+        }
+    } else {
+        g_initialized = false;
+    }
+    g_calculatedOnce = false;
+    InitializeAdaptiveScaling();
+
+    g_dailyClosePriceForTH = GetPriceForPreviousDay(inpTHPriceType);
+    if(g_dailyClosePriceForTH == EMPTY_VALUE || !MathIsValidNumber(g_dailyClosePriceForTH) || g_dailyClosePriceForTH <= 0) {
+        // P-MT5-01b (2026-09-16): DEFER, DO NOT ABORT.
+        //
+        // GetPriceForPreviousDay now answers EMPTY_VALUE while the D1 series has
+        // never been readable (MT5 synthesises it on demand; see the guard in
+        // HistoricalDataFunctions.mqh), because the alternative was worse: it
+        // used to return a stamped 0 for a full day, which made the TH base
+        // price - and therefore the whole level family - zero.
+        //
+        // Returning INIT_FAILED here would just move the failure, so this takes
+        // the same deferral the history branch above takes: g_initialized stays
+        // false, RedrawAllObjects retries, and the first redraw frame runs
+        // UpdateBasePrice() (its 30-minute gate is empty on a fresh instance,
+        // so it fires immediately and fills g_basePriceCached), which is what
+        // GetBasePriceForTH() reads. No new recovery path - the one that already
+        // exists is simply no longer bypassed by an aborted init.
+        //
+        // The wider test (non-finite, negative, zero) is the P-UI-57 discipline:
+        // a NaN is neither > 0 nor < 0, so a strict `== EMPTY_VALUE` would let
+        // it through and it would become the anchor of every level.
+        g_dailyClosePriceForTH = 0.0;
+        g_initialized = false;
+        static uint s_lastPrevDayWarnMs = 0;
+        uint prevDayNowMs = GetTickCount();
+        if(prevDayNowMs - s_lastPrevDayWarnMs > 30000) {
+            _LOG_GATE_W Print("[W][GEN] OnInit: previous-day prices not ready (D1 series still loading) - deferring");
+            s_lastPrevDayWarnMs = prevDayNowMs;
+        }
+    }
+    g_pInitMsHistory = GetTickCount() - pInitTick;   // P-PERF-10
+    pInitTick = GetTickCount();
+
+    // P-UI-56: no local GVar names here any more - the custom-price source (and its
+    // keys) have ONE owner in this file (see the P-UI-56 block above), and the
+    // resolution below asks it instead of re-implementing the chain.
+    int digits = Digits;
+
+    // Validate custom price input
+    double validatedCustomPrice = inpCustomTHStartPrice;
+    // P-UI-57: a non-finite input price is not "negative" and not "too large" —
+    // every comparison against NaN is false, so it would sail through both checks
+    // below and become the anchor of the whole level family.
+    if(!MathIsValidNumber(validatedCustomPrice)) {
+        _LOG_GATE_E Print("[E][GEN] OnInit: Invalid custom price (not a number)");
+        validatedCustomPrice = 0.0;
+    }
+    if(validatedCustomPrice < 0.0) {
+        _LOG_GATE_E Print("[E][GEN] OnInit: Invalid custom price (negative): ", validatedCustomPrice);
+        validatedCustomPrice = 0.0;
+    }
+    if(validatedCustomPrice > 1000000.0) {
+        _LOG_GATE_E Print("[E][GEN] OnInit: Invalid custom price (too large): ", validatedCustomPrice);
+        validatedCustomPrice = 0.0;
+    }
+
+    // P-UI-56: the source of the drawing price is resolved by ONE owner, shared
+    // with the per-frame path (`RedrawAllObjects`): THIS chart's placement first,
+    // the Input's seed second, nothing third - and the Input NEVER writes the
+    // placement keys, so a price the user dragged can no longer be replaced by the
+    // value in the Inputs dialog on the next attach.
+    //
+    // The old init chain also wrote `GlobalVariableSet(gvarName, input)` in its
+    // input branch while the per-symbol keys were shared by every chart of the
+    // symbol - the mechanism behind "each time the levels go somewhere else".
+    double srcPrice = 0.0;
+    bool   srcOverride = false;
+    int    srcKind = CustomPriceResolveSource(srcPrice, srcOverride);
+    g_customPriceKeyboardOverride = srcOverride;
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("[D][GEN] === Custom Price Debug (OnInit) ===");
+    Print("[D][GEN] inpCustomTHStartPrice: ", inpCustomTHStartPrice, " validated: ", validatedCustomPrice);
+    Print("[D][GEN] resolved price: ", srcPrice, " kind: ", srcKind);
+    #endif
+    if(srcKind != CPSRC_NONE) {
+        g_customTHStartPrice = srcPrice;
+        g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+        _LOG_GATE_I Print("[I][GEN] OnInit: custom price source=",
+                          (srcKind == CPSRC_PLACED ? "this chart's placement" : "Input seed"),
+                          " at ", DoubleToString(g_customTHStartPrice, digits));
+        CreateCustomPriceLine(g_customTHStartPrice, digits);
+    } else {
+        g_customTHStartPrice = 0.0;
+        g_thStartPointType = inpTHStartPointType;
+        g_customPriceKeyboardOverride = false;
+        CustomPriceForgetPlacement();
+        DEBUG_PRINT("OnInit: Using default mode (no custom price)");
+    }
+
+    g_redrawTHLevelsNeeded = true;
+
+    // Base price init debounce: skip if recently initialized during TF switch
+    string baseInitStampGvar = "Biotak_BaseInit_" + chartIdStr;
+    bool shouldInitBasePrice = true;
+    if(deferHeavyInit && GlobalVariableCheck(baseInitStampGvar)) {
+        datetime lastBaseInit = (datetime)GlobalVariableGet(baseInitStampGvar);
+        if(initNow > 0 && lastBaseInit > 0 && (initNow - lastBaseInit) <= 120)
+            shouldInitBasePrice = false;
+    }
+    if(shouldInitBasePrice) {
+        InitializeBasePriceSystem();
+        if(initNow > 0) GlobalVariableSet(baseInitStampGvar, (double)initNow);
+    } else {
+        g_systemInitialized = false;
+    }
+    g_pInitMsBase = GetTickCount() - pInitTick;   // P-PERF-10
+    pInitTick = GetTickCount();
+
+    // Restore timeframe lock state (chart key, else the symbol twin: chart ids are
+    // per-session, so a restart restores the symbol's lock — P-UI-142).
+    string lockFlagName = "Biotak_LockTF_" + chartIdStr;
+    if(GlobalVariableCheck(lockFlagName)) {
+        g_timeframeLocked = (bool)GlobalVariableGet(lockFlagName);
+    } else {
+        string lockFlagSym = "Biotak_LockTFSym_" + GetCachedSymbol();
+        if(GlobalVariableCheck(lockFlagSym)) g_timeframeLocked = (bool)GlobalVariableGet(lockFlagSym);
+    }
+    string lockPeriodName = "Biotak_LockTFPeriod_" + chartIdStr;
+    if(GlobalVariableCheck(lockPeriodName)) {
+        // R-TF-UNIT: this value outlives the process that wrote it. An MT5 build
+        // from before the unit fix persisted an ENUM_TIMEFRAMES constant here
+        // (16385 for H1), which would restore as a lock on a timeframe that does
+        // not exist - the badge reading "16385" instead of "H1", and LockOptFromPeriod()
+        // matched nothing, so the panel always showed the segment as "Cur".
+        // (comment kept: the CompatMinutes normalise below is the upgrade path)
+        g_lockedPeriod = CompatMinutes((int)GlobalVariableGet(lockPeriodName));
+    } else {
+        string lockPeriodSym = "Biotak_LockTFPeriodSym_" + GetCachedSymbol();
+        if(GlobalVariableCheck(lockPeriodSym))
+            g_lockedPeriod = CompatMinutes((int)GlobalVariableGet(lockPeriodSym));
+    }
+
+    // VIEWLOCK-OFF: view-lock restore retired —
+    //string viewFlagName = "Biotak_ViewLock_" + chartIdStr;
+    //if(GlobalVariableCheck(viewFlagName)) {
+    //    g_viewLockEnabled = (GlobalVariableGet(viewFlagName) > 0.5);
+    //}
+    //if(GlobalVariableCheck("Biotak_ViewAnchorT_" + chartIdStr)) {
+    //    g_viewAnchorTime = (datetime)GlobalVariableGet("Biotak_ViewAnchorT_" + chartIdStr);
+    //    g_viewAnchorMin = GlobalVariableGet("Biotak_ViewAnchorMin_" + chartIdStr);
+    //    g_viewAnchorMax = GlobalVariableGet("Biotak_ViewAnchorMax_" + chartIdStr);
+    //}
+    //if(g_viewLockEnabled) {
+    //    if(recentTimeframeSwitch && g_viewAnchorTime > 0) g_viewRestorePending = true;
+    //    else { ViewLockCapture(); ViewAnchorLineEnsure(); }   // fresh attach: anchor = current view
+    //}
+
+    // STEPOVERRIDE-OFF: one-time migration — the retired override key becomes
+    // the single base mode. (If the chart ALSO has an OV_ SM panel value, that
+    // loads later in RuntimeSettingsLoadOverrides and wins — it is the newer
+    // explicit choice.) The key is deleted and never read again.
+    string stepModeGvarName = "Biotak_StepMode_" + chartIdStr;
+    if(GlobalVariableCheck(stepModeGvarName)) {
+        int migratedMode = (int)GlobalVariableGet(stepModeGvarName);
+        if(migratedMode >= 0 && migratedMode <= 3) {
+            g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)migratedMode;
+        } else {
+            _LOG_GATE_W Print("[W][GEN] OnInit: Corrupted StepMode (", migratedMode, "), resetting.");
+        }
+        GlobalVariableDel(stepModeGvarName);
+    }
+
+    // Restore SS/LS sequence origin selected from the Custom Price menu
+    // (0 = SS first, 1 = LS first, any other value = use input).
+    // P-UI-67: the restore ADOPTS the persisted answer, through the owners - the
+    // read happens first because the clear (which owns the key) deletes it, and an
+    // absent or corrupt key must end as "the input answers", never as a bare
+    // `= -1` that leaves the persisted value behind for the next attach to read.
+    string sslsFirstGvarName = "Biotak_SSLSFirst_" + chartIdStr;
+    bool sslsKeyPresent = GlobalVariableCheck(sslsFirstGvarName);
+    int restoredSSLSFirst = sslsKeyPresent ? (int)GlobalVariableGet(sslsFirstGvarName) : -1;
+    SSLSOrderOverrideClear();
+    if(restoredSSLSFirst == 0 || restoredSSLSFirst == 1)
+        SSLSOrderOverrideSet(restoredSSLSFirst);
+
+    // Restore factor with validation (0 < val <= MAX_SAFE_FACTOR)
+    string factorGvarName = "Biotak_Factor_" + chartIdStr;
+    if(GlobalVariableCheck(factorGvarName)) {
+        double val = GlobalVariableGet(factorGvarName);
+        if(val > 0 && val <= MAX_SAFE_FACTOR) {
+            g_factorValueOverride = val;
+        } else {
+            _LOG_GATE_E Print("[E][GEN] OnInit: Invalid Factor (", val, "), resetting.");
+            GlobalVariableDel(factorGvarName);
+            g_factorValueOverride = 0.0;
+        }
+    } else {
+        g_factorValueOverride = 0.0;
+    }
+    // Manual mode factor clamping
+    if(inpFactorMode == FACTOR_MODE_MANUAL) {
+        if(inpFactorValue <= 0 || inpFactorValue > MAX_SAFE_FACTOR) {
+            _LOG_GATE_E Print("[E][GEN] OnInit: Invalid inpFactorValue (", inpFactorValue, "), clamping to 50.0");
+            g_factorValueOverride = 50.0;
+        }
+    }
+
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+    // Restore TH3 frequency with dynamic max validation (binary subdivision)
+    string freqGvarName = "Biotak_TH3Freq_" + chartIdStr;
+    if(GlobalVariableCheck(freqGvarName)) {
+        double restoredFreq = GlobalVariableGet(freqGvarName);
+        double maxFreq = GetFrequencyByIndex(MAX_TH3_FREQ_INDEX);
+        if(restoredFreq > 0 && restoredFreq <= maxFreq) {
+            g_th3FreqOverride = restoredFreq;
+        } else {
+            g_th3FreqOverride = 0;
+            GlobalVariableDel(freqGvarName);
+        }
+    }
+    string indexGvarName = "Biotak_TH3FreqIdx_" + chartIdStr;
+    if(GlobalVariableCheck(indexGvarName)) {
+        int restoredIndex = (int)GlobalVariableGet(indexGvarName);
+        if(restoredIndex >= MIN_TH3_FREQ_INDEX && restoredIndex <= MAX_TH3_FREQ_INDEX) {
+            g_th3FreqIndex = restoredIndex;
+        } else {
+            g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
+            GlobalVariableDel(indexGvarName);
+        }
+    }
+    // Binary subdivision migration: sync index with saved frequency (old GM -> binary)
+    if(g_th3FreqOverride > 0) {
+        double expectedFreq = GetFrequencyByIndex(g_th3FreqIndex);
+        if(MathAbs(expectedFreq - g_th3FreqOverride) > 0.01) {
+            g_th3FreqIndex = FindNearestFreqIndex(g_th3FreqOverride);
+            g_th3FreqOverride = GetFrequencyByIndex(g_th3FreqIndex);
+            GlobalVariableSet(freqGvarName, g_th3FreqOverride);
+            GlobalVariableSet(indexGvarName, (double)g_th3FreqIndex);
+            _LOG_GATE_I Print("[I][GEN] OnInit: TH3 Freq migrated to binary subdivision: idx=", g_th3FreqIndex,
+                              " freq=", DoubleToString(g_th3FreqOverride, 4));
+        }
+    }
+#endif
+
+    InitializeATRCache();
+
+    // ATR warmup debounce: skip if recently warmed up (within 90s)
+    if(inpShowATRLabels && !shouldBeHidden) {
+        datetime nowWarmup = TimeCurrent();
+        string warmupGvar = "Biotak_ATRWarmup_" + chartIdStr;
+        datetime lastWarmup = 0;
+        if(GlobalVariableCheck(warmupGvar)) {
+            lastWarmup = (datetime)GlobalVariableGet(warmupGvar);
+        }
+        if(lastWarmup <= 0 || nowWarmup <= 0 || (nowWarmup - lastWarmup) > 90) {
+            WarmupATRMultiTFCache();
+            if(nowWarmup > 0) GlobalVariableSet(warmupGvar, (double)nowWarmup);
+        }
+    }
+
+    g_pInitMsAtr = GetTickCount() - pInitTick;   // P-PERF-10 (ATR cache init + warmup)
+
+    PrintBuildInfo();
+
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+    // P-LM-04: a leg measurement drawn by an older build carries loose labels and
+    // no plate; its readout is recomputed into today's box here — the same slot,
+    // and the same rule, as the pattern restore below: legacy chart objects take
+    // the current build's shape before the first render. It runs AFTER the ATR
+    // warmup above on purpose: at attach a TF whose history is not loaded yet gives
+    // no ATR, and the sweep refuses to write a box built on a guessed one.
+    LegMeasureUpgradeLegacy();
+    // P-TH3-D4h: legacy chart objects repaint with the current build first;
+    // only when nothing was restored does the settings-change flag matter.
+    int th3Restored = TH3RestorePatternsFromChart();
+    // Check if TH3 objects need update (after settings change)
+    string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
+    if(GlobalVariableCheck(th3UpdateFlag) && GlobalVariableGet(th3UpdateFlag) > 0) {
+        if(th3Restored <= 0) UpdateAllTH3Objects();
+        GlobalVariableDel(th3UpdateFlag);
+    }
+#endif
+
+    #ifdef ENABLE_DEBUG_LOGS
+    Print("[D][GEN] OnInit complete: deferred=", deferHeavyInit, " hidden=", shouldBeHidden);
+    #endif
+
+    // Hidden state: set flags (objects created later in OnCalculate/RedrawAllObjects)
+    if(shouldBeHidden) {
+        g_redrawTHLevelsNeeded = false;
+    } else {
+        g_redrawTHLevelsNeeded = true;
+    }
+
+    #ifdef ENABLE_ASSERTIONS
+    FactorModeSanityCheck();
+    #endif
+
+    // P-PERF-38d: LAST thing before the first frame — every fingerprint input
+    // (mode, max levels, start point, LS-first, harmonic) is final by now.
+    ResolveTopologyAdoption();
+
+    // P-DRAW-01/02 (2026-09-22): the drawing toolbar's own two tables — the
+    // per-kind style memory and the preset slots (the built-in suggestions the
+    // user overwrites). Seeded once per instance, before any drawing can exist.
+    DrawStyleInit();
+    DrawPresetsInit();
+    DrawPresetsLoad();   // P-DRAW-05: the user's own templates survive the session
+
+    return INIT_SUCCEEDED;
+}
+
 #endif // EVENT_HANDLERS_INIT_MQH
 // EventHandlers_Calc.mqh - EventHandlers split 2026-09-29: exact lines 1497-2945 of EventHandlers.mqh, byte-identical, zero renames.
 #ifndef EVENT_HANDLERS_CALC_MQH
@@ -2251,8 +2325,7 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     InvalidateObjectCountCache();
 }
 
-//| Get adaptive level counts: split leans toward the live price.   |
-//| Port of MT4 EventHandlers_Calc.mqh:481-484.                     |
+//| Get adaptive level counts: the split leans toward the live price.     |
 //+------------------------------------------------------------------+
 void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
@@ -2295,15 +2368,18 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
 
     string currentTF = GetFractalTimeframeForCurrent();
     double currentScalingFactor = GetCurrentScalingFactor();
+    double volV = THVolNormDrawnV(inpTHVolNorm, THVolNormTFForFractalRung(FractalRungIndex(GetFractalTimeframeForCurrent())), GetTimeframeTH());   // P-TH-VOLNORM-TICK: block-adopted V, 1.0 when OFF
 
+    // The split leans with live, so the cache keys on the computed split.
+    int chkA = 0, chkB = 0; GetAdaptiveLevelCounts(chkA, chkB);
     if(dailyClosePrice == s_lastDailyClose &&
        currentTF == s_lastTF &&
        g_thStartPointType == s_lastStartPointType &&
        (g_thStartPointType != TH_START_POINT_CUSTOM_PRICE || g_customTHStartPrice == s_lastCustomPrice) &&
-       inpMaxLevels == s_lastMaxAbove &&
-       inpMaxLevels == s_lastMaxBelow &&
-       MathAbs(currentScalingFactor - s_lastScalingFactor) < EPSILON_GENERAL &&
-       MathAbs(g_highestHigh - s_lastHighestHigh) < EPSILON_PRICE &&
+        chkA == s_lastMaxAbove &&
+        chkB == s_lastMaxBelow &&
+        MathAbs(currentScalingFactor - s_lastScalingFactor) < EPSILON_GENERAL && !THVolNormLevelChanged(volV) &&
+        MathAbs(g_highestHigh - s_lastHighestHigh) < EPSILON_PRICE &&
        MathAbs(g_lowestLow - s_lastLowestLow) < EPSILON_PRICE &&
        s_lastDailyClose != 0) {
         data = s_cachedData;
@@ -2319,7 +2395,7 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
 
     // Apply ATR Adaptive Scaling to TH value
     // This preserves the fractal 2x ratio since the same factor scales all levels uniformly
-    data.thValue = GetAdaptedStepSize(data.thValue);
+    data.thValue = GetAdaptedStepSize(data.thValue) * (volV == 1.0 ? 1.0 : volV);   // P-TH-VOLNORM-TICK: OFF = no-op
 
     CalculateFractalValues(data.thValue, data.structureValue, data.patternValue, data.triggerValue);
 
@@ -2384,8 +2460,8 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
     s_lastTF = currentTF;
     s_lastStartPointType = g_thStartPointType;
     s_lastCustomPrice = g_customTHStartPrice;
-    s_lastMaxAbove = inpMaxLevels;
-    s_lastMaxBelow = inpMaxLevels;
+    s_lastMaxAbove = data.maxLevelsAbove;
+    s_lastMaxBelow = data.maxLevelsBelow;
     s_lastScalingFactor = currentScalingFactor;
     s_lastHighestHigh = g_highestHigh;
     s_lastLowestLow = g_lowestLow;
@@ -2976,7 +3052,7 @@ void RedrawAllObjects(bool force_redraw=false)
         bool   srcOverride = false;
         int    srcKind = CustomPriceResolveSource(srcPrice, srcOverride);
         if(srcKind == CPSRC_NONE) {
-            g_thStartPointType = inpTHStartPointType;
+            g_thStartPointType = (g_startPointOverride >= 0 && g_startPointOverride <= 4) ? (ENUM_TH_START_POINT_TYPE)g_startPointOverride : inpTHStartPointType;   // panel START POINT wins; -1 = dialog seed
             g_customTHStartPrice = 0.0;
         } else {
             bool priceMoved = (MathAbs(g_customTHStartPrice - srcPrice) > s_cachedPoint * 0.1);
@@ -3130,7 +3206,9 @@ void RedrawAllObjects(bool force_redraw=false)
         }
         // P-PERF-25: the mask term is kept OUT of the core so a line-visibility
         // flip is provably a visibility-only change.
-        frameCore = levelSig + levelLookSig + "|" +
+        // Split in frameCore (never levelSig: a drift must re-render, not wipe).
+        int spA = 0, spB = 0; GetAdaptiveLevelCounts(spA, spB);
+        frameCore = levelSig + levelLookSig + "|" + IntegerToString(spA) + "," + IntegerToString(spB) + "|" +
                           IntegerToString(g_drawGeneration) + "|" +
                           DoubleToString(g_dailyClosePriceForTH, s_cachedDigits) + "|" +
                           // P-UI-52: THE ACTIVE START POINT IS GEOMETRY, NOT JUST ITS TYPE.
@@ -3331,6 +3409,196 @@ void RedrawAllObjects(bool force_redraw=false)
     ThrottledChartRedraw();
 }
 #endif // EVENT_HANDLERS_CALC_MQH
+//+------------------------------------------------------------------+
+//| BaseKnot_Witness.mqh                                            |
+//| P-BK-107 (2026-10-09) — THE KNOT'S OWN READ, WITNESSED.          |
+//|                                                                  |
+//| The user's question, measured rather than argued: «الان atr همون  |
+//| گره رو نشون میده یا … atr هایی که برای لایو ما در لیبلها محاسبه    |
+//| کردیم». The note's hover prints the bands but NEVER the bar they  |
+//| were read at, so the ONE pair of numbers that answers it — the   |
+//| ATR of the knot's own anchor bar beside the ATR of the LIVE row   |
+//| on the same rung — was unreadable from the chart and could only  |
+//| be claimed. It is on the FLUSHED channel now (P-LOG-3: never      |
+//| `Print` alone — the journal is a cache and reads as «nothing       |
+//| happened»).                                                       |
+//|                                                                  |
+//| WHAT IT READS BACK: the registry's published facts (id, type,    |
+//| node time, anchor) and the ability table's OWN (TF, anchor) row — |
+//| the very row the type was decided against — plus the live row of  |
+//| the same rung for the comparison. NOTHING is derived here a      |
+//| second time, so this witness can never describe a measurement    |
+//| the box did not use.                                             |
+//|                                                                  |
+//| LAYER: this is the ONE BaseKnot file the entry compiles AFTER    |
+//| DrawStrip.mqh, because `DrawStripDiagEmit` is declared there and  |
+//| MQL4 resolves top-down: nothing inside BaseKnotTool (included at  |
+//| line 52) may call it. The hub that owns the call is               |
+//| EventHandlers.mqh, and this file must precede the caller in it    |
+//| (the same law as P-SIZE-SPLIT's halves).                          |
+//|                                                                  |
+//| COST: one bounded walk of the registry and one compare per box   |
+//| per pump round (500 ms); a still frame writes NOTHING. The line  |
+//| fires once per box per CHANGE — a new bar, a moved ATR, a new    |
+//| anchor — exactly when the note itself would rewrite.             |
+//+------------------------------------------------------------------+
+#ifndef BASE_KNOT_WITNESS_MQH
+#define BASE_KNOT_WITNESS_MQH
+
+// P-BK-107c (2026-10-09): 48 SEATS, A DELETED BOX GIVES ITS SEAT BACK, AND A FULL
+// TABLE IS SILENT — NEVER A DUPLICATE. The table used to hold 16 and, when full,
+// wrote into seat 0 (`if(slot < 0) slot = 0`), so on a chart with more than 16 live
+// boxes the two oldest boxes STOLE each other's seat every pump round and each wrote
+// a line for a type that had not moved — the exact noise P-BK-107b removed. So:
+//   * the bound is the SAME 48 the ability table and the pump's ask list use, which is
+//     the most rows one chart's boxes can ask for (BK_ENG_ROW_MAX);
+//   * a seat whose box is no longer in the registry is RELEASED first, every round —
+//     deleting a box frees its seat, and so does a registry wipe at attach, with no
+//     cross-layer call (this file sits ABOVE BaseKnotTool, so it may not call into it);
+//   * a table that is genuinely full of LIVE boxes writes NOTHING for the newcomer
+//     rather than evicting a live row. A bounded refusal is an absence the reader can
+//     see is missing; a duplicated line is a lie about what changed.
+#define BK_TW_MAX 48
+struct BaseKnotTwRow
+{
+   string   id;
+   int      kind;
+   int      tf;
+   datetime an;
+   double   atr;
+   double   step;
+   bool     used;
+};
+static BaseKnotTwRow s_bkTw[BK_TW_MAX];
+// A seat whose box left the registry is released. One bounded walk of the (tiny) seat
+// table against the registry, per pump round — the same "a stale row cannot answer" law
+// the ability table obeys (P-BK-79), kept here so a deleted box costs nothing later.
+void BaseKnotTwReclaim()
+{
+   for(int e = 0; e < BK_TW_MAX; e++)
+   {
+      if(!s_bkTw[e].used) continue;
+      if(BaseKnotFind(s_bkTw[e].id) >= 0) continue;   // still ours
+      s_bkTw[e].used = false;
+      s_bkTw[e].id = "";
+   }
+}
+
+void BaseKnotTypeWitness()
+{
+   BaseKnotTwReclaim();
+   int boxes = ArraySize(g_bkBoxes);
+   for(int i = 0; i < boxes; i++)
+   {
+      string   id     = g_bkBoxes[i].id;
+      int      nodeTF = g_bkBoxes[i].baseTFMin;
+      datetime an     = (g_bkBoxes[i].storyT > 0 ? g_bkBoxes[i].storyT : 0);
+      if(id == "") continue;
+      // P-BK-107a: A BOX WITH NO CLASS PUBLISHED YET IS A STATE, NOT A SKIP.
+      // `BaseKnotRegister` opens baseTFMin at 0 and only `BaseKnotSync` publishes it, so an
+      // INHERITED box (a chart reopened from a previous session) has a registry row and no
+      // class until something Syncs it. Printing the chart's own rung in its place would
+      // name a TF the knot never used; printing nothing is indistinguishable from "no box",
+      // which is exactly the confusion this witness exists to remove. So it says so.
+      if(nodeTF <= 0)
+      {
+         string pend = " [P-BK-107] box=" + id + " pending: no class published yet (no Sync has run for this box)";
+         // P-BK-107b: once per box, like the typed branch — a box whose class never arrives
+         // must not write a line every 500 ms.
+         bool seenPend = false;
+         for(int e = 0; e < BK_TW_MAX; e++)
+         {
+            if(!s_bkTw[e].used || s_bkTw[e].id != id) continue;
+            if(s_bkTw[e].kind < 0) seenPend = true;
+            else s_bkTw[e].kind = -1;   // the class left: stay in the pending seat, stay quiet
+            break;
+         }
+         if(seenPend) continue;
+         int slotP = -1;
+         for(int e = 0; e < BK_TW_MAX; e++) if(!s_bkTw[e].used) { slotP = e; break; }
+         if(slotP < 0) continue;   // P-BK-107c: same bounded refusal as the typed branch
+         s_bkTw[slotP].used = true; s_bkTw[slotP].id = id; s_bkTw[slotP].kind = -1;
+         s_bkTw[slotP].tf = 0; s_bkTw[slotP].an = 0; s_bkTw[slotP].atr = 0.0; s_bkTw[slotP].step = 0.0;
+         DrawStripDiagEmit(pend);
+         continue;
+      }
+      double atr = 0.0, pat = 0.0, str = 0.0, step = 0.0, label = 0.0;
+      bool warm = BaseKnotAbilityGet(nodeTF, an, atr, pat, str);   // the row the TYPE was decided against
+      BaseKnotStepRow(nodeTF, an, step);
+      // THE LIVE NUMBER THE LABELS PRINT for this very rung — `GetATRForTimeframe` is the
+      // ATR column's own owner (Labels_A.mqh: `CalculateWeightedATRForTimeframe` under a
+      // 30 s cache), so the comparison is the one that was asked for: the knot's bar against
+      // today's row of the SAME formula, not a second reading of ours. The ability table's
+      // live row is NOT used here: the pump asks (class, anchor) for a typed box and the
+      // chart's own rung at anchor 0, so (nodeTF, 0) is usually absent and would read 0.
+      double labelPrice = GetATRForTimeframe(nodeTF);
+      double pip = BaseKnotPipSize();
+      if(labelPrice > 0.0 && pip > 0.0) label = labelPrice / pip;
+      // P-BK-107b (2026-10-09): THE GUARD IS THE TYPE, AND ONLY THE TYPE. It used to be
+      // (type, anchor, ATR, step) — every field — and the base's own right side moves
+      // whenever its walk re-reads the band (`11:15 → 13:35 → 16:15 → 19:20 → 23:10` on
+      // one box, ATR 71.3 → 65.6), so a single box that never changed type wrote a dozen
+      // lines and the type's actual moves were lost in the noise. The question this
+      // witness exists for is «which type, against which bar» — a bar that moved without
+      // moving the type is the note's business (it prints it), not the log's. So the line
+      // fires on a type change and on the first sight of a box, and a still type is silent.
+      bool seen = false;
+      for(int e = 0; e < BK_TW_MAX; e++)
+      {
+         if(!s_bkTw[e].used || s_bkTw[e].id != id) continue;
+         if(s_bkTw[e].kind == g_bkBoxes[i].nodeKind) seen = true;
+         else s_bkTw[e].kind = g_bkBoxes[i].nodeKind;   // the type moved — refresh the seat in place
+         break;
+      }
+      if(seen) continue;
+      int slot = -1;
+      for(int e = 0; e < BK_TW_MAX; e++) if(!s_bkTw[e].used) { slot = e; break; }
+      // P-BK-107c: FULL OF LIVE BOXES = SAY NOTHING. The old `slot = 0` overwrote the
+      // oldest row and made two live boxes evict each other forever. A witness that skips
+      // is missing a line; one that duplicates invents a change that never happened.
+      if(slot < 0) continue;
+      s_bkTw[slot].used = true; s_bkTw[slot].id = id;
+      s_bkTw[slot].kind = g_bkBoxes[i].nodeKind; s_bkTw[slot].tf = nodeTF;
+      s_bkTw[slot].an = an; s_bkTw[slot].atr = atr; s_bkTw[slot].step = step;
+      DrawStripDiagEmit("[P-BK-107] box=" + id + " type=" + BaseKnotNodeShort(g_bkBoxes[i].nodeKind) +
+                        " node=" + BaseKnotTFName(nodeTF) + " anchor=" +
+                        (an > 0 ? TimeToString(an, TIME_DATE | TIME_MINUTES) : "live") +
+                        " ATR=" + DoubleToString(warm ? BaseKnotToPips(atr) : 0.0, 1) +
+                        " bands FTR<" + DoubleToString(BaseKnotToPips((atr + pat) * 0.5), 1) +
+                        " ETR<" + DoubleToString(BaseKnotToPips((pat + str) * 0.5), 1) +
+                        " CTR<" + DoubleToString(BaseKnotToPips(str), 1) +
+                        " stepTH=" + DoubleToString(BaseKnotToPips(step), 1) +
+                        " labelATR=" + DoubleToString(label, 1) +
+                        " gap=" + DoubleToString(label > 0.0 ? label - BaseKnotToPips(atr) : 0.0, 1));
+   }
+}
+
+// P-BK-111 (2026-10-09): THE FLIP'S WITNESS — ON THE FLUSHED CHANNEL, WITH A READ-BACK.
+// The direction cell is the one control whose whole claim is «it changed something the chart
+// shows», and the two ways it can be wrong are silent: the side does not move (a write aimed
+// at a field nobody re-reads) or it moves and the next 500 ms pump puts it straight back (a
+// lock the follow does not honour). Both read as «کلیک کردم هیچی نشد» and neither is visible
+// from the chart, because the note's own caption is a lie the chart believes. So the line
+// carries the box, the side BEFORE and AFTER, the lock, and the GlobalVariable's own value —
+// and it reads the OBJECT's value back, not the field it just wrote.
+void BaseKnotDirWitness()
+{
+   string id; int was = 0, now = 0, lock = 0;
+   while(BaseKnotDirFlipTake(id, was, now, lock))
+   {
+      int k = BaseKnotFind(id);
+      double gv = GlobalVariableCheck(BaseKnotDirLockGV(id))
+                   ? GlobalVariableGet(BaseKnotDirLockGV(id)) : 0.0;
+      DrawStripDiagEmit("[P-BK-111] dir box=" + id +
+                        " was=" + (was >= 0 ? "BUY" : "SELL") +
+                        " now=" + (now >= 0 ? "BUY" : "SELL") +
+                        " lock=" + IntegerToString(lock) +
+                        " read=" + (k < 0 ? "gone" : (g_bkBoxes[k].dir >= 0 ? "BUY" : "SELL")) +
+                        " gv=" + DoubleToString(gv, 0));
+   }
+}
+
+#endif // BASE_KNOT_WITNESS_MQH
 // EventHandlers_Objects.mqh - EventHandlers split 2026-09-29: exact lines 2946-4270 of EventHandlers.mqh, byte-identical, zero renames.
 #ifndef EVENT_HANDLERS_OBJECTS_MQH
 #define EVENT_HANDLERS_OBJECTS_MQH
@@ -3568,8 +3836,10 @@ void BaseKnotEngPump()
    double   tp1[BK_ENG_ROW_MAX];
    double   tp2[BK_ENG_ROW_MAX];
    double   tp3[BK_ENG_ROW_MAX];
-   double   ab[BK_ENG_ROW_MAX];      // P-BK-92: that TF's TH points in PRICE units
-   ArrayInitialize(ab, 0.0);      // explicit: the push below reads it for every `mins`
+    double   ab[BK_ENG_ROW_MAX];      // P-BK-106: that TF's ATR in PRICE units (the type's measure)
+    double   st[BK_ENG_ROW_MAX];      // P-BK-106: that TF's TH in PRICE units (the step's own number)
+    ArrayInitialize(ab, 0.0);      // explicit: the push below reads them for every `mins`
+    ArrayInitialize(st, 0.0);
    int n = BaseKnotEngNeeds(mins, anchors);
    for(int i = 0; i < n && i < BK_ENG_ROW_MAX; i++)
    {
@@ -3580,13 +3850,13 @@ void BaseKnotEngPump()
       // its story ended on — so the ATRs, the EngSL, the Hunter leg and the three targets
       // are the ones THAT bar's market gave, not today's drifted ones («با گذشت زمان ممکن
       // 40 بشه یا 10 بشه»). 0 stays the live row the sizing preview asks for.
-      STradePlan plan;
-      if(!TradePlanCompute(mins[i], plan, anchors[i]))
-      {
-         pips[i] = 0.0; hunts[i] = 0.0; tp1[i] = 0.0; tp2[i] = 0.0; tp3[i] = 0.0;
-         ab[i]   = 0.0;
-         continue;
-      }
+       STradePlan plan;
+       if(!TradePlanCompute(mins[i], plan, anchors[i]))
+       {
+          pips[i] = 0.0; hunts[i] = 0.0; tp1[i] = 0.0; tp2[i] = 0.0; tp3[i] = 0.0;
+          ab[i]   = 0.0; st[i] = 0.0;
+          continue;
+       }
       // P-TRADEPLAN-DEC (2026-09-16): the pushed risk is the CARD'S OWN NUMBER —
       // `plan.eng`, one decimal — not a second rounding of `engTrue`, so the box and the
       // `Eng.SL` row it is checked against cannot drift apart. A sub-pip size survives
@@ -3599,32 +3869,39 @@ void BaseKnotEngPump()
       tp1[i]  = (plan.tp1 > 0 ? (double)plan.tp1 : 0.0);
       tp2[i]  = (plan.tp2 > 0 ? (double)plan.tp2 : 0.0);
       tp3[i]  = (plan.tp3 > 0 ? (double)plan.tp3 : 0.0);
-      // P-BK-75: AND THE SAME PLAN CARRIES THE MOVEMENT ABILITY. `plan.ownPips` is
-      // THIS TF's composite ATR (TradePlanStripPips -> CalculateWeightedATR, the very
-      // number the strip and the trade block read), so the knot's type is decided by
-      // the SAME ATR the rest of the chart is drawn with — not a second reading that
-      // could drift from it. Pips -> price here, because the knot's box is in prices.
-      // P-BK-79: at THIS ROW'S anchor, so `plan.ownPips` is the anchored composite — the
-      // same number the row's own EngSL was divided out of, and the number the box' type
-      // is read against (BaseKnotAbilityGet at the same anchor).
-      // P-BK-92: THE RUNG'S OWN TH CARRIES THE MOVEMENT ABILITY (P-BK-75's ATR
-      // rule below, reversed per user: type + step read TH, plan stays ATR).
-      ab[i] = THAbilityPrice(mins[i], anchors[i]);
+       // P-BK-106 — THE TYPE'S OWN MEASURE IS BACK ON ATR (P-BK-92's TH reversal retired).
+       // `plan.ownPips` is THIS TF's composite ATR at THIS ROW'S anchor (TradePlanStripPips ->
+       // CalculateWeightedATR, the 5/10/21/66/132/264 blend the strip and the trade plan read),
+       // so the type is decided by the same ATR the rest of the chart is drawn with, read on the
+       // bar its own base ended («atr با مربوط به همون گذشته باشه که گره هستش … برای لایو حساب
+       // شده، بدرد اونجا نمیخوره», P-BK-79/105). TH had no volatility in it at all (`price * pct /
+       // 100`), so a calm pair and a violent one at the same price were typed by the same number.
+       // UNIT: ownPips is in PIPS and the ability table is in PRICE units — the conversion is
+       // HERE and nowhere else, through the pip size's one owner.
+       ab[i] = (plan.ownPips > 0.0 ? plan.ownPips * BaseKnotPipSize() : 0.0);
+       // P-BK-106: the STEP keeps the rung's own TH (P-BK-105). Same anchor, same row, a SECOND
+       // column — so this edit changes the type's measure and leaves every step number as it was.
+       st[i] = THAbilityPriceNorm(inpTHVolNorm, mins[i], anchors[i]);
    }
    BaseKnotEngPush(mins, anchors, pips, hunts, tp1, tp2, tp3, n);
-   // P-BK-92: P-BK-75's block below now hands TH per TF (reversed per user).
-   // P-BK-75 — THE NODE'S TYPE IS ITS HEIGHT AGAINST THE MOVEMENT ABILITIES OF ITS OWN
-   // TF (user: «به جای th از atr استفاده بشه»), so the pump hands ONE number per TF in —
-   // that TF's ATR — exactly as it already hands EngSL in: one row per TF the boxes
-   // asked for, off the SAME `mins` list, so the ask and the answer cannot disagree
-   // about which TFs a box draws with. The RATIOS (0.25 / 0.50 / 1.00) live in the
-   // tool's own table, never here: a second place that halved an ATR would be a second
-   // owner of the rule. A TF whose ATR is not warm pushes 0, which BaseKnotAbilityGet
-   // reads as an ABSENCE: the type stays BK_NODE_NONE and the tooltip says so.
-   // P-BK-79: one row per (TF, anchor) — the same list, the same keys.
-   BaseKnotAbilityReset();
-   for(int i = 0; i < n && i < BK_ENG_ROW_MAX; i++)
-      BaseKnotAbilityPush(mins[i], anchors[i], ab[i]);
+    // P-BK-92: P-BK-75's block below now hands TH per TF (reversed per user).
+    // P-BK-75 — THE NODE'S TYPE IS ITS HEIGHT AGAINST THE MOVEMENT ABILITIES OF ITS OWN
+    // TF (user: «به جای th از atr استفاده بشه»), so the pump hands ONE number per TF in —
+    // that TF's ATR — exactly as it already hands EngSL in: one row per TF the boxes
+    // asked for, off the SAME `mins` list, so the ask and the answer cannot disagree
+    // about which TFs a box draws with. The RATIOS (0.25 / 0.50 / 1.00) live in the
+    // tool's own table, never here: a second place that halved an ATR would be a second
+    // owner of the rule. A TF whose ATR is not warm pushes 0, which BaseKnotAbilityGet
+    // reads as an ABSENCE: the type stays BK_NODE_NONE and the tooltip says so.
+    // P-BK-79: one row per (TF, anchor) — the same list, the same keys.
+    // P-BK-106: ONE row per box is asked for now (the class), not three — the type's two
+    // upper bands are that rung's ATR scaled by the ladder's √-law (BaseKnotAbilityGet),
+    // so no rung above is read and none is asked for. The STEP's TH rides the same row.
+     BaseKnotAbilityReset();
+    for(int i = 0; i < n && i < BK_ENG_ROW_MAX; i++)
+       BaseKnotAbilityPush(mins[i], anchors[i], ab[i], st[i]);
+    BaseKnotTypeWitness();
+    BaseKnotDirWitness();   // P-BK-111: the flip's record, reported on the flushed channel
 }
 
 int OnCalculateHandler(const int rates_total, const int prev_calculated, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], const long &volume[], const int &spread[]) {
@@ -3656,7 +3933,7 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
        // TH is below BaseKnotTool (THCalculations, P-BK-92, was ATR), so Lite —
        // which has no RefreshOnBar — hands the same TH points in from its tick pump.
        // P-BK-46: and the same pump hands the knots' EngSL risk in (BaseKnotEngPump).
-       if(bkNow - s_bkLitePumpMs >= 500) { s_bkLitePumpMs = bkNow; BaseKnotStepPush(THAbilityPrice(Period(), 0)); BaseKnotEngPump(); BaseKnotSyncBadges(); TradePlanLiveTick(); }
+        if(bkNow - s_bkLitePumpMs >= 500) { s_bkLitePumpMs = bkNow; BaseKnotStepPush(THAbilityPriceNorm(inpTHVolNorm, Period(), 0)); BaseKnotEngPump(); BaseKnotSyncBadges(); TradePlanLiveTick(); }
     }
 #endif
 
@@ -4820,1052 +5097,28 @@ void ReleaseIndicatorMute()
 
 
 #endif // EVENT_HANDLERS_OBJECTS_MQH
-// EventHandlers_Router.mqh - EventHandlers split 2026-09-29: exact lines 4271-5820 of EventHandlers.mqh, byte-identical, zero renames.
-#ifndef EVENT_HANDLERS_ROUTER_MQH
-#define EVENT_HANDLERS_ROUTER_MQH
+//+------------------------------------------------------------------+
+//| EventHandlers_Router_Gesture.mqh                                 |
+//|                                                                  |
+//| P-SIZE-1500 (2026-10-04) - the custom price line's gesture stream.|
+//|                                                                  |
+//| Exact lines 1030-1495 of EventHandlers_Router.mqh, moved verbatim |
+//| into one function, zero renames: the press edge, the claim, the   |
+//| carry the terminal does not do itself, the release that drops the |
+//| selection it took, and the tooltip the release is owed (P-UI-49c/ |
+//| P-UI-99/P-UI-100b). It owes the move because the router was 1630  |
+//| lines against a 1592 baseline (contract 7).                       |
+//|                                                                  |
+//| Kept byte-identical for a reason: the block has NO `return` (its  |
+//| own `if` guards it) and reads no router local - so lifting it out |
+//| cannot change what the router does. It is included BEFORE the     |
+//| router: MQL4 resolves a call top-down.                            |
+//+------------------------------------------------------------------+
+#ifndef EVENT_HANDLERS_ROUTER_GESTURE_MQH
+#define EVENT_HANDLERS_ROUTER_GESTURE_MQH
 
-void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
+void RoutCustomPriceGesture(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-    // P-UI-114 (2026-09-23): right-click era deleted — terminal menu untouched,
-    // strip opens on a LEFT hold (DrawStripHoldStep/PollAt in DrawStrip.mqh).
-
-    // Base / Knot tool FIRST: while armed it owns every mouse gesture (no
-    // chart-click leak into custom-price/TH3/panels), and committed boxes own
-    // their badge/drag/delete events in every state.
-    if(BaseKnotOnChartEvent(id, lparam, dparam, sparam)) return;
-    // P-HR-01 / P-UI-136: the Horizontal Ray and the Path own their arm click and their committed drags.
-    if(HRayOnChartEvent(id, lparam, dparam, sparam) || PathOnChartEvent(id, lparam, dparam, sparam)) return;
-
-    // P-UI-100b (2026-09-22): THE DETECTOR OF "A FOREIGN OBJECT JUST APPEARED".
-    //
-    // A gesture of ours never creates a chart object; the terminal's own drawing
-    // tools (a fib, a rectangle, a trend line) always do. An object that is NOT
-    // ours, appearing while a hand-set line's gesture is live, is therefore the
-    // one proof that the press which started it was a DRAW and not a grab — the
-    // question the press edge itself cannot answer («وقتی فیو یا باکس از همون محل
-//--- P-UI-142: the arbiter's ONE writer + its census — the terminal's own voice is the only
-   //--- signal MT4 has; law, heartbeat, lock and census live at their owner (GlobalVariables.mqh).
-   //--- Lite ships no draw strip, so no flushed channel: the arbiter still WORKS there.
-   {
-      int gl=StringLen(inpObjectPrefix);
-      bool gOurs=(gl>0 && StringLen(sparam)>=gl && StringSubstr(sparam,0,gl)==inpObjectPrefix);
-      if(id == CHARTEVENT_OBJECT_DRAG && !gOurs && sparam != "") GestureForeignMotion(sparam);
-#ifndef BUILD_LITE
-      if(GestureCensusWanted(id, sparam)) { DrawStripDiagEmit("[gest] id="+IntegerToString(id)+" t="+IntegerToString(GetTickCount())+" xy="+IntegerToString((int)lparam)+","+IntegerToString((int)dparam)+" nm=\""+sparam+"\" ours="+IntegerToString(gOurs?1:0)); }
-#endif
-   }
-   if(id == CHARTEVENT_OBJECT_CREATE && sparam != "")
-   {
-       int createPrefixLen = StringLen(inpObjectPrefix);
-       bool createdByUs = (createPrefixLen > 0 && StringLen(sparam) >= createPrefixLen &&
-                           StringSubstr(sparam, 0, createPrefixLen) == inpObjectPrefix);
-       if(!createdByUs)
-       {
-           // P-DRAW-01 (2026-09-22): AND THE USER'S OWN DRAWING IS STYLED THE MOMENT
-           // IT EXISTS — «آخرین تغییرات ذخیره بشه». A fresh object wears the KIND's
-           // memory before the user can see it in the terminal's own look; a kind never
-           // styled is left exactly as MT4 drew it (the memory answers "untouched").
-           DrawStyleApplyOnCreate(sparam);
-           CustomPriceForeignDrawSeen();
-       }
-   }
-// P-TICKWRAP: the window is asked through its owner, never compared against GetTickCount()
-    // directly — an absolute compare stays true forever after the 49.7-day counter wrap, and
-    // then EVERY delete would be ignored for the rest of the cycle (TickDeadlinePending).
-    bool suppressDeleteEvent = g_suppressDeleteEvents || TickDeadlinePending(g_suppressDeleteEventsUntilMs);
-    if(id == CHARTEVENT_OBJECT_DELETE && !suppressDeleteEvent) {
-        string indicatorPrefix = inpObjectPrefix;
-        int prefixLen = StringLen(indicatorPrefix);
-        // P-BK-01 / P-HR-01: Base/Knot deletes are owned by BaseKnotTool (cascade/heal) and
-        // ray deletes by HRayTool (single object) — neither may flag a level redraw or
-        // pollute the object cache, so they never reach the sweep below.
-        if(prefixLen > 0 && StringLen(sparam) >= prefixLen && StringSubstr(sparam, 0, prefixLen) == indicatorPrefix &&
-           StringFind(sparam, "_BK_") < 0 && StringFind(sparam, "_HRAY_") < 0) {
-            // P-DEL-PROBE (2026-09-30) — OUR OWN MASS DELETE, LEAKING BACK IN.
-            //
-            // A delete of a name in OUR namespace that arrives OUTSIDE the
-            // suppression window is read as a foreign/user delete: it drops the
-            // cache entry, raises a FULL levels redraw and bumps the draw
-            // generation (which also voids every stored tf-mask). So one leaked
-            // event from our own ~70-band trigger wipe costs a whole family
-            // re-render - and a burst of them is churn the user feels as "the
-            // toggle is slow", with the flag set once per event.
-            //
-            // The window is 250 ms from the LAST delete (`g_suppressDeleteEvents
-            // UntilMs`, set by every bulk path), so a terminal that delivers the
-            // queued delete events later than that turns the wipe into a storm.
-            // The probe is the number that says whether that is what happens here:
-            // bounded to one line per second, so a storm cannot flood the log.
-            static int  s_ownDeleteLeaks   = 0;
-            static uint s_ownDeleteLeakMs  = 0;
-            s_ownDeleteLeaks++;
-            uint leakNow = GetTickCount();
-            if(s_ownDeleteLeakMs == 0 || leakNow - s_ownDeleteLeakMs >= 1000)
-            {
-                Print("[P-DEL] own-name delete NOT suppressed: n=", s_ownDeleteLeaks,
-                      " in <=1s, last=", sparam);
-                s_ownDeleteLeakMs = leakNow;
-                s_ownDeleteLeaks  = 0;
-            }
-            CacheRemoveObject(sparam);
-            g_redrawTHLevelsNeeded = true;
-            // P-PERF-02: a level vanished behind our back — the stored geometry
-            // signature no longer describes the chart, so the next frame must
-            // rebuild for real (this is the self-heal the per-object ObjectFind
-            // used to provide on every frame).
-            MarkDrawGeneration();
-        }
-    }
-    // P-UI-98j: EVEN A SUPPRESSED DELETE IS VERIFIED FOR THE STEP-1 PAIR. Our
-    // own bulk deletes never name a live handle (the surplus sweep starts past
-    // it, the foreign sweep runs on handoff with a fresh stash), so a stashed
-    // handle name that is really gone is an external delete that fell inside
-    // the 250 ms window - and ignoring it is exactly the stuck-missing line
-    // («ناپدید میشه ... دیگه نمیشه جابجاش کرد»). One probe, then the same two
-    // lines as above; a live gesture is left to the settle (it owns recovery).
-    else if(id == CHARTEVENT_OBJECT_DELETE && suppressDeleteEvent && sparam != "" &&
-            !g_s1DragLive && g_thStartPointType == TH_START_POINT_CUSTOM_PRICE &&
-            g_s1MarkPeriod == Period() &&
-            (sparam == g_s1MarkAboveName || sparam == g_s1MarkBelowName) &&
-            ObjectFind(0, sparam) < 0)
-    {
-        CacheRemoveObject(sparam);
-        g_redrawTHLevelsNeeded = true;
-        MarkDrawGeneration();
-    }
-
-    // VIEWLOCK-OFF:
-    //if(id == CHARTEVENT_OBJECT_DELETE && !suppressDeleteEvent && sparam == g_viewAnchorLineName && g_viewLockEnabled) {
-    //    ViewLockSetEnabled(false);
-    //    ThrottledChartRedraw();
-    //    return;
-    //}
-
-    if(id == CHARTEVENT_KEYDOWN)
-    {
-#ifndef BUILD_LITE
-        // Hex edit box owns the keyboard (palette color field): A-F are valid
-        // hex digits, so every letter hotkey below must stay silent while the
-        // user types. ESC/ENTER still reach the palette via HandleUIChartEvent.
-        // Same for the Base Box TEXT field (TV-parity 2026-09-07 — any letter
-        // is valid box text).
-        if(g_PalHexFocus || g_BkTextFocus) return;
-#endif
-        // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-        // Backspace = undo last TH3 drawing point (X, A, B, C placement)
-        if((int)lparam == 8 && TH3SessionActive()) {
-            TH3SessionUndo();
-            return;
-        }
-#endif
-
-        //
-        // F key   Hide/Show All Objects (fast visibility toggle)
-        //
-
-        if(IsHotkeyPressed(lparam, sparam, inpHideKey))
-        {
-            // P-UI-93: the whole transition moved into ONE owner
-            // (`ApplyHideAllState`, above the handler), because the panel's
-            // family rows had no other way to reach it - that was half of
-            // «این دکمه های با پنل هماهنگ نیستش».
-            //
-            // The target state is READ from the mute's own reader and
-            // inverted, never re-derived from the raw GlobalVariable here:
-            // exactly one writer (SetIndicatorHiddenState) and one reader
-            // (IsIndicatorHidden) exist, so they cannot drift.
-            ApplyHideAllState(!IsIndicatorHidden());
-            // P-UI-93: the panel's visibility rows DISPLAY this mute
-            // (PnlCurrentSet), and this file is compiled before the panel, so
-            // the repaint has to be asked for - exactly what the L / A / D /
-            // T / S / E hotkeys already do. Without this the rows keep
-            // claiming their family is painted while the chart is blank.
-            RequestUISync();
-            // P-PERF-24: one owner for "a discrete action paints now" - it
-            // forces the repaint even while hidden, which is what the old bare
-            // ChartRedraw() here was working around.
-            RepaintForDiscreteAction();
-            return;
-        }
-
-        //  
-        // L key   Toggle Lines Visibility (all LINE objects - not boxes)
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpLinesToggleKey))
-        {
-            // P-PERF-29: the switch's state, mirror, cache, persisted key and
-            // object MASK all live in one owner now - the panel rows and the
-            // factory reset used to raise the flag WITHOUT writing the mask,
-            // which the P-PERF-25 skip then trusted and painted nothing.
-            bool p26want = !g_linesVisible;
-            // P-PERF-22: this was a full-chart walk - ObjectsTotal(0,-1,-1) then
-            // ObjectName + ObjectGetInteger for EVERY object on the chart, ours
-            // or not, plus one TIMEFRAMES write per line whether or not the mask
-            // changed. The same repair already existed, correct, in
-            // VisibilityManager (SetAllLineObjectsVisibility): it walks the
-            // OBJECT CACHE - only our own objects, no ObjectName calls - and it
-            // keeps this hotkey's exclusions (F-key border segments, _BK_
-            // trade rays). It had no callers; it does now. It also bumps the
-            // P-PERF-02 epoch itself, so the guards re-assert once.
-            // P-PERF-26: the switch's own cost is measured, not guessed - on the
-            // old shape a bare press had no line of its own (the event ledger
-            // reports the whole event and the mask walk is the only work here).
-            uint p26t = GetTickCount();
-            SetLinesVisible(p26want, true);
-            // P-UI-40: the ZONES card's SHOW LINES row and the LINES card display
-            // this switch, and this path cannot repaint them (panel file comes
-            // later). Ask the UI layer — the row reads the live flag, only its
-            // IMAGE is stale.
-            RequestUISync();
-            P4ReportSlow("lines toggle (L) [lines=" + (g_linesVisible ? "1" : "0") + "]",
-                         GetTickCount() - p26t, P_P4_MOVE_WARN_MS);
-            LOG_I(LOG_CAT_LINES, "Lines " + (g_linesVisible ? "VISIBLE" : "HIDDEN"));
-            // P-PERF-24: a key press is one event - paint it now instead of
-            // waiting for the next tick to pass the 100 ms throttle.
-            RepaintForDiscreteAction();
-            return;
-        }
-
-        //  
-        // C key   Set Custom Price
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpCustomPriceKey))
-        {
-            g_waitingForCustomPriceClick = true;
-            g_customPriceKeyboardOverride = true;
-            _LOG_GATE_D Print("[D][GEN] Press anywhere on the chart to set custom TH start price");
-            ObjectDelete(0, g_customPriceHorizontalLineName);
-            g_customPriceLineCreated = false;
-            // P-UI-98d v2: the line is born at the vertical middle of the VISIBLE
-            // chart — wherever the user has scrolled («هر جایی که کاربر هست وسط
-            // صفحه ظاهر بشه») — the market's last price is only the fallback.
-            double currentPrice = ScreenMiddlePrice();
-            if(!(currentPrice > 0.0))
-                currentPrice = iClose(_Symbol, CompatTF(GetCachedPeriod()), 0);
-            g_customTHStartPrice = currentPrice;
-            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            HandsetPlacementArm();   // P-UI-98e: the fresh line and its handles wake draggable
-            // P-UI-56: ONE writer for the placement pair (this chart's price + flag).
-            CustomPricePersistPlacement(currentPrice);
-            // P-UI-48: ONE creator. This block used to write the line's whole
-            // property set by hand - the fifth copy of it in the file, and the
-            // place a stale OBJPROP_SELECTED had survived longest.
-            if(!CreateCustomPriceLine(currentPrice, Digits)) return;
-            HandsetMarkersRide();   // the green handle is born with its line
-            g_redrawTHLevelsNeeded = true;
-            _LOG_GATE_D Print("[D][GEN] [PIN] Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //  
-        // ESC key   Cancel Custom Price
-        //  
-        if(lparam == 27)
-        {
-            // P-UI-56: the active test reads THIS CHART's key (the resolver's own
-            // owner). Reading the old symbol-scoped key would have made ESC a no-op
-            // on a chart whose placement lives under the chart-scoped name.
-            bool customPriceActive = GlobalVariableCheck(CustomPriceGVName());
-            if(g_waitingForCustomPriceClick || customPriceActive || g_customPriceKeyboardOverride)
-            {
-                // P-UI-45: the sequence itself lives in ONE owner - the ring's PIN
-                // item's OFF press runs the very same one.
-                DeactivateCustomPriceMode("ESC");
-                ThrottledChartRedraw();
-                return;
-            }
-        }
-
-        //  
-        // T key   Toggle Trigger Zones (overlay only — unified lines are
-        //         unaffected; line visibility belongs to the L key)
-        //
-        if(IsHotkeyPressed(lparam, sparam, inpTriggerLevelsKey))
-        {
-            // P-PERF-32b: ONE owner for the whole transition. This block used to
-            // keep its own copy of the state, the persisted key and the render
-            // request - the same three lines the ring item and the card's SHOW row
-            // kept - and the pixels were the RENDER's to produce, so the press
-            // waited for a heavy frame («سطوح تریگر دیر خاموش و روشن میشه»). The
-            // owner (SetTriggerLevelsVisible, EventHandlers_Objects) now writes the
-            // family's masks through the render's own writer and repaints on the
-            // spot, exactly as the structure switches have since P-PERF-32.
-            bool tNext = !g_triggerLevelsEnabled;
-            RequestUISync();   // P-UI-40: the TRIGGER card's SHOW row + the ring badge
-            LOG_I(LOG_CAT_KEYS, tNext ? "Trigger Zones: ON" : "Trigger Zones: OFF");
-            // P-KEY-PROBE: the press is the FIRST timestamp of the latency pair; the
-            // owner prints `[P-KEY] T applied … ms=` once the pixels are painted, and
-            // the frame that reconciles prints `[P-KEY] T settled … ms=` at its own
-            // end (EventHandlers_Calc). Both lines are ungated on purpose - one line
-            // per key press, and they are the evidence the fix is judged by.
-            g_triggerPressMs      = GetTickCount();
-            g_triggerPressOn      = tNext ? 1 : 0;
-            g_triggerPressHidden  = 0;
-            g_triggerPressReached = 0;
-            Print("[P-KEY] T press on=", g_triggerPressOn, " zones=", 
-                  (tNext ? "show" : "hide"));
-            // P-PERF-21: NO force-clear. The overlay owns ONE family - the trigger
-            // zones - and RenderZones applies the live flag as a mask itself, so
-            // this is a re-render, never a wipe: structure lines, zones and labels
-            // are not deleted and re-materialised, and the geometry cache (which no
-            // longer keys on the flag) answers with the identical lists instead of
-            // recomputing them.
-            SetTriggerLevelsVisible(tNext);
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //  
-        // A key   Toggle ATR Labels
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpATRLabelsKey))
-        {
-            string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
-            g_atrLabelsVisible = !g_atrLabelsVisible;
-            RequestUISync();   // P-UI-40: the ATR card's own rows show this switch
-            g_showATRLabels = g_atrLabelsVisible;   // keep the ATR card mirror in sync
-            GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
-            
-            string objectPrefix = GetLevelObjectPrefix();
-            SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible); 
-            g_labelsRelayoutNeeded = true;
-            RedrawLabelsOnly();
-            LOG_I(LOG_CAT_LABELS, "ATR Labels " + (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //  
-        // S key   Cycle TH Labels Mode
-        //  
-        //
-        // D key   Toggle the bar-close countdown tag. Its OWN switch: the ATR
-        //         labels key (A) must never take the countdown away, and this
-        //         one never touches the ATR block (2026-09-11, user request).
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpCountdownKey))
-        {
-            g_showLiveCountdown = !g_showLiveCountdown;
-            RequestUISync();   // P-UI-40: COUNTDOWN card row 0 shows this switch
-            RuntimeSettingsSaveOverridesThrottled();   // OV_ CD/CDC/CDS/CDG
-            RefreshLiveCountdown();
-            LOG_I(LOG_CAT_LABELS, "Countdown tag " + (g_showLiveCountdown ? "VISIBLE" : "HIDDEN"));
-            ThrottledChartRedraw();
-            return;
-        }
-
-        if(IsHotkeyPressed(lparam, sparam, inpTHLabelsKey))
-        {
-            string thGvar = "Biotak_THLabels_" + GetCachedChartIdStr();
-            
-            // Cycle exclusive: ON -> OFF (remembers), OFF -> remembered ON (default STANDARD).
-            if(g_thLabelsMode != 0) {
-                g_thLabelsMode = 0;
-            }
-            else {
-                g_thLabelsMode = g_thLastOnMode;
-                if(g_thLabelsMode == 0) g_thLabelsMode = 2;
-            }
-
-            g_thLabelsVisible = (g_thLabelsMode != 0);
-            RequestUISync();   // P-UI-40: the TH LABELS card cycles on this mode
-            SyncTHFlagsFromMode();   // flags follow the mode → card never disagrees
-            GlobalVariableSet(thGvar, (double)g_thLabelsMode);
-            
-            string objectPrefix = GetLevelObjectPrefix();
-            SetTHLabelsVisibility(objectPrefix, g_thLabelsMode);
-            g_labelsRelayoutNeeded = true;
-            RedrawLabelsOnly();
-            string logMsg = "TH Labels mode=" + IntegerToString(g_thLabelsMode) + " (0=OFF,1=FRACTAL,2=STANDARD)";
-            LOG_I(LOG_CAT_LABELS, logMsg);
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //
-        // V key   Toggle TH3 Tool — TH3TOOL-ON (2026-09-19): restored.
-        //
-#ifndef BUILD_LITE
-        if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
-        {
-            ToggleTH3Tool();
-            ThrottledChartRedraw();
-            return;
-        }
-#endif
-
-#ifndef BUILD_LITE
-        //
-        // R key   Toggle HTF Candles overlay (left-hand cluster)
-        //
-        if(IsHotkeyPressed(lparam, sparam, inpHTFKey))
-        {
-            // P-HTF-KEY: mask walk — instant both ways, no delete/rebuild.
-            // Port of MT4 EventHandlers_Router.mqh lines 325-332.
-            g_UI.showHTF = !g_UI.showHTF;
-            GlobalVariableSet(GetGVName("HTF_EN"), g_UI.showHTF ? 1.0 : 0.0);
-            HTFApplyVisibleMasks();
-            RequestUISync();   // P-UI-40b: the HTF card's SHOW row displays this flag
-            LOG_I(LOG_CAT_LINES, "HTF " + (g_UI.showHTF ? "VISIBLE" : "HIDDEN"));
-            return;
-        }
-#endif
-
-        //
-        // P key   Arm the leg meter (a measurement only).
-        // P-TH3-PB-OFF (2026-09-21): the old coupling that stored a dragged leg
-        // on the active pattern as its pivot base is retired — the base is
-        // hand-typed in the TH3 TOOL card (`inpTH3PivotBasePips`), never drawn.
-        //
-#ifndef BUILD_LITE
-        if((int)lparam == 80)   // 'P' — toggle Leg Measure session (same as ring CIR_LEG)
-        {
-            LegMeasureToggle();
-            ThrottledChartRedraw();
-            return;
-        }
-#endif
-
-        //
-        // B key   Arm/cancel the TH3 base mark: two clicks pin the base height
-        // (P-TH3-PB-UI) — no drag, so scrolling between the clicks stays free.
-        //
-#ifndef BUILD_LITE
-        if((int)lparam == 66)   // 'B' — arm/cancel the base mark
-        {
-            TH3BaseMarkToggle();
-            ThrottledChartRedraw();
-            return;
-        }
-#endif
-
-        // E key   Cycle Step Mode (TH → SS-LS → Combo → Factor → TH).
-        // Single mode: E writes the base directly — same value the Tools
-        // ring item and the panel STEP MODE row write. GetCurrentStepMode()
-        // just returns it.
-        if(IsHotkeyPressed(lparam, sparam, inpStepModeKey))
-        {
-            RequestUISync();   // P-UI-40: the STEP card's mode row + the ring badge
-            g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)(((int)GetCurrentStepMode() + 1) % 4);
-            GlobalVariableDel("Biotak_StepMode_" + GetCachedChartIdStr());   // purge retired override key
-            RuntimeSettingsSaveOverridesThrottled();   // persist OV_ SM now (E bypasses ApplyRefreshFlags)
-            LOG_IP1(LOG_CAT_KEYS, "Step Mode changed to: ", GetStepModeName(GetCurrentStepMode()));
-            g_forceClearOnNextDraw = true;
-            g_redrawTHLevelsNeeded = true;
-            g_calculatedOnce = false;
-            RedrawAllObjects(true);
-            RefreshComboLabelExtraInfo();
-            UpdateStepModeLabel();
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //  
-        // 1/2 keys   Adjust Factor (always active)
-        //  
-        if(lparam == '1') { AdjustFactorValue(-1); return; }
-        else if(lparam == '2') { AdjustFactorValue(+1); return; }
-
-        //
-        // 3/4 keys   Adjust TH3 Frequency — TH3TOOL-ON (2026-09-19): restored.
-        //
-#ifndef BUILD_LITE
-        else if(lparam == '3') { DecrementTH3Frequency(); return; }
-        else if(lparam == '4') { CycleTH3Frequency(); return; }
-#endif
-
-        //  
-        // W key   Show Current Status
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpShowStatusKey))
-        {
-            RefreshComboLabelExtraInfo();
-            ShowAllStatusLabels();
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //  
-        // R key   Reset All Overrides
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpResetKey))
-        {
-            // STEPOVERRIDE-OFF: single Step Mode — Q resets the base + levels
-            // to factory, like the panel Reset does.
-            g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)(int)FactoryDefault(FF_STEP_CALC_MODE);
-            g_maxLevels = (int)FactoryDefault(FF_MAX_LEVELS);
-            g_comboMode = (ENUM_COMBO_MODE)(int)FactoryDefault(FF_COMBO_MODE);
-            g_comboPreset = (ENUM_COMBO_PRESET)(int)FactoryDefault(FF_COMBO_PRESET);
-            g_comboComp1TF = (ENUM_COMBO_TIMEFRAME_TYPE)(int)FactoryDefault(FF_COMBO_C1TF);
-            g_comboComp1Step = (ENUM_COMBO_STEP_TYPE)(int)FactoryDefault(FF_COMBO_C1STEP);
-            g_comboOp1 = (ENUM_COMBO_OPERATION)(int)FactoryDefault(FF_COMBO_OP1);
-            g_comboComp2Enabled = (FactoryDefault(FF_COMBO_C2ON) > 0.5);
-            g_comboComp2TF = (ENUM_COMBO_TIMEFRAME_TYPE)(int)FactoryDefault(FF_COMBO_C2TF);
-            g_comboComp2Step = (ENUM_COMBO_STEP_TYPE)(int)FactoryDefault(FF_COMBO_C2STEP);
-            g_factorValueOverride = 0;
-            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-            g_th3FreqOverride = 0;
-            g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
-#endif
-            g_timeframeLocked = false;
-            g_lockedPeriod = 0;
-            // inpX is the runtime copy after the RuntimeSettings #defines —
-            // restoring from the captured factory defaults instead (reading
-            // inpX here is a self-assign no-op that kept the current values).
-            g_triggerLevelsEnabled = (FactoryDefault(FF_TRIGGER_SHOW) > 0.5);
-            // P-PERF-29: same owner as the hotkey and the panel rows, so the
-            // restore writes the mask too (it used to leave the objects as they
-            // were, which only a timeframe switch repaired).
-            SetLinesVisible(FactoryDefault(FF_SHOW_LINES) > 0.5, false);
-            InvalidateAllVisibilityCaches();
-            g_atrLabelsVisible = (FactoryDefault(FF_SHOW_ATR) > 0.5);
-            g_showLiveCountdown = (FactoryDefault(FF_SHOW_COUNTDOWN) > 0.5);
-            g_countdownColor = (color)(int)FactoryDefault(FF_COUNTDOWN_COLOR);
-            g_countdownFontSize = (int)FactoryDefault(FF_COUNTDOWN_SIZE);
-            g_countdownGapPx = (int)FactoryDefault(FF_COUNTDOWN_GAP);
-            RefreshLiveCountdown();
-            g_thLabelsMode = (FactoryDefault(FF_SHOW_TH_LABELS) > 0.5) ? 2 : 0; // Default STANDARD if enabled
-            g_thLabelsVisible = (g_thLabelsMode != 0);
-            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-            if(inpEnableTH3Tool) {
-                UpdateAllTH3Objects();
-            }
-#endif
-            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-            // Cancel any active ABCD drawing session
-            if(TH3SessionActive()) {
-                TH3SessionCancel();
-            }
-#endif
-            g_customPriceKeyboardOverride = false;
-            g_thStartPointType = inpTHStartPointType;
-            g_customTHStartPrice = inpCustomTHStartPrice;
-            string chartIdStr = GetCachedChartIdStr();
-            string symbolName = GetCachedSymbol();
-            GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
-            // P-UI-67: the reset drops the override through its owner (state + key),
-            // so the panel's SS/LS ORDER switch is the answer again.
-            SSLSOrderOverrideClear();
-            // P-UI-40: the reset key rewrites nearly every displayed state, so
-            // the whole UI layer (ring states, badges, the open card) must be
-            // told once. This is also how the reset path already behaved when it
-            // was reached from the panel (PnlResetItem does exactly this pair).
-            RequestUISync();
-            GlobalVariableDel("Biotak_Factor_" + chartIdStr);
-            GlobalVariableDel("Biotak_LockTF_" + chartIdStr);
-            GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
-            // VIEWLOCK-OFF: if(g_viewLockEnabled) ViewLockSetEnabled(false);
-            GlobalVariableDel("Biotak_ViewLock_" + chartIdStr);   // VIEWLOCK-OFF: purge only
-            GlobalVariableDel("Biotak_ViewAnchorT_" + chartIdStr);
-            GlobalVariableDel("Biotak_ViewAnchorMin_" + chartIdStr);
-            GlobalVariableDel("Biotak_ViewAnchorMax_" + chartIdStr);
-            GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
-            GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
-            GlobalVariableDel("Biotak_ATRLabels_" + chartIdStr);
-            GlobalVariableDel("Biotak_THLabels_" + chartIdStr);
-            // P-UI-56: the Q reset drops THIS CHART's placement (both keys) through
-            // their owner; the Input seed needs no key at all (the resolver reads it
-            // directly), so the old "seed the price key from the Input" write is gone
-            // - it was the same key that made an Input-seeded chart look like a
-            // placement on the chart that shares its symbol.
-            CustomPriceForgetPlacement();
-            // P-UI-98: the reset returns the step to the mode's own answer too.
-            StepOverrideFactorReset();
-            // P-UI-98d: the hand-set lines wake ARMED again and their markers go
-            // (the redraw below re-creates what the fresh state wants).
-            g_cpLineArmed = true;
-            g_s1LinesArmed = true;
-            g_s1MarkAbovePrice = 0.0;
-            g_s1MarkBelowPrice = 0.0;
-            ObjectDelete(0, g_cpMarkerName);      CacheRemoveObject(g_cpMarkerName);
-            ObjectDelete(0, S1MarkName(1));       CacheRemoveObject(S1MarkName(1));
-            ObjectDelete(0, S1MarkName(-1));      CacheRemoveObject(S1MarkName(-1));
-            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-            GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
-            GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
-#endif
-            if(inpCustomTHStartPrice > 0.0) {
-                CreateCustomPriceLine(inpCustomTHStartPrice, Digits);
-            } else {
-                ObjectDelete(0, g_customPriceHorizontalLineName);
-                g_customPriceLineCreated = false;
-            }
-            UpdateLockStatusLabel();
-            Comment("\n\n        [ RESET ]");
-            g_resetCommentCreateTime = GetTickCount();
-            LOG_I(LOG_CAT_KEYS, "Reset: All overrides cleared");
-            ClearAllModeLabels();
-            EventSetMillisecondTimer(250);   // keep 250 ms cadence (see OnInit)
-            g_forceClearOnNextDraw = true;
-            g_calculatedOnce = false;
-            g_redrawTHLevelsNeeded = true;
-            RedrawAllObjects(true);
-            ThrottledChartRedraw();
-            return;
-        }
-
-        //
-        // X key   On-demand diagnostic dump ([TRADEPLAN]+[SNAP]+[ATRLEGS]+[PROF*])
-        //         No background auto-logging — this key is the only writer.
-        //
-        if(IsHotkeyPressed(lparam, sparam, inpLogDumpKey))
-        {
-            TradePlanDumpNow();
-            return;
-        }
-
-        //
-        // K key   Toggle Timeframe Lock
-        //  
-        if(IsHotkeyPressed(lparam, sparam, inpLockKey))
-        {
-            bool hadCustomPrice = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
-            double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;
-            // P-BK-17: the old raw ObjectsDeleteAll(0, inpObjectPrefix) wiped
-            // the user's Base/Knot boxes too — and the registry rebuilds from
-            // box anchors, so deleted boxes never came back. Guarded loop like
-            // DeleteAllIndicatorObjects(false) (inlined: that fn is defined
-            // below this caller — P-ARCH-02).
-            g_suppressDeleteEvents = true;
-            if(StringLen(inpObjectPrefix) > 0) {
-               int lkTotal = ObjectsTotal(0, -1, -1);
-               int lkPlen = StringLen(inpObjectPrefix);
-               for(int lki = lkTotal - 1; lki >= 0; lki--) {
-                  string lkName = ObjectName(0, lki, -1, -1);
-                  if(StringLen(lkName) < lkPlen) continue;
-                  if(StringSubstr(lkName, 0, lkPlen) != inpObjectPrefix) continue;
-                  if(StringFind(lkName, "_BK_") >= 0) continue;
-                  ObjectDelete(0, lkName);
-               }
-            }
-            g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
-            g_suppressDeleteEvents = false;
-            g_timeframeLocked = !g_timeframeLocked;
-            RequestUISync();   // P-UI-40: the lock badge is derived from this state
-            if(g_timeframeLocked)
-            {
-                g_lockedPeriod = GetCachedPeriod();
-                LOG_I(LOG_CAT_KEYS, "Timeframe LOCKED to: " + GetCurrentTimeframe());
-                _LOG_GATE_D Print("[D][GEN] [LOCK] Timeframe locked to: ", GetCurrentTimeframe());
-            }
-            else
-            {
-                LOG_I(LOG_CAT_KEYS, "Timeframe UNLOCKED - following chart: " + GetCurrentTimeframe());
-                _LOG_GATE_D Print("[D][GEN] [UNLOCK] Timeframe unlocked - now following chart timeframe: ", GetCurrentTimeframe());
-            }
-            UpdateLockStatusLabel();
-            string lockChartIdStr = GetCachedChartIdStr();
-            string lockFlagName = "Biotak_LockTF_" + lockChartIdStr;
-            GlobalVariableSet(lockFlagName, g_timeframeLocked);
-            string lockPeriodName = "Biotak_LockTFPeriod_" + lockChartIdStr;
-            GlobalVariableSet(lockPeriodName, g_lockedPeriod);
-            g_forceClearOnNextDraw = true;
-            g_calculatedOnce = false;
-            g_redrawTHLevelsNeeded = true;
-            RedrawAllObjects(true);
-            if(hadCustomPrice && savedCustomPrice > 0) {
-                g_customTHStartPrice = savedCustomPrice;
-                g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-                // P-UI-48: the owner, not another hand-written property set.
-                CreateCustomPriceLine(savedCustomPrice, Digits);
-            }
-            ThrottledChartRedraw();
-            return;
-        }
-
-        // VIEWLOCK-OFF: V key (View Lock) retired —
-        //if(IsHotkeyPressed(lparam, sparam, inpViewLockKey))
-        //{
-        //    ViewLockSetEnabled(!g_viewLockEnabled);
-        //    LOG_I(LOG_CAT_KEYS, "View Lock " + (g_viewLockEnabled ? "ON - view follows across timeframes" : "OFF - chart behaves normally"));
-        //    ThrottledChartRedraw();
-        //    return;
-        //}
-    } // end CHARTEVENT_KEYDOWN
-
-    //
-    // Leg Measure MOUSE_MOVE routing — drag-to-draw, runs before ABCD.
-    // MOUSE_MOVE is needed so we get left-button press/hold/release edges.
-    // P-TH3-PERF-07: CHART_EVENT_MOUSE_MOVE is chart-scoped and shared with
-    // the ring, panels and BaseKnot — its ONE writer is OnInitHandler.
-    // LegMeasure piggybacks on the existing MOUSE_MOVE stream; no extra flag write.
-    //
-    // P-UI-98e: a MOTIONLESS press/release emits no MOUSE_MOVE (P-BK-03), so a
-    // still click on a step-1 handle would never reach the release latch — the
-    // leg meter's own P-LM-13 trap, on the hand-set lines. The click DOES fire
-    // CHARTEVENT_CLICK on button-up, and it is the only edge that sees this case.
-    //
-    if(id == CHARTEVENT_CLICK) Step1ClickFinalize();
-    if(id == CHARTEVENT_CLICK) CustomPriceRearmFinalize();   // P-UI-98m: the still click on a SET line
-    // P-UI-149/P-UI-151: AND A CLICK THAT LANDS ELSEWHERE GIVES THE REVEAL BACK —
-    // every circle's, green included. It runs LAST on this edge on purpose: a click
-    // ON a marker row has already been answered by that marker's own contract above
-    // (reveal, or the SET candidate), and this owner asks the SAME two hit tests — so
-    // the click that reveals can never be the click that hides. The button-up is
-    // asked inside; the press's own twin echo touches nothing.
-    if(id == CHARTEVENT_CLICK) HandsetRevealDropOnForeignClick((int)lparam, (int)dparam);
-
-#ifndef BUILD_LITE
-    if(id == CHARTEVENT_MOUSE_MOVE && LegMeasureSessionActive())
-    {
-        if(LegMeasureMouseMove((int)lparam, (int)dparam, sparam))
-            ThrottledChartRedraw();
-        // Do NOT return — ABCD also needs MOUSE_MOVE for its own hover preview.
-    }
-
-    // P-LM-11: the leg's EDIT owner. The family is not selectable any more — the
-    // line, its two rings and its mid handle are OURS — so the drag is not a
-    // native one the terminal reports, it is THIS pass: a press hit-tests the
-    // family in screen pixels, and every held move rewrites the whole drawing
-    // from the same anchors in the same event. Nothing follows anything, so
-    // nothing can lag behind (the report P-LM-10 could only chase).
-    if(id == CHARTEVENT_MOUSE_MOVE && LegMeasureEditMouse((int)lparam, (int)dparam, sparam))
-        ThrottledChartRedraw();
-
-    // P-LM-08/P-LM-11: the object list is the one native delete the family still
-    // answers (nothing of it is selectable) — deleting the LINE there cascades to
-    // the rings, the mid handle, the plate and its three lines here.
-    if(id == CHARTEVENT_OBJECT_DELETE)
-        LegMeasureOnObjectDelete(sparam);
-
-    // P-LM-13: a MOTIONLESS press/release emits no MOUSE_MOVE on release (an MT4
-    // fact), but the click still fires CHARTEVENT_CLICK on button-up — so this is
-    // where a still press on the family ends. Without it the drag state stuck
-    // live: the view lock stayed held, the plate hung, and the Delete key found
-    // no selection («چرا نمیشه حذفش کرد»).
-    if(id == CHARTEVENT_CLICK) LegMeasureClickFinalize();
-
-    // P-LM-20: the terminal's OWN selection event. A still click on the (now
-    // selectable, P-LM-17) line reports OBJECT_CLICK, not a mouse move — so the
-    // selection changed between two of our ride passes and the face assembled
-    // itself from pieces that disagreed (the line widened while the discs kept
-    // the resting rasters: «موقع سلکت دایره‌ها بهم مریزه»). The terminal names
-    // the object it selected; the family answers in ONE atomic repaint. A click
-    // anywhere ELSE deselects the line, and this is the only handler that sees
-    // that path too — a repaint per leg in the registry answers it (the ride
-    // pass re-reads every flag, so a cleared selection is painted back).
-    if(id == CHARTEVENT_OBJECT_CLICK)
-    {
-        if(LegMeasureOnObjectClick(sparam)) ThrottledChartRedraw();
-        else LegMeasureRideChart();   // a click off the family: deselection lands whole
-    }
-#endif
-
-    //
-    // ABCD Mouse Event Routing — TH3TOOL-ON (2026-09-19): restored.
-    // P-TH3-PB-UI: the armed base mark rides the same dispatcher (its CLICK
-    // channel), so the router must wake for it even with no draw session.
-#ifndef BUILD_LITE
-    if(TH3SessionActive() ||
-       TH3BaseMarkArmed() ||
-       id == CHARTEVENT_OBJECT_DRAG ||
-       id == CHARTEVENT_OBJECT_DELETE ||
-       id == CHARTEVENT_MOUSE_MOVE) {
-        OnABCDMouseEvent(id, lparam, dparam, sparam);
-        if((TH3SessionActive() || TH3BaseMarkArmed()) && id == CHARTEVENT_CLICK) {
-            return;
-        }
-    }
-#endif
-
-    //  
-    // CHARTEVENT_CHART_CHANGE   Layout/Resize/Scroll/Zoom
-    //  
-    if(id == CHARTEVENT_CHART_CHANGE) {
-        if(IsIndicatorHidden()) return;
-        HandsetMarkersRide();   // P-UI-98d v2: the handles ride every layout change
-        static uint s_lastLayoutMs = 0;
-        static int s_lastW = -1;
-        static int s_lastH = -1;
-        static double s_lastVisibleMin = 0;
-        static double s_lastVisibleMax = 0;
-        static bool s_ccPrimed = false;   // P-PERF-28
-        uint nowMs = GetTickCount();
-        if(nowMs - s_lastLayoutMs < CHART_CHANGE_THROTTLE_MS) return;
-
-        int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-        int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-        bool sizeChanged = (w != s_lastW || h != s_lastH);
-        
-        double visibleMin = ChartGetDouble(0, CHART_PRICE_MIN);
-        double visibleMax = ChartGetDouble(0, CHART_PRICE_MAX);
-        bool viewportChanged = (MathAbs(visibleMin - s_lastVisibleMin) > GetCachedPoint() ||
-                                MathAbs(visibleMax - s_lastVisibleMax) > GetCachedPoint());
-        // P-PERF-28: on the FIRST chart-change of an instance the snapshot is
-        // still at its zero value, so `visibleMin - 0` is always > one point and
-        // `viewportChanged` was unconditionally TRUE. That ran a full
-        // RedrawAllObjects(false) inside the event on every attach and every
-        // timeframe switch — the live log charges it to the event as
-        //   [W][PERF] chart event id=9 [indicator=3375 ui=0] took 3375ms
-        // (and 3750/3938/3766/3734/4063 ms in the same session, 53 such events
-        // in one day). Nothing had actually changed: this instance's own initial
-        // draw already covers the viewport it is looking at. Prime the snapshot
-        // from the live chart instead of from 0 and the first event is a no-op.
-        if(!s_ccPrimed)
-        {
-            s_ccPrimed = true;
-            viewportChanged = false;
-        }
-        
-        if(!sizeChanged && !viewportChanged) return;
-        
-        s_lastW = w;
-        s_lastH = h;
-        s_lastVisibleMin = visibleMin;
-        s_lastVisibleMax = visibleMax;
-        s_lastLayoutMs = nowMs;
-        // VIEWLOCK-OFF: if(g_viewLockEnabled) ViewLockCapture();
-
-        // P-PERF-28b: this branch was the biggest single stall in the log yet
-        // had no sub-ledger of its own, so the named owner can only be guessed.
-        // Split it the way every other ledger here is split, and only print
-        // when the branch blows the event budget.
-        uint p28t = GetTickCount();
-        uint p28redraw = 0, p28labels = 0, p28leg = 0;
-        if(sizeChanged) g_labelsRelayoutNeeded = true;
-        if(viewportChanged) {
-            g_redrawTHLevelsNeeded = true;
-            RedrawAllObjects(false);
-            p28redraw = GetTickCount() - p28t;
-        } else if(sizeChanged) {
-            RedrawLabelsOnly();
-            p28labels = GetTickCount() - p28t;
-        }
-        p28t = GetTickCount();
-        // The live-price countdown tag is positioned off the price scale, so a
-        // scroll/zoom/resize invalidates its Y even with zero ticks (weekend
-        // charts). Re-derive it here, AFTER the redraws above (a label clear
-        // would otherwise eat it) — the label pipeline itself is 2 s gated, so
-        // this hook is what keeps the tag glued during a drag-scroll. Own
-        // switch: never gated by the ATR block (2026-09-11).
-        RefreshLiveCountdown();
-        uint p28count = GetTickCount() - p28t;
-        p28t = GetTickCount();
-        // P-LM-02: the leg-measure readouts are SCREEN objects, so the chart moving
-        // under them does not move them — and this branch is the one place that
-        // already answers "the chart moved" (scroll, zoom, resize, auto-scroll).
-        // The projection is READ-GUARDED: a box already where it belongs costs a
-        // handful of terminal reads and not one ObjectSet* (P-PERF-02).
-#ifndef BUILD_LITE
-        LegMeasureFollowAll();
-#endif
-        p28leg = GetTickCount() - p28t;
-        p28t = GetTickCount();
-        ThrottledChartRedraw();
-        uint p28paint = GetTickCount() - p28t;
-        if(p28redraw + p28labels + p28leg + p28count + p28paint >= P_P4_EVENT_WARN_MS)
-        {
-            // P-PERF-49 (2026-09-16) - `tail=` HAD NO OWNER, AND IT WAS THE WHOLE
-            // STALL. The live MT5 log:
-            //   chart change breakdown: redraw=0ms labels=390ms tail=3016ms
-            //   chart event CHART_CHANGE(id=9) [indicator=3485 ...] took 3485ms
-            // so P-PERF-28b's split ended exactly where the biggest number began:
-            // the tail is RefreshLiveCountdown() + ThrottledChartRedraw(), and 3016
-            // of the 3485 ms sat in whichever of those two it was. They are two
-            // different problems - one rebuilds a label, the other asks the
-            // TERMINAL to repaint a chart carrying 500-850 objects (ChartRedraw is
-            // 2.14 us on an idle chart and is priced per OBJECT on a full one) - so
-            // they get a field each. A number without a cause is what this project
-            // refuses to act on.
-            //
-            // THE SECOND FIELD NAMES THE PASS `redraw=` PAID FOR: the per-phase
-            // ledger P-PERF-03 already keeps (EventHandlers ~1745..2036) describes
-            // the very RedrawAllObjects() call made nine lines above, so it is read
-            // here instead of duplicated. On MT5 that is the difference between
-            // "a scroll costs 328 ms" and "the LEVELS block of that pass is 328 ms".
-            //
-            // READ THE NUMBERS AS TICK-QUANTIZED: GetTickCount() steps in Windows'
-            // ~15.6 ms tick, so every ms in this ledger is n x 15.625 (the day's
-            // 694 lines carry 56 distinct values and they are exactly that set).
-            // A phase under one tick reads 0 ms; the ordering is trustworthy, the
-            // absolute value is +/- one tick. Anything finer needs
-            // GetMicrosecondCount(), which is MT5-only - see the next step.
-            string renderSplit = " render[levels=" + IntegerToString((int)g_p3MsLevels) +
-                                 " labels=" + IntegerToString((int)g_p3MsLabels) +
-                                 " overlay=" + IntegerToString((int)g_p3MsOverlay) +
-                                 " base=" + IntegerToString((int)g_p3MsBase) +
-                                 " atr=" + IntegerToString((int)g_p3MsAtr) +
-                                 " hist=" + IntegerToString((int)g_p3MsHistory) + "]";
-            _LOG_GATE_W Print("[W][PERF] chart change breakdown: redraw=", (int)p28redraw,
-                  "ms labels=", (int)p28labels, "ms leg=", (int)p28leg,
-                  "ms tail=", (int)(p28count + p28paint),
-                  "ms [count=", (int)p28count, " paint=", (int)p28paint, "]", renderSplit);
-        }
-        return;
-    }
-
-    //  
-    // CHARTEVENT_CLICK   Custom Price Click
-    //  
-    // P-UI-92: the pick mode's click must be a CHART click. CLICK carries the price
-    // under the cursor, so a click on an open card/strip/menu used to set the custom
-    // price origin from the price hidden under that control (and the panel's own
-    // press was handled in the UI half of the same event, which runs after this one).
-    // Two tests, one rule (see UIPointerOverSurface): WHERE the release landed, and
-    // WHOSE release it is (a claim the UI published before this half ran).
-    if(id == CHARTEVENT_CLICK && g_waitingForCustomPriceClick &&
-       !UIPeekClickClaim() && !UIPointerOverSurface((int)lparam, (int)dparam))
-    {
-        if(StringFind(sparam, "r") >= 0)
-        {
-            CleanupCustomPriceObjects(true, true);
-            _LOG_GATE_D Print("[D][GEN] Custom price setting cancelled (right-click)");
-            ThrottledChartRedraw();
-            return;
-        }
-        double clickedPrice = dparam;
-        if(!g_customPriceLineCreated)
-        {
-            if(!CreateCustomPriceLine(clickedPrice, Digits)) return;
-            _LOG_GATE_D Print("[D][GEN] [PIN] Drag the orange dotted line to adjust price. Double-click to confirm.");
-        }
-        else
-        {
-            uint currentTickCount = GetTickCount();
-            bool isDoubleClick = (currentTickCount - g_lastClickTickCount < DOUBLE_CLICK_THRESHOLD_MS);
-            g_lastClickTickCount = currentTickCount;
-            if (isDoubleClick || !g_customPriceLineCreated)
-            {
-                g_waitingForCustomPriceClick = false;
-                g_customPriceKeyboardOverride = true;
-                double selectedPrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
-                g_customTHStartPrice = selectedPrice;
-                g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-                CustomPricePersistPlacement(selectedPrice);   // P-UI-56: one writer
-                // P-UI-98d: the confirm IS the placement's SET — the price is
-                // final, the line goes inert, the double-click re-arms it. The
-                // CREATE case (no line yet) stays armed: the fresh line must
-                // drag freely until its own double-click confirms.
-                if(g_customPriceLineCreated) g_cpLineArmed = false;
-                // P-UI-45: settle - the line KEEPS its price and becomes inert again
-                // (see CreateCustomPriceLine). Confirming must not leave it grabbed:
-                // a selection outlives the gesture, and MT4 then drags the line on
-                // every later drag anywhere on the chart.
-                CreateCustomPriceLine(selectedPrice, Digits);
-                g_redrawTHLevelsNeeded = true;
-                RedrawAllObjects(true);
-                _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
-            }
-        }
-        ThrottledChartRedraw();
-    }
-
-    //  
-    // CHARTEVENT_OBJECT_CLICK   Custom Price Line / ABCD Pattern
-    //  
-    if(id == CHARTEVENT_OBJECT_CLICK && sparam == g_customPriceHorizontalLineName)
-    {
-        uint currentTickCount = GetTickCount();
-        bool isDoubleClick = (currentTickCount - g_lastClickTickCount < DOUBLE_CLICK_THRESHOLD_MS);
-        g_lastClickTickCount = currentTickCount;
-        // P-UI-45: MT4 selects a selectable line on the press that grabs it, and a
-        // SELECTED line is dragged by MT4 on every later drag anywhere on the chart.
-        // Arm the deferred clear instead of writing the property HERE: this event
-        // may arrive on the press, and clearing it then would drop the line out of
-        // the very drag the user is starting.
-        if(!isDoubleClick) g_customPriceNativeDrag = true;
-        if (isDoubleClick)
-        {
-            // P-UI-98d: a SET line wakes on the double-click — silent, no
-            // prompt: the SS/LS selector below belongs to a live line, and the
-            // user's order names the double-click as the re-arm gesture.
-            if(!g_cpLineArmed)
-            {
-                CustomPriceLineOwnArm(true);
-                // P-UI-98g: re-armed AND revealed - the double-click is the user
-                // asking for the handle back, so the circle comes with it.
-                g_cpHandleShown = true;
-                CustomPriceMarkerSync();
-                ThrottledChartRedraw();
-                return;
-            }
-            // A double-click on Custom Price is a fast SS/LS start selector.
-            // The price remains unchanged; only the sequence origin changes.
-            int selectedStart = MessageBox("SS/LS sequence start\n\nYes = LS first\nNo = SS first\nCancel = keep current",
-                                           "Select SS/LS start", MB_YESNOCANCEL | MB_ICONQUESTION);
-            // P-UI-67: the prompt is the per-chart OVERRIDE's owner (state + key in
-            // one place, next to the getter that consults it). IDCANCEL keeps the
-            // current answer, so it writes nothing.
-            if(selectedStart == IDYES) SSLSOrderOverrideSet(1);
-            else if(selectedStart == IDNO) SSLSOrderOverrideSet(0);
-            g_waitingForCustomPriceClick = false;
-            g_customPriceKeyboardOverride = true;
-            double selectedPrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
-            g_customTHStartPrice = selectedPrice;
-            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            CustomPricePersistPlacement(selectedPrice);   // P-UI-56: one writer
-            // P-UI-45/P-UI-48: settle - the line KEEPS its price and stays
-            // grabbable (same owner as the chart-click confirm above).
-            CreateCustomPriceLine(selectedPrice, Digits);
-            g_redrawTHLevelsNeeded = true;
-            RedrawAllObjects(true);
-            _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
-        }
-        else if(g_cpLineArmed)
-        {
-            // P-UI-98g: THE FIRST CLICK SHOWS THE HANDLE. «فقط وقتی روش کلیک کردیم
-            // دایره ها بیاد برای درگ کردن» — armed only means grabbable; the green
-            // circle is painted once the user asks for it, and asking is this click.
-            // It is not a SET: committing a line the user has not touched yet would
-            // make the first click cost a double-click to undo.
-            if(!g_cpHandleShown)
-            {
-                g_cpHandleShown = true;
-                CustomPriceMarkerSync();
-                ThrottledChartRedraw();
-            }
-            // P-UI-98d: a click on an ALREADY-SHOWN armed line is the SET candidate —
-            // deferred past the double-click window (the sweep commits it), so the
-            // first click of a double never sets first. A click that is the ECHO of
-            // a drag release (the just-dragged stamp) sets nothing: the line drags
-            // freely until the user deliberately clicks it.
-            else if(currentTickCount - g_cpJustDraggedMs > 350)
-            {
-                g_cpSetPending = sparam;
-                g_cpSetPendingMs = currentTickCount;
-            }
-        }
-    }
-
-    //
-    // CHARTEVENT_OBJECT_CLICK   Step-1 handle: click = SET, double-click = re-arm
-    //
-    // P-UI-98d: the same contract the custom price line wears. While ARMED the
-    // handle drags (the P-UI-98 OBJECT_DRAG channel recomputes the factor live);
-    // a single click SETS it (the ladder keeps the dragged step, the handle
-    // turns inert, the red dot goes); a double-click re-arms it. A click that is
-    // the echo of a drag release sets nothing.
-    if(id == CHARTEVENT_OBJECT_CLICK && Step1LineIsDragHandle(sparam))
-        Step1HandleClickAt(sparam);   // P-UI-98e: the ONE click contract (the
-                                      // terminal's own report is now one of three
-                                      // edges; the dedupe drops its twin)
-
-    // P-UI-98m: the green circle's own report - the third edge of the SET
-    // line's re-arm contract (the masked line fires none itself). The 60 ms
-    // twin guard inside drops the duplicate when the row pair already saw it.
-    if(id == CHARTEVENT_OBJECT_CLICK && sparam == g_cpMarkerName)
-        CustomPriceRearmClickAt();
-
-    //
-    // CHARTEVENT_MOUSE_MOVE   Custom Price Drag Detection
-    //
-    // P-UI-98d: the double-click window's sweeper rides the mouse stream — the
-    // cheapest always-on channel there is (two stamp compares when nothing is
-    // pending). The tick path sweeps too, so a click that never moves again
-    // still commits. And the handset handles ride the same stream (a pan moves
-    // the price scale under them — the leg meter's own P-LM-16b answer).
-    HandsetClickSweep();
-    HandsetMarkersRide();
-    // P-UI-98e: the step-1 handle's gesture walks the same stream as the
-    // custom-price line's — and the custom-price line is not the only reason
-    // this block exists any more: the handle is armed off the PLACEMENT, and a
-    // chart that lost the line object must not lose the handle with it.
     if(id == CHARTEVENT_MOUSE_MOVE &&
        (g_customPriceLineCreated || g_thStartPointType == TH_START_POINT_CUSTOM_PRICE))
     {
@@ -6332,6 +5585,1102 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             }
         }
     }
+}
+
+#endif // EVENT_HANDLERS_ROUTER_GESTURE_MQH
+// EventHandlers_Router.mqh - EventHandlers split 2026-09-29: exact lines 4271-5820 of EventHandlers.mqh, byte-identical, zero renames.
+// P-SIZE-1500 (2026-10-04): the file drifted to 1630 lines (baseline 1592). The custom
+// price line's whole gesture stream (lines 1030-1495) moved verbatim into
+// EventHandlers_Router_Gesture.mqh, included just above the router; the seat below is
+// the same seat, in the same order, so the router's decisions are untouched.
+#ifndef EVENT_HANDLERS_ROUTER_MQH
+#define EVENT_HANDLERS_ROUTER_MQH
+
+void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
+{
+    // P-UI-114 (2026-09-23): right-click era deleted — terminal menu untouched,
+    // strip toggles on a single click of a drawing (DrawStripClickToggle in DrawStrip.mqh).
+
+    // Base / Knot tool FIRST: while armed it owns every mouse gesture (no
+    // chart-click leak into custom-price/TH3/panels), and committed boxes own
+    // their badge/drag/delete events in every state.
+    if(BaseKnotOnChartEvent(id, lparam, dparam, sparam)) return;
+    // P-HR-01 / P-UI-136: the Horizontal Ray and the Path own their arm click and their committed drags.
+    if(HRayOnChartEvent(id, lparam, dparam, sparam) || PathOnChartEvent(id, lparam, dparam, sparam)) return;
+
+    // P-UI-100b (2026-09-22): THE DETECTOR OF "A FOREIGN OBJECT JUST APPEARED".
+    //
+    // A gesture of ours never creates a chart object; the terminal's own drawing
+    // tools (a fib, a rectangle, a trend line) always do. An object that is NOT
+    // ours, appearing while a hand-set line's gesture is live, is therefore the
+    // one proof that the press which started it was a DRAW and not a grab — the
+    // question the press edge itself cannot answer («وقتی فیو یا باکس از همون محل
+//--- P-UI-142: the arbiter's ONE writer + its census — the terminal's own voice is the only
+   //--- signal MT4 has; law, heartbeat, lock and census live at their owner (GlobalVariables.mqh).
+   //--- Lite ships no draw strip, so no flushed channel: the arbiter still WORKS there.
+   {
+      int gl=StringLen(inpObjectPrefix);
+      bool gOurs=(gl>0 && StringLen(sparam)>=gl && StringSubstr(sparam,0,gl)==inpObjectPrefix);
+      if(id == CHARTEVENT_OBJECT_DRAG && !gOurs && sparam != "") GestureForeignMotion(sparam);
+#ifndef BUILD_LITE
+      if(GestureCensusWanted(id, sparam)) { DrawStripDiagEmit("[gest] id="+IntegerToString(id)+" t="+IntegerToString(GetTickCount())+" xy="+IntegerToString((int)lparam)+","+IntegerToString((int)dparam)+" nm=\""+sparam+"\" ours="+IntegerToString(gOurs?1:0)); }
+#endif
+   }
+   if(id == CHARTEVENT_OBJECT_CREATE && sparam != "")
+   {
+       int createPrefixLen = StringLen(inpObjectPrefix);
+       bool createdByUs = (createPrefixLen > 0 && StringLen(sparam) >= createPrefixLen &&
+                           StringSubstr(sparam, 0, createPrefixLen) == inpObjectPrefix);
+       if(!createdByUs)
+       {
+           // P-DRAW-01 (2026-09-22): AND THE USER'S OWN DRAWING IS STYLED THE MOMENT
+           // IT EXISTS — «آخرین تغییرات ذخیره بشه». A fresh object wears the KIND's
+           // memory before the user can see it in the terminal's own look; a kind never
+           // styled is left exactly as MT4 drew it (the memory answers "untouched").
+           DrawStyleApplyOnCreate(sparam);
+           CustomPriceForeignDrawSeen();
+       }
+   }
+// P-TICKWRAP: the window is asked through its owner, never compared against GetTickCount()
+    // directly — an absolute compare stays true forever after the 49.7-day counter wrap, and
+    // then EVERY delete would be ignored for the rest of the cycle (TickDeadlinePending).
+    bool suppressDeleteEvent = g_suppressDeleteEvents || TickDeadlinePending(g_suppressDeleteEventsUntilMs);
+    if(id == CHARTEVENT_OBJECT_DELETE && !suppressDeleteEvent) {
+        string indicatorPrefix = inpObjectPrefix;
+        int prefixLen = StringLen(indicatorPrefix);
+        // P-BK-01 / P-HR-01: Base/Knot deletes are owned by BaseKnotTool (cascade/heal) and
+        // ray deletes by HRayTool (single object) — neither may flag a level redraw or
+        // pollute the object cache, so they never reach the sweep below.
+        if(prefixLen > 0 && StringLen(sparam) >= prefixLen && StringSubstr(sparam, 0, prefixLen) == indicatorPrefix &&
+           StringFind(sparam, "_BK_") < 0 && StringFind(sparam, "_HRAY_") < 0) {
+            // P-DEL-PROBE (2026-09-30) — OUR OWN MASS DELETE, LEAKING BACK IN.
+            //
+            // A delete of a name in OUR namespace that arrives OUTSIDE the
+            // suppression window is read as a foreign/user delete: it drops the
+            // cache entry, raises a FULL levels redraw and bumps the draw
+            // generation (which also voids every stored tf-mask). So one leaked
+            // event from our own ~70-band trigger wipe costs a whole family
+            // re-render - and a burst of them is churn the user feels as "the
+            // toggle is slow", with the flag set once per event.
+            //
+            // The window is 250 ms from the LAST delete (`g_suppressDeleteEvents
+            // UntilMs`, set by every bulk path), so a terminal that delivers the
+            // queued delete events later than that turns the wipe into a storm.
+            // The probe is the number that says whether that is what happens here:
+            // bounded to one line per second, so a storm cannot flood the log.
+            static int  s_ownDeleteLeaks   = 0;
+            static uint s_ownDeleteLeakMs  = 0;
+            s_ownDeleteLeaks++;
+            uint leakNow = GetTickCount();
+            if(s_ownDeleteLeakMs == 0 || leakNow - s_ownDeleteLeakMs >= 1000)
+            {
+                Print("[P-DEL] own-name delete NOT suppressed: n=", s_ownDeleteLeaks,
+                      " in <=1s, last=", sparam);
+                s_ownDeleteLeakMs = leakNow;
+                s_ownDeleteLeaks  = 0;
+            }
+            CacheRemoveObject(sparam);
+            // P-DEL-COALESCE (2026-10-05): the wipe that CAUSED this burst already
+            // owes its recovery, and P-DEL-PROBE above names the mechanism — a
+            // terminal may deliver a ~70-band wipe's queued delete events for longer
+            // than the 250 ms window (the comment above says so in so many words:
+            // "a burst of them is churn the user feels as 'the toggle is slow'"),
+            // and every one that lands outside the window used to re-arm the FULL
+            // ~900-object staged rebuild (GlobalVariables.mqh:549) AND bump the
+            // draw generation, which voids the object cache's absent-proofs and
+            // makes the next frame re-probe every family for real
+            // (ObjectCache.mqh:428). The first leak of a burst already owns the
+            // recovery; the rest of the SAME wipe must not buy another one. A
+            // rebuild that is already OWED covers every name this event could
+            // name, and one that lands after that rebuild ran is a NEW burst and
+            // re-arms exactly as before. The flag is cleared only by the rebuild
+            // itself (EventHandlers_Calc:1490/:1505), so "flag already set" means
+            // precisely "the recovery is pending and has not run".
+            if(!g_redrawTHLevelsNeeded)
+            {
+               g_redrawTHLevelsNeeded = true;
+               // P-PERF-02: a level vanished behind our back — the stored geometry
+               // signature no longer describes the chart, so the next frame must
+               // rebuild for real (this is the self-heal the per-object ObjectFind
+               // used to provide on every frame).
+               MarkDrawGeneration();
+            }
+        }
+    }
+    // P-UI-98j: EVEN A SUPPRESSED DELETE IS VERIFIED FOR THE STEP-1 PAIR. Our
+    // own bulk deletes never name a live handle (the surplus sweep starts past
+    // it, the foreign sweep runs on handoff with a fresh stash), so a stashed
+    // handle name that is really gone is an external delete that fell inside
+    // the 250 ms window - and ignoring it is exactly the stuck-missing line
+    // («ناپدید میشه ... دیگه نمیشه جابجاش کرد»). One probe, then the same two
+    // lines as above; a live gesture is left to the settle (it owns recovery).
+    else if(id == CHARTEVENT_OBJECT_DELETE && suppressDeleteEvent && sparam != "" &&
+            !g_s1DragLive && g_thStartPointType == TH_START_POINT_CUSTOM_PRICE &&
+            g_s1MarkPeriod == Period() &&
+            (sparam == g_s1MarkAboveName || sparam == g_s1MarkBelowName) &&
+            ObjectFind(0, sparam) < 0)
+    {
+        CacheRemoveObject(sparam);
+        g_redrawTHLevelsNeeded = true;
+        MarkDrawGeneration();
+    }
+
+    // VIEWLOCK-OFF:
+    //if(id == CHARTEVENT_OBJECT_DELETE && !suppressDeleteEvent && sparam == g_viewAnchorLineName && g_viewLockEnabled) {
+    //    ViewLockSetEnabled(false);
+    //    ThrottledChartRedraw();
+    //    return;
+    //}
+
+    if(id == CHARTEVENT_KEYDOWN)
+    {
+#ifndef BUILD_LITE
+        // Hex edit box owns the keyboard (palette color field): A-F are valid
+        // hex digits, so every letter hotkey below must stay silent while the
+        // user types. ESC/ENTER still reach the palette via HandleUIChartEvent.
+        // Same for the Base Box TEXT field (TV-parity 2026-09-07 — any letter
+        // is valid box text).
+        if(g_PalHexFocus || g_BkTextFocus) return;
+#endif
+        // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+        // Backspace = undo last TH3 drawing point (X, A, B, C placement)
+        if((int)lparam == 8 && TH3SessionActive()) {
+            TH3SessionUndo();
+            return;
+        }
+#endif
+
+        //
+        // F key   Hide/Show All Objects (fast visibility toggle)
+        //
+
+        if(IsHotkeyPressed(lparam, sparam, inpHideKey))
+        {
+            // P-UI-93: the whole transition moved into ONE owner
+            // (`ApplyHideAllState`, above the handler), because the panel's
+            // family rows had no other way to reach it - that was half of
+            // «این دکمه های با پنل هماهنگ نیستش».
+            //
+            // The target state is READ from the mute's own reader and
+            // inverted, never re-derived from the raw GlobalVariable here:
+            // exactly one writer (SetIndicatorHiddenState) and one reader
+            // (IsIndicatorHidden) exist, so they cannot drift.
+            ApplyHideAllState(!IsIndicatorHidden());
+            // P-UI-93: the panel's visibility rows DISPLAY this mute
+            // (PnlCurrentSet), and this file is compiled before the panel, so
+            // the repaint has to be asked for - exactly what the L / A / D /
+            // T / S / E hotkeys already do. Without this the rows keep
+            // claiming their family is painted while the chart is blank.
+            RequestUISync();
+            // P-PERF-24: one owner for "a discrete action paints now" - it
+            // forces the repaint even while hidden, which is what the old bare
+            // ChartRedraw() here was working around.
+            RepaintForDiscreteAction();
+            return;
+        }
+
+        //  
+        // L key   Toggle Lines Visibility (all LINE objects - not boxes)
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpLinesToggleKey))
+        {
+            // P-PERF-29: the switch's state, mirror, cache, persisted key and
+            // object MASK all live in one owner now - the panel rows and the
+            // factory reset used to raise the flag WITHOUT writing the mask,
+            // which the P-PERF-25 skip then trusted and painted nothing.
+            bool p26want = !g_linesVisible;
+            // P-PERF-22: this was a full-chart walk - ObjectsTotal(0,-1,-1) then
+            // ObjectName + ObjectGetInteger for EVERY object on the chart, ours
+            // or not, plus one TIMEFRAMES write per line whether or not the mask
+            // changed. The same repair already existed, correct, in
+            // VisibilityManager (SetAllLineObjectsVisibility): it walks the
+            // OBJECT CACHE - only our own objects, no ObjectName calls - and it
+            // keeps this hotkey's exclusions (F-key border segments, _BK_
+            // trade rays). It had no callers; it does now. It also bumps the
+            // P-PERF-02 epoch itself, so the guards re-assert once.
+            // P-PERF-26: the switch's own cost is measured, not guessed - on the
+            // old shape a bare press had no line of its own (the event ledger
+            // reports the whole event and the mask walk is the only work here).
+            uint p26t = GetTickCount();
+            SetLinesVisible(p26want, true);
+            // P-UI-40: the ZONES card's SHOW LINES row and the LINES card display
+            // this switch, and this path cannot repaint them (panel file comes
+            // later). Ask the UI layer — the row reads the live flag, only its
+            // IMAGE is stale.
+            RequestUISync();
+            P4ReportSlow("lines toggle (L) [lines=" + (g_linesVisible ? "1" : "0") + "]",
+                         GetTickCount() - p26t, P_P4_MOVE_WARN_MS);
+            LOG_I(LOG_CAT_LINES, "Lines " + (g_linesVisible ? "VISIBLE" : "HIDDEN"));
+            // P-PERF-24: a key press is one event - paint it now instead of
+            // waiting for the next tick to pass the 100 ms throttle.
+            RepaintForDiscreteAction();
+            return;
+        }
+
+        //  
+        // C key   Set Custom Price
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpCustomPriceKey))
+        {
+            g_waitingForCustomPriceClick = true;
+            g_customPriceKeyboardOverride = true;
+            _LOG_GATE_D Print("[D][GEN] Press anywhere on the chart to set custom TH start price");
+            ObjectDelete(0, g_customPriceHorizontalLineName);
+            g_customPriceLineCreated = false;
+            // P-UI-98d v2: the line is born at the vertical middle of the VISIBLE
+            // chart — wherever the user has scrolled («هر جایی که کاربر هست وسط
+            // صفحه ظاهر بشه») — the market's last price is only the fallback.
+            double currentPrice = ScreenMiddlePrice();
+            if(!(currentPrice > 0.0))
+                currentPrice = iClose(_Symbol, CompatTF(GetCachedPeriod()), 0);
+            g_customTHStartPrice = currentPrice;
+            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+            HandsetPlacementArm();   // P-UI-98e: the fresh line and its handles wake draggable
+            // P-UI-56: ONE writer for the placement pair (this chart's price + flag).
+            CustomPricePersistPlacement(currentPrice);
+            // P-UI-48: ONE creator. This block used to write the line's whole
+            // property set by hand - the fifth copy of it in the file, and the
+            // place a stale OBJPROP_SELECTED had survived longest.
+            if(!CreateCustomPriceLine(currentPrice, Digits)) return;
+            HandsetMarkersRide();   // the green handle is born with its line
+            g_redrawTHLevelsNeeded = true;
+            _LOG_GATE_D Print("[D][GEN] [PIN] Custom price set to: ", DoubleToString(currentPrice, Digits), " - Drag to adjust.");
+            ThrottledChartRedraw();
+            return;
+        }
+
+        //  
+        // ESC key   Cancel Custom Price
+        //  
+        if(lparam == 27)
+        {
+            // P-UI-56: the active test reads THIS CHART's key (the resolver's own
+            // owner). Reading the old symbol-scoped key would have made ESC a no-op
+            // on a chart whose placement lives under the chart-scoped name.
+            bool customPriceActive = GlobalVariableCheck(CustomPriceGVName());
+            if(g_waitingForCustomPriceClick || customPriceActive || g_customPriceKeyboardOverride)
+            {
+                // P-UI-45: the sequence itself lives in ONE owner - the ring's PIN
+                // item's OFF press runs the very same one.
+                DeactivateCustomPriceMode("ESC");
+                ThrottledChartRedraw();
+                return;
+            }
+        }
+
+        //  
+        // T key   Toggle Trigger Zones (overlay only — unified lines are
+        //         unaffected; line visibility belongs to the L key)
+        //
+        if(IsHotkeyPressed(lparam, sparam, inpTriggerLevelsKey))
+        {
+            // P-PERF-32b: ONE owner for the whole transition. This block used to
+            // keep its own copy of the state, the persisted key and the render
+            // request - the same three lines the ring item and the card's SHOW row
+            // kept - and the pixels were the RENDER's to produce, so the press
+            // waited for a heavy frame («سطوح تریگر دیر خاموش و روشن میشه»). The
+            // owner (SetTriggerLevelsVisible, EventHandlers_Objects) now writes the
+            // family's masks through the render's own writer and repaints on the
+            // spot, exactly as the structure switches have since P-PERF-32.
+            bool tNext = !g_triggerLevelsEnabled;
+            RequestUISync();   // P-UI-40: the TRIGGER card's SHOW row + the ring badge
+            LOG_I(LOG_CAT_KEYS, tNext ? "Trigger Zones: ON" : "Trigger Zones: OFF");
+            // P-KEY-PROBE: the press is the FIRST timestamp of the latency pair; the
+            // owner prints `[P-KEY] T applied … ms=` once the pixels are painted, and
+            // the frame that reconciles prints `[P-KEY] T settled … ms=` at its own
+            // end (EventHandlers_Calc). Both lines are ungated on purpose - one line
+            // per key press, and they are the evidence the fix is judged by.
+            g_triggerPressMs      = GetTickCount();
+            g_triggerPressOn      = tNext ? 1 : 0;
+            g_triggerPressHidden  = 0;
+            g_triggerPressReached = 0;
+            Print("[P-KEY] T press on=", g_triggerPressOn, " zones=", 
+                  (tNext ? "show" : "hide"));
+            // P-PERF-21: NO force-clear. The overlay owns ONE family - the trigger
+            // zones - and RenderZones applies the live flag as a mask itself, so
+            // this is a re-render, never a wipe: structure lines, zones and labels
+            // are not deleted and re-materialised, and the geometry cache (which no
+            // longer keys on the flag) answers with the identical lists instead of
+            // recomputing them.
+            SetTriggerLevelsVisible(tNext);
+            ThrottledChartRedraw();
+            return;
+        }
+
+#ifndef BUILD_LITE
+        //
+        // R key   Toggle HTF Candles overlay (left-hand cluster)
+        //
+        if(IsHotkeyPressed(lparam, sparam, inpHTFKey))
+        {
+            // P-HTF-KEY: the owner holds state + key + mask walk + paint.
+            SetHTFVisible(!g_UI.showHTF);
+            RequestUISync();   // P-UI-40b: the HTF card's row 0 displays this flag
+            LOG_I(LOG_CAT_LINES, "HTF " + (g_UI.showHTF ? "VISIBLE" : "HIDDEN"));
+            return;
+        }
+#endif
+
+        //  
+        // A key   Toggle ATR Labels
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpATRLabelsKey))
+        {
+            string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
+            g_atrLabelsVisible = !g_atrLabelsVisible;
+            RequestUISync();   // P-UI-40: the ATR card's own rows show this switch
+            g_showATRLabels = g_atrLabelsVisible;   // keep the ATR card mirror in sync
+            GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
+            
+            string objectPrefix = GetLevelObjectPrefix();
+            SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible); 
+            g_labelsRelayoutNeeded = true;
+            RedrawLabelsOnly();
+            LOG_I(LOG_CAT_LABELS, "ATR Labels " + (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
+            ThrottledChartRedraw();
+            return;
+        }
+
+        //  
+        // S key   Cycle TH Labels Mode
+        //  
+        //
+        // D key   Toggle the bar-close countdown tag. Its OWN switch: the ATR
+        //         labels key (A) must never take the countdown away, and this
+        //         one never touches the ATR block (2026-09-11, user request).
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpCountdownKey))
+        {
+            g_showLiveCountdown = !g_showLiveCountdown;
+            RequestUISync();   // P-UI-40: COUNTDOWN card row 0 shows this switch
+            RuntimeSettingsSaveOverridesThrottled();   // OV_ CD/CDC/CDS/CDG
+            RefreshLiveCountdown();
+            LOG_I(LOG_CAT_LABELS, "Countdown tag " + (g_showLiveCountdown ? "VISIBLE" : "HIDDEN"));
+            ThrottledChartRedraw();
+            return;
+        }
+
+        if(IsHotkeyPressed(lparam, sparam, inpTHLabelsKey))
+        {
+            string thGvar = "Biotak_THLabels_" + GetCachedChartIdStr();
+            
+            // Cycle exclusive: ON -> OFF (remembers), OFF -> remembered ON (default STANDARD).
+            if(g_thLabelsMode != 0) {
+                g_thLabelsMode = 0;
+            }
+            else {
+                g_thLabelsMode = g_thLastOnMode;
+                if(g_thLabelsMode == 0) g_thLabelsMode = 2;
+            }
+
+            g_thLabelsVisible = (g_thLabelsMode != 0);
+            RequestUISync();   // P-UI-40: the TH LABELS card cycles on this mode
+            SyncTHFlagsFromMode();   // flags follow the mode → card never disagrees
+            GlobalVariableSet(thGvar, (double)g_thLabelsMode);
+            
+            string objectPrefix = GetLevelObjectPrefix();
+            SetTHLabelsVisibility(objectPrefix, g_thLabelsMode);
+            g_labelsRelayoutNeeded = true;
+            RedrawLabelsOnly();
+            string logMsg = "TH Labels mode=" + IntegerToString(g_thLabelsMode) + " (0=OFF,1=FRACTAL,2=STANDARD)";
+            LOG_I(LOG_CAT_LABELS, logMsg);
+            ThrottledChartRedraw();
+            return;
+        }
+
+        //
+        // V key   Toggle TH3 Tool — TH3TOOL-ON (2026-09-19): restored.
+        //
+#ifndef BUILD_LITE
+        if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
+        {
+            ToggleTH3Tool();
+            ThrottledChartRedraw();
+            return;
+        }
+#endif
+
+        //
+        // P key   Arm the leg meter (a measurement only).
+        // P-TH3-PB-OFF (2026-09-21): the old coupling that stored a dragged leg
+        // on the active pattern as its pivot base is retired — the base is
+        // hand-typed in the TH3 TOOL card (`inpTH3PivotBasePips`), never drawn.
+        //
+#ifndef BUILD_LITE
+        if((int)lparam == 80)   // 'P' — toggle Leg Measure session (same as ring CIR_LEG)
+        {
+            LegMeasureToggle();
+            ThrottledChartRedraw();
+            return;
+        }
+#endif
+
+        //
+        // B key   Arm/cancel the TH3 base mark: two clicks pin the base height
+        // (P-TH3-PB-UI) — no drag, so scrolling between the clicks stays free.
+        //
+#ifndef BUILD_LITE
+        if((int)lparam == 66)   // 'B' — arm/cancel the base mark
+        {
+            TH3BaseMarkToggle();
+            ThrottledChartRedraw();
+            return;
+        }
+#endif
+
+        //
+        // M key   Snapshot the active pattern for the AI dataset (P-TH3-REC:
+        // key handling lives HERE with B/V/P — one owner for hotkeys).
+        // 'S' and 'R' are spoken for, so this key is 'M' (77) for Memory/Master.
+        //
+#ifndef BUILD_LITE
+        if((int)lparam == 77)   // 'M' — export sample: PNG + TXT + Master-CSV row
+        {
+            Print("[TH3 RECORDER] Key 'M' pressed. Capturing sample & exporting AI dataset...");
+            TH3_ExportCurrentSample(g_activeABCDPattern);
+            ThrottledChartRedraw();
+            return;
+        }
+#endif
+
+        // E key   Cycle Step Mode (TH → SS-LS → Combo → Factor → TH).
+        // Single mode: E writes the base directly — same value the Tools
+        // ring item and the panel STEP MODE row write. GetCurrentStepMode()
+        // just returns it.
+        if(IsHotkeyPressed(lparam, sparam, inpStepModeKey))
+        {
+            RequestUISync();   // P-UI-40: the STEP card's mode row + the ring badge
+            g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)(((int)GetCurrentStepMode() + 1) % 4);
+            GlobalVariableDel("Biotak_StepMode_" + GetCachedChartIdStr());   // purge retired override key
+            RuntimeSettingsSaveOverridesThrottled();   // persist OV_ SM now (E bypasses ApplyRefreshFlags)
+            LOG_IP1(LOG_CAT_KEYS, "Step Mode changed to: ", GetStepModeName(GetCurrentStepMode()));
+            g_forceClearOnNextDraw = true;
+            g_redrawTHLevelsNeeded = true;
+            g_calculatedOnce = false;
+            RedrawAllObjects(true);
+            RefreshComboLabelExtraInfo();
+            UpdateStepModeLabel();
+            ThrottledChartRedraw();
+            return;
+        }
+
+        //  
+        // 1/2 keys   Adjust Factor (always active)
+        //  
+        if(lparam == '1') { AdjustFactorValue(-1); return; }
+        else if(lparam == '2') { AdjustFactorValue(+1); return; }
+
+        //
+        // 3/4 keys   Adjust TH3 Frequency — TH3TOOL-ON (2026-09-19): restored.
+        //
+#ifndef BUILD_LITE
+        else if(lparam == '3') { DecrementTH3Frequency(); return; }
+        else if(lparam == '4') { CycleTH3Frequency(); return; }
+#endif
+
+        //  
+        // W key   Show Current Status
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpShowStatusKey))
+        {
+            RefreshComboLabelExtraInfo();
+            ShowAllStatusLabels();
+            ThrottledChartRedraw();
+            return;
+        }
+
+        //  
+        // R key   Reset All Overrides
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpResetKey))
+        {
+            // STEPOVERRIDE-OFF: single Step Mode — Q resets the base + levels
+            // to factory, like the panel Reset does.
+            g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)(int)FactoryDefault(FF_STEP_CALC_MODE);
+            g_maxLevels = (int)FactoryDefault(FF_MAX_LEVELS);
+            g_comboMode = (ENUM_COMBO_MODE)(int)FactoryDefault(FF_COMBO_MODE);
+            g_comboPreset = (ENUM_COMBO_PRESET)(int)FactoryDefault(FF_COMBO_PRESET);
+            g_comboComp1TF = (ENUM_COMBO_TIMEFRAME_TYPE)(int)FactoryDefault(FF_COMBO_C1TF);
+            g_comboComp1Step = (ENUM_COMBO_STEP_TYPE)(int)FactoryDefault(FF_COMBO_C1STEP);
+            g_comboOp1 = (ENUM_COMBO_OPERATION)(int)FactoryDefault(FF_COMBO_OP1);
+            g_comboComp2Enabled = (FactoryDefault(FF_COMBO_C2ON) > 0.5);
+            g_comboComp2TF = (ENUM_COMBO_TIMEFRAME_TYPE)(int)FactoryDefault(FF_COMBO_C2TF);
+            g_comboComp2Step = (ENUM_COMBO_STEP_TYPE)(int)FactoryDefault(FF_COMBO_C2STEP);
+            g_factorValueOverride = 0;
+            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+            g_th3FreqOverride = 0;
+            g_th3FreqIndex = DEFAULT_TH3_FREQ_INDEX;
+#endif
+            g_timeframeLocked = false;
+            g_lockedPeriod = 0;
+            // inpX is the runtime copy after the RuntimeSettings #defines —
+            // restoring from the captured factory defaults instead (reading
+            // inpX here is a self-assign no-op that kept the current values).
+            g_triggerLevelsEnabled = (FactoryDefault(FF_TRIGGER_SHOW) > 0.5);
+            // P-PERF-29: same owner as the hotkey and the panel rows, so the
+            // restore writes the mask too (it used to leave the objects as they
+            // were, which only a timeframe switch repaired).
+            SetLinesVisible(FactoryDefault(FF_SHOW_LINES) > 0.5, false);
+            InvalidateAllVisibilityCaches();
+            g_atrLabelsVisible = (FactoryDefault(FF_SHOW_ATR) > 0.5);
+            g_showLiveCountdown = (FactoryDefault(FF_SHOW_COUNTDOWN) > 0.5);
+            g_countdownColor = (color)(int)FactoryDefault(FF_COUNTDOWN_COLOR);
+            g_countdownFontSize = (int)FactoryDefault(FF_COUNTDOWN_SIZE);
+            g_countdownGapPx = (int)FactoryDefault(FF_COUNTDOWN_GAP);
+            RefreshLiveCountdown();
+            g_thLabelsMode = (FactoryDefault(FF_SHOW_TH_LABELS) > 0.5) ? 2 : 0; // Default STANDARD if enabled
+            g_thLabelsVisible = (g_thLabelsMode != 0);
+            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+            if(inpEnableTH3Tool) {
+                UpdateAllTH3Objects();
+            }
+#endif
+            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+            // Cancel any active ABCD drawing session
+            if(TH3SessionActive()) {
+                TH3SessionCancel();
+            }
+#endif
+            g_customPriceKeyboardOverride = false;
+            g_thStartPointType = inpTHStartPointType;
+            g_startPointOverride = -1;   // panel START POINT row: Q restores the dialog seed
+            g_customTHStartPrice = inpCustomTHStartPrice;
+            string chartIdStr = GetCachedChartIdStr();
+            string symbolName = GetCachedSymbol();
+            GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
+            // P-UI-67: the reset drops the override through its owner (state + key),
+            // so the panel's SS/LS ORDER switch is the answer again.
+            SSLSOrderOverrideClear();
+            // P-UI-40: the reset key rewrites nearly every displayed state, so
+            // the whole UI layer (ring states, badges, the open card) must be
+            // told once. This is also how the reset path already behaved when it
+            // was reached from the panel (PnlResetItem does exactly this pair).
+            RequestUISync();
+            GlobalVariableDel("Biotak_Factor_" + chartIdStr);
+            GlobalVariableDel("Biotak_LockTF_" + chartIdStr);
+            GlobalVariableDel("Biotak_LockTFPeriod_" + chartIdStr);
+            // VIEWLOCK-OFF: if(g_viewLockEnabled) ViewLockSetEnabled(false);
+            GlobalVariableDel("Biotak_ViewLock_" + chartIdStr);   // VIEWLOCK-OFF: purge only
+            GlobalVariableDel("Biotak_ViewAnchorT_" + chartIdStr);
+            GlobalVariableDel("Biotak_ViewAnchorMin_" + chartIdStr);
+            GlobalVariableDel("Biotak_ViewAnchorMax_" + chartIdStr);
+            GlobalVariableDel("Biotak_TriggerLevels_" + chartIdStr);
+            GlobalVariableDel("Biotak_LinesVisible_" + chartIdStr);
+            GlobalVariableDel("Biotak_ATRLabels_" + chartIdStr);
+            GlobalVariableDel("Biotak_THLabels_" + chartIdStr);
+            // P-UI-56: the Q reset drops THIS CHART's placement (both keys) through
+            // their owner; the Input seed needs no key at all (the resolver reads it
+            // directly), so the old "seed the price key from the Input" write is gone
+            // - it was the same key that made an Input-seeded chart look like a
+            // placement on the chart that shares its symbol.
+            CustomPriceForgetPlacement();
+            // P-UI-98: the reset returns the step to the mode's own answer too.
+            StepOverrideFactorReset();
+            // P-UI-98d: the hand-set lines wake ARMED again and their markers go
+            // (the redraw below re-creates what the fresh state wants).
+            g_cpLineArmed = true;
+            g_s1LinesArmed = true;
+            g_s1MarkAbovePrice = 0.0;
+            g_s1MarkBelowPrice = 0.0;
+            ObjectDelete(0, g_cpMarkerName);      CacheRemoveObject(g_cpMarkerName);
+            ObjectDelete(0, S1MarkName(1));       CacheRemoveObject(S1MarkName(1));
+            ObjectDelete(0, S1MarkName(-1));      CacheRemoveObject(S1MarkName(-1));
+            // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+            GlobalVariableDel("Biotak_TH3Freq_" + chartIdStr);
+            GlobalVariableDel("Biotak_TH3FreqIdx_" + chartIdStr);
+#endif
+            if(inpCustomTHStartPrice > 0.0) {
+                CreateCustomPriceLine(inpCustomTHStartPrice, Digits);
+            } else {
+                ObjectDelete(0, g_customPriceHorizontalLineName);
+                g_customPriceLineCreated = false;
+            }
+            UpdateLockStatusLabel();
+            Comment("\n\n        [ RESET ]");
+            g_resetCommentCreateTime = GetTickCount();
+            LOG_I(LOG_CAT_KEYS, "Reset: All overrides cleared");
+            ClearAllModeLabels();
+            EventSetMillisecondTimer(250);   // keep 250 ms cadence (see OnInit)
+            g_forceClearOnNextDraw = true;
+            g_calculatedOnce = false;
+            g_redrawTHLevelsNeeded = true;
+            RedrawAllObjects(true);
+            ThrottledChartRedraw();
+            return;
+        }
+
+        //
+        // X key   On-demand diagnostic dump ([TRADEPLAN]+[SNAP]+[ATRLEGS]+[PROF*])
+        //         No background auto-logging — this key is the only writer.
+        //
+        if(IsHotkeyPressed(lparam, sparam, inpLogDumpKey))
+        {
+            TradePlanDumpNow();
+            TradePlanLegAtrDump();   // P-LEGATR witness (own file: Labels_A never grows, §7)
+#ifndef BUILD_LITE
+            CircHomeWitness();       // orb home witness (pair/home/box/stored) — menu side only (P-BUILD-01)
+#endif
+            return;
+        }
+
+        //
+        // K key   Toggle Timeframe Lock
+        //  
+        if(IsHotkeyPressed(lparam, sparam, inpLockKey))
+        {
+            bool hadCustomPrice = (ObjectFind(0, g_customPriceHorizontalLineName) >= 0);
+            double savedCustomPrice = hadCustomPrice ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0;
+            // P-BK-17: the old raw ObjectsDeleteAll(0, inpObjectPrefix) wiped
+            // the user's Base/Knot boxes too — and the registry rebuilds from
+            // box anchors, so deleted boxes never came back. Guarded loop like
+            // DeleteAllIndicatorObjects(false) (inlined: that fn is defined
+            // below this caller — P-ARCH-02).
+            g_suppressDeleteEvents = true;
+            if(StringLen(inpObjectPrefix) > 0) {
+               int lkTotal = ObjectsTotal(0, -1, -1);
+               int lkPlen = StringLen(inpObjectPrefix);
+               for(int lki = lkTotal - 1; lki >= 0; lki--) {
+                  string lkName = ObjectName(0, lki, -1, -1);
+                  if(StringLen(lkName) < lkPlen) continue;
+                  if(StringSubstr(lkName, 0, lkPlen) != inpObjectPrefix) continue;
+                  if(StringFind(lkName, "_BK_") >= 0) continue;
+                  ObjectDelete(0, lkName);
+               }
+            }
+            g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+            g_suppressDeleteEvents = false;
+            g_timeframeLocked = !g_timeframeLocked;
+            RequestUISync();   // P-UI-40: the lock badge is derived from this state
+            if(g_timeframeLocked)
+            {
+                g_lockedPeriod = GetCachedPeriod();
+                LOG_I(LOG_CAT_KEYS, "Timeframe LOCKED to: " + GetCurrentTimeframe());
+                _LOG_GATE_D Print("[D][GEN] [LOCK] Timeframe locked to: ", GetCurrentTimeframe());
+            }
+            else
+            {
+                LOG_I(LOG_CAT_KEYS, "Timeframe UNLOCKED - following chart: " + GetCurrentTimeframe());
+                _LOG_GATE_D Print("[D][GEN] [UNLOCK] Timeframe unlocked - now following chart timeframe: ", GetCurrentTimeframe());
+            }
+            UpdateLockStatusLabel();
+            string lockChartIdStr = GetCachedChartIdStr();
+            string lockFlagName = "Biotak_LockTF_" + lockChartIdStr;
+            GlobalVariableSet(lockFlagName, g_timeframeLocked);
+            string lockPeriodName = "Biotak_LockTFPeriod_" + lockChartIdStr;
+            GlobalVariableSet(lockPeriodName, g_lockedPeriod);
+            // P-UI-142: symbol twins (chart ids are per-session; the twin is the restart layer)
+            GlobalVariableSet("Biotak_LockTFSym_" + GetCachedSymbol(), g_timeframeLocked);
+            GlobalVariableSet("Biotak_LockTFPeriodSym_" + GetCachedSymbol(), g_lockedPeriod);
+            g_forceClearOnNextDraw = true;
+            g_calculatedOnce = false;
+            g_redrawTHLevelsNeeded = true;
+            RedrawAllObjects(true);
+            if(hadCustomPrice && savedCustomPrice > 0) {
+                g_customTHStartPrice = savedCustomPrice;
+                g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+                // P-UI-48: the owner, not another hand-written property set.
+                CreateCustomPriceLine(savedCustomPrice, Digits);
+            }
+            ThrottledChartRedraw();
+            return;
+        }
+
+        // VIEWLOCK-OFF: V key (View Lock) retired —
+        //if(IsHotkeyPressed(lparam, sparam, inpViewLockKey))
+        //{
+        //    ViewLockSetEnabled(!g_viewLockEnabled);
+        //    LOG_I(LOG_CAT_KEYS, "View Lock " + (g_viewLockEnabled ? "ON - view follows across timeframes" : "OFF - chart behaves normally"));
+        //    ThrottledChartRedraw();
+        //    return;
+        //}
+    } // end CHARTEVENT_KEYDOWN
+
+    //
+    // Leg Measure MOUSE_MOVE routing — drag-to-draw, runs before ABCD.
+    // MOUSE_MOVE is needed so we get left-button press/hold/release edges.
+    // P-TH3-PERF-07: CHART_EVENT_MOUSE_MOVE is chart-scoped and shared with
+    // the ring, panels and BaseKnot — its ONE writer is OnInitHandler.
+    // LegMeasure piggybacks on the existing MOUSE_MOVE stream; no extra flag write.
+    //
+    // P-UI-98e: a MOTIONLESS press/release emits no MOUSE_MOVE (P-BK-03), so a
+    // still click on a step-1 handle would never reach the release latch — the
+    // leg meter's own P-LM-13 trap, on the hand-set lines. The click DOES fire
+    // CHARTEVENT_CLICK on button-up, and it is the only edge that sees this case.
+    //
+    if(id == CHARTEVENT_CLICK) Step1ClickFinalize();
+    if(id == CHARTEVENT_CLICK) CustomPriceRearmFinalize();   // P-UI-98m: the still click on a SET line
+    // P-UI-149/P-UI-151: AND A CLICK THAT LANDS ELSEWHERE GIVES THE REVEAL BACK —
+    // every circle's, green included. It runs LAST on this edge on purpose: a click
+    // ON a marker row has already been answered by that marker's own contract above
+    // (reveal, or the SET candidate), and this owner asks the SAME two hit tests — so
+    // the click that reveals can never be the click that hides. The button-up is
+    // asked inside; the press's own twin echo touches nothing.
+    if(id == CHARTEVENT_CLICK) HandsetRevealDropOnForeignClick((int)lparam, (int)dparam);
+
+#ifndef BUILD_LITE
+    if(id == CHARTEVENT_MOUSE_MOVE && LegMeasureSessionActive())
+    {
+        if(LegMeasureMouseMove((int)lparam, (int)dparam, sparam))
+            ThrottledChartRedraw();
+        // Do NOT return — ABCD also needs MOUSE_MOVE for its own hover preview.
+    }
+
+    // P-LM-11: the leg's EDIT owner. The family is not selectable any more — the
+    // line, its two rings and its mid handle are OURS — so the drag is not a
+    // native one the terminal reports, it is THIS pass: a press hit-tests the
+    // family in screen pixels, and every held move rewrites the whole drawing
+    // from the same anchors in the same event. Nothing follows anything, so
+    // nothing can lag behind (the report P-LM-10 could only chase).
+    if(id == CHARTEVENT_MOUSE_MOVE && LegMeasureEditMouse((int)lparam, (int)dparam, sparam))
+        ThrottledChartRedraw();
+
+    // P-LM-08/P-LM-11: the object list is the one native delete the family still
+    // answers (nothing of it is selectable) — deleting the LINE there cascades to
+    // the rings, the mid handle, the plate and its three lines here.
+    if(id == CHARTEVENT_OBJECT_DELETE)
+        LegMeasureOnObjectDelete(sparam);
+
+    // P-LM-13: a MOTIONLESS press/release emits no MOUSE_MOVE on release (an MT4
+    // fact), but the click still fires CHARTEVENT_CLICK on button-up — so this is
+    // where a still press on the family ends. Without it the drag state stuck
+    // live: the view lock stayed held, the plate hung, and the Delete key found
+    // no selection («چرا نمیشه حذفش کرد»).
+    if(id == CHARTEVENT_CLICK) LegMeasureClickFinalize();
+
+    // P-LM-20: the terminal's OWN selection event. A still click on the (now
+    // selectable, P-LM-17) line reports OBJECT_CLICK, not a mouse move — so the
+    // selection changed between two of our ride passes and the face assembled
+    // itself from pieces that disagreed (the line widened while the discs kept
+    // the resting rasters: «موقع سلکت دایره‌ها بهم مریزه»). The terminal names
+    // the object it selected; the family answers in ONE atomic repaint. A click
+    // anywhere ELSE deselects the line, and this is the only handler that sees
+    // that path too — a repaint per leg in the registry answers it (the ride
+    // pass re-reads every flag, so a cleared selection is painted back).
+    if(id == CHARTEVENT_OBJECT_CLICK)
+    {
+        if(LegMeasureOnObjectClick(sparam)) ThrottledChartRedraw();
+        else LegMeasureRideChart();   // a click off the family: deselection lands whole
+    }
+#endif
+
+    //
+    // ABCD Mouse Event Routing — TH3TOOL-ON (2026-09-19): restored.
+    // P-TH3-PB-UI: the armed base mark rides the same dispatcher (its CLICK
+    // channel), so the router must wake for it even with no draw session.
+#ifndef BUILD_LITE
+    if(TH3SessionActive() ||
+       TH3BaseMarkArmed() ||
+       id == CHARTEVENT_OBJECT_DRAG ||
+       id == CHARTEVENT_OBJECT_DELETE ||
+       id == CHARTEVENT_MOUSE_MOVE) {
+        OnABCDMouseEvent(id, lparam, dparam, sparam);
+        if((TH3SessionActive() || TH3BaseMarkArmed()) && id == CHARTEVENT_CLICK) {
+            return;
+        }
+    }
+#endif
+
+    //  
+    // CHARTEVENT_CHART_CHANGE   Layout/Resize/Scroll/Zoom
+    //  
+    if(id == CHARTEVENT_CHART_CHANGE) {
+        if(IsIndicatorHidden()) return;
+        HandsetMarkersRide();   // P-UI-98d v2: the handles ride every layout change
+        static uint s_lastLayoutMs = 0;
+        static int s_lastW = -1;
+        static int s_lastH = -1;
+        static double s_lastVisibleMin = 0;
+        static double s_lastVisibleMax = 0;
+        static bool s_ccPrimed = false;   // P-PERF-28
+        uint nowMs = GetTickCount();
+        if(nowMs - s_lastLayoutMs < CHART_CHANGE_THROTTLE_MS) return;
+
+        int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+        int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+        bool sizeChanged = (w != s_lastW || h != s_lastH);
+        
+        double visibleMin = ChartGetDouble(0, CHART_PRICE_MIN);
+        double visibleMax = ChartGetDouble(0, CHART_PRICE_MAX);
+        bool viewportChanged = (MathAbs(visibleMin - s_lastVisibleMin) > GetCachedPoint() ||
+                                MathAbs(visibleMax - s_lastVisibleMax) > GetCachedPoint());
+        // P-PERF-28: on the FIRST chart-change of an instance the snapshot is
+        // still at its zero value, so `visibleMin - 0` is always > one point and
+        // `viewportChanged` was unconditionally TRUE. That ran a full
+        // RedrawAllObjects(false) inside the event on every attach and every
+        // timeframe switch — the live log charges it to the event as
+        //   [W][PERF] chart event id=9 [indicator=3375 ui=0] took 3375ms
+        // (and 3750/3938/3766/3734/4063 ms in the same session, 53 such events
+        // in one day). Nothing had actually changed: this instance's own initial
+        // draw already covers the viewport it is looking at. Prime the snapshot
+        // from the live chart instead of from 0 and the first event is a no-op.
+        if(!s_ccPrimed)
+        {
+            s_ccPrimed = true;
+            viewportChanged = false;
+        }
+        
+        if(!sizeChanged && !viewportChanged) return;
+        
+        s_lastW = w;
+        s_lastH = h;
+        s_lastVisibleMin = visibleMin;
+        s_lastVisibleMax = visibleMax;
+        s_lastLayoutMs = nowMs;
+        // VIEWLOCK-OFF: if(g_viewLockEnabled) ViewLockCapture();
+
+        // P-PERF-28b: this branch was the biggest single stall in the log yet
+        // had no sub-ledger of its own, so the named owner can only be guessed.
+        // Split it the way every other ledger here is split, and only print
+        // when the branch blows the event budget.
+        uint p28t = GetTickCount();
+        uint p28redraw = 0, p28labels = 0, p28leg = 0;
+        if(sizeChanged) g_labelsRelayoutNeeded = true;
+        if(viewportChanged) {
+            g_redrawTHLevelsNeeded = true;
+            RedrawAllObjects(false);
+            p28redraw = GetTickCount() - p28t;
+        } else if(sizeChanged) {
+            RedrawLabelsOnly();
+            p28labels = GetTickCount() - p28t;
+        }
+        p28t = GetTickCount();
+        // The live-price countdown tag is positioned off the price scale, so a
+        // scroll/zoom/resize invalidates its Y even with zero ticks (weekend
+        // charts). Re-derive it here, AFTER the redraws above (a label clear
+        // would otherwise eat it) — the label pipeline itself is 2 s gated, so
+        // this hook is what keeps the tag glued during a drag-scroll. Own
+        // switch: never gated by the ATR block (2026-09-11).
+        RefreshLiveCountdown();
+        uint p28count = GetTickCount() - p28t;
+        p28t = GetTickCount();
+        // P-LM-02: the leg-measure readouts are SCREEN objects, so the chart moving
+        // under them does not move them — and this branch is the one place that
+        // already answers "the chart moved" (scroll, zoom, resize, auto-scroll).
+        // The projection is READ-GUARDED: a box already where it belongs costs a
+        // handful of terminal reads and not one ObjectSet* (P-PERF-02).
+#ifndef BUILD_LITE
+        LegMeasureFollowAll();
+#endif
+        p28leg = GetTickCount() - p28t;
+        p28t = GetTickCount();
+        ThrottledChartRedraw();
+        uint p28paint = GetTickCount() - p28t;
+        if(p28redraw + p28labels + p28leg + p28count + p28paint >= P_P4_EVENT_WARN_MS)
+        {
+            // P-PERF-49 (2026-09-16) - `tail=` HAD NO OWNER, AND IT WAS THE WHOLE
+            // STALL. The live MT5 log:
+            //   chart change breakdown: redraw=0ms labels=390ms tail=3016ms
+            //   chart event CHART_CHANGE(id=9) [indicator=3485 ...] took 3485ms
+            // so P-PERF-28b's split ended exactly where the biggest number began:
+            // the tail is RefreshLiveCountdown() + ThrottledChartRedraw(), and 3016
+            // of the 3485 ms sat in whichever of those two it was. They are two
+            // different problems - one rebuilds a label, the other asks the
+            // TERMINAL to repaint a chart carrying 500-850 objects (ChartRedraw is
+            // 2.14 us on an idle chart and is priced per OBJECT on a full one) - so
+            // they get a field each. A number without a cause is what this project
+            // refuses to act on.
+            //
+            // THE SECOND FIELD NAMES THE PASS `redraw=` PAID FOR: the per-phase
+            // ledger P-PERF-03 already keeps (EventHandlers ~1745..2036) describes
+            // the very RedrawAllObjects() call made nine lines above, so it is read
+            // here instead of duplicated. On MT5 that is the difference between
+            // "a scroll costs 328 ms" and "the LEVELS block of that pass is 328 ms".
+            //
+            // READ THE NUMBERS AS TICK-QUANTIZED: GetTickCount() steps in Windows'
+            // ~15.6 ms tick, so every ms in this ledger is n x 15.625 (the day's
+            // 694 lines carry 56 distinct values and they are exactly that set).
+            // A phase under one tick reads 0 ms; the ordering is trustworthy, the
+            // absolute value is +/- one tick. Anything finer needs
+            // GetMicrosecondCount(), which is MT5-only - see the next step.
+            string renderSplit = " render[levels=" + IntegerToString((int)g_p3MsLevels) +
+                                 " labels=" + IntegerToString((int)g_p3MsLabels) +
+                                 " overlay=" + IntegerToString((int)g_p3MsOverlay) +
+                                 " base=" + IntegerToString((int)g_p3MsBase) +
+                                 " atr=" + IntegerToString((int)g_p3MsAtr) +
+                                 " hist=" + IntegerToString((int)g_p3MsHistory) + "]";
+            _LOG_GATE_W Print("[W][PERF] chart change breakdown: redraw=", (int)p28redraw,
+                  "ms labels=", (int)p28labels, "ms leg=", (int)p28leg,
+                  "ms tail=", (int)(p28count + p28paint),
+                  "ms [count=", (int)p28count, " paint=", (int)p28paint, "]", renderSplit);
+        }
+        return;
+    }
+
+    //  
+    // CHARTEVENT_CLICK   Custom Price Click
+    //  
+    // P-UI-92: the pick mode's click must be a CHART click. CLICK carries the price
+    // under the cursor, so a click on an open card/strip/menu used to set the custom
+    // price origin from the price hidden under that control (and the panel's own
+    // press was handled in the UI half of the same event, which runs after this one).
+    // Two tests, one rule (see UIPointerOverSurface): WHERE the release landed, and
+    // WHOSE release it is (a claim the UI published before this half ran).
+    if(id == CHARTEVENT_CLICK && g_waitingForCustomPriceClick &&
+       !UIPeekClickClaim() && !UIPointerOverSurface((int)lparam, (int)dparam))
+    {
+        if(StringFind(sparam, "r") >= 0)
+        {
+            CleanupCustomPriceObjects(true, true);
+            _LOG_GATE_D Print("[D][GEN] Custom price setting cancelled (right-click)");
+            ThrottledChartRedraw();
+            return;
+        }
+        double clickedPrice = dparam;
+        if(!g_customPriceLineCreated)
+        {
+            if(!CreateCustomPriceLine(clickedPrice, Digits)) return;
+            _LOG_GATE_D Print("[D][GEN] [PIN] Drag the orange dotted line to adjust price. Double-click to confirm.");
+        }
+        else
+        {
+            uint currentTickCount = GetTickCount();
+            bool isDoubleClick = (currentTickCount - g_lastClickTickCount < DOUBLE_CLICK_THRESHOLD_MS);
+            g_lastClickTickCount = currentTickCount;
+            if (isDoubleClick || !g_customPriceLineCreated)
+            {
+                g_waitingForCustomPriceClick = false;
+                g_customPriceKeyboardOverride = true;
+                double selectedPrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
+                g_customTHStartPrice = selectedPrice;
+                g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+                CustomPricePersistPlacement(selectedPrice);   // P-UI-56: one writer
+                // P-UI-98d: the confirm IS the placement's SET — the price is
+                // final, the line goes inert, the double-click re-arms it. The
+                // CREATE case (no line yet) stays armed: the fresh line must
+                // drag freely until its own double-click confirms.
+                if(g_customPriceLineCreated) g_cpLineArmed = false;
+                // P-UI-45: settle - the line KEEPS its price and becomes inert again
+                // (see CreateCustomPriceLine). Confirming must not leave it grabbed:
+                // a selection outlives the gesture, and MT4 then drags the line on
+                // every later drag anywhere on the chart.
+                CreateCustomPriceLine(selectedPrice, Digits);
+                g_redrawTHLevelsNeeded = true;
+                RedrawAllObjects(true);
+                _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+            }
+        }
+        ThrottledChartRedraw();
+    }
+
+    //  
+    // CHARTEVENT_OBJECT_CLICK   Custom Price Line / ABCD Pattern
+    //  
+    if(id == CHARTEVENT_OBJECT_CLICK && sparam == g_customPriceHorizontalLineName)
+    {
+        uint currentTickCount = GetTickCount();
+        bool isDoubleClick = (currentTickCount - g_lastClickTickCount < DOUBLE_CLICK_THRESHOLD_MS);
+        g_lastClickTickCount = currentTickCount;
+        // P-UI-45: MT4 selects a selectable line on the press that grabs it, and a
+        // SELECTED line is dragged by MT4 on every later drag anywhere on the chart.
+        // Arm the deferred clear instead of writing the property HERE: this event
+        // may arrive on the press, and clearing it then would drop the line out of
+        // the very drag the user is starting.
+        if(!isDoubleClick) g_customPriceNativeDrag = true;
+        if (isDoubleClick)
+        {
+            // P-UI-98d: a SET line wakes on the double-click — silent, no
+            // prompt: the SS/LS selector below belongs to a live line, and the
+            // user's order names the double-click as the re-arm gesture.
+            if(!g_cpLineArmed)
+            {
+                CustomPriceLineOwnArm(true);
+                // P-UI-98g: re-armed AND revealed - the double-click is the user
+                // asking for the handle back, so the circle comes with it.
+                g_cpHandleShown = true;
+                CustomPriceMarkerSync();
+                ThrottledChartRedraw();
+                return;
+            }
+            // A double-click on Custom Price is a fast SS/LS start selector.
+            // The price remains unchanged; only the sequence origin changes.
+            int selectedStart = MessageBox("SS/LS sequence start\n\nYes = LS first\nNo = SS first\nCancel = keep current",
+                                           "Select SS/LS start", MB_YESNOCANCEL | MB_ICONQUESTION);
+            // P-UI-67: the prompt is the per-chart OVERRIDE's owner (state + key in
+            // one place, next to the getter that consults it). IDCANCEL keeps the
+            // current answer, so it writes nothing.
+            if(selectedStart == IDYES) SSLSOrderOverrideSet(1);
+            else if(selectedStart == IDNO) SSLSOrderOverrideSet(0);
+            g_waitingForCustomPriceClick = false;
+            g_customPriceKeyboardOverride = true;
+            double selectedPrice = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
+            g_customTHStartPrice = selectedPrice;
+            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+            CustomPricePersistPlacement(selectedPrice);   // P-UI-56: one writer
+            // P-UI-45/P-UI-48: settle - the line KEEPS its price and stays
+            // grabbable (same owner as the chart-click confirm above).
+            CreateCustomPriceLine(selectedPrice, Digits);
+            g_redrawTHLevelsNeeded = true;
+            RedrawAllObjects(true);
+            _LOG_GATE_I Print("[I][GEN] Custom Price Mode activated! Using ", inpMaxLevels, " levels above/below price: ", DoubleToString(selectedPrice, Digits));
+        }
+        else if(g_cpLineArmed)
+        {
+            // P-UI-98g: THE FIRST CLICK SHOWS THE HANDLE. «فقط وقتی روش کلیک کردیم
+            // دایره ها بیاد برای درگ کردن» — armed only means grabbable; the green
+            // circle is painted once the user asks for it, and asking is this click.
+            // It is not a SET: committing a line the user has not touched yet would
+            // make the first click cost a double-click to undo.
+            if(!g_cpHandleShown)
+            {
+                g_cpHandleShown = true;
+                CustomPriceMarkerSync();
+                ThrottledChartRedraw();
+            }
+            // P-UI-98d: a click on an ALREADY-SHOWN armed line is the SET candidate —
+            // deferred past the double-click window (the sweep commits it), so the
+            // first click of a double never sets first. A click that is the ECHO of
+            // a drag release (the just-dragged stamp) sets nothing: the line drags
+            // freely until the user deliberately clicks it.
+            else if(currentTickCount - g_cpJustDraggedMs > 350)
+            {
+                g_cpSetPending = sparam;
+                g_cpSetPendingMs = currentTickCount;
+            }
+        }
+    }
+
+    //
+    // CHARTEVENT_OBJECT_CLICK   Step-1 handle: click = SET, double-click = re-arm
+    //
+    // P-UI-98d: the same contract the custom price line wears. While ARMED the
+    // handle drags (the P-UI-98 OBJECT_DRAG channel recomputes the factor live);
+    // a single click SETS it (the ladder keeps the dragged step, the handle
+    // turns inert, the red dot goes); a double-click re-arms it. A click that is
+    // the echo of a drag release sets nothing.
+    if(id == CHARTEVENT_OBJECT_CLICK && Step1LineIsDragHandle(sparam))
+        Step1HandleClickAt(sparam);   // P-UI-98e: the ONE click contract (the
+                                      // terminal's own report is now one of three
+                                      // edges; the dedupe drops its twin)
+
+    // P-UI-98m: the green circle's own report - the third edge of the SET
+    // line's re-arm contract (the masked line fires none itself). The 60 ms
+    // twin guard inside drops the duplicate when the row pair already saw it.
+    if(id == CHARTEVENT_OBJECT_CLICK && sparam == g_cpMarkerName)
+        CustomPriceRearmClickAt();
+
+    //
+    // CHARTEVENT_MOUSE_MOVE   Custom Price Drag Detection
+    //
+    // P-UI-98d: the double-click window's sweeper rides the mouse stream — the
+    // cheapest always-on channel there is (two stamp compares when nothing is
+    // pending). The tick path sweeps too, so a click that never moves again
+    // still commits. And the handset handles ride the same stream (a pan moves
+    // the price scale under them — the leg meter's own P-LM-16b answer).
+    HandsetClickSweep();
+    HandsetMarkersRide();
+    // P-UI-98e: the step-1 handle's gesture walks the same stream as the
+    // custom-price line's — and the custom-price line is not the only reason
+    // this block exists any more: the handle is armed off the PLACEMENT, and a
+    // chart that lost the line object must not lose the handle with it.
+    // P-SIZE-1500: the custom price line's own gesture stream (press edge, claim,
+    // carry, release, tooltip) moved to its own owner above -
+    // EventHandlers_Router_Gesture.mqh, called at the exact seat it held.
+    RoutCustomPriceGesture(id, lparam, dparam, sparam);
 
     //  
     // CHARTEVENT_OBJECT_DRAG   Custom Price Line Drag End
@@ -6548,6 +6897,11 @@ void DeleteAllIndicatorObjects(bool deepCleanup = false) {
         ObjectsDeleteAll(0, inpObjectPrefix + "TH_");
         ObjectsDeleteAll(0, inpObjectPrefix + "SharedPattern_");
     }
+    // Retired P-FREE witness pair (removed 2026-10-05): fixed names match no
+    // namespace, so the wipe above never saw them — delete explicitly once, here,
+    // so a remove-and-re-add deploy (the only deploy) leaves no orphan behind.
+    ObjectDelete(0, "Biotak_FreeSym_Label");
+    ObjectDelete(0, "Biotak_FreeMark_Label");
 
     g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
     g_suppressDeleteEvents = false;

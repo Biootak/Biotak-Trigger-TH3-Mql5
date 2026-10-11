@@ -41,7 +41,9 @@
 // (DrawStrip_Base.mqh), and it is BORROWED by name here: the path opens no
 // second file and writes no second format.
 #ifndef BUILD_LITE
-void DrawStripDiagEmit(const string line);   // defined later in this unit (DrawStrip_Base.mqh)
+// P-WARN-46 (2026-10-04): the prototype that stood here was the build's last warning 46
+// in this file. A prototype is the IMPORT MQL4 needs for an #import-ed library, not for a
+// body later in the same unit - MQL4 resolves that on its own (see the note in Toolbar_A).
 void PathWitness(const string line) { DrawStripDiagEmit("[Path] " + line); }
 #else
 // Lite ships no draw strip, so it ships no diag channel — MQL4 rejects a

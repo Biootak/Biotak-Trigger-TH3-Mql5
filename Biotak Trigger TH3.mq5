@@ -443,6 +443,8 @@ void OnTimer()
     CompatRefreshChartData();
     // P-UI-113-OFF (2026-09-23): no fast window — every tick is housekeeping.
 
+    TH3RecorderFlashTick();
+
     // P-PERF-16: the 250 ms safety refresh behind the cached UI metrics. Resizing
     // the chart also fires a chart-change event (which invalidates immediately);
     // this line covers a missed notification and costs two terminal reads per

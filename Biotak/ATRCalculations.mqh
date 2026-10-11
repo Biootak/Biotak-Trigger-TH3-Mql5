@@ -153,14 +153,12 @@ void CleanupATRCache() {
 //+------------------------------------------------------------------+
 void ReleaseATRHandle() {
     // In MT4, iATR uses direct function calls without handles.
-    // On MT5, iATR() creates OS-level indicator handles that the terminal
-    // keeps alive until explicitly released. Without IndicatorRelease() the
-    // handles accumulate across every timeframe switch and re-attach, which
-    // is one of the measured reasons MT5 becomes slower over time.
-    // ReleaseATRHandleCache() is defined in MT5Compat/MQL5Compat.mqh and
-    // included BEFORE this file, so the call is always resolved on MT5.
-    // On MT4 this block is a no-op (MQL4 has no #ifdef MQL5 support so the
-    // function simply does not exist, but neither does iATR() use handles).
+    // On MT5, iATR() creates OS-level indicator handles that must be
+    // released explicitly on every deinit — otherwise they accumulate
+    // across timeframe switches and slow the terminal down.
+    // ReleaseATRHandleCache() is defined in MT5Compat/MQL5Compat.mqh
+    // (included BEFORE this file) and calls IndicatorRelease() on every
+    // cached slot. MT5-ONLY fix; MT4 has no such handles.
 #ifdef __MQL5__
     ReleaseATRHandleCache();
 #endif
@@ -1054,9 +1052,8 @@ void TrexSMALegsBatch(const ENUM_TIMEFRAMES tf, const int &periods[], double &ou
                       const int shift = 1)
 {
     int n = ArraySize(periods);
-    if(ArraySize(out) != n) ArrayResize(out, n);
-    // Zero-init with scalar writes (faster than ArrayInitialize for n<=6)
-    for(int z = 0; z < n; z++) out[z] = 0.0;
+    ArrayResize(out, n);
+    ArrayInitialize(out, 0.0);
     if(n <= 0) return;
 
     int sh = (shift > 0 ? shift : 1);   // shift 0 is the FORMING bar — never a leg's anchor
@@ -1073,15 +1070,13 @@ void TrexSMALegsBatch(const ENUM_TIMEFRAMES tf, const int &periods[], double &ou
     if(maxPeriodNeeded == 0) return;
     int need = maxPeriodNeeded + sh + 2;
 
-    // P-PERF-MT5-02: static staging arrays — MQL5 never shrinks them, so the
-    // allocation from the first call is reused on every subsequent call.
     // ONE bulk copy per series (was ~4 scalar calls per bar). CopyTime needs a
     // datetime[] (MQL4 does not convert array types), the prices need double[].
-    static double   highArr[], lowArr[], closeArr[];
-    static datetime timeArr[];
+    double highArr[], lowArr[], closeArr[];
+    datetime timeArr[];
     bool batchOk = false;
-    if(ArrayResize(highArr, need) >= need && ArrayResize(lowArr, need) >= need &&
-       ArrayResize(closeArr, need) >= need && ArrayResize(timeArr, need) >= need)
+    if(ArrayResize(highArr, need) == need && ArrayResize(lowArr, need) == need &&
+       ArrayResize(closeArr, need) == need && ArrayResize(timeArr, need) == need)
     {
         int gotH = CopyHigh(Symbol(), tf, 0, need, highArr);
         int gotL = CopyLow(Symbol(), tf, 0, need, lowArr);
@@ -1112,14 +1107,8 @@ void TrexSMALegsBatch(const ENUM_TIMEFRAMES tf, const int &periods[], double &ou
 
 void CalculateATRBatchTrex(double &results[], const ENUM_TIMEFRAMES tf,
                            const int shift = 1) {
-    // P-PERF-MT5-02 (2026-10-11): the caller (ATRWeightedComposite) passes a
-    // local double[] that is re-created on every tick. ArrayResize+ArrayInitialize
-    // on a 6-element array is cheap (~100 ns) but multiplied by 8 TFs × every
-    // tick it adds up. The fix: resize once to 6 (no-op on subsequent calls since
-    // MQL5 never shrinks), then zero-initialise with six scalar writes (faster
-    // than ArrayInitialize which calls into the runtime).
-    if(ArraySize(results) != 6) ArrayResize(results, 6);
-    results[0] = results[1] = results[2] = results[3] = results[4] = results[5] = 0.0;
+    ArrayResize(results, 6);
+    ArrayInitialize(results, 0.0);
 
     int sh = (shift > 0 ? shift : 1);
     int nb = iBars(Symbol(), tf);
@@ -1348,11 +1337,9 @@ void WarmupATRStep() {
 }
 
 void WarmupATRMultiTFCache() {
-    // P-PERF-MT5-03: warmup runs unconditionally — handle creation is the goal,
-    // not just label display. iATR handles are async; creating them here means
-    // they are warm (BarsCalculated > 0) by the time the first level draw runs.
+    if(!inpShowATRLabels) return;
     g_atrWarmupIdx = 0;
-    WarmupATRStep();   // first TF now — the current chart's labels must not wait
+    WarmupATRStep();   // first one now — the visible labels must not wait
 }
 
 

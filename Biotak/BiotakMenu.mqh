@@ -26,6 +26,201 @@
 #property strict
 
 #include "HTFCandles.mqh"
+// BiotakHomes.mqh - the PLACE of the three placeable surfaces, split out of
+// BiotakMenu_A.mqh on 2026-10-05 because that file reached 1532 lines and
+// contract 7 says a file over the 1500-line ceiling never grows (P-SIZE-1500):
+// touch it = split it by owner. This IS that owner - one home per surface, the
+// fraction it is stored as, and the one default when there is no home at all.
+//
+// MUST be included ABOVE BiotakMenu_A.mqh: MQL4 resolves a call top-down, and
+// every reader of a home (LoadUIPlaces, SaveUIStates, the orb's release, the
+// chip's drag) lives below the cut, so a half included under them is error 168.
+#ifndef BIOTAK_HOMES_MQH
+#define BIOTAK_HOMES_MQH
+
+//+------------------------------------------------------------------+
+//| P-UI-118 — THE ORB'S DEFAULT HOME IS THE CHART'S CENTRE, ONE OWNER.|
+//|                                                                  |
+//| User order 2026-09-25: «منو وسط باز بشه از هر طرف» — the menu must |
+//| open as a RING, fanning from every side. `CircLayout` leaves the   |
+//| arc the moment the orb is within `CIRC_EDGE_TRIGGER` (90 px) of    |
+//| any edge and collapses the ring into a train along it — which is   |
+//| exactly what a corner-parked orb does, and what the Tools          |
+//| sub-menu escalates away from (fan -> rail -> grid). The centre is  |
+//| the ONLY position where every layout family is reachable as         |
+//| designed, so it is the default.                                    |
+//|                                                                  |
+//| BOTH readers ask here — the first-attach default and the fallback  |
+//| when a saved position is missing — so the two can never disagree    |
+//| about where "default" is. A SAVED position still wins: the user's   |
+//| drag is the truth, and only a chart with no stored pair lands here. |
+//| The value is clamped like every other orb write on the next pass.   |
+//+------------------------------------------------------------------+
+void CircDefaultMenuPos(int &x, int &y)
+{
+   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   if(cw <= 0) cw = 1920;
+   if(ch <= 0) ch = 1080;
+   x = cw / 2;
+   y = ch / 2;
+}
+
+//--- P-UI-131e — A HOME THAT OUTLIVES THE CHART AND THE SYMBOL. User order: «در هر چارت
+//--- در هر شرایط همون جا باشه، بدون هزینه». A placed surface is the HAND's preference,
+//--- not a fact of one window: the keys still carried ChartID(), and a CLAMP was saved
+//--- back into the live pair (so one narrow chart ratcheted the place for good). A home
+//--- lives under a key with no chart and no symbol in it; the value that paints is never
+//--- the value stored; cost is one read at load and one write when the hand really moves.
+string GVHomeName(const string id,const bool y) { return "BIOMENU_HOME_" + id + (y ? "Y" : "X"); }
+
+//--- one home, three readers (the orb, the strip, the chip): the chart-free pair first,
+//--- then the pre-131e per-chart pair it replaced, so the upgrade keeps the place the
+//--- hand already chose instead of re-seeding the default. Absent both = no home.
+bool GVHomeLoad(const string id,const string legacyInfix,int &x,int &y)
+{
+   string nx = GVHomeName(id,false), ny = GVHomeName(id,true);
+   if(GlobalVariableCheck(nx) && GlobalVariableCheck(ny))
+   {
+      x = (int)GlobalVariableGet(nx); y = (int)GlobalVariableGet(ny);
+      if(x >= 0 && y >= 0) return true;
+   }
+   string lx = GetGVName(legacyInfix + "X"), ly = GetGVName(legacyInfix + "Y");
+   if(GlobalVariableCheck(lx) && GlobalVariableCheck(ly))
+   {
+      x = (int)GlobalVariableGet(lx); y = (int)GlobalVariableGet(ly);
+      if(x >= 0 && y >= 0) return true;
+   }
+   x = -1; y = -1;
+   return false;
+}
+
+//--- the orb's own home. -1 = the hand has never placed it: CircDefaultMenuPos answers.
+static int s_OrbHomeX = -1, s_OrbHomeY = -1;
+bool CircOrbHomeGet(int &x,int &y)
+{
+   x = s_OrbHomeX; y = s_OrbHomeY;
+   return (s_OrbHomeX >= 0 && s_OrbHomeY >= 0);
+}
+void CircOrbHomeSet(const int x,const int y) { s_OrbHomeX = x; s_OrbHomeY = y; }
+
+//--- P-UI-126: THE CHIP'S OWN PLACE — P-DRAW-41's home, one surface over, and owned
+//--- here because the UI-state block below is its only reader and writer. (-1,-1) =
+//--- the hand has never placed it: the chart's middle then answers, measured LIVE so a
+//--- resized chart is never stuck with a stale centre. Stored as the BOX's centre.
+static int s_TipHomeX = -1, s_TipHomeY = -1;
+bool CircTipHomeGet(int &x, int &y)
+{
+   x = s_TipHomeX; y = s_TipHomeY;
+   return (s_TipHomeX >= 0 && s_TipHomeY >= 0);
+}
+void CircTipHomeSet(const int x, const int y) { s_TipHomeX = x; s_TipHomeY = y; }
+
+//+------------------------------------------------------------------+
+//| P-UI-140 (2026-10-05) — A PLACE IS A PLACE ON THIS WINDOW.        |
+//| Report: «این دوتا موقع ریستارت ترمینال از جاش تکون میخوره» — the  |
+//| orb and the chip both MOVED on restart. Cause: both homes were     |
+//| stored as ABSOLUTE PIXELS, a restart re-lays the window out, so    |
+//| the same number is painted in a different box and clamped into it; |
+//| a stored centre made it worse, because `ohx == defX` then read the |
+//| OLD centre as «the hand moved it». ONE RULE, every scenario       |
+//| (restart, resize, maximize, another monitor, another symbol or    |
+//| chart): the STORED form is a FRACTION of the chart box and the     |
+//| painted pixels are re-derived from it against the LIVE metrics —   |
+//| (0.5,0.5) is the centre of every window, which retires the centre |
+//| heuristic. Nothing is re-saved on the way (that ratchet is         |
+//| P-UI-131e again) and a pixel home is migrated once, in the window   |
+//| it is read in. Long form: docs/th3-ui-placement.md                  |
+//+------------------------------------------------------------------+
+string GVHomeFracName(const string id,const bool y) { return "BIOMENU_HOME_" + id + (y ? "_FY" : "_FX"); }
+void HomeChartSize(int &cw, int &ch)
+{
+   cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   if(cw <= 0) cw = 1920;  if(ch <= 0) ch = 1080;   // the fallback every reader keeps
+}
+//--- the WRITER's size: no fallback. A fraction divided by a window that is not
+//--- the one the pixels came from is the poisoned store (measured CHIP_FX=1.1075
+//--- above) — and at teardown the terminal can report 0 for a window it is
+//--- destroying. A writer that cannot measure the box stores nothing.
+bool HomeChartSizeRaw(int &cw, int &ch)
+{
+   cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   return (cw > 0 && ch > 0);
+}
+bool GVHomeFracKnown(const string id)
+{
+   return GlobalVariableCheck(GVHomeFracName(id,false)) && GlobalVariableCheck(GVHomeFracName(id,true));
+}
+//--- ONE place a pixel becomes a fraction, so the writer and the slot guards in
+//--- `SaveUIStates` can never disagree about what was stored.
+double HomeFracOf(const int v, const int span)
+{
+   if(span <= 0) return 0.5;
+   return (double)v / (double)span;
+}
+//--- ONE clamp, used by the reader below and by `GVHomeSaveFrac`. A live drag is already
+//--- inside the window, so the write side only bites the one case that can be outside it:
+//--- `SaveUIStates` re-deriving a pair whose window has since shrunk. A store holding a
+//--- place outside the box is the state the reader has to repair; nothing here may
+//--- create it, or the pair drifts a little further on every re-derivation.
+double HomeFracClamp(const double f)
+{
+   if(f < 0.0) return 0.0;
+   if(f > 1.0) return 1.0;
+   return f;
+}
+//--- the ONE reader of a fractional home, and the only one the 250 ms pass may use:
+//--- fractions only, NO writes. A read that repairs the store is a write under the
+//--- user's hand — the ratchet P-UI-131e removed.
+//---
+//--- MEASURED 2026-10-05 in the trade terminal (`profiles/gvariables.dat`, read twice):
+//--- a pair can sit OUTSIDE the box — that store carried `CHIP_FX = 1.1075`, greater
+//--- than 1, in both reads (its sibling `ORB_FY` also read 1.613 once and was rewritten
+//--- between the two reads, because the terminal keeps saving while it runs: that
+//--- rewriting is the creep this block ends). The cause is a fraction divided by a
+//--- window that was not the one the pixels came from. Such a value is not garbage: it
+//--- is the same place said with a wrong denominator, so the place it MEANS is the near
+//--- EDGE. So the reader CLAMPS (`1.1075` becomes `1.0` = the right edge, `0.0896` stays
+//--- = the top, i.e. the pinned top-right chip of the report) — a reader that refused
+//--- instead would drop a placed surface to the chart's centre, i.e. MOVE it on the
+//--- upgrade that was supposed to stop the moving.
+//--- Clamping is also what makes the answer DETERMINISTIC: every restart derives the
+//--- same pixels from the same pair, so the drift cannot resume.
+bool GVHomeFracRead(const string id, int &x, int &y)
+{
+   if(!GVHomeFracKnown(id)) return false;
+   const double fx = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false)));
+   const double fy = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true)));
+   int cw = 0, ch = 0; HomeChartSize(cw, ch);
+   x = (int)MathRound(fx * cw);
+   y = (int)MathRound(fy * ch);
+   return true;
+}
+void GVHomeSaveFrac(const string id, const int x, const int y)
+{
+   if(x < 0 || y < 0) return;
+   int rcw = 0, rch = 0;
+   if(!HomeChartSizeRaw(rcw, rch)) return;   // unknown denominator: store nothing,
+                                            // and keep the pixel keys (no data loss)
+   GlobalVariableSet(GVHomeFracName(id,false), HomeFracClamp(HomeFracOf(x, rcw)));
+   GlobalVariableSet(GVHomeFracName(id,true), HomeFracClamp(HomeFracOf(y, rch)));
+   //--- the pixel keys are dead on arrival: a reader that adopts a window-sized
+   //--- number as a place is the bug this block exists to end.
+   GlobalVariableDel(GVHomeName(id,false)); GlobalVariableDel(GVHomeName(id,true));
+}
+bool GVHomeLoadFrac(const string id, const string legacyInfix, int &x, int &y)
+{
+   if(GVHomeFracRead(id, x, y)) return true;
+   int px = 0, py = 0;
+   if(!GVHomeLoad(id, legacyInfix, px, py)) { x = -1; y = -1; return false; }
+   GVHomeSaveFrac(id, px, py);          // migration, once, in the reading window
+   x = px; y = py;
+   return true;
+}
+
+#endif // BIOTAK_HOMES_MQH
 
 //+------------------------------------------------------------------+
 //| Embedded icon resources (BMP, generated by tools/gen-icons.ps1)   |
@@ -752,83 +947,6 @@ string CircBadgeTxt(const int i) { return g_UI.btnPrefix + "CircBadgeTxt" + Inte
                               // apply a new UI default: a version mismatch clears the saved
                               // BIOMENU_* block once and re-seeds from CircDefaultMenuPos.
 
-//+------------------------------------------------------------------+
-//| P-UI-118 — THE ORB'S DEFAULT HOME IS THE CHART'S CENTRE, ONE OWNER.|
-//|                                                                  |
-//| User order 2026-09-25: «منو وسط باز بشه از هر طرف» — the menu must |
-//| open as a RING, fanning from every side. `CircLayout` leaves the   |
-//| arc the moment the orb is within `CIRC_EDGE_TRIGGER` (90 px) of    |
-//| any edge and collapses the ring into a train along it — which is   |
-//| exactly what a corner-parked orb does, and what the Tools          |
-//| sub-menu escalates away from (fan -> rail -> grid). The centre is  |
-//| the ONLY position where every layout family is reachable as         |
-//| designed, so it is the default.                                    |
-//|                                                                  |
-//| BOTH readers ask here — the first-attach default and the fallback  |
-//| when a saved position is missing — so the two can never disagree    |
-//| about where "default" is. A SAVED position still wins: the user's   |
-//| drag is the truth, and only a chart with no stored pair lands here. |
-//| The value is clamped like every other orb write on the next pass.   |
-//+------------------------------------------------------------------+
-void CircDefaultMenuPos(int &x, int &y)
-{
-   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
-   if(cw <= 0) cw = 1920;
-   if(ch <= 0) ch = 1080;
-   x = cw / 2;
-   y = ch / 2;
-}
-
-//--- P-UI-131e — A HOME THAT OUTLIVES THE CHART AND THE SYMBOL. User order: «در هر چارت
-//--- در هر شرایط همون جا باشه، بدون هزینه». A placed surface is the HAND's preference,
-//--- not a fact of one window: the keys still carried ChartID(), and a CLAMP was saved
-//--- back into the live pair (so one narrow chart ratcheted the place for good). A home
-//--- lives under a key with no chart and no symbol in it; the value that paints is never
-//--- the value stored; cost is one read at load and one write when the hand really moves.
-string GVHomeName(const string id,const bool y) { return "BIOMENU_HOME_" + id + (y ? "Y" : "X"); }
-
-//--- one home, three readers (the orb, the strip, the chip): the chart-free pair first,
-//--- then the pre-131e per-chart pair it replaced, so the upgrade keeps the place the
-//--- hand already chose instead of re-seeding the default. Absent both = no home.
-bool GVHomeLoad(const string id,const string legacyInfix,int &x,int &y)
-{
-   string nx = GVHomeName(id,false), ny = GVHomeName(id,true);
-   if(GlobalVariableCheck(nx) && GlobalVariableCheck(ny))
-   {
-      x = (int)GlobalVariableGet(nx); y = (int)GlobalVariableGet(ny);
-      if(x >= 0 && y >= 0) return true;
-   }
-   string lx = GetGVName(legacyInfix + "X"), ly = GetGVName(legacyInfix + "Y");
-   if(GlobalVariableCheck(lx) && GlobalVariableCheck(ly))
-   {
-      x = (int)GlobalVariableGet(lx); y = (int)GlobalVariableGet(ly);
-      if(x >= 0 && y >= 0) return true;
-   }
-   x = -1; y = -1;
-   return false;
-}
-
-//--- the orb's own home. -1 = the hand has never placed it: CircDefaultMenuPos answers.
-static int s_OrbHomeX = -1, s_OrbHomeY = -1;
-bool CircOrbHomeGet(int &x,int &y)
-{
-   x = s_OrbHomeX; y = s_OrbHomeY;
-   return (s_OrbHomeX >= 0 && s_OrbHomeY >= 0);
-}
-void CircOrbHomeSet(const int x,const int y) { s_OrbHomeX = x; s_OrbHomeY = y; }
-
-//--- P-UI-126: THE CHIP'S OWN PLACE — P-DRAW-41's home, one surface over, and owned
-//--- here because the UI-state block below is its only reader and writer. (-1,-1) =
-//--- the hand has never placed it: the chart's middle then answers, measured LIVE so a
-//--- resized chart is never stuck with a stale centre. Stored as the BOX's centre.
-static int s_TipHomeX = -1, s_TipHomeY = -1;
-bool CircTipHomeGet(int &x, int &y)
-{
-   x = s_TipHomeX; y = s_TipHomeY;
-   return (s_TipHomeX >= 0 && s_TipHomeY >= 0);
-}
-void CircTipHomeSet(const int x, const int y) { s_TipHomeX = x; s_TipHomeY = y; }
 
 void ResetUIToDefaults()
 {
@@ -838,6 +956,7 @@ void ResetUIToDefaults()
    g_UI.menuVisible = true;
    g_UI.showHTF = false;
    g_UI.tipPin = false;   // P-UI-126: the chip's default MODE is hover; its place is not this
+   g_ToolsOpen = false;   // P-UI-142: tools chrome starts shut; the snapshot reopens it
 }
 
 //--- P-UI-131e — WHERE THE THREE PLACEABLE SURFACES STAND, one owner for both init paths.
@@ -852,21 +971,28 @@ void LoadUIPlaces()
    int defX = 0, defY = 0;
    CircDefaultMenuPos(defX, defY);               // P-UI-118: the ONE answer to "default"
    int ohx = -1, ohy = -1;
-   bool haveOrbHome = GVHomeLoad("ORB", "MENU", ohx, ohy);
-   if(haveOrbHome && ohx == defX && ohy == defY) haveOrbHome = false;
+   //--- P-UI-140: captured BEFORE the load, because the load MIGRATES a legacy pixel
+   //--- pair into a fraction — asked afterwards, every migrated answer would look like
+   //--- a fractional one and the centre test below would never run.
+   const bool orbHadFrac = GVHomeFracKnown("ORB");
+   bool haveOrbHome = GVHomeLoadFrac("ORB", "MENU", ohx, ohy);
+   //--- P-UI-140: only a MIGRATED pixel pair can be «only the centre» — a
+   //--- fractional home needs no such test, because (0.5,0.5) IS every centre.
+   if(haveOrbHome && !orbHadFrac && ohx == defX && ohy == defY) haveOrbHome = false;
    if(haveOrbHome) CircOrbHomeSet(ohx, ohy);     // the home outlives the SESSION, not the reset
    g_UI.menuX = haveOrbHome ? ohx : defX;
    g_UI.menuY = haveOrbHome ? ohy : defY;
    //--- P-DRAW-41: THE STRIP'S HOME — the plate comes back where it was left, instead of
    //--- being re-placed beside the drawing on every attach (the placement that put it on
    //--- the user's own work). Absent key = no home: the first open measures one.
+   //--- P-UI-142: fractional like the orb and the chip (pixel keys migrate once, on read).
    int hx = -1, hy = -1;
-   GVHomeLoad("STRIP", "HOME", hx, hy);
+   GVHomeLoadFrac("STRIP", "HOME", hx, hy);
    DrawStripHomeSet(hx, hy);
    //--- P-UI-126: the chip's own place. An absent pair means the hand has never placed it —
    //--- a state, not a reset: a fresh chart starts in hover mode with no place of its own.
    int tx = -1, ty = -1;
-   if(GVHomeLoad("CHIP", "TIP", tx, ty)) CircTipHomeSet(tx, ty);
+   if(GVHomeLoadFrac("CHIP", "TIP", tx, ty)) CircTipHomeSet(tx, ty);
 }
 
 void LoadUIState()
@@ -876,6 +1002,8 @@ void LoadUIState()
 
    g_UI.menuVisible = GlobalVariableCheck(gvMen)   ? (GlobalVariableGet(gvMen)   > 0.5) : true;
    g_UI.showHTF     = GlobalVariableCheck(gvHtf)   ? (GlobalVariableGet(gvHtf)   > 0.5) : false;
+   string gvTools = GetGVName("TOOLS");
+   g_ToolsOpen = GlobalVariableCheck(gvTools) ? (GlobalVariableGet(gvTools) > 0.5) : false;   // P-UI-142: menu creation rebuilds the chrome from this
    if(GlobalVariableCheck(GetGVName("TIPPIN")))
       g_UI.tipPin = (GlobalVariableGet(GetGVName("TIPPIN")) > 0.5);
    // P-DRAW-89: the plate's transparency setting is retired. Its GV is swept on
@@ -1035,32 +1163,44 @@ void SaveUIStates(const bool flushNow = false)
    // saving them ratcheted the place inward for good. The key is chart-free too.
    int ohx = 0, ohy = 0;
    const bool haveOrbHome = CircOrbHomeGet(ohx, ohy);
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 3, haveOrbHome ? (double)ohx : -1.0))
-      { GlobalVariableSet(GVHomeName("ORB",false), haveOrbHome ? (double)ohx : -1.0); uiChanged++; }
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 4, haveOrbHome ? (double)ohy : -1.0))
-      { GlobalVariableSet(GVHomeName("ORB",true), haveOrbHome ? (double)ohy : -1.0); uiChanged++; }
+   //--- P-UI-140: the orb is stored as a FRACTION of the chart box; the key is
+   //--- still per-key (P-PERF-44), it just compares fractions now. ONE size read for
+   //--- the two axes and the chip's pair below — the compare and the write must agree,
+   //--- and a second read could in principle land on a different box.
+   //--- A teardown can report 0 for a window it is destroying: with no measured box
+   //--- the home slots are skipped whole (no compare, no save), so a fallback
+   //--- denominator can never overwrite the hand's fraction.
+   int hcw = 0, hch = 0;
+   const bool haveBox = HomeChartSizeRaw(hcw, hch);
+   if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 3, haveOrbHome ? HomeFracOf(ohx, hcw) : -1.0))
+      { if(haveOrbHome) GVHomeSaveFrac("ORB", ohx, ohy); uiChanged++; }
+   if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 4, haveOrbHome ? HomeFracOf(ohy, hch) : -1.0))
+      { if(haveOrbHome) GVHomeSaveFrac("ORB", ohx, ohy); uiChanged++; }
    if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 5, g_UI.showHTF ? 1.0 : 0.0))
       { GlobalVariableSet(GetGVName("HTF_EN"), g_UI.showHTF ? 1.0 : 0.0); uiChanged++; }
    // P-DRAW-41 (2026-09-25): the strip's home is a user position like the menu
    // orb's, so it is stored with the same keys and under the same guards — one pair,
    // written only when the hand really moved it. No version bump: a chart whose
    // keys are missing simply has no home yet and its first open measures one.
+   // P-UI-142: the strip's home joins the orb and the chip as a FRACTION —
+   // absolute pixels drifted on every resize/restart (the P-UI-140 report for
+   // the orb, still open for the strip). Same guarded slots, fractions now.
    int hx = 0, hy = 0;
    const bool haveHome = DrawStripHomeGet(hx, hy);
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 6, haveHome ? (double)hx : -1.0))
-      { GlobalVariableSet(GVHomeName("STRIP",false), haveHome ? (double)hx : -1.0); uiChanged++; }
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 7, haveHome ? (double)hy : -1.0))
-      { GlobalVariableSet(GVHomeName("STRIP",true), haveHome ? (double)hy : -1.0); uiChanged++; }
+   if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 6, haveHome ? HomeFracOf(hx, hcw) : -1.0))
+      { if(haveHome) GVHomeSaveFrac("STRIP", hx, hy); uiChanged++; }
+   if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 7, haveHome ? HomeFracOf(hy, hch) : -1.0))
+      { if(haveHome) GVHomeSaveFrac("STRIP", hx, hy); uiChanged++; }
    // P-DRAW-89: the plate's transparency writer is gone with the setting; slot 8
    // of the shadow set is free again.
    // P-UI-126: the chip's own place and mode — the hand's answers, written only when
    // they really moved (the drag's release and the card's switch are the whole set).
    int thx = 0, thy = 0;
    const bool haveTipHome = CircTipHomeGet(thx, thy);
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 9, haveTipHome ? (double)thx : -1.0))
-      { GlobalVariableSet(GVHomeName("CHIP",false), haveTipHome ? (double)thx : -1.0); uiChanged++; }
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 10, haveTipHome ? (double)thy : -1.0))
-      { GlobalVariableSet(GVHomeName("CHIP",true), haveTipHome ? (double)thy : -1.0); uiChanged++; }
+   if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 9, haveTipHome ? HomeFracOf(thx, hcw) : -1.0))
+      { if(haveTipHome) GVHomeSaveFrac("CHIP", thx, thy); uiChanged++; }
+   if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 10, haveTipHome ? HomeFracOf(thy, hch) : -1.0))
+      { if(haveTipHome) GVHomeSaveFrac("CHIP", thx, thy); uiChanged++; }
    if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 11, g_UI.tipPin ? 1.0 : 0.0))
       { GlobalVariableSet(GetGVName("TIPPIN"), g_UI.tipPin ? 1.0 : 0.0); uiChanged++; }
    // P-PERF-44 (3): report BEFORE the early return. A skip count that survives a
@@ -1076,6 +1216,34 @@ void SaveUIStates(const bool flushNow = false)
    // sits outside any other flush transaction - so it asks AND commits. The
    // plain saves only ask, and the one commit pays for all of them.
    if(flushNow) { GVFlushRequest(); GVFlushCommit(); }
+}
+
+// On-demand witness for a displaced orb (X hotkey, beside the trade dump):
+// the live pair, the memory home, the live box and the STORED fraction, so a
+// "not at its previous place" report names which of the four disagrees instead
+// of guessing. Read-only: no save, no migrate, no repaint.
+void CircHomeWitness()
+{
+   int hx = -1, hy = -1;
+   bool hasHome = CircOrbHomeGet(hx, hy);
+   int cw = 0, ch = 0; HomeChartSize(cw, ch);
+   double fx = -1.0, fy = -1.0;
+   if(GlobalVariableCheck(GVHomeFracName("ORB", false))) fx = GlobalVariableGet(GVHomeFracName("ORB", false));
+   if(GlobalVariableCheck(GVHomeFracName("ORB", true))) fy = GlobalVariableGet(GVHomeFracName("ORB", true));
+   string home = "none";
+   if(hasHome) home = "(" + IntegerToString(hx) + "," + IntegerToString(hy) + ")";
+   string s = "[MENUPOS] pair=(" + IntegerToString(g_UI.menuX) + "," + IntegerToString(g_UI.menuY) + ")"
+            + " home=" + home
+            + " box=(" + IntegerToString(cw) + "," + IntegerToString(ch) + ")"
+            + " stored=(" + DoubleToString(fx, 4) + "," + DoubleToString(fy, 4) + ")";
+   TpxLine(s);
+   int h = FileOpen(TradePlanExportFileName(), FILE_READ | FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(h != INVALID_HANDLE)
+   {
+      FileSeek(h, 0, SEEK_END);
+      FileWriteString(h, s + "\n");
+      FileClose(h);
+   }
 }
 
 // P-PERF-44 (1): prime this block from its own LOAD pass. LoadUIState() has just
@@ -1775,6 +1943,8 @@ void CircTipModeChanged()
 
 //--- P-UI-126: the orb's own move path calls this (one bool) so a pinned banner that
 //--- rides "above the orb" is re-placed by the next tick, not per move event.
+//--- P-UI-140: and the re-derivation of a PLACE on a new window calls it too — a
+//--- home that moved must be re-placed by the tick, exactly like a moved orb.
 static bool s_TipDirty = false;
 void CircTipPinnedTouch() { s_TipDirty = true; }
 
@@ -1793,8 +1963,10 @@ void CircTipPinnedTouch() { s_TipDirty = true; }
 static bool s_TipDrag = false;
 static bool s_TipMoved = false;   // a real move (>= 1 px) eats the release's click echo
 static int  s_TipGrabDX = 0, s_TipGrabDY = 0;
+//--- P-UI-140: the hand owns the chip's place for the whole drag, so the 250 ms
+//--- re-derivation must stand off exactly as it does for the orb (one accessor, so
+//--- the refresh never reads a static it does not own).
 bool CircTipDragging() { return s_TipDrag; }
-
 
 bool CircTipGrabStart(const int mx, const int my)
 {
@@ -2891,61 +3063,43 @@ void ToolsBadgePos(const int i, int &x, int &y)
 }
 
 #endif // BIOTAK_MENU_B_MQH
-
-// P-UI-140: BiotakHomes helpers needed by CircHomesRefresh (ported from BiotakHomes.mqh).
-string GVHomeFracName(const string id, const bool y) { return "BIOMENU_HOME_" + id + (y ? "_FY" : "_FX"); }
-void HomeChartSize(int &cw, int &ch)
-{
-   cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
-   if(cw <= 0) cw = 1920;  if(ch <= 0) ch = 1080;
-}
-bool GVHomeFracKnown(const string id)
-{
-   return GlobalVariableCheck(GVHomeFracName(id,false)) && GlobalVariableCheck(GVHomeFracName(id,true));
-}
-double HomeFracClamp(const double f) { return f < 0.0 ? 0.0 : (f > 1.0 ? 1.0 : f); }
-bool GVHomeFracRead(const string id, int &x, int &y)
-{
-   if(!GVHomeFracKnown(id)) return false;
-   const double fx = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false)));
-   const double fy = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true)));
-   int cw = 0, ch = 0; HomeChartSize(cw, ch);
-   x = (int)MathRound(fx * cw);
-   y = (int)MathRound(fy * ch);
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| P-UI-140: Re-derive the orb's and chip's HOME from their stored  |
-//| fractions on every chart-size change.                             |
-//| Called from the CHART_CHANGE branch (immediately, so a resize    |
-//| lands on the same frame) and from the 250 ms OnTimer pass (the   |
-//| safety net for a missed notification, exactly P-PERF-16's shape).|
-//+------------------------------------------------------------------+
-void CircHomesRefresh()
-{
-   int cw = 0, ch = 0; HomeChartSize(cw, ch);
-   static int s_cw = 0, s_ch = 0;
-   if(cw == s_cw && ch == s_ch) return;
-   s_cw = cw; s_ch = ch;
-   int x = 0, y = 0;
-   if(!g_OrbDragging && GVHomeFracRead("ORB", x, y))
-   {
-      CircOrbHomeSet(x, y);
-      if(g_UI.menuVisible) UpdateCircularMenuPosition();
-   }
-   if(!CircTipDragging() && GVHomeFracRead("CHIP", x, y))
-   {
-      CircTipHomeSet(x, y);
-      CircTipPinnedTouch();
-   }
-}
-
-
 // BiotakMenu_C.mqh - BiotakMenu.mqh split 2026-09-29: exact lines 2842-4015, byte-identical, zero renames.
 #ifndef BIOTAK_MENU_C_MQH
 #define BIOTAK_MENU_C_MQH
+
+//+------------------------------------------------------------------+
+//| P-PERF-55 — THE RING IS APPLIED WHEN IT CHANGES, NOT WHEN THE     |
+//| CHART NOTICES SOMETHING.                                          |
+//|                                                                   |
+//| `CHARTEVENT_CHART_CHANGE` is not "the window resized": MT4 fires  |
+//| it on scroll, zoom and every scale change too, so with            |
+//| auto-scroll on it lands many times a second. The branch that       |
+//| answers it called `UpdateCircularMenuPosition()` — and that call   |
+//| re-applied the WHOLE ring through `CircApplyMenuPosition()`, whose |
+//| write set with the ring up is 1 orb + RING_COUNT(9) items x (2     |
+//| `ObjectFind` + 4 `ObjectSetInteger`) + the badge seats + the tools |
+//| row and its header/pager = roughly 60-100 terminal calls, every    |
+//| one of them re-writing a number that had not changed.             |
+//|                                                                   |
+//| `CircLayout(i,x,y)` is a PURE function of (i, menuX, menuY, cw,    |
+//| ch) — `CircFitRadius` beside it already caches on the same four —  |
+//| so the applied position is a derivation of exactly those four plus |
+//| the metrics it read them against, plus what is on screen. When all |
+//| of those are the value the LAST apply already wrote, the write set |
+//| is identical and the call is pure cost. Nothing below the guard    |
+//| can be owed by a chart-change alone: `CircCreateItem`/`CircCreate- |
+//| Orb` position themselves at birth, the sub-panel keeps its OWN     |
+//| shape key (`SubRelayoutIfNeeded`, which still runs), and           |
+//| `SaveUIStates` is compare-guarded on the very values the key holds.|
+//|                                                                   |
+//| The CHROME GENERATION is in the key so this can never skip a       |
+//| rebuild: a newly created object was never placed by the apply the  |
+//| key remembers, so `CreateMenu`/`DeleteRing` bump the counter and   |
+//| the next call always passes. Cost of a miss: two integer reads,    |
+//| two compares and three bool reads. Cost of a hit: those, and the   |
+//| work above is not done.                                            |
+//+------------------------------------------------------------------+
+static int s_circChromeGen = 0;   // bumped by every rebuild of the ring/orb family
 
 void ToolsCreateBadge(const int i)
 {
@@ -3251,9 +3405,14 @@ void CreateMenu()
    UIReleaseClaimReset();
    CircCreateOrb();
    CircRefreshOrbSkin();   // ORBSTATE: bow when closed, TRex when open
+   // P-PERF-55: the family is (re)born here - the apply guard must pass next time.
+   s_circChromeGen++;
    if(!g_UI.menuVisible) return;
-   for(int i = 0; i < RING_COUNT; i++)
-      CircCreateItem(i);
+   // The ring stays hidden while the Tools submenu is open (CreateToolsMenu
+   // deleted it, CircItemAt refuses it) — rebuilding it here painted both.
+   if(!g_ToolsOpen)
+      for(int i = 0; i < RING_COUNT; i++)
+         CircCreateItem(i);
    if(g_ToolsOpen)
       for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
 }
@@ -3362,6 +3521,7 @@ void SubRelayoutIfNeeded()
 //--- wants nothing else — so it is a function, not a loop written twice.
 void DeleteRing()
 {
+   s_circChromeGen++;   // P-PERF-55: the family is gone - a later apply must not be skipped
    for(int i = 0; i < RING_COUNT; i++)
    {
       ObjectDelete(0, CircIcon(i));
@@ -3497,6 +3657,30 @@ void UpdateCircularMenuPosition()
    g_UI.menuX = ClampInt(g_UI.menuX, bnX, bxX);
    g_UI.menuY = ClampInt(g_UI.menuY, bnY, bxY);
 
+   // P-PERF-55 — THE GUARD. Everything below writes what (menuX, menuY, cw, ch, what is
+   // on screen, the chrome generation) already decides, so when those are still the value
+   // the last apply wrote, the write set is IDENTICAL and every terminal call below is
+   // pure cost. This function's only caller is the CHART_CHANGE branch, and MT4 fires
+   // that on scroll and zoom - not only on a resize - so on a scrolling chart the ring
+   // was being re-written many times a second, ~60-100 calls each time.
+   // The clamp above still runs on every call: it is arithmetic on the live pair and it
+   // is what keeps `g_UI` honest, which is upstream of the guard, not downstream of it.
+   const int chromeFlags = (g_UI.menuVisible ? 1 : 0) | (g_ToolsOpen ? 2 : 0);
+   static int s_ucmX = -2147483647, s_ucmY = -2147483647;
+   static int s_ucmCw = 0, s_ucmCh = 0, s_ucmFlags = -1, s_ucmGen = -1;
+   if(g_UI.menuX == s_ucmX && g_UI.menuY == s_ucmY && cw == s_ucmCw && ch == s_ucmCh &&
+      chromeFlags == s_ucmFlags && s_circChromeGen == s_ucmGen)
+   {
+      // The sub-panel keeps its OWN shape key and a settings change can re-shape it with
+      // no move at all, so its own check is never skipped — it is three compares and a
+      // return when nothing changed, and a rebuild when something did.
+      SubRelayoutIfNeeded();
+      return;
+   }
+   s_ucmX = g_UI.menuX;  s_ucmY = g_UI.menuY;
+   s_ucmCw = cw;         s_ucmCh = ch;
+   s_ucmFlags = chromeFlags; s_ucmGen = s_circChromeGen;
+
    CircApplyMenuPosition();
    // A resize / TF switch can change the sub-menu's SHAPE (the arc may no longer
    // fit, or fewer rows may fit and the panel must page). Rebuild only when the
@@ -3504,6 +3688,49 @@ void UpdateCircularMenuPosition()
    SubRelayoutIfNeeded();
    CircTipPinnedTouch();   // P-UI-126: a pinned banner "above the orb" follows by tick, not per move
    SaveUIStates();
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-140 (2026-10-05) — THE PASS THAT KEEPS A PLACE A PLACE.      |
+//| Report: «این دوتا موقع ریستارت ترمینال از جاش تکون میخوره» — the  |
+//| orb and the chip moved on restart. A home is stored as a FRACTION |
+//| of the chart box (BiotakMenu_A), so when the BOX itself changes —  |
+//| a restart that lays the window out again, a resize, maximize /    |
+//| restore, another monitor's DPI, another symbol — the pixels must  |
+//| be RE-DERIVED from that fraction against the NEW metrics. Before   |
+//| this they were the same absolute numbers painted into a different  |
+//| box and then clamped into it, which is the drift.                  |
+//|                                                                   |
+//| The HOME is what is updated, never the live pair: P-UI-131e made   |
+//| the pair a DERIVATION of the home, and a refresh that wrote the    |
+//| pair would be the ratchet that block removed. The repaint then     |
+//| rides the two owners that already exist for a moved orb and for a  |
+//| pinned chip — no third paint path is born here.                    |
+//|                                                                   |
+//| Guards: a live drag owns its surface until release. Cost: two      |
+//| terminal reads per quarter second, and nothing else until the box  |
+//| really is a different box (the common case is two compares).       |
+//| Called from the CHART_CHANGE branch (immediately, so a resize      |
+//| lands on the same frame) and from the 250 ms OnTimer pass (the     |
+//| safety net for a missed notification, exactly P-PERF-16's shape).  |
+//+------------------------------------------------------------------+
+void CircHomesRefresh()
+{
+   int cw = 0, ch = 0; HomeChartSize(cw, ch);
+   static int s_cw = 0, s_ch = 0;
+   if(cw == s_cw && ch == s_ch) return;
+   s_cw = cw; s_ch = ch;
+   int x = 0, y = 0;
+   if(!g_OrbDragging && GVHomeFracRead("ORB", x, y))
+   {
+      CircOrbHomeSet(x, y);                              // the home is the truth
+      if(g_UI.menuVisible) UpdateCircularMenuPosition();  // ...and the pair follows it
+   }
+   if(!CircTipDragging() && GVHomeFracRead("CHIP", x, y))
+   {
+      CircTipHomeSet(x, y);
+      CircTipPinnedTouch();   // the banner re-places itself on the next tick
+   }
 }
 
 static bool g_PnlForegroundWasOn = false;
@@ -3583,6 +3810,25 @@ void CircAbortRingGesture()
 // ══════════════════════════════════════════════════════════════════════════
 void CircReapStaleRingClaims()
 {
+   // P-UI-141 (2026-10-06, user: «منوی اصلی وقتی ریستارت میشه سر جاش
+   // قبلیش نیست»): A DANGLING TRAVELLED DRAG IS AN UNRECORDED ANSWER, NOT
+   // GARBAGE. MEASURED in gvariables.dat: the stored home said bottom-left
+   // (0.0424,0.9493) while the orb painted mid-left — the pair had travelled
+   // and neither the release nor anything after it recorded the home, so the
+   // restart faithfully restored the stale one. The release is not guaranteed
+   // (a button-up the terminal never delivers, a release another surface eats):
+   // then the pair sits travelled, the home sits stale, and the NEXT press —
+   // this one — used to clear the flags and lock the divergence in. So a press
+   // that finds travelled flags commits the pair FIRST, through the same two
+   // calls every release path uses (no new writer), and only then does the
+   // old reap below run. A press with no travel behind it changes nothing (the
+   // save dedupes through its own shadow: zero writes). Cost: two compares on
+   // a press that already reaps; the steady state pays nothing.
+   if(g_OrbMoved || g_OrbWasDragged)
+   {
+      CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates();
+      g_OrbMoved = false;   // consumed (WasDragged stays the click-eater's own)
+   }
    if(g_LongPressItem < 0 && !g_OrbDragging && g_DragOwner != DRAG_MENU) return;
    _LOG_GATE_W Print("[W][UI] P-UI-90: reaped a stale ring claim on a new press "
                      "(orb=", (g_OrbDragging ? 1 : 0), " hold=", g_LongPressItem, ")");
@@ -4157,6 +4403,21 @@ int CircArmTH3Draw()
 #ifndef BIOTAK_MENU_D_MQH
 #define BIOTAK_MENU_D_MQH
 
+// P-HTF-KEY — ONE owner for the HTF overlay switch: the R hotkey, the ring's
+// HTF light and the card's ENABLED row. State + persisted key + mask walk
+// (instant both ways, no delete/rebuild); first ON builds via the walk.
+// Callers own nothing more (P-PERF-24 paints in the owner).
+void SetHTFVisible(const bool on)
+{
+   uint t0 = GetTickCount();
+   g_UI.showHTF = on;
+   GlobalVariableSet(GetGVName("HTF_EN"), on ? 1.0 : 0.0);
+   HTFApplyVisibleMasks();
+   RepaintForDiscreteAction();      // P-PERF-24: the press paints NOW
+   Print("[HTF] set on=", (on ? 1 : 0), " drawn=", g_HTFDrawnCount,
+         " ms=", (int)(GetTickCount() - t0));
+}
+
 //+------------------------------------------------------------------+
 //| Handle Button Click Events                                       |
 //+------------------------------------------------------------------+
@@ -4473,19 +4734,19 @@ int HandleButtonClick(const string clickedObject)
       // TH3 TOOL card's row 0.
       refreshFlags = CircArmTH3Draw();
    }
-   else if(feat == CIR_HTF)
-   {
-      uint htfT0 = GetTickCount();
-      g_UI.showHTF = !g_UI.showHTF;
-      GlobalVariableSet(GetGVName("HTF_EN"), g_UI.showHTF ? 1.0 : 0.0);
-      // P-HTF-KEY: mask walk — instant both ways, no delete/rebuild; first ON
-      // builds via the walk if no family exists yet. Port of MT4 SetHTFVisible().
-      HTFApplyVisibleMasks();
-      Print("[HTF] set on=", (g_UI.showHTF ? 1 : 0), " drawn=", g_HTFDrawnCount,
-            " ms=", (int)(GetTickCount() - htfT0));
-      // P-UI-40b (2026-09-13): the HTF card's row 0 displays THIS flag.
+    else if(feat == CIR_HTF)
+    {
+       SetHTFVisible(!g_UI.showHTF);
+      // P-UI-40b (2026-09-13): the HTF card's row 0 displays THIS flag, and this
+      // file is included BEFORE the panel's - so the ring cannot repaint that card
+      // itself. The ring repairs its own light/status on the next tick
+      // (UpdateMenuSyncIfChanged fingerprints CircFeatureOn), but an open card has
+      // no such net: without this request it kept the previous switch position
+      // until it was reopened. Same asymmetry P-UI-40 fixed for the other
+      // switches; this one was missed because `g_UI.showHTF` was not on the
+      // gate's displayed-state list (it is now).
       RequestUISync();   // P-UI-40b: the HTF card's SHOW row displays this flag
-      refreshFlags = REFRESH_NONE;   // mask walk already handled the repaint path
+      refreshFlags = REFRESH_NONE;   // P-HTF-KEY: the owner masked + painted; a refresh flag would rebuild the family it just kept
    }
    else if(feat == CIR_BASEKNOT)
    {
@@ -4545,7 +4806,9 @@ void ToggleMenuVisibility()
    UIReleaseClaimReset();
    if(willShow)
    {
-      for(int i = 0; i < RING_COUNT; i++) CircCreateItem(i);
+      // Same rule as CreateMenu: no ring behind an open Tools submenu.
+      if(!g_ToolsOpen)
+         for(int i = 0; i < RING_COUNT; i++) CircCreateItem(i);
       if(g_ToolsOpen)
          for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
    }

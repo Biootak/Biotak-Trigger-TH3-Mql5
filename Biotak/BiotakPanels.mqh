@@ -62,6 +62,7 @@
 #resource "\\Files\\Icons\\bk_lock_off.bmp"
 #resource "\\Files\\Icons\\bk_lock_on.bmp"
 #resource "\\Files\\Icons\\bk_del.bmp"
+#resource "\\Files\\Icons\\bk_dirflip.bmp"   // P-BK-111: the direction cell's up/down glyph
 #resource "\\Files\\Icons\\bk_more.bmp"
 #resource "\\Files\\Icons\\bk_chev.bmp"
 #resource "\\Files\\Icons\\bk_dds.bmp"
@@ -423,6 +424,7 @@ string PnlCardKey(const int item)
 {
    if(item==0) return "T";
    if(item==7) return "L";
+   if(item==6) return "R";
    return "";
 }
 
@@ -602,7 +604,7 @@ string PnlHeaderSub(const int item)
    if(item==3)  return "FRACTAL · STANDARD · TARGETS";
    if(item==6)  return "HIGHER TIMEFRAME OVERLAY";
    if(item==7)  return "ONE STYLE FOR ALL LINES";
-   if(item==8)  return "PIN · WIDTH + COLOR";   // P-UI-47: MAGNET retired (BKMAGNET-OFF); BKMAGNET2-OFF keeps it retired
+   if(item==8)  return "LOCK · PIN · WIDTH + COLOR";   // P-UI-101: row 2 is the LOCK (magnet retired)
    if(item==9)  return "ENGINE · SECTION SWAPS WITH MODE";
    if(item==10) return "AUTO / MANUAL STEP ENGINE";
    if(item==11) return "L1 - L5 ZONE TOGGLES";
@@ -778,8 +780,12 @@ int PalTgtToKind(const int t)
    // P-UI-131h: the NAME table's tail (25/26) names the two AUTO edge halves, whose kinds
    // are 26/27 — kind 25 does not exist, so the tail must be MAPPED, not clamped. Clamping
    // it made the cycler label the page "Edge Top" while it edited kind 24 (TRex Spread).
+   // P-PAL-22: P-PAL-19c widened the ring to 29, but the guard below still read
+   // PAL_BASE_TARGETS - 1 (= 28) and swallowed the tail back into identity: slot 25
+   // carried nonexistent kind 25 (dead apply) and 26/27/28 edited one role down.
+   // The guard is the last CONTIGUOUS kind (24); the tail maps over the gap.
    int k = ClampInt(t, 0, PAL_TGT_NAMES_N - 1);
-   if(k <= PAL_BASE_TARGETS - 1) return k;
+   if(k <= PAL_ATR_SPREAD) return k;
    // P-PAL-19: the tail is MAPPED, and it is now four wide: 25/26 name the AUTO
    // edge halves (kinds 26/27) and 27/28 name the strip's two (kinds 28/29). The
    // +1 offset is only valid for the first pair, which is why this is a ladder
@@ -792,7 +798,14 @@ int PalTgtToKind(const int t)
 //--- palette kind → its cycle index
 int PalTgtIndexOfKind(const int k)
 {
-   return ClampInt(k, 0, PAL_TGT_NAMES_N - 1);
+   // P-PAL-22: the inverse of the ladder above. Clamping sent kind 26/27/28 one
+   // slot down (wrong caption) and kind 29 onto 28. Round-trip: 26↔25, 27↔26,
+   // 28↔27, 29↔28; base kinds are identity.
+   if(k <= PAL_ATR_SPREAD) return ClampInt(k, 0, PAL_TGT_NAMES_N - 1);
+   if(k == 26) return 25;
+   if(k == 27) return 26;
+   if(k == 28) return 27;
+   return 28;
 }
 
 string PalTgtLabel(const int t)
@@ -968,6 +981,9 @@ int PaletteApplyTransparency(const int kind, const int tr)
       case PAL_DRAW_BORDER:
       case PAL_DRAW_FILL:
          if(!DrawStripPalTargetLive()) return REFRESH_NONE;
+         //--- P-LVL-COLOR: one level has no tone of its own — the TR track is
+         //--- hidden for it (PalTargetAlpha answers -1), so a drag here is a no-op.
+         if(DrawStripPalTargetIsLevel()) return REFRESH_NONE;
          DrawSlotOpacitySet(DrawStripPalTargetObj(), t, DrawStripPalTargetSlot());
          DrawStripPalRepaintAsk();   // P-PAL-19f: a REQUEST, not a paint — the strip is
                                      // repainted by the entry's bridge, once, after this
@@ -1498,6 +1514,10 @@ void PnlSpecBuild(const int item)
       PnlSpecAdd(2, PNL_K_LEGACY, 7, 1, "crosshair", "H");
       PnlSpecAdd(2, PNL_K_LEGACY, 8, 1, "flag", "P");
       PnlSpecAdd(2, PNL_K_LEGACY, 9, 1, "ruler");
+      // P-LEGATR: the plan's ATR source, APPENDED in its own band (14→16 display
+      // rows, still wide). Address 19 renders here and nowhere else.
+      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "PLAN ATR", 1);
+      PnlSpecAdd(2, PNL_K_LEGACY, 19, 1, "gauge");
       // P-UI-70d: the trade card's personalisation band. The four rows below
       // write the SAME settings the group-13 dialog inputs write (ROW GAP ->
       // P-UI-131: the whole TRADE CARD band moved to the GENERAL card (ROW GAP,
@@ -1512,25 +1532,18 @@ void PnlSpecBuild(const int item)
       PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "CARD COLORS", 1);
       PnlSpecAdd(2, PNL_K_CSET, 14, 5);
    }
-   else if(item == 3)   // TH LABELS (ember) — 6 addresses / 8 display rows
-                        // (P-UI-131: MARGIN BOTTOM renders on the GENERAL card)
-   {
-      PnlSpecAdd(3, PNL_K_SEC, -1, 0, "", "", "TH SOURCES", 3);
-      PnlSpecAdd(3, PNL_K_LEGACY, 0, 1, "wave");
-      PnlSpecAdd(3, PNL_K_LEGACY, 1, 1, "steps");
-      PnlSpecAdd(3, PNL_K_LEGACY, 2, 1, "wave");
-      PnlSpecAdd(3, PNL_K_SEC, -1, 0, "", "", "TARGETS", 1);
-      PnlSpecAdd(3, PNL_K_LEGACY, 3, 1, "target");
-      // P-TH-01: TH PERCENT lives here, not in a band of its own, on purpose:
-      // the card is 8 display rows and `PNL_WIDE_MIN_ROWS` is 10, so a ninth
-      // row keeps it NARROW. A tenth would flip the whole card to the
-      // two-column layout — a redesign, not a research knob.
-      // P-UI-131: MARGIN BOTTOM (address 4) moved to the GENERAL card's grid — it
-      // is a label-grid floor, not a TH-source setting — so this band is one row
-      // and the card is EIGHT display rows (a ninth would flip it to two columns).
-      PnlSpecAdd(3, PNL_K_SEC, -1, 0, "", "", "LAYOUT", 1);
-      PnlSpecAdd(3, PNL_K_LEGACY, 5, 1, "sigma");
-   }
+    else if(item == 3)   // TH LABELS (ember) — 7 addresses / 9 display rows
+                         // (P-UI-131: MARGIN BOTTOM renders on the GENERAL card)
+    {
+       PnlSpecAdd(3, PNL_K_SEC, -1, 0, "", "", "TH SOURCES", 3);
+       PnlSpecAdd(3, PNL_K_LEGACY, 0, 1, "wave");
+       PnlSpecAdd(3, PNL_K_LEGACY, 1, 1, "steps");
+       PnlSpecAdd(3, PNL_K_LEGACY, 2, 1, "wave");
+       PnlSpecAdd(3, PNL_K_SEC, -1, 0, "", "", "TARGETS", 1);
+       PnlSpecAdd(3, PNL_K_LEGACY, 3, 1, "target");
+       PnlSpecAdd(3, PNL_K_SEC, -1, 0, "", "", "LAYOUT", 1);
+       PnlSpecAdd(3, PNL_K_LEGACY, 6, 1, "wave");
+    }
     // TH3TOOL-ON (2026-09-19): the TH3 card is back. Its 8 settings keep their
     // addresses (g_PnlRows[5] was left dormant at 8), so a persisted OV/GV from
     // before the retirement still loads into the row it was written for.
@@ -1607,10 +1620,15 @@ void PnlSpecBuild(const int item)
       // the lock — so it is the first row, above the look settings. It has no
       // glyph chip on purpose: the padlock art belongs to the box strip
       // (bk_lock_*.bmp), and a row may carry none (PnlPaintChip returns early).
-      PnlSpecAdd(8, PNL_K_SW, 2, 1, "");
-      PnlSpecAdd(8, PNL_K_SEC, -1, 0, "", "", "PIN", 2);
-      PnlSpecAdd(8, PNL_K_LEGACY, 0, 1, "weight");
-      PnlSpecAdd(8, PNL_K_LEGACY, 1, 1, "droplet");
+       PnlSpecAdd(8, PNL_K_SW, 2, 1, "");
+       PnlSpecAdd(8, PNL_K_SEC, -1, 0, "", "", "PIN", 2);
+       PnlSpecAdd(8, PNL_K_LEGACY, 0, 1, "weight");
+       PnlSpecAdd(8, PNL_K_LEGACY, 1, 1, "droplet");
+       // P-UI-154: the anchor's START POINT (dialog-only until now) rides here,
+       // address 4 APPENDED so 0..3 keep their numbers and the OV_ keys keep
+       // their meaning. A fifth address, still far below PNL_WIDE_MIN_ROWS.
+       PnlSpecAdd(8, PNL_K_SEC, -1, 0, "", "", "ANCHOR", 1);
+       PnlSpecAdd(8, PNL_K_LEGACY, 4, 1, "wave");
       // BKMAGNET2-OFF (2026-09-15, user decision): the MAGNET band and its two
       // rows are hidden again — the engine is commented, so the rows have no
       // reader by construction (P-UI-47's shape). Setting 3 stays persisted and
@@ -3097,7 +3115,7 @@ int PnlPanelH(const int item)
 }
 int PnlPanelW(const int item)
 {
-   if(item == 13) return PNL_TB_W;   // TV strip is 380px, not a 312 card
+   if(item == 13) return PNL_TB_W;   // the TV strip is its own width, not a 312 card
    return PnlCardW(item);
 }
 
@@ -3538,46 +3556,32 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else if(row==15) { kind=4; label="EX COLOR"; }
       else if(row==16) { kind=4; label="HUNTER COLOR"; }
       else if(row==17) { kind=4; label="TRADE COLOR"; }
-      else             { kind=4; label="SPREAD COLOR"; }
+      else if(row==18) { kind=4; label="SPREAD COLOR"; }
+       // P-LEGATR: APPENDED (row 19), so rows 0..18 keep their addresses and the
+       // persisted OV_ keys keep their meaning.
+      else             { kind=1; label="LEG ATR"; }
    }
-   else if(item==3)   // TH LABELS
-   {
-      if(row==0)       { kind=1; label="TH LABELS"; }
-      else if(row==1)  { kind=1; label="FRACTAL THs"; }
-      else if(row==2)  { kind=1; label="STANDARD THs"; }
-      else if(row==3)  { kind=1; label="TH TARGETS"; }
-      else if(row==4)  { label="MARGIN BOTTOM"; minV=10; maxV=200; }
-      // P-TH-01: the research knob, as the block's trailing fallthrough. That
-      // placement is not cosmetic: `tools/panel-mt4-sim.py` derives the
-      // fallthrough's row number as "how many row branches preceded it"
-      // (`parse_set_def`), so it MUST be the LAST branch in the block or the
-      // simulator reads MARGIN BOTTOM's row as this one and silently drops a
-      // row from the proof. MARGIN BOTTOM therefore gets an EXPLICIT branch of
-      // its own above — which the wiring audit also needs, because it treats
-      // the trailing statement as answering only the card's TOP address.
-      //
-      // (Never write a COMPLETE row-branch test in this comment: `row_arms` in
-      // panel-wiring-audit.py scans the raw text for the whole `if(`+`row`+`==`
-      // shape, so a branch spelled here becomes a phantom arm with no caption
-      // and the audit reports a blank control. This cost one red run already.)
-      //
-      // min 0 = OFF (the professor's table); `TH_PERCENT_OVERRIDE_MAX` is the
-      // slider's own end stop AND the load clamp — one number, so the slider
-      // can always reproduce what it saved. step 1 (not 0.01) is deliberate:
-      // `PnlValueFromX` maps ~230 px of travel onto the range, so a 0.01 grid
-      // would print values no drag can ever land on and 75 — the user's own
-      // example — would be unreachable.
-      else             { label="TH PERCENT"; minV=0; maxV=TH_PERCENT_OVERRIDE_MAX; step=1; unit="%"; }
-   }   // P-UI-126: HOVER CHIP — ONE row, one question. The chip's PLACE is the hand's own
-   // (a drag), so it is not a setting; what IS a setting is when the chip is up:
-   // hover-only («با موس», the shipped default) or always («همیشه فعال باشه»).
-   else if(item==4)
-   {
-      if(row==0)       { kind=1; label="ALWAYS SHOWN"; }
-   }
+    else if(item==3)   // TH LABELS
+    {
+       if(row==0)       { kind=1; label="TH LABELS"; }
+       else if(row==1)  { kind=1; label="FRACTAL THs"; }
+       else if(row==2)  { kind=1; label="STANDARD THs"; }
+       else if(row==3)  { kind=1; label="TH TARGETS"; }
+        else if(row==4)  { label="MARGIN BOTTOM"; minV=10; maxV=200; }
+        // P-TH-VOLNORM: the price-only scale switch, as the block's trailing
+       // fallthrough (the simulator counts preceding branches, so the appended
+       // setting takes the trailing slot and every address above keeps its
+       // number). Switch defaults (kind=1, 0/100): ON/OFF. OFF = classic TH.
+       //
+       // (Never write a COMPLETE row-branch test in this comment: `row_arms` in
+       // panel-wiring-audit.py scans the raw text for the whole `if(`+`row`+`==`
+       // shape, so a branch spelled here becomes a phantom arm with no caption
+       // and the audit reports a blank control. This cost one red run already.)
+       else             { kind=1; label="VOL NORM"; }
+    }
     // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
     // P-TH3-PB-MAN (2026-09-21): BASE PIPS is the trailing fallthrough, like
-    // P-TH-01's TH PERCENT on card 3 — `tools/panel-mt4-sim.py` derives the
+    // VOL NORM on card 3 — `tools/panel-mt4-sim.py` derives the
     // fallthrough's row as "how many row branches preceded it", so it MUST be
     // the LAST branch or the simulator drops a row from the proof. SHOW LABELS
     // therefore gets its own EXPLICIT branch above (the wiring audit also
@@ -3642,22 +3646,27 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
    }
    // item==7 retired Tools/Misc rows are gone (were duplicates of CustomPrice,
    // Zones & the STRUCTURE card) — the slot now hosts the LINES card above.
-   else if(item==8)   // CUSTOM PRICE PIN — the pin only (pip-distance labels
-                      // live on the ATR LABELS card)
-   {
-      if(row==0)       { label="WIDTH"; minV=1; maxV=5; }
-      else if(row==1)  { kind=4; label="COLOR"; }
-      // BKMAGNET2-OFF (2026-09-15): rows kept for the address space only —
-      // no display row renders them (P-UI-47's convention); the engine that
-      // read them is commented in `BaseKnotTool.mqh`.
-      else if(row==2)  { kind=1; label="MAGNET"; }
-      else             { label="MAGNET SENS"; minV=0; maxV=100; unit="p"; }
-   }
+    else if(item==8)   // CUSTOM PRICE PIN — the pin only (pip-distance labels
+                       // live on the ATR LABELS card)
+    {
+       if(row==0)       { label="WIDTH"; minV=1; maxV=5; }
+       else if(row==1)  { kind=4; label="COLOR"; }
+       // P-UI-101 (2026-09-22): row 2 is the LOCK now (the magnet's retired row).
+       // Row 3 stays for the address space only — no display row renders it
+       // (P-UI-47's convention); the engine that read it is commented.
+       else if(row==2)  { kind=1; label="LOCK"; }
+       else if(row==3)  { label="MAGNET SENS"; minV=0; maxV=100; unit="p"; }
+       // P-UI-154: the START POINT as the block's trailing fallthrough (four
+       // preceding branches, so the simulator reads row four). kind=2 options
+       // run in enum order (ConstantsAndEnums.mqh:370): the press lands 0..4
+       // and the apply writes the same number back — no index table to drift.
+       else             { kind=2; label="START POINT"; opts="Midpoint|High|Low|Custom|Prev Close"; minV=0; maxV=4; }
+    }
     else if(item==9)   // STEP MODE — mode segments + the SELECTED mode's
                        // own settings inline below + MAX LEVELS last.
     {
        if(row==0) { kind=2; label="STEP MODE"; opts="TH|SS-LS|Combo|Factor"; minV=0; maxV=3; }
-       else if(row==PnlStepMaxLevelsRow()) { label="MAX LEVELS"; minV=1; maxV=500; }
+       else if(row==PnlStepMaxLevelsRow()) { label="MAX LEVELS"; minV=1; maxV=MAX_SAFE_LEVELS; }
        else PnlStepSectionRowDef(row-1, kind, label, minV, maxV, step, unit, opts);
     }
    else if(item==11)  // STRUCTURE — sub-card opened from the Zones & Levels card
@@ -3711,7 +3720,7 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
    else if(item==14)  // P-UI-131 — GENERAL SETTINGS (cross-card). Every bound here is
    {                  // the SAME number the loader clamps with, so a saved value is
                       // one this control can reproduce.
-      if(row==0)       { label="MAX LEVELS"; minV=1; maxV=500; }
+      if(row==0)       { label="MAX LEVELS"; minV=1; maxV=MAX_SAFE_LEVELS; }
       else if(row==1)  { label="LABEL SIZE"; minV=4; maxV=24; unit="pt"; }
       else if(row==2)  { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
       else if(row==3)  { kind=2; label="FONT"; opts=LabelFontOpts(); minV=0; maxV=LABEL_FONT_N-1; }
@@ -4076,8 +4085,9 @@ double PnlDefValSet(const int item,const int row)
               // P-UI-131h: the sentinel shape card 0 uses for its COLOR rows, and -1 =
               // AUTO for the two opacities — the factory look IS the derivation, so
               // Reset returns to the soft, surface-anchored edge and to nothing pinned.
-              if(row==14 || row==15) return 3;   // COLOR rows → palette sentinel
-              if(row==16 || row==17) return -1;  // AUTO
+               if(row==14 || row==15) return 3;   // COLOR rows → palette sentinel
+               if(row==16) return -1;  // TOP OPACITY AUTO
+               if(row==17) return 1;   // P-UI-143: BOTTOM OPACITY card look as shipped
               if(row==8) return (FactoryDefault(FF_LS_FIRST)>0.5)?1.0:0.0;
               if(row==9) return (FactoryDefault(FF_SHOW_MIDPOINT)>0.5)?1.0:0.0;
               return 0;                        // rows 10-11 = NAV rows
@@ -4099,13 +4109,14 @@ double PnlDefValSet(const int item,const int row)
               // mirrors the COUNT COLOR row above (PnlColorKindSet owns the
               // colour itself, so the reset path goes through PnlSetColor).
               if(row>=14 && row<=18) return 3;
-              return FactoryDefault(FF_TRADE_MARGIN);
+              if(row==19) return (FactoryDefault(FF_USE_LEG_ATR)>0.5)?1.0:0.0;   // P-LEGATR (0 = OFF)
+              return (FactoryDefault(FF_USE_LEG_ATR)>0.5)?1.0:0.0;   // trailing answers the TOP address (row 19)
       case 3: if(row==0) return (FactoryDefault(FF_SHOW_TH_LABELS)>0.5)?1.0:0.0;
               if(row==1) return (FactoryDefault(FF_TH_FRACTAL)>0.5)?1.0:0.0;
               if(row==2) return (FactoryDefault(FF_TH_STANDARD)>0.5)?1.0:0.0;
               if(row==3) return (FactoryDefault(FF_TH_TARGETS)>0.5)?1.0:0.0;
               if(row==4) return 40;                    // default margin bottom
-              if(row==5) return FactoryDefault(FF_TH_PERCENT);   // P-TH-01 — 0 = professor's table
+              if(row==6) return 0.0;                    // P-TH-VOLNORM — OFF = classic TH (address 5 retired with the knob)
               return 40;                               // default margin bottom
        // VIEWLOCK-OFF: case 4: return 0.0;   // view lock off by default
        // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
@@ -4145,11 +4156,12 @@ double PnlDefValSet(const int item,const int row)
               if(row==4) return FactoryDefault(FF_LINE_TRANSPARENCY);
               return 3;   // row 5 = COLOR row → palette sentinel
       case 8: if(row==0) return FactoryDefault(FF_CUSTOM_WIDTH);
-              // P-UI-101: row 2 is the LOCK now (the magnet's retired row). Its
-              // factory default is "unlocked" — a fresh placement is free.
-              if(row==2) return 0.0;
-              if(row==3) return FactoryDefault(FF_MAGNET_SENS);
-              return 3;   // COLOR row → palette sentinel
+               // P-UI-101: row 2 is the LOCK now (the magnet's retired row). Its
+               // factory default is "unlocked" — a fresh placement is free.
+               if(row==2) return 0.0;
+               if(row==3) return FactoryDefault(FF_MAGNET_SENS);
+               if(row==4) return (int)inpTHStartPointType;   // P-UI-154: factory = the dialog seed
+               return 3;   // COLOR row → palette sentinel
       case 9: if(row==0) return (int)FactoryDefault(FF_STEP_CALC_MODE);
               if(row==PnlStepMaxLevelsRow()) return FactoryDefault(FF_MAX_LEVELS);
               return PnlStepSectionDefVal(row-1);
@@ -4308,7 +4320,8 @@ double PnlCurrentSet(const int item,const int row)
               if(row==12) return g_trexStampGapRows;
               if(row==13) return g_tradeMarginBottom;
               if(row>=14 && row<=18) return 0;   // palette-only (P-UI-70d)
-              return g_tradeMarginBottom;
+              if(row==19) return g_useLegATR?1.0:0.0;   // P-LEGATR (not a visibility family: no mute term)
+              return g_useLegATR?1.0:0.0;   // trailing answers the TOP address (row 19)
       case 3: // P-UI-93: SetTHLabelsVisibility spells its mask
               // `(mode != 0) && !IsIndicatorHidden()`, so the TH family's master
               // row answers the mute. Rows 1/2/3 are the mode's SOURCES and the
@@ -4317,11 +4330,11 @@ double PnlCurrentSet(const int item,const int row)
               if(row==1) return g_showFractalTHs?1.0:0.0;
               if(row==2) return g_showStandardTHs?1.0:0.0;
               if(row==3) return g_showTHTargets?1.0:0.0;
-              // P-TH-01: row 4 is spelled out rather than left to the trailing
+              // Row 4 is spelled out rather than left to the trailing
               // `return` below, because the wiring audit reads the trailing
-              // statement as answering only the card's TOP address (setting 5).
+              // statement as answering only the card's TOP address.
               if(row==4) return g_thLabelsMarginBottom;
-              if(row==5) return g_thPercentOverride;   // P-TH-01 (0 = OFF)
+              if(row==6) return g_thVolNorm?1.0:0.0;   // P-TH-VOLNORM (address 5 retired with the knob)
               return g_thLabelsMarginBottom;
        case 4: if(row==0) return g_UI.tipPin?1.0:0.0;   // P-UI-126: ALWAYS SHOWN
                return 0.0;
@@ -4350,8 +4363,9 @@ double PnlCurrentSet(const int item,const int row)
               if(row==4) return g_lineTransparency;
               return 0;   // row 5 = COLOR row (palette only)
       case 8: if(row==0) return g_customPriceLevelWidth;
-              if(row==2) return g_customPriceLocked ? 1.0 : 0.0;   // P-UI-101
-              return g_magnetSensitivityPips;
+               if(row==2) return g_customPriceLocked ? 1.0 : 0.0;   // P-UI-101
+               if(row==4) return (int)g_thStartPointType;   // P-UI-154: live type (override/placement/dialog)
+               return g_magnetSensitivityPips;
       case 9: if(row==0) return (int)g_stepCalculationMode;
               if(row==PnlStepMaxLevelsRow()) return g_maxLevels;
               return PnlStepSectionCurrent(row-1);
@@ -4554,7 +4568,13 @@ int PnlApplySet(const int item,const int row,const double v)
                             g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
          else if(row==12) { g_trexStampGapRows=ClampInt((int)MathRound(v),0,TREX_CARD_MAX_GAP_ROWS);
                             g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
-         else             { g_tradeMarginBottom=ClampInt((int)MathRound(v),0,TREX_CARD_MAX_MARGIN_BOTTOM);
+         else if(row==13) { g_tradeMarginBottom=ClampInt((int)MathRound(v),0,TREX_CARD_MAX_MARGIN_BOTTOM);
+                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+         // P-LEGATR (trailing answers the TOP address, row 19): the plan's ATR
+         // source. ON = pre-CP leg composite, OFF = the live read (shipped
+         // numbers). The relayout re-resolves every plan leg at once.
+         else             { g_useLegATR=(v>0.5);
+                            RuntimeSettingsSaveOverridesThrottled();   // OV_ALG
                             g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
          break;
       case 3:   // TH LABELS — single source of truth is g_thLabelsMode;
@@ -4625,36 +4645,24 @@ int PnlApplySet(const int item,const int row,const double v)
          // trailing `else` below, because the wiring audit reads the trailing
          // statement as answering only the card's TOP address (setting 5).
          else if(row==4)  { g_thLabelsMarginBottom=ClampInt((int)MathRound(v),10,200); g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
-         // P-TH-01 (2026-09-18) — THE TH PERCENTAGE, LIVE.
-         //
-         // User: «این درصد محاسبات هم th هم بشه تنظیم کرد برای تحقیقات لازم
-         // دارمش» + «پنل، زنده», with the limit «بقیه دست نمیخوره روابطه به
-         // جایی 66 دیگه چیزها میاد».
-         //
-         // The row writes ONE number, `g_thPercentOverride`, and NOTHING else:
-         // every derived value (the drawn TH step, Pattern, Trigger, the label
-         // strip) re-resolves through `FractalPercentScale()` on the next pass,
-         // so the ladder's internal relationships cannot be broken by an edit
-         // here. 0 = OFF = the professor's table, unchanged.
-         //
-         // THE CACHE IS THE TRAP. `CalculateTimeframeTH` stores the percentage
-         // it resolved, so a knob change that did not invalidate the cache
-         // would keep drawing the OLD ladder until some unrelated event (a TF
-         // switch, a re-attach) happened to clear it — the classic "the slider
-         // moves and nothing changes". `InvalidateTimeframeDependentCaches()`
-         // is the existing owner of exactly that invalidation.
-         //
-         // The write is guarded by `!=` so a drag that lands on the value it
-         // already holds returns REFRESH_NONE and costs nothing: a live gesture
-         // sends a batch per frame, and repainting a 43200-bar chart for a
-         // no-op frame is the one way this row could make the panel feel slow.
-         else if(row==5)
+         // P-TH-VOLNORM: the price-only scale switch. Writes ONE flag; the
+         // label pass re-resolves V through THVolNormLabelV, so OFF restores
+         // the classic numbers with no other state to unwind. Guarded by
+         // `!=`: a no-op press costs nothing.
+         else if(row==6)
          {
-            double nv = ClampSettingDbl(v, 0.0, TH_PERCENT_OVERRIDE_MAX);
-            if(nv != g_thPercentOverride)
+            bool nvOn = (v>0.5);
+            if(nvOn != g_thVolNorm)
             {
-               g_thPercentOverride = nv;
-               InvalidateTimeframeDependentCaches();
+               g_thVolNorm = nvOn;
+               if(nvOn) g_fractalShift = 0;   // the jump stands down: rung back to base (OFF resumes via updates)
+               else UpdateATRScalingFactor(g_dailyClosePriceForTH, GetCachedDigits(), true);   // forced: snap the jump back in THIS press, not at the background gate
+               // Toggle witness (ungated: a press is rare): what the hand asked,
+               // and what the jump stood at after it.
+               Print("[P-LBL] TH volnorm toggle ", (nvOn ? "ON" : "OFF"),
+                     " shift=", g_fractalShift);
+               InvalidateTimeframeDependentCaches();   // the rung resolution moved under the pct cache
+               RuntimeSettingsSaveOverridesThrottled();   // OV_TVN
                g_labelsRelayoutNeeded=true; flags=REFRESH_ALL;
             }
          }
@@ -4691,7 +4699,7 @@ int PnlApplySet(const int item,const int row,const double v)
          // something — a press that changed nothing stays silent.
          {
             double htfBefore = PnlCurrent(6, row);
-         if(row==0)       { g_UI.showHTF=(v>0.5); flags=REFRESH_HTF; }
+          if(row==0)       { SetHTFVisible(v>0.5); flags=REFRESH_NONE; }   // P-HTF-KEY: owner masked + painted
          else if(row==1)
          {
             // P-UI-92: option 0/1 are the DYNAMIC rungs (they follow the
@@ -4730,11 +4738,42 @@ int PnlApplySet(const int item,const int row,const double v)
          break;
       case 8:   // CUSTOM PRICE PIN — the pin only
          if(row==0)       { g_customPriceLevelWidth=ClampInt((int)MathRound(v),1,5); flags=REFRESH_BUFFERS; }
-         // P-UI-101: row 2 is the LOCK — the one control the hold-on-line gesture
-         // exists for. It goes through the ONE owner, which is also where the
-         // lock is ENFORCED (a locked line never arms) and persisted.
-         else if(row==2)  { CustomPriceLineOwnLock(v > 0.5); flags=REFRESH_BUFFERS; }
-         else             { g_magnetSensitivityPips=ClampInt((int)MathRound(v),0,100); RuntimeSettingsSaveOverridesThrottled(); }
+          // P-UI-101: row 2 is the LOCK — the one control the hold-on-line gesture
+          // exists for. It goes through the ONE owner, which is also where the
+          // lock is ENFORCED (a locked line never arms) and persisted.
+          else if(row==2)  { CustomPriceLineOwnLock(v > 0.5); flags=REFRESH_BUFFERS; }
+          // P-UI-154: START POINT. A bare write would die on the next frame:
+          // the per-frame resolver re-derives the type from placement/seed
+          // (EventHandlers_Calc.mqh:1205), so the row takes any placement down
+          // first (like Q) and records an override the resolver honors. No
+          // mirror/FF_/OV_: session-live like its ten sibling writers, and the
+          // dialog seed stays the durable value. Custom arms click-to-place
+          // (the PIN button's shape); the other four switch the anchor.
+          else if(row==4)
+          {
+             ENUM_TH_START_POINT_TYPE nvSp = (ENUM_TH_START_POINT_TYPE)ClampInt((int)MathRound(v), 0, 4);
+             if((int)nvSp != (int)g_thStartPointType || nvSp == TH_START_POINT_CUSTOM_PRICE)
+             {
+                if(nvSp == TH_START_POINT_CUSTOM_PRICE)
+                {
+                   g_startPointOverride = -1;
+                   g_waitingForCustomPriceClick = true;
+                   g_customPriceKeyboardOverride = true;
+                   ObjectDelete(0, g_customPriceHorizontalLineName);
+                   g_customPriceLineCreated = false;
+                }
+                else
+                {
+                   CustomPriceForgetPlacement();
+                   g_startPointOverride = (int)nvSp;
+                   g_thStartPointType = nvSp;
+                }
+                RequestUISync();
+                g_forceClearOnNextDraw = true; g_redrawTHLevelsNeeded = true;
+                g_labelsRelayoutNeeded = true; flags = REFRESH_ALL;
+             }
+          }
+          else             { g_magnetSensitivityPips=ClampInt((int)MathRound(v),0,100); RuntimeSettingsSaveOverridesThrottled(); }
          break;
       case 9:   // STEP MODE — mode segments + the SELECTED mode's own
                 // settings inline below + MAX LEVELS last. Section rows
@@ -4750,7 +4789,7 @@ int PnlApplySet(const int item,const int row,const double v)
          }
          else if(row==PnlStepMaxLevelsRow())
          {
-            g_maxLevels=ClampInt((int)MathRound(v),1,500);
+            g_maxLevels=ClampInt((int)MathRound(v),1,MAX_SAFE_LEVELS);
             g_redrawTHLevelsNeeded=true; flags=REFRESH_RECALC;
          }
          else
@@ -5030,8 +5069,8 @@ string BkMiniSlotName(const int idx)
       case 2: return "TBtext";     // T → Text tab of card 12
       case 3: return "TBstyle";    // STYLE ▾ dropdown
       case 4: return "TBwidth";    // WIDTH Npx ▾ dropdown
-      case 5: return "TBlock";     // padlock (held box)
-      case 6: return "TBdel";      // trash (held box)
+      case 5:  return "TBlock";     // padlock (held box)
+      case 6:  return "TBdel";      // trash (held box)
       default: return "TBmore";    // ••• → full Base Box card 12
    }
 }
@@ -5589,6 +5628,14 @@ void PnlComputePosition(const int item,const int ph,int &px,int &py)
    if(cw<=0) cw=1920;
    if(ch<=0) ch=1080;
    int pw = PnlPanelW(item);
+
+   if(g_PnlPinSpot)
+   {
+      g_PnlPinSpot = false;
+      px = (int)MathMax(4, MathMin(cw - pw - 8, g_PnlX[item]));
+      py = (int)MathMax(4, MathMin(ch - ph - PNL_BOTTOM_SAFE, g_PnlY[item]));
+      return;
+   }
 
    // P-UI-91: the two rects every spot must clear — the ring/orb box, and the
    // band the VISIBLE price action occupies (measured once per open; `false`
@@ -6695,8 +6742,10 @@ int PnlKeyMasterSet(const int item)
    // toggles:
    //   card 0  (T) -> 3 SHOW       == the T hotkey, g_triggerLevelsEnabled
    //   card 7  (L) -> 1 SHOW       == the L hotkey, g_linesVisible
+   //   card 6  (R) -> 0 ENABLED    == the R hotkey, g_UI.showHTF
    if(item == 0) return 3;
    if(item == 7) return 1;
+   if(item == 6) return 0;
    return -1;   // a .key with no master stays a hint: nothing to press
 }
 
@@ -7626,7 +7675,9 @@ void PnlRebuildKeepSpot(const int item)
    int sx=g_PnlX[item], sy=g_PnlY[item];
    bool wm=g_PnlManualPos[item];
    g_PnlManualPos[item]=true; g_PnlX[item]=sx; g_PnlY[item]=sy;
+   g_PnlPinSpot=true;
    PnlOpen(item);
+   g_PnlPinSpot=false;
    g_PnlManualPos[item]=wm;
 }
 
@@ -7761,7 +7812,7 @@ int PnlApplyOption(const int item,const int row,const int idx)
 {
    int flags=PnlApply(item,row,(double)idx);
    PnlDdClose();      // popover gone before the rebuild (destroy also covers)
-   PnlOpen(item);     // full rebuild — reshape-safe like TAB switches
+   PnlRebuildKeepSpot(item);   // same card rebuilt on the spot, never re-anchored
    return flags;
 }
 
@@ -10393,6 +10444,11 @@ void HandleUIChartEvent(const int id, const long &lparam, const double &dparam, 
       // cached UI metrics here so the first reader after this event re-reads the
       // size once, instead of every hit test re-reading it.
       CircUIMetricsInvalidate();
+      // P-UI-140: and the two STORED places re-derive themselves from their fractions
+      // BEFORE anything paints them, so a resize / maximize / restore / DPI change
+      // lands on this frame instead of waiting for the 250 ms safety pass. This is
+      // the scenario the report names first; the timer line covers a missed event.
+      CircHomesRefresh();
       if(g_UI.menuVisible) UpdateCircularMenuPosition();
       // P-UI-93: and the event a DPI change is most likely to arrive on (a window
       // dragged to another monitor is resized by the terminal first). The probe is
@@ -10491,6 +10547,30 @@ void SnapshotOpenSurfaces()
    GlobalVariableSet(GetGVName("TOOLS"), g_ToolsOpen ? 1.0 : 0.0);
 }
 
+// P-UI-142: reopen what the snapshot saw open — once, on the first tick after a
+// FRESH attach (terminal restart / re-add). A timeframe switch closes panels by
+// design: the switch stamp is fresh then, so this stays out of its way. Item 13
+// (box-bound mini strip) is never reopened blind; an already-open card wins.
+void PnlRestoreSaved()
+{
+   static bool done = false;
+   if(done) return;
+   done = true;
+   if(g_PnlOpen >= 0) return;
+   string vn = GetGVName("PNLOPN");
+   if(!GlobalVariableCheck(vn)) return;
+   int want = (int)GlobalVariableGet(vn);
+   if(want < 0 || want >= PNL_COUNT || want == 13) return;
+   string stamp = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
+   datetime nowT = TimeCurrent();
+   if(nowT > 0 && GlobalVariableCheck(stamp))
+   {
+      datetime lastSw = (datetime)GlobalVariableGet(stamp);
+      if(lastSw > 0 && (nowT - lastSw) <= 20) return;   // a switch just closed these: stay closed
+   }
+   PnlOpen(want);
+}
+
 //--- per-tick / per-bar UI refresh (HTF forming candle + menu badge sync)
 //--- P-UI-75a: THE DRAG'S POLLED SHADOW — the tick/timer half of the grab.
 //|     A press that never moved emits NO CHARTEVENT_MOUSE_MOVE (the P-BK-03
@@ -10558,12 +10638,12 @@ void PnlDragPoll()
 void RefreshKitOnBar()
 {
    // Called from OnCalculate AND OnTimer — i.e. on every tick twice.
+   PnlRestoreSaved();   // P-UI-142: once — reopens the teardown snapshot's panel, if any
    // RefreshUIPerTick() already self-throttles (500ms + change guards), so
    // this is a straight pass-through; kept as a seam for future bar-only work.
    RefreshUIPerTick();
    BkHoldPoll();   // stationary-press hold needs key-state polling (no event exists for it)
    CpHoldPoll();   // P-UI-101: the custom price line's own hold, same zero-move backup
-   DrawStripHoldPollAt(g_LastUIX, g_LastUIY, UILeftButtonDown());   // P-UI-113: drawings' left-hold
    DrawStripHoldSelectPoll();   // P-UI-113g: restore native selection after MT4's release
    BoxExtrasPump();             // P-DRAW-21/22: box mid follow + extend steps (2s/new-bar throttled)
    // P-UI-127: the card drag's polled shadow stays out, on its own measurement

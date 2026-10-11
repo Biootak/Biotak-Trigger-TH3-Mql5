@@ -136,14 +136,12 @@ static bool g_showStructureL3 = true;                            // [09.2] inpSh
 static bool g_showStructureL4 = true;                            // [09.2] inpShowStructureL4
 static bool g_showStructureL5 = true;                            // [09.2] inpShowStructureL5
 static bool g_showMidpointLine = true;                           // [03] inpShowMidpointLine
-static bool g_showMidZones = false;                              // [07.1] inpShowMidZones.
-                                                                 // P-UI-119: the level families
-                                                                 // start OFF (user order).
+static bool g_showMidZones = true;                               // [07.1] inpShowMidZones (P-UI-143: card look as shipped)
 static ENUM_ZONE_STYLE g_midZoneStyle = ZONE_STYLE_BOX_FILLED;   // [07.1] inpMidZoneStyle
-static int g_midZoneTransparency = 50;                           // [07.2] inpMidZoneTransparency
-static double g_midZoneHeightPercent = 33.0;                     // [07.2] inpMidZoneHeightPercent
+static int g_midZoneTransparency = 66;                           // [07.2] inpMidZoneTransparency (P-UI-143)
+static double g_midZoneHeightPercent = 50.0;                     // [07.2] inpMidZoneHeightPercent
 static ENUM_LINE_STYLE g_midZoneBorderStyle = STYLE_SOLID;       // [07.2] inpMidZoneBorderStyle
-static int g_midZoneBorderWidth = 1;                             // [07.2] inpMidZoneBorderWidth
+static int g_midZoneBorderWidth = 5;                             // [07.2] inpMidZoneBorderWidth (P-UI-143)
 // P-UI-63: the EDGE's transparency, the band's sibling. `g_midZoneTransparency` owns the
 // BAND (the filled rectangle); this one owns the edge the BORDER / BORDER WIDTH rows
 // style, so the two can be set apart - the reported «شفافیت خط و زون جدا از هم باشد».
@@ -156,7 +154,7 @@ static int g_midZoneBorderTransparency = 50;                     // [07.2] inpMi
 static color g_zoneEdgeTopColor = clrNONE;
 static color g_zoneEdgeBottomColor = clrNONE;
 static int   g_zoneEdgeTopTransparency = -1;
-static int   g_zoneEdgeBottomTransparency = -1;
+static int   g_zoneEdgeBottomTransparency = 1;   // P-UI-143: card look as shipped (was AUTO)
 static bool g_showPipDistanceLabels = true;                      // [03] inpShowPipDistanceLabels
 static bool g_showATRLabels = false;                             // [03] inpShowATRLabels
 static bool g_showATRTargets = true;                             // [03] inpShowATRTargets
@@ -171,6 +169,10 @@ static int g_atrLabelRowGap = 10;                                // [03] inpATRT
 static int g_atrTradeFontSize = 0;                               // [03] inpATRTradeLabelFontSize (0 = follow inpFontSize)
 static int g_trexStampGapRows = 0;                               // [13] inpTrexStampGapRows
 static int g_tradeMarginBottom = 8;                              // [13] inpLabelsMarginBottom (the card's floor)
+// P-LEGATR: the plan's ATR source. OFF = the live composite (shipped numbers);
+// ON = the pre-CP leg composite (TradePlanLegAnchor's as-of read). Panel switch
+// on the ATR LABELS card, persisted as OV_ALG, FF_ address appended (never renumbered).
+static bool g_useLegATR = false;                                 // inpUseLegATR
 // P-UI-131 — the LABEL GRID's own two knobs, promoted from "Inputs only" to live
 // settings so the GENERAL SETTINGS card can drive them. Each has ONE reader family
 // (the label layout), so the dialog input and the panel row are the same value.
@@ -203,12 +205,8 @@ static int g_countdownGapPx = 6;                                 // [03] inpCoun
 static bool g_showTHLabels = false;                              // [03] inpShowTHLabels
 static bool g_showFractalTHs = false;                            // [03] inpShowFractalTHs
 static bool g_showStandardTHs = false;                           // [03] inpShowStandardTHs
+static bool g_thVolNorm = false;                                 // [03] inpTHVolNorm (P-TH-VOLNORM)
 static bool g_showTHTargets = true;                              // [03] inpShowTHTargets
-// [01] P-TH-01 — the TH percentage for THIS chart's rung (0 = the professor's
-// table). The ladder itself is NOT stored here: `FractalPercentScale` derives the
-// ratio from this one number, so a panel edit and the engine can never hold two
-// different ladders. See the Input's own note in PropertiesAndInputs.mqh.
-static double g_thPercentOverride = 0.0;                         // [01] inpTHPercentOverride
 static int g_thLabelsMarginBottom = 40;                          // [13] inpTHLabelsMarginBottom
 static bool g_enableTH3Tool = true;                              // [14] inpEnableTH3Tool
 static ENUM_TH3_DRAWING_MODE g_th3DrawingMode = TH3_MODE_ABCD;  // [14] inpTH3DrawingMode
@@ -219,7 +217,7 @@ static ENUM_LINE_STYLE g_th3Style = STYLE_SOLID;                 // [14] inpTH3S
 static color g_th3Color = clrDarkBlue;                           // [14] inpTH3Color
 static color g_th3PipTextColor = clrDarkBlue;                    // [14] inpTH3PipTextColor
 static bool g_showTH3Labels = true;                              // [14] inpShowTH3Labels
-static bool g_showMotherPivotZone = true;                        // [14] inpShowMotherPivotZone (P-TH3-P6e)
+static bool g_showMotherPivotZone = false;                       // [14] inpShowMotherPivotZone (P-TH3-DISC: detector zone OFF)
 static int g_customPriceLevelWidth = 1;                          // [02] inpCustomPriceLevelWidth
 static color g_customPriceLevelColor = clrDodgerBlue;            // [02] inpCustomPriceLevelColor
 static int g_customPriceTransparency = 0;                        // palette TR (default solid)
@@ -352,7 +350,7 @@ enum FactorySetting
    FF_BK_ALIGN,          // inpBKAlign
    FF_BK_VALIGN,         // inpBKVAlign
     FF_BK_INFO_SIZE,      // inpBKInfoFontSize (P-BK-27 — appended: FF_ addresses never renumber)
-    FF_TH_PERCENT,        // inpTHPercentOverride (P-TH-01 — appended for the same reason)
+     FF_TH_PERCENT,        // RETIRED (P-TH-01 removed 2026-10-08: knob gone, scale is 1.0) — slot kept: FF_ addresses never renumber
     FF_TH3_PIVOT_BASE,    // inpTH3PivotBasePips (P-TH3-PB-MAN — appended for the same reason)
     FF_LABEL_SIZE,        // inpFontSize (P-UI-131 — appended: FF_ addresses never renumber)
     FF_LABEL_ROW_GAP,     // inpLabelRowGap (P-UI-131)
@@ -361,8 +359,10 @@ enum FactorySetting
     FF_MARGIN_LEFT,       // inpLabelsMarginLeft (P-UI-131)
     FF_COLUMN_GAP,        // inpLabelColumnGap (P-UI-131)
     FF_SECTION_GAP,       // inpSectionGap (P-UI-131)
-    FF_MAX_LABEL_W,       // inpMaxLabelWidth (P-UI-131)
-    FF_COUNT
+     FF_MAX_LABEL_W,       // inpMaxLabelWidth (P-UI-131)
+     FF_USE_LEG_ATR,       // inpUseLegATR (P-LEGATR — appended: FF_ addresses never renumber)
+     FF_TH_VOLNORM,        // inpTHVolNorm (P-TH-VOLNORM — appended: FF_ addresses never renumber)
+     FF_COUNT
 };
 static double g_factoryDefaults[FF_COUNT];
 
@@ -425,7 +425,6 @@ void RuntimeSettingsInit()
    g_factoryDefaults[FF_TH_STANDARD]         = inpShowStandardTHs;
    g_factoryDefaults[FF_TH_TARGETS]          = inpShowTHTargets;
    g_factoryDefaults[FF_TH_MARGIN_BOTTOM]    = inpTHLabelsMarginBottom;
-   g_factoryDefaults[FF_TH_PERCENT]          = 0.0;   // P-TH-01 RETIRED 2026-10-08 — slot kept, always 0
    g_factoryDefaults[FF_LABEL_SIZE]          = inpFontSize;            // P-UI-131
    g_factoryDefaults[FF_LABEL_ROW_GAP]       = inpLabelRowGap;         // P-UI-131
    g_factoryDefaults[FF_LABEL_FONT]          = LabelFontIdxOf(inpFontName);
@@ -433,7 +432,9 @@ void RuntimeSettingsInit()
    g_factoryDefaults[FF_MARGIN_LEFT]         = inpLabelsMarginLeft;
    g_factoryDefaults[FF_COLUMN_GAP]          = inpLabelColumnGap;
    g_factoryDefaults[FF_SECTION_GAP]         = inpSectionGap;
-   g_factoryDefaults[FF_MAX_LABEL_W]         = inpMaxLabelWidth;
+    g_factoryDefaults[FF_MAX_LABEL_W]         = inpMaxLabelWidth;
+    g_factoryDefaults[FF_USE_LEG_ATR]         = inpUseLegATR;   // P-LEGATR (seeded HERE, above the #defines, like every mirror)
+    g_factoryDefaults[FF_TH_VOLNORM]          = inpTHVolNorm;   // P-TH-VOLNORM (OFF = classic TH)
 #ifndef BUILD_LITE
     // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
     g_factoryDefaults[FF_ENABLE_TH3]          = inpEnableTH3Tool;
@@ -524,6 +525,8 @@ void RuntimeSettingsInit()
    g_showATRTradeSLLabels = inpShowATRTradeSLLabels;
    g_showATRTradeTPLabels = inpShowATRTradeTPLabels;
    g_atrLabelRowGap = inpATRTradeLabelRowGap;
+   g_useLegATR = inpUseLegATR;   // P-LEGATR (seeded HERE, above the #defines — below it this is a no-op self-assign)
+   g_thVolNorm = inpTHVolNorm;   // P-TH-VOLNORM (seeded HERE, above the #defines)
    g_showLiveCountdown = inpShowLiveCountdown;
    g_countdownColor = inpCountdownColor;
    g_countdownFontSize = inpCountdownFontSize;
@@ -615,9 +618,6 @@ void RuntimeSettingsInit()
    g_sectionGap = inpSectionGap;
    g_maxLabelWidth = inpMaxLabelWidth;
 
-   // P-TH-01 RETIRED 2026-10-08: knob gone from inputs, scale is 1.0, override is 0.
-   g_thPercentOverride = 0.0;
-
 #ifndef BUILD_LITE
     // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
     // [14] TH3 TOOL
@@ -706,6 +706,7 @@ void RuntimeSettingsInit()
 #define inpShowATRTradeSLLabels g_showATRTradeSLLabels
 #define inpShowATRTradeTPLabels g_showATRTradeTPLabels
 #define inpATRTradeLabelRowGap g_atrLabelRowGap
+#define inpUseLegATR g_useLegATR   // P-LEGATR
 #define inpATRTradeLabelFontSize g_atrTradeFontSize
 #define inpTrexStampGapRows g_trexStampGapRows
 #define inpLabelsMarginBottom g_tradeMarginBottom
@@ -737,9 +738,9 @@ string LabelFontName()
 #define inpShowTHLabels g_showTHLabels
 #define inpShowFractalTHs g_showFractalTHs
 #define inpShowStandardTHs g_showStandardTHs
+#define inpTHVolNorm g_thVolNorm   // P-TH-VOLNORM
 #define inpShowTHTargets g_showTHTargets
 #define inpTHLabelsMarginBottom g_thLabelsMarginBottom
-#define inpTHPercentOverride g_thPercentOverride
 #define inpEnableTH3Tool g_enableTH3Tool
 #define inpTH3DrawingMode g_th3DrawingMode
 #define inpTH3BaseStepPercent g_th3BaseStepPercent
@@ -790,18 +791,16 @@ int ClampSettingInt(const int v, const int lo, const int hi)
    return v;
 }
 
-// P-TH-01: the double sibling of the above. `inpTHPercentOverride` is the
-// only double setting the panel can edit, so this exists for exactly one
-// caller pair — the persisted-override load and nothing else. The bound is
-// named once (`TH_PERCENT_OVERRIDE_MAX`, ConstantsAndEnums.mqh) because the
+// ClampSettingDbl: the double sibling of the above. One caller left (PBP,
+// the pivot-base override): the bound is named at the caller because the
 // panel's slider reads the same number: a slider whose max is past the
 // engine's clamp stops responding at the end of its travel.
 double ClampSettingDbl(const double v, const double lo, const double hi)
 {
    // P-UI-57: NaN passes every range test, so a non-finite value fell through
-   // both gates and was returned as-is (a NaN TH-percent / pivot-base override
-   // persisted and reloaded). Non-finite clamps to the floor: for every caller
-   // (TPC, PBP) the floor is 0.0 = OFF, the safe default.
+   // both gates and was returned as-is (a NaN pivot-base override
+   // persisted and reloaded). Non-finite clamps to the floor: for the caller
+   // (PBP) the floor is 0.0 = OFF, the safe default.
    if(!MathIsValidNumber(v)) return lo;
    if(v < lo) return lo;
    if(v > hi) return hi;
@@ -1152,8 +1151,6 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "TS2", g_showStandardTHs ? 1 : 0);
    RSSetNext(p + "TG",  g_showTHTargets ? 1 : 0);
    RSSetNext(p + "TB",  g_thLabelsMarginBottom);
-   // P-TH-01 RETIRED: sweep any orphan TPC key so old charts don't restore a stale override.
-   if(GlobalVariableCheck(p + "TPC")) GlobalVariableDel(p + "TPC");
    RSSetNext(p + "E3",  g_enableTH3Tool ? 1 : 0);
    RSSetNext(p + "D3",  g_th3DrawingMode);
    RSSetNext(p + "B3",  g_th3BaseStepPercent);
@@ -1193,6 +1190,9 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "LCG", g_labelColumnGap);
    RSSetNext(p + "LSG", g_sectionGap);
    RSSetNext(p + "LMW", g_maxLabelWidth);
+   RSSetNext(p + "ALG", g_useLegATR ? 1 : 0);   // P-LEGATR (appended LAST: the shadow is positional, older slots never move)
+   RSSetNext(p + "TSH", g_triggerLevelsEnabled ? 1 : 0);   // P-UI-142: the T toggle rides the OV_ mirror home (was RAM + per-chart key only)
+   RSSetNext(p + "TVN", g_thVolNorm ? 1 : 0);   // P-TH-VOLNORM (appended LAST: the shadow is positional, older slots never move)
    RSShadowCommit();
 }
 
@@ -1211,7 +1211,7 @@ void RuntimeSettingsLoadOverrides()
 {
    if(StringLen(g_settingsGVPrefix) == 0) return;
    string p = g_settingsGVPrefix + "OV_";
-   if(GlobalVariableCheck(p + "ML"))  g_maxLevels = ClampSettingInt((int)GlobalVariableGet(p + "ML"), 1, 500);
+   if(GlobalVariableCheck(p + "ML"))  g_maxLevels = ClampSettingInt((int)GlobalVariableGet(p + "ML"), 1, MAX_SAFE_LEVELS);
    if(GlobalVariableCheck(p + "TW"))  g_triggerWidth = ClampSettingInt((int)GlobalVariableGet(p + "TW"), 1, 5);
    if(GlobalVariableCheck(p + "TS"))  g_triggerStyle = (ENUM_LINE_STYLE)ClampSettingInt((int)GlobalVariableGet(p + "TS"), 0, 4);
    if(GlobalVariableCheck(p + "TC"))  g_triggerColor = (color)(int)GlobalVariableGet(p + "TC");
@@ -1357,10 +1357,9 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "TS2")) g_showStandardTHs = (GlobalVariableGet(p + "TS2") > 0.5);
    if(GlobalVariableCheck(p + "TG"))  g_showTHTargets = (GlobalVariableGet(p + "TG") > 0.5);
    if(GlobalVariableCheck(p + "TB"))  g_thLabelsMarginBottom = ClampSettingInt((int)GlobalVariableGet(p + "TB"), 10, 200);
-   // P-TH-01: `ClampSettingDbl` is the same bound the panel slider and the
-   // engine read (0 = OFF, 200 = the slider's own end stop) — a GV written by
-   // an older build cannot ask for a ladder the slider cannot reproduce.
-   if(GlobalVariableCheck(p + "TPC")) g_thPercentOverride = ClampSettingDbl(GlobalVariableGet(p + "TPC"), 0.0, TH_PERCENT_OVERRIDE_MAX);
+   // P-TH-01 retired 2026-10-08: the knob is gone, so its old spelling is
+   // swept instead of read — an orphan `TPC` must not outlive the setting.
+   if(GlobalVariableCheck(p + "TPC")) GlobalVariableDel(p + "TPC");
    if(GlobalVariableCheck(p + "E3"))  g_enableTH3Tool = (GlobalVariableGet(p + "E3") > 0.5);
    if(GlobalVariableCheck(p + "D3"))  g_th3DrawingMode = (ENUM_TH3_DRAWING_MODE)ClampSettingInt((int)GlobalVariableGet(p + "D3"), 0, 1);
    if(GlobalVariableCheck(p + "B3"))  g_th3BaseStepPercent = MathMax(0.5, GlobalVariableGet(p + "B3"));
@@ -1404,6 +1403,9 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "LCG")) g_labelColumnGap = ClampSettingInt((int)GlobalVariableGet(p + "LCG"), 0, 200);
    if(GlobalVariableCheck(p + "LSG")) g_sectionGap = ClampSettingInt((int)GlobalVariableGet(p + "LSG"), 0, 200);
    if(GlobalVariableCheck(p + "LMW")) g_maxLabelWidth = ClampSettingInt((int)GlobalVariableGet(p + "LMW"), 50, 600);
+   if(GlobalVariableCheck(p + "ALG")) g_useLegATR = (GlobalVariableGet(p + "ALG") > 0.5);   // P-LEGATR (absent key = OFF, the shipped look)
+   if(GlobalVariableCheck(p + "TSH")) g_triggerLevelsEnabled = (GlobalVariableGet(p + "TSH") > 0.5);   // P-UI-142: the T toggle's durable layer (per-chart key wins at restore)
+   if(GlobalVariableCheck(p + "TVN")) g_thVolNorm = (GlobalVariableGet(p + "TVN") > 0.5);   // P-TH-VOLNORM (absent key = OFF, the shipped look)
    // P-PERF-27b: what was just read is what we would write back, so record it as
    // "already on disk" and stop the teardown from re-writing it.
    RuntimeSettingsPrimeOverrideShadow();

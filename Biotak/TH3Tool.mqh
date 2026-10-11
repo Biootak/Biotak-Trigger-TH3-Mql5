@@ -4265,7 +4265,6 @@ void ToggleTH3Tool(const bool fromRingItem = false) {
 }
 
 
-
 #endif // TH3_TOOL_C_MQH
 // TH3Tool_D.mqh - TH3Tool.mqh split 2026-09-29: exact lines 4227-4302, byte-identical, zero renames.
 #ifndef TH3_TOOL_D_MQH
@@ -4348,6 +4347,742 @@ int FindOptimalFrequencyForABCD_WithLearningData(
 }
 
 #endif // TH3_TOOL_D_MQH
+// TH3Recorder.mqh - split from TH3Tool_C.mqh 2026-10-05 (P-SIZE-1500):
+// the interactive audit recorder, by owner.
+#ifndef TH3_RECORDER_MQH
+#define TH3_RECORDER_MQH
+
+//--- the dataset tree is one owner's (TH3DatasetPaths.mqh): the recorder
+//--- writes through it and the harness pins the SAME names, so a reader and
+//--- the writer can never disagree about where a sample lands.
+//+------------------------------------------------------------------+
+//| TH3/TH3DatasetPaths.mqh                                          |
+//| P-TH3-REC — THE DATASET TREE, BY OWNER.                          |
+//|                                                                  |
+//| The recorder's paths are BEHAVIOUR, not text: a reader looking in |
+//| MQL4\Files\TH3_Dataset must find a sample where the spec says.    |
+//| This file is the ONE home for those paths so the recorder and the |
+//| harness cannot disagree about where a sample lands. It is PURE:   |
+//| string/datetime in, string out — no chart reads and no objects —  |
+//| which is also what makes it harness-safe (P-BUILD-02:             |
+//| Biotak_TH3_Test.mq4 cannot include the recorder itself, because    |
+//| that pulls TH3Pivots_A/TH3Tool_A and the whole chart chain with  |
+//| it).                                                             |
+//|                                                                  |
+//| MQL4 has no mkdir; the terminal's own FolderCreate is the only    |
+//| way and it takes a path RELATIVE to MQL4\Files. It is idempotent  |
+//| and returns 0 when the folder already exists, so these calls are |
+//| safe on every press. A refusal is NOT fatal: the recorder then    |
+//| falls back to the flat Screenshots/Logs pair and still records    |
+//| the sample rather than losing it.                                |
+//|                                                                  |
+//| P-TH3-DB (2026-10-05) — ONE FOLDER PER SAMPLE, AND A DATABASE   |
+//| THAT CAN BE READ WITHOUT OPENING A CHART. The flat pair put 20   |
+//| shots in one folder and 20 TXT in another, so a reader had to    |
+//| join Sample_015.txt with Sample_015_EURUSD_M5.png by NAME and    |
+//| then read the numbers out of prose to compare them. Now every     |
+//| sample owns a folder named <date>-<clock>_<SYMBOL>_<TF>_S<NNN>  |
+//| [_<pattern>] holding its TXT, its PNG and its own one-row CSV,    |
+//| and the global index TH3_Dataset/Dataset.csv holds one row per   |
+//| sample with the date, the symbol, the timeframe, the pattern and |
+//| the formula's answer beside the market's. The folder NAME is     |
+//| derived from the capture stamp, so the tree sorts by time without |
+//| a database, and the same rule is pinned by the harness.          |
+//+------------------------------------------------------------------+
+#ifndef TH3_DATASET_PATHS_MQH
+#define TH3_DATASET_PATHS_MQH
+#property strict
+
+#define TH3_DATASET_DIR      "TH3_Dataset"
+#define TH3_DATASET_SAMPLES  "TH3_Dataset/Samples"     // one folder per sample
+#define TH3_DATASET_SHOTS    "TH3_Dataset/Screenshots"  // flat fallback only
+#define TH3_DATASET_LOGS     "TH3_Dataset/Logs"         // flat fallback only
+#define TH3_DATASET_DB_NAME  "Dataset.csv"
+#define TH3_RECORDER_MAX     100
+
+//+------------------------------------------------------------------+
+//| The tree, and whether it took. `dirsOk` is the recorder's only   |
+//| answer to "did the folders appear" — it is passed by reference so|
+//| the caller can name the mode in its own output (the TXT says which|
+//| path mode wrote it, so a flat fallback is never mistaken for the |
+//| tree).                                                          |
+//+------------------------------------------------------------------+
+void TH3RecorderEnsureDirs(bool &dirsOk)
+{
+   // FolderCreate answers bool (true = created OR already there): a `< 0`
+   // test on it is dead (warning 65) and `!FolderCreate` would call an
+   // existing tree a failure and reroute everything flat. Unconditional —
+   // exactly what the old code always did.
+   FolderCreate(TH3_DATASET_SAMPLES);
+   FolderCreate(TH3_DATASET_SHOTS);
+   FolderCreate(TH3_DATASET_LOGS);
+   FolderCreate(TH3_DATASET_DIR);
+   dirsOk = true;
+}
+
+//+------------------------------------------------------------------+
+//| One joiner, so the tree prefix and the fallback are the SAME rule |
+//| on both sides. Pure: string in, string out.                     |
+//+------------------------------------------------------------------+
+string TH3RecorderPath(const string dir, const string leaf, const bool dirsOk)
+{
+   return dirsOk ? (dir + "/" + leaf) : leaf;
+}
+
+//+------------------------------------------------------------------+
+//| P-TH3-DB — A FOLDER NAME IS A FILENAME, SO IT IS SANITISED.     |
+//| The symbol, the timeframe and the pattern name all end up on    |
+//| disk, and the pattern name is a free string the renderer built.  |
+//| Windows forbids \ / : * ? " < > | in a folder name, and a name  |
+//| with a space in it is awkward in git; every other character      |
+//| becomes '_' and the result is capped, so a pathological pattern |
+//| name cannot produce a path longer than the terminal tolerates.   |
+//| Pure: string in, string out, no chart, no files.                 |
+//+------------------------------------------------------------------+
+string TH3SafeName(const string raw, const int maxLen)
+{
+   string s = raw;
+   for(int i = 0; i < StringLen(s); i++)
+   {
+      ushort c = StringGetCharacter(s, i);
+      bool keep = ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+                   (c >= 'a' && c <= 'z') || c == '_' || c == '-');
+      if(!keep) StringSetCharacter(s, i, '_');   // in place: it returns success, not the string
+   }
+   if(maxLen > 0 && StringLen(s) > maxLen) s = StringSubstr(s, 0, maxLen);
+   return s;
+}
+
+//+------------------------------------------------------------------+
+//| P-TH3-DB — THE DASHBOARD AND THE DATABASE SORT LIKE FOLDERS.     |
+//| "20261005-1743_EURUSD_M5_S015_ABCD_Pattern_7040265" sorts by     |
+//| capture time, then symbol, then timeframe, then the counter, and |
+//| every piece of that is a fact already in the sample — the date   |
+//| and clock come from the capture stamp, not from a filesystem     |
+//| mtime that a copy would rewrite. Pure.                           |
+//+------------------------------------------------------------------+
+string TH3SampleStamp(const datetime when)
+{
+   //--- NOT TimeToString(when, TIME_DATE): this build resolves that two-argument
+   //--- form as a symbol, not the builtin (compile error 137), and a folder name
+   //--- has to be locale-free anyway - a German or Persian terminal would spell
+   //--- the same capture differently. So the stamp is formatted from the integer
+   //--- parts, which is pure, exact, and identical on every machine.
+   return StringFormat("%04d%02d%02d-%02d%02d",
+                       TimeYear(when), TimeMonth(when), TimeDay(when),
+                       TimeHour(when), TimeMinute(when));
+}
+
+//+------------------------------------------------------------------+
+//| The same stamp split for the database: the day, and the clock.   |
+//| The dashboard groups by these, so they must be plain text a     |
+//| spreadsheet sorts - not "2026.10.05 17:43" in one field.        |
+//+------------------------------------------------------------------+
+string TH3SampleDate(const datetime when)
+{
+   return StringFormat("%04d.%02d.%02d", TimeYear(when), TimeMonth(when), TimeDay(when));
+}
+
+string TH3SampleClock(const datetime when)
+{
+   return StringFormat("%02d:%02d", TimeHour(when), TimeMinute(when));
+}
+
+string TH3SampleFolderName(const datetime when, const string sym, const string tf,
+                           const int idx, const string pattern)
+{
+   string name = TH3SampleStamp(when) + "_" + TH3SafeName(sym, 12) + "_"
+               + TH3SafeName(tf, 6) + "_" + StringFormat("S%03d", idx);
+   string p = TH3SafeName(pattern, 20);
+   if(p != "") name += "_" + p;
+   return name;
+}
+
+//+------------------------------------------------------------------+
+//| The sample's own folder, relative to MQL4\Files.                 |
+//+------------------------------------------------------------------+
+string TH3SampleFolder(const datetime when, const string sym, const string tf,
+                       const int idx, const string pattern)
+{
+   return TH3_DATASET_SAMPLES + "/" + TH3SampleFolderName(when, sym, tf, idx, pattern);
+}
+
+//+------------------------------------------------------------------+
+//| P-TH3-DB — A CSV FIELD CANNOT CARRY A COMMA. The pattern name is |
+//| free text; MQL4's CSV writer does not quote it, so one pattern   |
+//| containing ',' would silently shift every later column. Pure.    |
+//+------------------------------------------------------------------+
+string TH3CsvField(const string raw)
+{
+   string s = raw;                    // StringReplace edits in place and returns the COUNT, not the string
+   StringReplace(s, ",", " ");
+   StringReplace(s, "\n", " ");
+   StringReplace(s, "\r", " ");
+   StringReplace(s, "\"", "'");
+   return s;
+}
+
+//+------------------------------------------------------------------+
+//| P-TH3-DB — THE DATABASE'S COLUMNS, ONCE.                         |
+//| The global Dataset.csv and every per-sample sample.csv are       |
+//| written from THIS list, so a reader can join the two without     |
+//| guessing. Pure, and pinned by the harness: the column COUNT and  |
+//| the first names are behaviour (a tool reads them by name), and a |
+//| silent change would empty a dashboard instead of breaking it.    |
+//|                                                                  |
+//| Ordered so the file reads by eye: who and when, what was drawn,  |
+//| what the formula answered, what the market did, where the files  |
+//| are.                                                             |
+//+------------------------------------------------------------------+
+#define TH3_DATASET_COLS 34
+
+void TH3DatasetHeader(string &cols[])
+{
+   ArrayResize(cols, TH3_DATASET_COLS);
+   cols[0]  = "Sample_ID";
+   cols[1]  = "Capture_Date";       // yyyy.MM.dd — the day the press happened
+   cols[2]  = "Capture_Clock";      // HH:mm
+   cols[3]  = "Capture_Stamp";      // yyyyMMdd-HHmm — the folder's own prefix
+   cols[4]  = "Symbol";
+   cols[5]  = "TF";
+   cols[6]  = "Owner_TF";
+   cols[7]  = "Pattern";
+   cols[8]  = "Direction";          // down | up
+   cols[9]  = "D_Time";
+   cols[10] = "D_Price";
+   cols[11] = "Digits";
+   cols[12] = "Pip_Size";
+   cols[13] = "Mother_Pips";
+   cols[14] = "Leg_AB";
+   cols[15] = "Leg_BC";
+   cols[16] = "Leg_CD";
+   cols[17] = "Ratio_BC_AB";
+   cols[18] = "Ratio_CD_BC";
+   cols[19] = "K";
+   cols[20] = "Step_Mother";
+   cols[21] = "Step_Pattern";
+   cols[22] = "Step_Pips";
+   cols[23] = "Target_1";
+   cols[24] = "Target_3";
+   cols[25] = "Target_5";
+   cols[26] = "Target_7";
+   cols[27] = "Actual_Turn";
+   cols[28] = "Error_Pips";
+   cols[29] = "Rungs_Hit";
+   cols[30] = "Folder";
+   cols[31] = "Log_File";
+   cols[32] = "Screenshot";
+   // P-TH3-DB: the TF rung (TH3PatternStepRungTF) is an INPUT of the formula —
+   // it decides whether the mother is a macro span — and the dataset that exists
+   // to tune the formula has to carry it, or a tuner can only guess. Appended
+   // last so every column index already pinned and every tool that reads by
+   // position stays exactly where it was.
+   cols[33] = "Rung_Pips";
+}
+
+#endif // TH3_DATASET_PATHS_MQH
+
+//+------------------------------------------------------------------+
+//| P-TH3-REC (2026-10-05) — INTERACTIVE AUDIT RECORDER (key M, 77).  |
+//| Human visual discretion is mandatory for telling a valid market   |
+//| structure from an invented one, so the trader anchors the pattern |
+//| and the mother pivot BY HAND and this captures the sample for     |
+//| off-terminal formula validation: a PNG plus a full diagnostic TXT |
+//| INSIDE ITS OWN FOLDER under                                       |
+//| MQL4\Files\TH3_Dataset\Samples\<date>-<clock>_<SYM>_<TF>_S<NNN>,   |
+//| one row in that folder sample.csv, and one row in the global    |
+//| TH3_Dataset\Dataset.csv beside them (P-TH3-DB).        |
+//|                                                                  |
+//| THE TREE (spec §4.B.1) is owned by TH3/TH3DatasetPaths.mqh,     |
+//| which the harness includes too — one home for the folder names,  |
+//| so the writer and a reader of the dataset cannot disagree.       |
+//|                                                                  |
+//| THE COUNTER lives in a chart-scoped GlobalVariable, 1..100, and   |
+//| advances only when all three artifacts land — a partial export    |
+//| keeps its number so a retry cannot overwrite a good sample with a |
+//| half-written one. The banner is Comment(), overwritten by the    |
+//| next capture. The observed turn reuses the proof diagnostic       |
+//| (TH3HitPivotMeasure); an unreacted chart records none.            |
+//| User-paced: one ~0.5 s settle Sleep per press so the centered    |
+//| view is what the PNG holds.                                      |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| P-TH3-REC-06 (2026-10-05) — THE MIRROR: SAMPLES REACH THE REPO.  |
+//|                                                                   |
+//| The samples were only ever in `MQL4\Files\TH3_Dataset`, which is   |
+//| inside the TERMINAL's data folder. Nothing outside the machine    |
+//| could see them, and deleting that folder (a reinstall, a "clean   |
+//| up my MT4 data" step) destroys the whole labelled set — the one   |
+//| asset the formula is being tuned AGAINST. So every artifact is    |
+//| ALSO written into the PROJECT, where it is reviewable, diffable   |
+//| and survives the terminal.                                        |
+//|                                                                   |
+//| MT4 CANNOT DO THIS ITSELF: `FileOpen` is sandboxed to the data    |
+//| folder, so the project path is not writable from inside the       |
+//| terminal. The copy is therefore the USER'S side: a one-line      |
+//| `node tools/th3-dataset-sync.js` (or the tray) moves the same     |
+//| files across. This function only REPORTS where to find them and   |
+//| writes the pointer the sync reads — it never pretends to have     |
+//| copied anything it could not.                                    |
+//+------------------------------------------------------------------+
+#define TH3_PROJECT_SAMPLES  "Samples/TH3_Dataset"
+
+// Where the project copy must land, stated in the log and in every TXT so
+// the sync and any reviewer read the SAME string. One home for the path.
+string TH3RecorderProjectDir()
+{
+   return TH3_PROJECT_SAMPLES;
+}
+
+//+------------------------------------------------------------------+
+//| P-TH3-REC-03 — THE ONE-SECOND PROOF, IN THE MIDDLE.              |
+//| A capture with no visible answer reads as a capture that did     |
+//| nothing, so the press paints one centred label and clears it.    |
+//| `Comment()` was the wrong instrument twice over: it writes in the |
+//| corner (where the eye is not) and it PERSISTS, so the next       |
+//| capture would overwrite a message that had already done its job. |
+//|                                                                   |
+//| ONE OBJECT, one second, then it is deleted. OBJ_LABEL with       |
+//| CORNER=0 (centre) and an absolute XY seat is how a label is       |
+//| centred in MT4 — ANCHOR alone moves the text, not the box, and a |
+//| centred box is what «وسط صفحه» means. The delete is UNCONDITIONAL |
+//| (the same call on success and on failure), so a failed export    |
+//| still leaves nothing behind and a second press cannot stack two. |
+//|                                                                   |
+//| It is created AFTER the screenshot, so the PNG holds the chart   |
+//| and not the receipt.                                              |
+//|                                                                   |
+//| P-TH3-REC-04 (2026-10-05) — NO SLEEP. The first version slept a   |
+//| second after painting the label, and it showed NOTHING: MT4 paints |
+//| when the event handler RETURNS, so a Sleep inside OnChartEvent    |
+//| froze the whole terminal with the label still unpainted, and the   |
+//| delete on the far side of the Sleep removed it before it ever      |
+//| reached the screen. The trader saw a one-second freeze — which is  |
+//| exactly the «چیزی نمیاد، فقط فریز» report. The label is created,   |
+//| the handler returns (so it paints), and the DELETE is owed to      |
+//| OnTimer, which the project already runs every 250 ms (P-PERF-16).  |
+//| Nothing blocks; the label lives exactly one second of wall clock.  |
+//+------------------------------------------------------------------+
+#define TH3_REC_FLASH_MS  1000
+#define TH3_REC_FLASH_XML  "Biotak_TH3_RecorderFlash"
+
+//--- the deadline is the terminal's own clock, not a frame count: a
+//--- tick-less chart still ages the label out through OnTimer.
+static datetime g_th3FlashDue = 0;
+
+void TH3RecorderFlashClear()
+{
+   g_th3FlashDue = 0;
+   if(ObjectFind(0, TH3_REC_FLASH_XML) >= 0) ObjectDelete(0, TH3_REC_FLASH_XML);
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| The 250 ms OnTimer beat that ages the label out. One comparison   |
+//| per tick of wall clock; the object exists for exactly the second  |
+//| the trader asked for and not a millisecond of the next press.     |
+//+------------------------------------------------------------------+
+void TH3RecorderFlashTick()
+{
+   if(g_th3FlashDue == 0) return;          // nothing owed: the common case, one compare
+   if(TimeCurrent() < g_th3FlashDue) return;
+   TH3RecorderFlashClear();
+}
+
+void TH3RecorderFlash(const string msg)
+{
+   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   if(w <= 0 || h <= 0) { w = 1024; h = 768; }   // never divide by nothing
+
+   //--- P-TH3-REC-05 (2026-10-05) — THE SEAT IS MEASURED, NOT GUESSED. A
+   //--- fixed 420px box for a message whose length is now a few characters put
+   //--- the text off-centre («از هر طرف»): the LABEL centres the TEXT on its
+   //--- anchor, so a too-wide box moves the text off the chart's middle by
+   //--- half the slack. So the box is sized FROM the string (7 px per char at
+   //--- the 13px face, plus the padding OBJ_LABEL's border adds) and the anchor
+   //--- is then placed at the exact middle of what is left.
+   //--- P-TH3-REC-05: a mono face, because the box width is DERIVED from the
+   //--- string length. A proportional face makes that arithmetic a guess, and
+   //--- a guess is exactly what put the text off the middle before. The face is
+   //--- the product's own (BioChromeFont) so the receipt matches every other
+   //--- caption on the chart.
+   int fontSize = 13;
+   int tw = (StringLen(msg) * 7) + 30;      // 7 px/char + padding + the 3px border
+   if(tw < 110) tw = 110;                    // never a sliver
+   if(tw > w - 20) tw = w - 20;               // never wider than the chart
+   int th = fontSize + 18;
+
+   //--- re-press: clear the previous one FIRST, so a fast second press never
+   //--- stacks two labels and the old text never survives into the new second.
+   if(ObjectFind(0, TH3_REC_FLASH_XML) >= 0) ObjectDelete(0, TH3_REC_FLASH_XML);
+
+   if(ObjectCreate(0, TH3_REC_FLASH_XML, OBJ_LABEL, 0, 0, 0))
+   {
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_CORNER, 0);          // absolute
+      //--- the middle of the CHART, on both axes, from the box's own size
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_XDISTANCE, (w - tw) / 2);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_YDISTANCE, (h - th) / 2);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_ANCHOR, ANCHOR_CENTER);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_FONTSIZE, fontSize);
+      ObjectSetString(0, TH3_REC_FLASH_XML, OBJPROP_FONT, BioChromeFont(false));
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_COLOR, clrWhite);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_BGCOLOR, clrBlack);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_WIDTH, 3);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_BACK, false);       // on the graph
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, TH3_REC_FLASH_XML, OBJPROP_HIDDEN, true);
+      ObjectSetString(0, TH3_REC_FLASH_XML, OBJPROP_TEXT, msg);
+   }
+   ChartRedraw();
+
+   //--- the one second is OWED to OnTimer, not slept here. Returning now is
+   //--- what lets MT4 paint the label at all (see the header).
+   g_th3FlashDue = TimeCurrent() + 1;
+}
+
+//+------------------------------------------------------------------+
+//| P-TH3-REC — the capture. One press, one sample.                  |
+//| `patternName` is the ACTIVE pattern's name (the spec's call site  |
+//| passes g_activeABCDPattern); an empty argument means "whatever is |
+//| active", so a caller that has no name is answered, not refused.    |
+//+------------------------------------------------------------------+
+void TH3_ExportCurrentSample(const string patternName = "")
+{
+   string patName = (patternName != "") ? patternName : g_activeABCDPattern;
+   if(patName == "")
+   {
+      Print("[TH3 RECORDER] no active pattern — place an ABCD first.");
+      return;
+   }
+   TH3Pattern pat;
+   if(!TH3PatternStoreGet(patName, pat) || pat.D.time <= 0 || pat.D.price <= 0)
+   {
+      Print("[TH3 RECORDER] active pattern has no D — nothing to export.");
+      return;
+   }
+   double pip = GetCachedPipSize();
+   if(!(pip > 0)) pip = Point;
+
+   //--- the formula's own inputs, read exactly as the renderer reads them
+   double legAB = MathAbs(pat.B.price - pat.A.price);
+   double legBC = MathAbs(pat.C.price - pat.B.price);
+   double legCD = MathAbs(pat.D.price - pat.C.price);
+   double ratioBC_AB = (legAB > 0) ? legBC / legAB : 0.0;
+   double ratioCD_BC = (legBC > 0) ? legCD / legBC : 0.0;
+   double kFactor = TH3UnifiedK(ratioCD_BC);
+   double motherIn = TH3ManualBaseStep(inpTH3PivotBasePips, pip);
+   int cdBars = TH3ClosedBars(pat.C.time, pat.D.time);
+   int ownerTF = TH3ClosedOwnerTF(cdBars);
+   double rung = TH3PatternStepRungTF(ownerTF);
+   if(rung <= 0) rung = TH3PatternStepRung();
+   double stepMother = (motherIn >= 2.5 * rung) ? (motherIn / 3.0) : motherIn;
+   if(stepMother <= 0) stepMother = rung;
+   double stepPattern = (kFactor > 0) ? legCD / kFactor : 0.0;
+   double baseUnit = CalculateUnifiedMasterStep(legCD, ratioCD_BC, motherIn, rung);
+   if(baseUnit <= 0)
+      baseUnit = (rung > 0) ? rung
+                 : ((legCD > 0 ? legCD : MathAbs(pat.B.price - pat.A.price)) * (GetCurrentTH3Frequency() / 100.0));
+   //--- the ladder, projected from D along the movement direction
+    bool dirDown = (pat.D.price > pat.C.price);
+    double lv[7]; ArrayInitialize(lv, 0.0);   // the loop below fills all 7; the init only stills warning 60
+   for(int li = 0; li < 7; li++)
+      lv[li] = dirDown ? pat.D.price - ((li + 1) * baseUnit)
+                       : pat.D.price + ((li + 1) * baseUnit);
+   //--- the observed turn: DIAGNOSTIC ONLY. TH3HitPivotMeasure reads the
+   //--- closed bars; P-TH3-STEP-16 forbids it from touching baseUnit, and
+   //--- here it only fills MARKET_REACTION so the error margin is measured.
+   double closedStep = 0, closedK = 0, closedRatio = 0;
+   TH3ClosedStepFromLegs(pat.B.price, pat.C.price, pat.D.price, closedStep, closedK, closedRatio);
+   TH3HitProof hp;
+   bool hitOK = TH3HitPivotMeasure(pat.D.time, pat.D.price, dirDown, baseUnit, hp, closedStep);
+   bool hasTurn = (hitOK && hp.deepestRungs > 0);
+   double turnPx = hasTurn ? hp.tipPrice : 0.0;
+   double errPips = hasTurn ? MathAbs(turnPx - lv[2]) / pip : 0.0;
+
+   //--- the index. P-UI-142: per-SYMBOL, not per-chart — chart ids are
+   //--- per-session, so a per-chart counter restarted at 1 after every restart
+   //--- (and two charts of one symbol shared numbers). The chart key is adopted
+   //--- once, then deleted; the symbol owns the count from here on.
+   string gvName = "Biotak_TH3Sample_" + GetCachedSymbol();
+   int idx = 0;
+   if(GlobalVariableCheck(gvName)) idx = (int)GlobalVariableGet(gvName);
+   string gvLegacy = "Biotak_TH3Sample_" + GetCachedChartIdStr();
+   if(GlobalVariableCheck(gvLegacy))
+   {
+      int oldIdx = (int)GlobalVariableGet(gvLegacy);
+      if(oldIdx > idx) idx = oldIdx;
+      GlobalVariableDel(gvLegacy);
+   }
+   idx++;
+   if(idx > TH3_RECORDER_MAX)
+   {
+      Print("[TH3 RECORDER] dataset full (", TH3_RECORDER_MAX, ") — nothing written.");
+      return;
+   }
+
+   bool dirsOk = false;
+   TH3RecorderEnsureDirs(dirsOk);
+   datetime capAt = TimeCurrent();               // the press, not the D bar
+   string sampleId = StringFormat("Sample_%03d", idx);
+   string tfName   = TH3TfName(Period());
+   string shotName = StringFormat("Sample_%03d_%s_%s.png", idx, Symbol(), tfName);
+   string logName  = sampleId + ".txt";
+
+   //--- P-TH3-DB (2026-10-05) - ONE FOLDER PER SAMPLE. The flat pair forced
+   //--- a reader to join Sample_015.txt with Sample_015_EURUSD_M5.png by NAME
+   //--- and then read its numbers out of prose; a sample nobody can take in
+   //--- one glance is a sample nobody reviews. The folder is named from facts
+   //--- the sample already carries - capture stamp, symbol, timeframe, counter
+   //--- and pattern - so the tree sorts by time with no database at all, and
+   //--- the name itself is the key a tool parses.
+   string folderName = TH3SampleFolderName(capAt, Symbol(), tfName, idx, patName);
+   string sampleDir  = TH3_DATASET_SAMPLES + "/" + folderName;
+    bool sampleOk     = dirsOk && FolderCreate(sampleDir);   // bool answer: no dead `>= 0` test (warning 65)
+   string shotPath, logPath, rowPath;
+   if(sampleOk)
+   {
+      shotPath = sampleDir + "/" + shotName;
+      logPath  = sampleDir + "/" + logName;
+      rowPath  = sampleDir + "/sample.csv";
+   }
+   else
+   {
+      //--- a refused folder is NOT a lost sample: the flat pair still holds
+      //--- the same three files, and the TXT says which mode wrote it.
+      shotPath = TH3RecorderPath(TH3_DATASET_SHOTS, shotName, dirsOk);
+      logPath  = TH3RecorderPath(TH3_DATASET_LOGS,  logName,  dirsOk);
+      rowPath  = TH3RecorderPath(TH3_DATASET_LOGS,  sampleId + ".csv", dirsOk);
+   }
+   string csvPath = TH3RecorderPath(TH3_DATASET_DIR, TH3_DATASET_DB_NAME, dirsOk);
+
+   //--- P-TH3-DB - THE ROW, BUILT ONCE AND WRITTEN TWICE. The sample's own
+   //--- CSV travels with its folder; the global Dataset.csv is the one file a
+   //--- reader can sort, filter and pivot without opening twenty folders. Both
+   //--- come from THIS array and from the header TH3DatasetHeader() owns, so
+   //--- the two copies cannot drift the way two hand-written headers do.
+   string row[];
+   ArrayResize(row, TH3_DATASET_COLS);
+   row[0]  = sampleId;
+   row[1]  = TH3SampleDate(capAt);
+   row[2]  = TH3SampleClock(capAt);
+   row[3]  = TH3SampleStamp(capAt);
+   row[4]  = Symbol();
+   row[5]  = tfName;
+   row[6]  = TH3TfName(ownerTF);
+   row[7]  = TH3CsvField(patName);
+   row[8]  = dirDown ? "down" : "up";
+   row[9]  = TimeToString(pat.D.time);
+   row[10] = DoubleToString(pat.D.price, Digits);
+   row[11] = IntegerToString(Digits);
+   row[12] = DoubleToString(pip, Digits);
+   row[13] = DoubleToString(motherIn / pip, 1);
+   row[14] = DoubleToString(legAB / pip, 1);
+   row[15] = DoubleToString(legBC / pip, 1);
+   row[16] = DoubleToString(legCD / pip, 1);
+   row[17] = DoubleToString(ratioBC_AB, 3);
+   row[18] = DoubleToString(ratioCD_BC, 3);
+   row[19] = DoubleToString(kFactor, 3);
+   row[20] = DoubleToString(stepMother / pip, 1);
+   row[21] = DoubleToString(stepPattern / pip, 1);
+   row[22] = DoubleToString(baseUnit / pip, 1);
+   row[23] = DoubleToString(lv[0], Digits);
+   row[24] = DoubleToString(lv[2], Digits);
+   row[25] = DoubleToString(lv[4], Digits);
+   row[26] = DoubleToString(lv[6], Digits);
+   row[27] = hasTurn ? DoubleToString(turnPx, Digits) : "";
+   row[28] = hasTurn ? DoubleToString(errPips, 1) : "";
+    row[29] = hasTurn ? IntegerToString((int)hp.deepestRungs) : "0";   // explicit truncation, as before (warning 43)
+   row[30] = sampleOk ? folderName : "";
+   row[31] = logName;
+   row[32] = shotName;
+   //--- the rung is an INPUT (it gates the macro-span rule), so it belongs in the
+   //--- row: a formula tuned without it is tuned on a guess.
+   row[33] = DoubleToString(rung / pip, 1);
+
+   //--- P-TH3-REC-02 (2026-10-05) — THE VIEW IS NOT OURS TO MOVE. The spec
+   //--- said «center the chart on D», and this did: a ChartNavigate to 30 bars
+   //--- before D plus a 0.5 s settle, so the capture showed a view the trader
+   //--- never asked for — and on a chart whose D sits far back in history it
+   //--- scrolled the whole screen to the left («دکمه m میزنم میره اول چارت»).
+   //--- The trader has already framed the structure by hand; the capture's job
+   //--- is to RECORD that frame, not to re-frame it. So the view is left alone
+   //--- and the shot is one redraw away, with no Sleep either — a still chart
+   //--- needs no settle, and the settle was the whole cost of the old path.
+   ChartRedraw();
+
+   //--- P-TH3-REC-04 (2026-10-05) — THE SHOT IS 1:1 WITH THE CHART, NOT A
+   //--- STRETCH. The call passed a FIXED 1920x1080 while the chart is a
+   //--- different size, and `WindowScreenShot` scales whatever it is given
+   //--- into those numbers: the capture came out upscaled and soft, the caption
+   //--- unreadable, and the exact price of a rung not legible off the picture —
+   //--- which defeats the whole point of a dataset whose numbers have to be
+   //--- checked against the pixels.
+   //---
+   //--- MEASURED on the user's own chart (2026-10-05, Samples 001/002): the
+   //--- 1920x1080 PNGs held a plot area with the border at y=2 and y=1056 and
+   //--- the caption plate 1018px tall — text rows of 9-12px, i.e. stretched
+   //--- pixels, not rendered ones.
+   //---
+   //--- A HONEST LIMIT (the docs, docs.mql4.com/chart_operations/
+   //--- windowscreenshot): the signature is
+   //---   WindowScreenShot(filename, size_x, size_y, start_bar, scale, mode)
+   //--- and it captures the CHART AREA ONLY — the toolbar, the Market Watch
+   //--- and the desktop are outside what MQL4 can hand back. A true full-desktop
+   //--- grab is not available from inside an indicator. What this now gives is
+   //--- the widest TRUE capture: every bar, every rung and the caption at one
+   //--- screen pixel per image pixel, sharp. `start_bar=0` pins the shot to the
+   //--- bars currently on screen instead of the end-of-chart default, so the
+   //--- frame the trader framed is the frame that is written.
+   int shotW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int shotH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   if(shotW <= 0) shotW = 1920;   // never hand the API a zero width
+   if(shotH <= 0) shotH = 1080;
+   // MT5-ONLY: WindowScreenShot is MQL4-only; MQL5 uses ChartScreenShot.
+   // ChartScreenShot takes the chart ID (0 = current), filename (relative to
+   // the terminal Files/ folder), width, height, and alignment (ALIGN_LEFT
+   // keeps the same "current bars on screen" behaviour as start_bar=0).
+#ifdef __MQL5__
+   bool okShot = ChartScreenShot(0, shotPath, shotW, shotH, ALIGN_LEFT);
+#else
+   bool okShot = WindowScreenShot(shotPath, shotW, shotH, 0);
+#endif
+
+   int fh = FileOpen(logPath, FILE_WRITE | FILE_TXT | FILE_ANSI);
+   bool okTxt = (fh != INVALID_HANDLE);
+   if(okTxt)
+   {
+      FileWrite(fh, "SAMPLE_ID: " + sampleId);
+      FileWrite(fh, "SYMBOL: " + Symbol());
+      FileWrite(fh, "TIMEFRAME: " + TH3TfName(Period()));
+      FileWrite(fh, "CAPTURE_TIME: " + TimeToString(capAt));
+      FileWrite(fh, "CAPTURE_STAMP: " + TH3SampleStamp(capAt));
+      FileWrite(fh, "DATETIME_D: " + TimeToString(pat.D.time));
+      FileWrite(fh, "PATTERN: " + patName);
+      FileWrite(fh, "SAMPLE_FOLDER: " + (sampleOk ? folderName : "(none - flat fallback)"));
+      FileWrite(fh, "DATASET_PATH_MODE: " + (sampleOk ? "TH3_Dataset/Samples/<folder>/"
+                                                     : "flat (FolderCreate refused)"));
+      FileWrite(fh, "OWNER_TF: " + TH3TfName(ownerTF));
+      FileWrite(fh, "COORDINATES:");
+      FileWrite(fh, "  Point_A: {Price: " + DoubleToString(pat.A.price, Digits) + ", Time: " + TimeToString(pat.A.time) + "}");
+      FileWrite(fh, "  Point_B: {Price: " + DoubleToString(pat.B.price, Digits) + ", Time: " + TimeToString(pat.B.time) + "}");
+      FileWrite(fh, "  Point_C: {Price: " + DoubleToString(pat.C.price, Digits) + ", Time: " + TimeToString(pat.C.time) + "}");
+      FileWrite(fh, "  Point_D: {Price: " + DoubleToString(pat.D.price, Digits) + ", Time: " + TimeToString(pat.D.time) + "}");
+      FileWrite(fh, "LEGS:");
+      FileWrite(fh, "  Leg_AB_Pips: " + DoubleToString(legAB / pip, 1));
+      FileWrite(fh, "  Leg_BC_Pips: " + DoubleToString(legBC / pip, 1));
+      FileWrite(fh, "  Leg_CD_Pips: " + DoubleToString(legCD / pip, 1));
+      FileWrite(fh, "  Ratio_BC_AB: " + DoubleToString(ratioBC_AB, 3));
+      FileWrite(fh, "  Ratio_CD_BC: " + DoubleToString(ratioCD_BC, 3));
+      FileWrite(fh, "  K_Factor: " + DoubleToString(kFactor, 3));
+      FileWrite(fh, "MOTHER_PIVOT:");
+      FileWrite(fh, "  Size_Pips: " + DoubleToString(motherIn / pip, 1));
+      FileWrite(fh, "  Type: \"External_Historical_Shelf\"");
+      FileWrite(fh, "FORMULA_OUTPUT:");
+      FileWrite(fh, "  Step_Mother: " + DoubleToString(stepMother / pip, 1));
+      FileWrite(fh, "  Step_Pattern: " + DoubleToString(stepPattern / pip, 1));
+      FileWrite(fh, "  Final_Step_BaseUnit: " + DoubleToString(baseUnit / pip, 1));
+      FileWrite(fh, "LADDER_TARGETS:");
+      FileWrite(fh, "  Step_1: " + DoubleToString(lv[0], Digits));
+      FileWrite(fh, "  Step_2_Mid: " + DoubleToString(lv[1], Digits));
+      FileWrite(fh, "  Step_3_Target: " + DoubleToString(lv[2], Digits));
+      FileWrite(fh, "  Step_4_Mid: " + DoubleToString(lv[3], Digits));
+      FileWrite(fh, "  Step_5_Target: " + DoubleToString(lv[4], Digits));
+      FileWrite(fh, "  Step_6_Mid: " + DoubleToString(lv[5], Digits));
+      FileWrite(fh, "  Step_7_Target: " + DoubleToString(lv[6], Digits));
+      FileWrite(fh, "MARKET_REACTION:");
+      FileWrite(fh, "  Actual_Reversal_Low: " + (hasTurn ? DoubleToString(turnPx, Digits) : "none"));
+      FileWrite(fh, "  Actual_Reversal_High: " + (hasTurn ? DoubleToString(turnPx, Digits) : "none"));
+      FileWrite(fh, "  Error_Margin_Pips: " + DoubleToString(errPips, 1));
+      FileWrite(fh, "  Against: " + sampleId + " Step_3_Target");
+      FileWrite(fh, "SCREENSHOT: " + shotPath);
+      //--- P-TH3-REC-04: the capture's own size, so a reader never has to guess
+      //--- whether the PNG is 1:1 with the screen or a rescale of it.
+      FileWrite(fh, "SCREENSHOT_SIZE: " + IntegerToString(shotW) + "x" + IntegerToString(shotH));
+      FileWrite(fh, "SCREENSHOT_AREA: chart_only (MQL4 WindowScreenShot cannot reach the toolbar or desktop)");
+      //--- P-TH3-REC-06: the project copy's name, so the file is findable from
+      //--- the repo without knowing the sync tool. The terminal CANNOT write
+      //--- there itself (FileOpen is sandboxed) — this is the pointer, not a
+      //--- claim that it landed.
+      FileWrite(fh, "PROJECT_COPY: " + TH3RecorderProjectDir() + "/Samples/" + folderName + "/" + shotName);
+      FileWrite(fh, "PROJECT_COPY_LOG: " + TH3RecorderProjectDir() + "/Samples/" + folderName + "/" + logName);
+      FileWrite(fh, "PROJECT_COPY_ROW: " + TH3RecorderProjectDir() + "/Samples/" + folderName + "/sample.csv");
+      FileWrite(fh, "PROJECT_COPY_DB: " + TH3RecorderProjectDir() + "/" + TH3_DATASET_DB_NAME);
+      FileClose(fh);
+      fh = INVALID_HANDLE;
+   }
+
+   //--- the sample's own CSV: the header plus exactly one row, inside its folder
+   bool okRow = false;
+   int rh = FileOpen(rowPath, FILE_WRITE | FILE_CSV | FILE_ANSI, ',');
+   if(rh != INVALID_HANDLE)
+   {
+      string hdr[];
+      TH3DatasetHeader(hdr);
+      FileWriteArray(rh, hdr);
+      FileWriteArray(rh, row);
+      FileClose(rh);
+      rh = INVALID_HANDLE;
+      okRow = true;
+   }
+
+   //--- the global DB: the header on the empty file, then ONE appended row
+   bool okCsv = false;
+   int ch = FileOpen(csvPath, FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI, ',');
+   if(ch != INVALID_HANDLE)
+   {
+      string hdr[];
+      TH3DatasetHeader(hdr);
+      if(FileSize(ch) == 0) FileWriteArray(ch, hdr);
+      FileSeek(ch, 0, SEEK_END);
+      FileWriteArray(ch, row);
+      FileClose(ch);
+      ch = INVALID_HANDLE;
+      okCsv = true;
+   }
+   if(okShot && okTxt && okRow && okCsv)
+   {
+      //--- the counter advances only on a COMPLETE export, so a retry cannot
+      //--- reuse a number whose PNG or row is already on disk
+      GlobalVariableSet(gvName, idx);
+      //--- P-TH3-REC-05: the ON-SCREEN receipt is short and LATIN, and the long
+      //--- form stays in the journal and the TXT. Two reasons for the alphabet:
+      //--- MT4 does not render Persian reliably on OBJ_LABEL (no on-chart label
+      //--- in this whole product carries Persian — every one is Latin), and a
+      //--- receipt a trader cannot read is no receipt. A receipt is read in a
+      //--- glance, not parsed, and every character here is one the box has to
+      //--- be sized around (see TH3RecorderFlash).
+      string msg = StringFormat("SAVED  #%03d", idx);
+      //--- P-TH3-REC-03: the proof is ON the screen, for ONE second, in the
+      //--- MIDDLE. `Comment()` writes into the corner, where the eye is not and
+      //--- where the next capture overwrites it — a press with no visible answer
+      //--- reads as a press that did nothing. A centred label that clears itself
+      //--- says «گرفته شد» without becoming furniture. Created after the shot,
+      //--- so it never lands in the PNG.
+      TH3RecorderFlash(msg);
+      Print(msg);
+   }
+   else
+   {
+      if(fh != INVALID_HANDLE) FileClose(fh);
+      string bad = StringFormat("FAILED #%03d  png:%s txt:%s row:%s db:%s",
+                                idx, (okShot ? "ok" : "X"), (okTxt ? "ok" : "X"),
+                                (okRow ? "ok" : "X"), (okCsv ? "ok" : "X"));
+      Print("[TH3 RECORDER] Sample #", idx, " FAILED (shot=", okShot, " txt=", okTxt,
+            " row=", okRow, " db=", okCsv, ") — nothing advanced.");
+      //--- P-TH3-REC-03: the FAILURE gets the same one second. A silent miss is
+      //--- the exact case the user cannot diagnose — the press looked identical
+      //--- to the working one. The counter is deliberately NOT advanced.
+      TH3RecorderFlash(bad);
+      Print(bad);
+   }
+   //--- P-TH3-REC-03: the flash is gone either way, and this redraw is what
+   //--- removes the last frame of it, so no label survives the press.
+   ThrottledChartRedraw();
+}
+
+#endif // TH3_RECORDER_MQH
 
 #endif // TH3_TOOL_MQH
 

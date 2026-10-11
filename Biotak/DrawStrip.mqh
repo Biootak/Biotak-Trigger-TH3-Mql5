@@ -508,8 +508,16 @@
 #define DSTRIP_ACT_MORE 0
 #define DSTRIP_ACT_GEAR 1
 #define DSTRIP_ACT_PIN 2
-#define DSTRIP_ACT_DEL 3
-#define DSTRIP_ACT_N 4
+//--- P-BK-111 (2026-10-09) — THE SIDE IS THE USER'S TO TURN. It sits in the COMMAND
+//--- group, not the quick-slot group, and that placement is the decision: the quick slots
+//--- are the served drawing's own PROPERTIES (DRAW_SLOT_*, read and written on the object
+//--- itself, kind-dependent), and a side is not a property of any drawing — it is a call
+//--- on one Base Box, owned by the knot layer. So the cell is a fixed command like gear /
+//--- bin, it widens the row by one seat (the layout derives the seats from DSTRIP_ACT_N),
+//--- and on a drawing that is not a Base Box it paints, says so, and does nothing.
+#define DSTRIP_ACT_DIR 3
+#define DSTRIP_ACT_DEL 4
+#define DSTRIP_ACT_N 5
 //--- P-DRAW-29 (2026-09-24) — the plate skin's own metrics (define-before-use:
 //--- PointInside and the clamps read them far above the painters). The plate's
 //--- height is ALWAYS 48+42k, so one top cap (margin + 44) + k mid bands (42)
@@ -653,7 +661,7 @@ static bool     s_dsPalGrab = false;             // a scrub is live
 static int      s_dsPalCell = -1;                // its last previewed cell
 static uint     s_dsPalMs = 0;                   // its hit-test cadence (DSTRIP_GRIP_MS)
 static uint     s_dsPalDoneMs = 0;               // the release that already applied
-static string   s_dsPalName[DRAW_SEL_MAX];       // its members (the group, or the held one)
+static string   s_dsPalName[DRAW_SEL_MAX];       // its target: the SERVED drawing (P-DRAW-09b retired)
 static int      s_dsPalN = 0;
 static bool     s_dsHexFocus = false;            // the HEX field is being typed in
 //--- P-DRAW-48 (2026-09-26): THE COLOUR BOARD IS ITS OWN CARD. User order:
@@ -1072,7 +1080,10 @@ void DrawStripGripRelease()
 // ══════════════════════════════════════════════════════════════════════════
 bool DrawStripIsColorSlot(const int slot)
 {
-   return (slot == DRAW_SLOT_COLOR || slot == DRAW_SLOT_FILLCLR);
+   //--- P-DRAW-BODY-UI: the handle's own colour rides the same palette bridge,
+   //--- so it is a colour cell too (same seats, no layout change).
+   return (slot == DRAW_SLOT_COLOR || slot == DRAW_SLOT_FILLCLR ||
+           slot == DRAW_SLOT_BODYCOLOR);
 }
 color DrawStripColorRead(const string nm, const int slot)
 {
@@ -1104,6 +1115,10 @@ static string s_dsPalObj = "";        // the drawing the popup is editing
 static int    s_dsPalSlot = DSTRIP_PICK_NONE;
 static int    s_dsPalAskSlot = DSTRIP_PICK_NONE;   // the pending open, one click wide
 static bool   s_dsPalRepaint = false;      // a pick owes the strip ONE frame (P-PAL-19f)
+//--- P-LVL-COLOR (2026-10-04) — ONE LEVEL'S OWN COLOR. -1 = the slot's (whole
+//--- drawing); >=0 = the stored level index on s_dsPalObj. The popup is the same
+//--- cards palette (one palette, P-PAL-19); only the target is narrower.
+static int    s_dsPalLevel = -1;
 
 void DrawStripPalAsk(const int slot)
 {
@@ -1112,7 +1127,19 @@ void DrawStripPalAsk(const int slot)
    s_dsPalObj  = s_dsObj;
    s_dsPalSlot = slot;
    s_dsPalAskSlot = slot;
+   s_dsPalLevel = -1;
 }
+//--- a level row's swatch asks through here: same palette, one stored level.
+void DrawStripPalAskLevel(const int slot, const int level)
+{
+   if(!s_dsOpen || s_dsObj == "") return;
+   DrawStripGearClose();
+   s_dsPalObj  = s_dsObj;
+   s_dsPalSlot = slot;
+   s_dsPalAskSlot = slot;
+   s_dsPalLevel = level;
+}
+bool DrawStripPalTargetIsLevel() { return (s_dsPalLevel >= 0); }
 int    DrawStripPalAsked()   { if(s_dsPalAskSlot == DSTRIP_PICK_NONE) return -1;
                                int a = s_dsPalAskSlot; s_dsPalAskSlot = DSTRIP_PICK_NONE; return a; }
 string DrawStripPalTargetObj()  { return s_dsPalObj; }
@@ -1138,11 +1165,37 @@ bool   DrawStripPalTargetLive() { return (s_dsPalObj != "" && DrawStripIsColorSl
 color DrawStripPalTargetColor()
 {
    if(!DrawStripPalTargetLive()) return clrNONE;
+   //--- P-LVL-COLOR: a level target reads its own stored ink, never the slot's.
+   if(s_dsPalLevel >= 0)
+   {
+      if(ObjectFind(0, s_dsPalObj) < 0) return clrNONE;
+      if(s_dsPalLevel >= DrawLevelCount(s_dsPalObj)) return clrNONE;
+      return (color)(int)ObjectGetInteger(0, s_dsPalObj, OBJPROP_LEVELCOLOR, s_dsPalLevel);
+   }
    return DrawStripColorRead(s_dsPalObj, s_dsPalSlot);
 }
 int DrawStripPalTargetApply(const color c)
 {
    if(!DrawStripPalTargetLive()) return 0;
+   //--- P-LVL-COLOR: one stored level re-inks (undoable — the level set snapshot
+   //--- carries per-level colors), the pen's children follow in the same frame.
+   if(s_dsPalLevel >= 0)
+   {
+      if(ObjectFind(0, s_dsPalObj) < 0) return 0;
+      if(s_dsPalLevel >= DrawLevelCount(s_dsPalObj)) return 0;
+      if((int)c < 0) return 0;
+      DrawStripUndoPush();
+      ObjectSetInteger(0, s_dsPalObj, OBJPROP_LEVELCOLOR, s_dsPalLevel, c);
+      FibPenSync(s_dsPalObj, false);
+      DrawStripRecentPush(c);
+      int gotL = (int)ObjectGetInteger(0, s_dsPalObj, OBJPROP_LEVELCOLOR, s_dsPalLevel);
+      DrawStripDiagEmit("[drawstrip] PALAPPLY live=1 obj=\"" + s_dsPalObj + "\" slot=" +
+                        IntegerToString(s_dsPalSlot) + " level=" + IntegerToString(s_dsPalLevel) +
+                        " picked=" + DrawStripColorHex(c) +
+                        " read=" + DrawStripColorHex((color)gotL));
+      s_dsPalRepaint = true;
+      return 1;
+   }
    DrawStripColorCommit(s_dsPalSlot, c);
    DrawStripRecentPush(c);
    //--- P-PAL-19d (2026-10-02) — THE SECOND PICK IS A SEPARATE CASE, and the report
@@ -1173,6 +1226,8 @@ int DrawStripPalTargetApply(const color c)
 int DrawStripPalTargetAlpha()
 {
    if(!DrawStripPalTargetLive()) return -1;
+   //--- P-LVL-COLOR: one level has no tone of its own (-1 = no TR track).
+   if(s_dsPalLevel >= 0) return -1;
    return DrawSlotAlphaGet(s_dsPalObj, s_dsPalSlot);
 }
 //--- P-DRAW-64a2 (2026-10-02) — WHICH SLOT, IN THE STRIP'S OWN WORDS. The popup's two
@@ -1184,6 +1239,11 @@ int DrawStripPalTargetAlpha()
 void DrawStripPalRoleSet(const int role)
 {
    if(s_dsPalObj == "" || s_dsPalSlot == DSTRIP_PICK_NONE) return;
+   //--- P-DRAW-BODY-UI: a handle colour has no second role — the BORDER/FILL
+   //--- chips must not retarget it onto the levels while the popup is open.
+   if(s_dsPalSlot == DRAW_SLOT_BODYCOLOR) return;
+   //--- P-LVL-COLOR: one level is one target — the role chips keep it.
+   if(s_dsPalLevel >= 0) return;
    int want = (role == 0) ? DRAW_SLOT_COLOR : DRAW_SLOT_FILLCLR;
    if(!DrawSlotAvailable(DrawKindOf(s_dsPalObj), want)) return;
    s_dsPalSlot = want;
@@ -1289,9 +1349,31 @@ void DrawStripPublishRect()
 #define DSTRIP_OPEN_PRESS_MAX_MS 10000   // the longest a press may claim its own clicks
 static uint s_dsOpenerUntil = 0;         // 0 = disarmed; else the press's own deadline
 static uint s_dsOpenerTailUntil = 0;     // the twin-event tail (after the release witness)
-void DrawStripOpenerArm()    { s_dsOpenerUntil = GetTickCount() + DSTRIP_OPEN_PRESS_MAX_MS; s_dsOpenerTailUntil = 0; }
-void DrawStripOpenerDisarm() { s_dsOpenerUntil = 0; s_dsOpenerTailUntil = 0; }
-bool DrawStripOpenerClickSpent() { return (TickDeadlinePending(s_dsOpenerUntil) || TickDeadlinePending(s_dsOpenerTailUntil)); }
+static int  s_dsOpenerN = 0;             // twin events left to spend (one release = two channels)
+void DrawStripOpenerArm()    { s_dsOpenerUntil = GetTickCount() + DSTRIP_OPEN_PRESS_MAX_MS; s_dsOpenerTailUntil = 0; s_dsOpenerN = 2; }
+void DrawStripOpenerDisarm() { s_dsOpenerUntil = 0; s_dsOpenerTailUntil = 0; s_dsOpenerN = 0; }
+//--- P-UI-155 (2026-10-08) — THE FALLBACK'S OWN TWIN FLAG. A chart-first open
+//--- (hollow interior) may be followed by the same release's object channel;
+//--- that twin must be spent, never closed. Time-bounded (twin channels arrive
+//--- milliseconds apart), never token-counted: a stale token budget ate genuine
+//--- clicks for ten seconds. Armed only by the fallback open below; the spent
+//--- check clears it, and the deadline clears itself.
+static bool s_dsTwinOwed = false;
+static uint s_dsTwinUntil = 0;
+void DrawStripTwinArm() { s_dsTwinOwed = true; s_dsTwinUntil = GetTickCount() + DSTRIP_OPEN_TAIL_MS; }
+bool DrawStripTwinSpent()
+{
+   if(!s_dsTwinOwed || !TickDeadlinePending(s_dsTwinUntil)) { s_dsTwinOwed = false; return false; }
+   s_dsTwinOwed = false;
+   return true;
+}
+bool DrawStripOpenerClickSpent()
+{
+   if(!TickDeadlinePending(s_dsOpenerUntil) && !TickDeadlinePending(s_dsOpenerTailUntil)) { s_dsOpenerN = 0; return false; }
+   if(s_dsOpenerN <= 0) return false;
+   s_dsOpenerN--;
+   return true;
+}
 //--- P-UI-113g (2026-09-24): SELECTION IS REPAIRED AFTER MT4'S CLICK, NOT INSIDE
 //--- THE CLICK CALLBACK. P-UI-113f selected the hold target both at the fire and
 //--- on the release event, but MT4 commits the terminal's own press/release
@@ -1330,9 +1412,13 @@ static int      s_dsPressX = 0, s_dsPressY = 0;
 static string   s_dsPressObj = "";       // P-UI-113i: the drawing named by that press
 static int      s_dsTravel = 0;          // furthest the LEFT hand got while held
 static bool     s_dsPressTracked = false;   // P-UI-113d: a press EDGE was seen for this
-                                            // cycle, so `s_dsTravel` is this gesture's
-                                            // (a zero-move press leaves no edge: the
-                                            // release then reads as a click, never a drag)
+                                             // cycle, so `s_dsTravel` is this gesture's
+                                             // (a zero-move press leaves no edge: the
+                                             // release then reads as a click, never a drag)
+static uint     s_dsPressEdgeMs = 0;         // P-UI-155: when that edge ran (0 = none yet).
+                                             // A travel veto without a fresh edge is a
+                                             // PREVIOUS gesture's travel against a still
+                                             // press — it may only refuse, never allow.
 //--- P-UI-113j (2026-09-25) — THE PRESS NAMES ITS OWN DRAWING. `s_dsPressObj`
 //--- above exists only when the MOVE STREAM carried the press edge: a still press
 //--- carries none (P-LM-13). The release then fell back to a live hit test, and
@@ -1357,9 +1443,9 @@ static uint     s_dsPressCycleMs = 0;    // the cycle's life bound: the press ca
 //--- log named the owner until DIAG-116 printed `press refused: cycle live`.
 //--- The cycle has ONE job — keep a FLAP from re-timing a press it already named
 //--- (P-UI-115c) — and the flaps it was measured against are milliseconds apart
-//--- (179/252/488 ms). 2 s covers every press that can still become a hold (a hold
-//--- fires at 500 ms) and can never outlive its press far enough to eat the next
-//--- one. A gesture already IN MOTION is guarded by its own witness instead: the
+//--- (179/252/488 ms). 2 s covers every press that can still matter and can never
+//--- outlive its press far enough to eat the next one (every release ends it).
+//--- A gesture already IN MOTION is guarded by its own witness instead: the
 //--- router's drag heartbeat (P-UI-130 in DrawStrip_Router.mqh).
 #define DSTRIP_PRESS_CYCLE_MS 2000
 void DrawStripPressCycleSet(const string nm)
@@ -1382,10 +1468,26 @@ static int      s_duFill[DSTRIP_UNDO_MAX], s_duRay[DSTRIP_UNDO_MAX];
 static color    s_duFillClr[DSTRIP_UNDO_MAX];    // P-DRAW-64: the interior's colour
 static int      s_duFillOp[DSTRIP_UNDO_MAX];     // and its own tone
 static int      s_duFont[DSTRIP_UNDO_MAX], s_duGlyph[DSTRIP_UNDO_MAX], s_duBack[DSTRIP_UNDO_MAX];
+static color    s_duBodyClr[DSTRIP_UNDO_MAX];   // P-DRAW-BODY-UI: undo restores the handle too
+static int      s_duBodyW[DSTRIP_UNDO_MAX], s_duBodySt[DSTRIP_UNDO_MAX];
 static int      s_duLvN = 0;
 static double   s_duLvV[DSTRIP_UNDO_LV];
 static color    s_duLvC[DSTRIP_UNDO_LV];
 static int      s_duLvW[DSTRIP_UNDO_LV], s_duLvS[DSTRIP_UNDO_LV];
+static string   s_duLvT[DSTRIP_UNDO_LV];   // P-LVL-TEXT: one level's own note
+//--- P-LVL-TEXT (2026-10-04) — ONE LEVEL'S NOTE, ARMED. The label zone of a level
+//--- row arms the e4 field on that STORED level; Enter commits LEVELTEXT.
+//--- Disarmed by the commit and by GearClose (strip close rides it).
+static bool     s_dsLvlDescArmed = false;
+static string   s_dsLvlDescObj = "";
+static int      s_dsLvlDescIdx = -1;
+bool DrawStripLvlDescWant()
+{
+   if(!s_dsLvlDescArmed || s_dsLvlDescObj == "" || s_dsLvlDescObj != s_dsObj) return false;
+   if(s_dsObj == "" || ObjectFind(0, s_dsObj) < 0) return false;
+   if(s_dsLvlDescIdx < 0 || s_dsLvlDescIdx >= DrawLevelCount(s_dsObj)) return false;
+   return true;
+}
 static string   s_duCopy = "";
 
 string DrawStripObjName(const int i)  { return "PnlDrawS_" + IntegerToString(i); }
@@ -1709,6 +1811,22 @@ bool DrawStripGearHit(const int mx, const int my)
       if(my < ry || my >= ry + DSTRIP_GEAR_ROW_H) continue;
       int rx = px + s_dsGRCol[r] * DSTRIP_GEAR_COL;
       if(mx < rx || mx >= rx + rowW) continue;
+      //--- P-LVL-COLOR: the level row's swatch (the paint's own chip seat below)
+      //--- opens the palette on that stored level; the rest of the row toggles.
+      //--- Same seat arrays the paint writes (s_dsGRY/s_dsGRCol) plus the paint's
+      //--- own chip constants — no second grid.
+      //--- P-LVL-TEXT: the LABEL zone arms the note field; the switch zone and
+      //--- the row's padding keep the legacy toggle.
+      if(s_dsGRKind[r] == 4)
+      {
+         int sx = rx + DSTRIP_GEAR_PAD, sy = ry + DSTRIP_CARD_CHIP_Y;
+         if(mx >= sx && mx < sx + 22 && my >= sy && my < sy + 22)
+         { DrawStripGearLevelColorTap(r); return true; }
+         int lx = rx + DSTRIP_GEAR_PAD + 22 + 8;
+         int wx = rx + rowW - 40;
+         if(mx >= lx && mx < wx)
+         { DrawStripGearLevelDescTap(r); return true; }
+      }
       DrawStripGearRowTap(r);
       return true;
    }
@@ -1934,8 +2052,26 @@ string DrawStripIconRes(const int slot, const string nm)
    if(slot == DRAW_SLOT_STYLE)
    {
       int st = (int)DrawSlotRead(nm, DRAW_SLOT_STYLE);
+      if(st < 0) st = 0;
+      // P-LOOK: a look wears its native icon (no baked glyphs for looks).
+      else if(st > 4) st = FibPenLookNative(st - 4);
       if(st < 0 || st > 4) st = 0;
       return "::Files\\Icons\\bk_style" + IntegerToString(st) + ".bmp";
+   }
+   //--- P-DRAW-BODY-UI: the handle's own width/style reuse the level family's
+   //--- rasters (same seats, no new art) — read off the body's own slots, so the
+   //--- two width cells can never show each other's value.
+   if(slot == DRAW_SLOT_BODYWIDTH)
+   {
+      int bw = (int)DrawSlotRead(nm, DRAW_SLOT_BODYWIDTH);
+      if(bw < DRAW_WIDTH_MIN || bw > DRAW_WIDTH_MAX) bw = DRAW_WIDTH_MIN;
+      return "::Files\\Icons\\bk_w" + IntegerToString(bw) + ".bmp";
+   }
+   if(slot == DRAW_SLOT_BODYSTYLE)
+   {
+      int bs = (int)DrawSlotRead(nm, DRAW_SLOT_BODYSTYLE);
+      if(bs < 0 || bs > 4) bs = 0;
+      return "::Files\\Icons\\bk_style" + IntegerToString(bs) + ".bmp";
    }
    if(slot == DRAW_SLOT_RAY)
    {
@@ -1976,6 +2112,12 @@ string DrawStripActRes(const int a)
    if(a == DSTRIP_ACT_GEAR) return "::Files\\Icons\\bk_gear.bmp";
    if(a == DSTRIP_ACT_PIN)
       return (s_dsPinned ? "::Files\\Icons\\gl_pin_gold.bmp" : "::Files\\Icons\\gl_pin_m.bmp");
+   //--- P-BK-111: ONE glyph, and it is a TWO-HEADED arrow. The cell has three states, not
+   //--- two, so the usual pair of faces would be wrong twice: a single-headed up arrow
+   //--- reads as «this box is a BUY», which is a claim the strip cannot make (the side
+   //--- belongs to the knot layer, and the user may have overridden it). A shape that can
+   //--- go both ways is the only honest face for a cell whose job is to change the side.
+   if(a == DSTRIP_ACT_DIR) return "::Files\\Icons\\bk_dirflip.bmp";
    if(a == DSTRIP_ACT_DEL) return "::Files\\Icons\\bk_del.bmp";
    return "";
 }
@@ -2186,6 +2328,9 @@ string DrawStripSlotText(const EDrawKind k, const int slot, const string nm)
       case DRAW_SLOT_STYLE:
       {
          int st = (int)DrawSlotRead(nm, DRAW_SLOT_STYLE);
+         if(st == FIBPEN_STYLE_NEON) return "Neon";
+         if(st == FIBPEN_STYLE_CAPS) return "Caps";
+         if(st == FIBPEN_STYLE_WASH) return "Wash";
          if(st == STYLE_DASH) return "Dash";
          if(st == STYLE_DOT) return "Dot";
          if(st == STYLE_DASHDOT) return "D-Dash";
@@ -2225,6 +2370,21 @@ string DrawStripSlotText(const EDrawKind k, const int slot, const string nm)
       case DRAW_SLOT_BACK:
          // the slot IS `OBJPROP_BACK`, so the word follows the slot, not the wish
          return (DrawSlotRead(nm, DRAW_SLOT_BACK) > 0.5) ? "Layer: behind" : "Layer: front";
+      //--- P-DRAW-BODY-UI: the handle's words carry the "Handle" name, so the two
+      //--- width cells (and the two style cells) never read as one value twice.
+      case DRAW_SLOT_BODYCOLOR:
+         return DrawStripColorLabel((color)(int)DrawSlotRead(nm, DRAW_SLOT_BODYCOLOR));
+      case DRAW_SLOT_BODYWIDTH:
+         return "Handle " + IntegerToString((int)DrawSlotRead(nm, DRAW_SLOT_BODYWIDTH)) + "px";
+      case DRAW_SLOT_BODYSTYLE:
+      {
+         int bs = (int)DrawSlotRead(nm, DRAW_SLOT_BODYSTYLE);
+         if(bs == STYLE_DASH) return "Handle Dash";
+         if(bs == STYLE_DOT) return "Handle Dot";
+         if(bs == STYLE_DASHDOT) return "Handle D-Dash";
+         if(bs == STYLE_DASHDOTDOT) return "Handle D-Dot";
+         return "Handle Solid";
+      }
       default: return "";
    }
 }
@@ -2292,9 +2452,12 @@ void DrawStripRecentPush(const color c)
 }
 bool DrawStripHasPicker(const int slot)
 {
+   //--- P-DRAW-BODY-UI: BODYCOLOR rides the palette via IsColorSlot; the handle's
+   //--- width/style open the same list picker as the levels' pair.
    return (DrawStripIsColorSlot(slot) || slot == DRAW_SLOT_WIDTH ||
            slot == DRAW_SLOT_STYLE || slot == DRAW_SLOT_RAY ||
            slot == DRAW_SLOT_FONT  || slot == DRAW_SLOT_GLYPH ||
+           slot == DRAW_SLOT_BODYWIDTH || slot == DRAW_SLOT_BODYSTYLE ||
            slot == DSTRIP_SLOT_LEVELS);
 }
 bool DrawStripIsToggle(const int slot)
@@ -2307,8 +2470,12 @@ int DrawStripPickCount(const EDrawKind k, const int slot)
 {
    //--- P-PAL-21: a colour seat has NO rows here any more — the list picker is the
    //--- one that is left, and a colour seat's editor is the CARDS' popup.
-   if(slot == DRAW_SLOT_WIDTH) return 5;
-   if(slot == DRAW_SLOT_STYLE) return 5;
+   if(slot == DRAW_SLOT_WIDTH || slot == DRAW_SLOT_BODYWIDTH) return 5;
+   // P-LOOK: the fibo's own looks ride the STYLE slot as 5/6/7 — same writer,
+   // same highlight, same undo; other kinds keep the native five.
+   //--- P-DRAW-BODY-UI: the handle's style is the native five only (no looks).
+   if(slot == DRAW_SLOT_BODYSTYLE) return 5;
+   if(slot == DRAW_SLOT_STYLE) return ((k == DK_FIBO || k == DK_FIBOFAN) ? 8 : 5);
    if(slot == DRAW_SLOT_RAY) return 4;
    if(slot == DRAW_SLOT_FONT) return DrawStripFontCount();
    if(slot == DRAW_SLOT_GLYPH) return DrawStripGlyphCount();
@@ -2324,10 +2491,20 @@ color DrawStripPickColor(const int slot, const int row)
 //--- the option's caption (colour cells are swatches: no text, tooltip speaks).
 string DrawStripPickText(const EDrawKind k, const int slot, const int row)
 {
-   if(slot == DRAW_SLOT_WIDTH)
+   if(slot == DRAW_SLOT_WIDTH || slot == DRAW_SLOT_BODYWIDTH)
    {
       if(row < 0 || row > 4) return "";
       return IntegerToString(row + 1) + "px";
+   }
+   //--- P-DRAW-BODY-UI: native five only — a handle never wears a look.
+   if(slot == DRAW_SLOT_BODYSTYLE)
+   {
+      if(row == 1) return "Dash";
+      if(row == 2) return "Dot";
+      if(row == 3) return "D-Dash";
+      if(row == 4) return "D-Dot";
+      if(row == 0) return "Solid";
+      return "";
    }
    if(slot == DRAW_SLOT_STYLE)
    {
@@ -2335,6 +2512,9 @@ string DrawStripPickText(const EDrawKind k, const int slot, const int row)
       if(row == 2) return "Dot";
       if(row == 3) return "D-Dash";
       if(row == 4) return "D-Dot";
+      if(row == FIBPEN_STYLE_NEON && (k == DK_FIBO || k == DK_FIBOFAN)) return "Neon";
+      if(row == FIBPEN_STYLE_CAPS && (k == DK_FIBO || k == DK_FIBOFAN)) return "Caps";
+      if(row == FIBPEN_STYLE_WASH && (k == DK_FIBO || k == DK_FIBOFAN)) return "Wash";
       if(row == 0) return "Solid";
       return "";
    }
@@ -2367,6 +2547,8 @@ bool DrawStripPickIsCur(const string nm, const EDrawKind k, const int slot, cons
       return (c != clrNONE && (color)(int)DrawSlotRead(nm, slot) == c);
    }
    if(slot == DRAW_SLOT_WIDTH) return ((int)DrawSlotRead(nm, DRAW_SLOT_WIDTH) == row + 1);
+   if(slot == DRAW_SLOT_BODYWIDTH) return ((int)DrawSlotRead(nm, DRAW_SLOT_BODYWIDTH) == row + 1);
+   if(slot == DRAW_SLOT_BODYSTYLE) return ((int)DrawSlotRead(nm, DRAW_SLOT_BODYSTYLE) == row);
    if(slot == DRAW_SLOT_STYLE) return ((int)DrawSlotRead(nm, DRAW_SLOT_STYLE) == row);
    if(slot == DRAW_SLOT_RAY)   return ((int)DrawSlotRead(nm, DRAW_SLOT_RAY) == row);
    if(slot == DRAW_SLOT_FONT)  return ((int)DrawSlotRead(nm, DRAW_SLOT_FONT) == DrawStripFontAt(row));
@@ -2543,12 +2725,13 @@ void DrawStripColorHoverClear()
 //--- define-before-use), see below. The contract lives here: through the group
 //--- fan-out (P-DRAW-09b), learning the look for the next drawing (P-DRAW-01c).
 
-//--- P-DRAW-09b: the tip says WHICH drawings the tap will change — the one thing
-//--- a multi-drawing toolbar must never leave to guesswork.
+//--- P-DRAW-09b (retired 2026-10-03): the scope line is GONE, and it is always
+//--- empty — `DrawSelCount()` is 1 by construction now (the served drawing), so the
+//--- suffix could never print «applies to all 2 selected». Kept as one function with
+//--- one answer so every tip that appends it stays honest: a tap changes the drawing
+//--- the strip is on, and only that one.
 string DrawStripTipScope()
 {
-   int n = DrawSelCount();
-   if(n > 1) return "  ·  applies to all " + IntegerToString(n) + " selected";
    return "";
 }
 
@@ -2605,6 +2788,15 @@ string DrawStripSlotTip(const EDrawKind k, const int slot, const string nm)
       case DRAW_SLOT_BACK:
          return "Behind the candles: " + DrawStripSlotText(k, DRAW_SLOT_BACK, nm) +
                 " — click to toggle" + scope;
+      case DRAW_SLOT_BODYCOLOR:
+         return "Handle color: " + DrawStripColorLabel((color)(int)DrawSlotRead(nm, DRAW_SLOT_BODYCOLOR)) +
+                " — click to choose" + scope;
+      case DRAW_SLOT_BODYWIDTH:
+         return "Handle width: " + IntegerToString((int)DrawSlotRead(nm, DRAW_SLOT_BODYWIDTH)) +
+                " px — click to choose" + scope;
+      case DRAW_SLOT_BODYSTYLE:
+         return "Handle style: " + DrawStripSlotText(k, DRAW_SLOT_BODYSTYLE, nm) +
+                " — click to choose" + scope;
       default: break;
    }
    if(slot == DSTRIP_SLOT_LEVELS)
@@ -2639,10 +2831,21 @@ string DrawStripActTip(const int a)
    if(a == DSTRIP_ACT_GEAR) return "Full settings: style, levels, template, strip";
    if(a == DSTRIP_ACT_PIN) return (s_dsPinned ? "Pinned: outside click won't dismiss — click to unpin"
                                               : "Pin: keep the strip while editing");
+   //--- P-BK-111: THE CAPTION STATES BOTH HALVES OF THE CYCLE, because a caption that
+   //--- only says «flip» leaves the user guessing how to hand the box back to the market
+   //--- — and the answer (click again) IS the third state. On a drawing that is not a
+   //--- Base Box it says exactly that, instead of promising a change it cannot make.
+   if(a == DSTRIP_ACT_DIR)
+   {
+      string id = BaseKnotDirBoxFor(s_dsObj);
+      if(id == "") return "Direction: flips a BASE BOX's side — this drawing is not one";
+      if(BaseKnotDirLocked(id)) return "Back to automatic: let the price pick this box's side (it is " + BaseKnotDirWord(id) + ")";
+      return "Trade this box the other way — it is " + BaseKnotDirWord(id) + ", click again to let the price decide";
+   }
    if(a == DSTRIP_ACT_DEL)
    {
-      int n = DrawSelCount();
-      if(n > 1) return "Delete these " + IntegerToString(n) + " drawings (not undoable)";
+      //--- P-DRAW-09b retired (2026-10-03): the bin is this drawing's bin. The strip
+      //--- serves one object, so the «these N drawings» wording could never be true.
       return "Delete this drawing (not undoable)";
    }
    return "";
@@ -2676,24 +2879,37 @@ bool DrawStripSlotOn(const int slot, const string nm)
    return false;
 }
 
-//--- P-DRAW-09c: the badge text. ONE owner of what the strip says it is serving,
-//--- so the group count can never be printed from one place and applied in another.
+//--- P-DRAW-09c: the badge text. ONE owner of what the strip says it is serving.
+//--- P-DRAW-09b retired (2026-10-03): the `xN` count is GONE — the strip serves ONE
+//--- drawing, so a count on the badge would be a number the strip could never honour.
 string DrawStripTitle()
 {
    if(s_dsObj == "") return "";
-   string t = DrawKindName(s_dsKind);
-   int n = DrawSelCount();
-   if(n > 1) t += "  x" + IntegerToString(n);
-   return t;
+   return DrawKindName(s_dsKind);
 }
 
 //--- P-DRAW-13: the LEVELS union both the popover and the gear tab read — the
 //--- nine common values plus the drawing's own customs, capped. ONE builder so
+//--- P-LVL-SCALE (2026-10-04) — MT4 STORES RATIOS, THE PANEL SHOWS PERCENT.
+//--- `OBJPROP_LEVELVALUE` is a ratio (MQL5 book journal: 0.236, 0.618, 1.0;
+//--- measured on-chart: customs 0.3/0.7/1.0 land at 30/70/100%). The old common
+//--- list stored 23.6 (=2360%, off-chart) and the add field's own example
+//--- ("88.6") stored 8860% — «این سطح درست اضافه نمیشه». ONE normalizer: a value
+//--- at percent scale (|v|>=10, the two-digit labels the panel itself shows)
+//--- rides /100; a ratio rides as-is. Old percent-stored sets migrate through
+//--- `DrawStripLevelsCollect`, the one funnel into every rewrite.
+double DrawStripLevelNorm(const double v)
+{
+   if(!MathIsValidNumber(v)) return v;
+   if(MathAbs(v) >= 10.0) return v / 100.0;
+   return v;
+}
 //--- the two editors can never disagree about row i.
 bool DrawStripLevelIsCommon(const double v)
 {
+   double nv = DrawStripLevelNorm(v);
    for(int j = 0; j < DrawStripLevelCommonCount(); j++)
-      if(MathAbs(DrawStripLevelCommon(j) - v) < 0.000001) return true;
+      if(MathAbs(DrawStripLevelCommon(j) - nv) < 0.000001) return true;
    return false;
 }
 int DrawStripGearLevelCount()
@@ -2704,12 +2920,12 @@ int DrawStripGearLevelCount()
    int cur = DrawLevelCount(s_dsObj);
    for(int i = 0; i < cur && n < DSTRIP_GLIST_MAX; i++)
    {
-      double v = DrawLevelValue(s_dsObj, i);
+      double v = DrawStripLevelNorm(DrawLevelValue(s_dsObj, i));
       if(!MathIsValidNumber(v)) continue;
       if(DrawStripLevelIsCommon(v)) continue;
       bool dup = false;
       for(int j = 0; j < i; j++)
-         if(MathAbs(DrawLevelValue(s_dsObj, j) - v) < 0.000001) { dup = true; break; }
+         if(MathAbs(DrawStripLevelNorm(DrawLevelValue(s_dsObj, j)) - v) < 0.000001) { dup = true; break; }
       if(!dup) n++;
    }
    if(n > DSTRIP_GLIST_MAX) n = DSTRIP_GLIST_MAX;
@@ -2724,12 +2940,12 @@ double DrawStripGearLevelAt(const int row)
    int cur = DrawLevelCount(s_dsObj);
    for(int i = 0; i < cur; i++)
    {
-      double v = DrawLevelValue(s_dsObj, i);
+      double v = DrawStripLevelNorm(DrawLevelValue(s_dsObj, i));
       if(!MathIsValidNumber(v)) continue;
       if(DrawStripLevelIsCommon(v)) continue;
       bool dup = false;
       for(int j = 0; j < i; j++)
-         if(MathAbs(DrawLevelValue(s_dsObj, j) - v) < 0.000001) { dup = true; break; }
+         if(MathAbs(DrawStripLevelNorm(DrawLevelValue(s_dsObj, j)) - v) < 0.000001) { dup = true; break; }
       if(dup) continue;
       if(seen == row) return v;
       seen++;
@@ -2747,26 +2963,39 @@ double DrawStripGearLevelAt(const int row)
 // ══════════════════════════════════════════════════════════════════════════
 double DrawStripLevelCommon(const int i)
 {
+   //--- P-LVL-SCALE: stored ratios (MT4 truth), shown percent (panel labels).
    switch(i)
    {
       case 0: return 0.0;
-      case 1: return 23.6;
-      case 2: return 38.2;
-      case 3: return 50.0;
-      case 4: return 61.8;
-      case 5: return 78.6;
-      case 6: return 100.0;
-      case 7: return 127.2;
-      default: return 161.8;
+      case 1: return 0.236;
+      case 2: return 0.382;
+      case 3: return 0.5;
+      case 4: return 0.618;
+      case 5: return 0.786;
+      case 6: return 1.0;
+      case 7: return 1.272;
+      default: return 1.618;
    }
 }
 int DrawStripLevelCommonCount() { return 9; }
-string DrawStripLevelName(const double v) { return DoubleToString(v, 1); }
+string DrawStripLevelName(const double v)
+{
+   //--- P-LVL-SCALE: the label is percent ("23.6"), the value a ratio (0.236).
+   if(!MathIsValidNumber(v)) return "";
+   double nv = DrawStripLevelNorm(v);
+   string s = DoubleToString(nv * 100.0, 1);
+   if(StringLen(s) > 2 && StringSubstr(s, StringLen(s) - 2) == ".0")
+      s = StringSubstr(s, 0, StringLen(s) - 2);
+   return s;
+}
 int DrawStripLevelFind(const string nm, const double v)
 {
+   //--- P-LVL-SCALE: compare normalized — an old percent-stored set (23.6) still
+   //--- answers its row (0.236) instead of duplicating beside it.
+   double nv = DrawStripLevelNorm(v);
    int n = DrawLevelCount(nm);
    for(int i = 0; i < n; i++)
-      if(MathAbs(DrawLevelValue(nm, i) - v) < 0.000001) return i;
+      if(MathAbs(DrawStripLevelNorm(DrawLevelValue(nm, i)) - nv) < 0.000001) return i;
    return -1;
 }
 
@@ -3126,6 +3355,20 @@ bool BoxExtendStep(const string name)
    FillChildSync(name);
    return true;
 }
+//--- P-ORPHAN-ALL (2026-10-04) — EVERY REMNANT ANSWERS FOR ITSELF, AND SAYS SO.
+//--- The pass below carries the repo's three orphan rules (the interior's child, the
+//--- box's 50 % line, the fibo pen's rows); «این بقایش چرا حذف نمیشه» was one of them
+//--- MISSING rather than one of them wrong (measured 2026-10-04: two deleted fibos had
+//--- left 36 `_FSD` rows on the hand's chart — `Fibo 54705` and `Fibo 58985` were gone
+//--- from the chart file while their whole pen was still in it). What no rule had was
+//--- a WITNESS: a cleanup was invisible, so it could only be believed. One line per
+//--- drop, through the ONE deleter — drops are rare, the pass is not, and a stray that
+//--- dies now names itself and its missing master in the diag file.
+void DrawOrphanDrop(const string nm, const string par)
+{
+   ObjectDelete(0, nm);
+   DrawStripDiagEmit("[drawstrip] ORPHAN drop=\"" + nm + "\" par=\"" + par + "\"");
+}
 void BoxExtrasPump()
 {
    static uint s_bxMs = 0;
@@ -3146,7 +3389,7 @@ void BoxExtrasPump()
       if(FillIsChild(nm))
       {
          string par = FillChildParent(nm);
-         if(par == "" || ObjectFind(0, par) < 0) { ObjectDelete(0, nm); continue; }
+         if(par == "" || ObjectFind(0, par) < 0) { DrawOrphanDrop(nm, par); continue; }   // P-ORPHAN-ALL
          //--- P-DRAW-64: a child of an INDICATOR object is a STRAY — an earlier build
          //--- of this split synced any dragged rectangle, the product's own boxes
          //--- included, which moved such a box's interior into a child and left it
@@ -3155,7 +3398,7 @@ void BoxExtrasPump()
          //--- child only ever existed while that fill was on.
          if(DrawIsIndicatorObject(par))
          {
-            ObjectDelete(0, nm);
+            DrawOrphanDrop(nm, par);   // P-ORPHAN-ALL: a child of an indicator is a stray too
             if((int)ObjectGetInteger(0, par, OBJPROP_FILL) == 0)
                ObjectSetInteger(0, par, OBJPROP_FILL, true);
             continue;
@@ -3173,7 +3416,17 @@ void BoxExtrasPump()
       if(BoxIsMidChild(nm))
       {
          string par = BoxMidParent(nm);
-         if(par == "" || ObjectFind(0, par) < 0) ObjectDelete(0, nm);
+         if(par == "" || ObjectFind(0, par) < 0) DrawOrphanDrop(nm, par);   // P-ORPHAN-ALL
+         continue;
+      }
+      //--- P-LOOK-RAY2: the pen's children answer for their own parent too (the same
+      //--- orphan rule, one family over). A fibo deleted while the indicator was off
+      //--- leaves `_FSD/_FSC/_FSW` bands whose master is gone - a styled line drawn on
+      //--- nothing is exactly what "strays" means here, and nothing else knew them.
+      if(FibPenIsChild(nm) || FibPenFamIsChild(nm))
+      {
+         string par = FibPenChildParent(nm);
+         if(par == "" || ObjectFind(0, par) < 0) DrawOrphanDrop(nm, par);   // P-ORPHAN-ALL
          continue;
       }
       //--- P-DRAW-64: the pass was already paying for ONE type read, so the
@@ -3189,6 +3442,13 @@ void BoxExtrasPump()
             (int)ObjectGetInteger(0, nm, OBJPROP_FILL) != 0)
             FillChildSync(nm);
       }
+      //--- P-LOOK-RAY2 (2026-10-04) - THE PEN'S NET RIDES THE PASS THAT ALREADY PAYS
+      //--- THE TYPE READ. The pen had only event paths, so a master the terminal landed
+      //--- after the last event kept a stale pen forever (measured: the pen ran x=59..721
+      //--- against level lines at x=681..1079 - "the styles are not applied on the right
+      //--- side"). `FibPenHeal` is one memo compare while the pen matches the master it
+      //--- was built from, and the sync only on a mismatch.
+      if(ty == OBJ_FIBO || ty == OBJ_FIBOFAN) FibPenHeal(nm);
       if(ty != OBJ_RECTANGLE) continue;
       //--- P-UI-134: the marks' CENSUS is the store now, not the description. This
       //--- used to skip every rectangle whose text carried no `[BX` — a test of the
@@ -3306,8 +3566,13 @@ string DrawStripMoreText(const int r)
    int kind = s_dsMoreKind[r], arg = s_dsMoreArg[r];
    if(kind == DSTRIP_MK_APPLYALL)
    {
-      int n = DrawSelCount();
-      return "Apply to all " + DrawKindName(s_dsKind) + (n > 1 ? " (x" + IntegerToString(n) + ")" : "");
+      //--- P-DRAW-09b retired (2026-10-03): the count in this label used to be the
+      //--- SELECTION's size, so it promised «all 2 selected» while the act underneath
+      //--- reached every drawing of the kind. It now counts the drawings this row will
+      //--- really touch — the walk `DrawStyleApplyToKind` performs — so the number and
+      //--- the act are the same fact.
+      int n = DrawStyleKindCount(s_dsObj);
+      return "Apply to all " + DrawKindName(s_dsKind) + (n > 0 ? " (x" + IntegerToString(n) + ")" : "");
    }
    if(kind == DSTRIP_MK_PRESET) return DrawPresetName(s_dsKind, arg);
    if(kind == DSTRIP_MK_SAVE) return "Save current look";
@@ -3561,6 +3826,57 @@ bool DrawStripGearQuickRow(const int slot, int &y)
    //--- where it is declared, and this one is declared as a single line).
    DrawStripGearGridStamp(mark, y, DSTRIP_GRID_MAX);
    return true;
+}
+//--- P-LVL-COLOR — ONE LEVEL'S SWATCH, PAINTED. The chip shows the ink that
+//--- level wears while it is on the chart, else what adding it would wear (the
+//--- slot's color). Same 22x22 seat and same `ri`/`rc` names as the icon it
+//--- replaces (no new object, no new destroy path); the hit test's swatch rect
+//--- is this seat. Lives here, not in GearB: that file stands at the 1500
+//--- ceiling and never grows (contract §7).
+bool DrawStripGearLevelSwatch(const int r, const int rx, const int py, bool &dd)
+{
+   //--- false = not a level row: the caller's own branch paints it. true eats
+   //--- the branch (the icon it would paint is what covered the swatch), and the
+   //--- faces' own dirt rides `dd` — a handled-but-clean row reports clean.
+   if(s_dsGRKind[r] != 4 || !DrawKindHasLevels(s_dsKind)) return false;
+   bool cur = DrawStripGearRowIsCur(r);
+   string tip = DrawStripGearRowTip(r);
+   double lv = DrawStripGearLevelAt(s_dsGRArg[r]);
+   int li = (MathIsValidNumber(lv) ? DrawStripLevelFind(s_dsObj, lv) : -1);
+   color lc = (li >= 0 ? (color)(int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELCOLOR, li)
+                       : (color)(int)DrawSlotRead(s_dsObj, DRAW_SLOT_COLOR));
+   string ltip = tip + " · swatch sets this level's color";
+   dd |= DrawStripFace(DrawStripRowChipName(r), rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22,
+                       cur ? "::Files\\Icons\\pnl_chip_gold.bmp" : "::Files\\Icons\\pnl_chip.bmp", ltip);
+   dd |= DrawStripBtn(DrawStripRowIconName(r), rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22,
+                      lc, DrawStripInkOn(lc), BioSwatchBorder(lc, BIO_CLR_CARD), "", ltip);
+   return true;
+}
+//--- P-LVL-TEXT — ONE LEVEL'S WORDS. Value plus the level's own note ("50 · TP1").
+//--- A note that only repeats the value (MT4's own default) is not shown twice.
+//--- Lives here, not in GearB: that file stands at the 1500 ceiling (contract §7).
+string DrawStripGearLevelText(const int arg)
+{
+   double v = DrawStripGearLevelAt(arg);
+   if(!MathIsValidNumber(v)) return "";
+   string t = DrawStripLevelName(v);
+   int li = DrawStripLevelFind(s_dsObj, v);
+   if(li >= 0)
+   {
+      string d = ObjectGetString(0, s_dsObj, OBJPROP_LEVELTEXT, li);
+      StringTrimLeft(d); StringTrimRight(d);
+      //--- a default text that IS the value ("0.5", "50") is not shown twice:
+      //--- numeric-only notes compare by worth, real words always show.
+      bool num = (d != "");
+      for(int ci = 0; num && ci < StringLen(d); ci++)
+      {
+         ushort ch = StringGetCharacter(d, ci);
+         if((ch < '0' || ch > '9') && ch != '.' && ch != '-' && ch != '+') num = false;
+      }
+      if(num && DrawStripLevelNorm(StringToDouble(d)) == DrawStripLevelNorm(v)) d = "";
+      if(d != "" && d != t) t += " · " + d;
+   }
+   return t;
 }
 void DrawStripGearSection(const string text, int &y)
 {
@@ -3988,11 +4304,18 @@ int DrawStripGearLayout(int y0)
    //--- last band, outside the block that owns their header. The column reset stays
    //--- (DrawStripGearPlace owns the same value and runs on every path).
    for(int r = 0; r < s_dsGRN; r++) s_dsGRCol[r] = 0;
-   if(levelEdit)
-   {
-      s_dsGearEditY[1] = y;
-      y += DSTRIP_GEAR_ROW_H;
-   }
+    if(levelEdit)
+    {
+       s_dsGearEditY[1] = y;
+       y += DSTRIP_GEAR_ROW_H;
+    }
+    //--- P-LVL-TEXT: the armed note field rides below the add field — one full
+    //--- row on the plate law, so the tab keeps its height contract.
+    if(s_dsGear == DSTRIP_GEAR_LEVELS && DrawStripLvlDescWant())
+    {
+       s_dsGearEditY[4] = y;
+       y += DSTRIP_GEAR_ROW_H;
+    }
    if(s_dsGear == DSTRIP_GEAR_TPL && s_dsTplNameArmed)
    {
       s_dsGearEditY[3] = y;
@@ -4127,7 +4450,14 @@ string DrawStripPopRowRes(const int r)
    if(s_dsPicker == DRAW_SLOT_WIDTH)
       return "::Files\\Icons\\bk_w" + IntegerToString(r + 1) + ".bmp";
    if(s_dsPicker == DRAW_SLOT_STYLE)
-      return "::Files\\Icons\\bk_style" + IntegerToString(r) + ".bmp";
+   {
+      // P-LOOK: no baked glyphs for looks — each wears its native icon.
+      int rr = r;
+      if(rr == FIBPEN_STYLE_NEON) rr = 1;
+      else if(rr == FIBPEN_STYLE_CAPS || rr == FIBPEN_STYLE_WASH) rr = 0;
+      if(rr < 0 || rr > 4) return "";
+      return "::Files\\Icons\\bk_style" + IntegerToString(rr) + ".bmp";
+   }
    if(s_dsPicker == DRAW_SLOT_RAY)
       return "::Files\\Icons\\bk_ray" + IntegerToString(r) + ".bmp";
    if(s_dsPicker == DRAW_SLOT_FONT) return "::Files\\Icons\\gl_textsize_m.bmp";
@@ -4505,6 +4835,7 @@ void DrawStripGearClose()
    s_dsGearPressSpent = false;   // P-DRAW-84: the purge is where a panel's press ends
    s_dsGearPlaced = false; s_dsGearPlacedObj = "";   // P-DRAW-88: next open scores anew
    s_dsTplNameArmed = false;
+   s_dsLvlDescArmed = false;   // P-LVL-TEXT: a note edit dies with the panel
 }
 
 void DrawStripClose()
@@ -4829,11 +5160,7 @@ string DrawStripGearRowText(const int r)
    if(kind == 1) return DrawStripSwitchName(s_dsObj, arg);
    if(kind == 2) return DrawPresetName(s_dsKind, arg);
    if(kind == 3) return "Save current look";
-   if(kind == 4)
-   {
-      double v = DrawStripGearLevelAt(arg);
-      return (MathIsValidNumber(v) ? DrawStripLevelName(v) : "");
-   }
+   if(kind == 4) return DrawStripGearLevelText(arg);
    if(kind == 5)
    {
       if(arg == 0) return "All levels on";
@@ -4891,7 +5218,7 @@ string DrawStripGearRowTip(const int r)
       double v = DrawStripGearLevelAt(arg);
       if(!MathIsValidNumber(v)) return "";
       bool on = (DrawStripLevelFind(s_dsObj, v) >= 0);
-      return DrawStripLevelName(v) + (on ? " is on — click to remove" : " — click to add") +
+      return DrawStripLevelName(v) + (on ? " is on — switch removes, label notes, swatch colors" : " — click to add") +
              " (the held drawing; stays open for the next one)";
    }
    if(kind == 5)
@@ -5655,7 +5982,7 @@ bool DrawStripGearPaint()
       //--- else. One probe, on the path that is not a group.
       if(ObjectFind(0, DrawStripRowDigestName(r)) >= 0)
       { ObjectDelete(0, DrawStripRowDigestName(r)); dirty = true; }
-      if(res != "")
+      if(res != "" && !DrawStripGearLevelSwatch(r, rx, py, dirty))
       {
          //--- P-DRAW-77: THE CARDS' OWN SEATS, MEASURED, NOT DERIVED. The chip is
          //--- `px+PNL_PAD_X, ry+PNL_CHIP_Y` and the label `PnlLabelX()` = PAD_X +
@@ -5702,7 +6029,8 @@ bool DrawStripGearPaint()
       //--- the `!want` branch below, which is the same sweep every retired field uses.
       bool want = ((e == 1 && s_dsGear == DSTRIP_GEAR_LEVELS) ||
                    (e == 2 && s_dsGear == DSTRIP_GEAR_MARK && s_dsKind == DK_TEXT) ||
-                   (e == 3 && s_dsGear == DSTRIP_GEAR_TPL && s_dsTplNameArmed));
+                   (e == 3 && s_dsGear == DSTRIP_GEAR_TPL && s_dsTplNameArmed) ||
+                   (e == 4 && s_dsGear == DSTRIP_GEAR_LEVELS && DrawStripLvlDescWant()));
       if(!want)
       {
          if(ObjectFind(0, en) >= 0) { ObjectDelete(0, en); dirty = true; }
@@ -5729,6 +6057,8 @@ bool DrawStripGearPaint()
       else if(e == 3)
          dirty |= DrawStripEdit(e, ex, s_dsGearEditY[e], ew, "",
                                 "Template name — Enter saves this look under your name", false);
+      else if(e == 4)
+         dirty |= DrawStripEdit(e, ex, s_dsGearEditY[e], ew, ObjectGetString(0, s_dsObj, OBJPROP_LEVELTEXT, s_dsLvlDescIdx), "Level note — Enter writes it on this level", false);
       else
          dirty |= DrawStripEdit(e, ex, s_dsGearEditY[e], ew,
                                 ObjectGetString(0, s_dsObj, OBJPROP_TEXT),
@@ -6993,11 +7323,19 @@ void DrawStripPaint()
          int swx = x + (DSTRIP_CELL - sw) / 2, swy = rowY + (DSTRIP_CELL - sw) / 2;
          int bw = DSTRIP_CELL - 4, bh = (DSTRIP_CELL - 6) / 2;   // 28 x 13, 6px between
          int bx = x + 2, bty = rowY + 1, bby = rowY + 1 + bh + 6;
-         color bcol = DrawStripColorRead(s_dsObj, DRAW_SLOT_COLOR);
+         //--- P-DRAW-BODY-UI: a single-role seat wears ITS OWN slot — the
+         //--- handle's cell reads the handle, never the levels.
+         bool isBody = (slot == DRAW_SLOT_BODYCOLOR);
+         color bcol = DrawStripColorRead(s_dsObj, isBody ? DRAW_SLOT_BODYCOLOR : DRAW_SLOT_COLOR);
          color ccol = DrawStripColorFace(s_dsObj, DRAW_SLOT_FILLCLR);
          string rtip = DrawStripColorRingTip(s_dsObj, merged);
          string ctip = (merged ? DrawStripColorMidTip(s_dsObj) : rtip);
-         bool bOpen = (s_dsPicker == DRAW_SLOT_COLOR);
+         if(isBody)
+         {
+            rtip = DrawStripSlotTip(s_dsKind, DRAW_SLOT_BODYCOLOR, s_dsObj);
+            ctip = rtip;
+         }
+         bool bOpen = (s_dsPicker == (isBody ? DRAW_SLOT_BODYCOLOR : DRAW_SLOT_COLOR));
          if(merged)
          {
             //--- the cell, then TWO marks: the top bar is the BORDER's and the bottom
@@ -7452,6 +7790,7 @@ bool DrawStripOpenAt(const string name, const int mx, const int my)
    if(s_dsY > ch - s_dsH - 4) s_dsY = ch - s_dsH - 4;
    DrawStripHomeSet(s_dsX, s_dsY);   // P-DRAW-41: what was placed (or clamped) IS the home
    if(k == DK_RECT) BoxMidSync(name);   // P-DRAW-21: the drag/zoom ride moves the mid too
+   FibPenSync(name, false);   // P-DRAW-74b: an open re-converges the pair with the drawing
    DrawStripPaint();
    return true;
 }
@@ -7463,11 +7802,13 @@ bool DrawStripOpen(const string name)
    return DrawStripOpenAt(name, -1, -1);
 }
 
-//--- P-DRAW-09b: ONE write for a value, delivered to the WHOLE group. The
-//--- learning half lives in `DrawSlotWrite` (P-DRAW-01c), so every member and the
-//--- kind's memory move together — and the group is pruned first, because a
-//--- member another gesture deleted is not a name to write. Every caller pushes
-//--- undo FIRST (single-step looks).
+//--- P-DRAW-09b (retired 2026-10-03): ONE write for a value, delivered to the
+//--- SERVED DRAWING. The loop is kept because every reader of `DrawSelCount` keeps
+//--- its exact signature, and the store now holds one name (see `DrawSelSnapshot`) —
+//--- so this iterates a list of ONE. The automatic fan-out that made a colour tap
+//--- on one fibo land on the other is gone from every write path that came through
+//--- here. The learning half lives in `DrawSlotWrite` (P-DRAW-01c).
+//--- Every caller pushes undo FIRST (single-step looks).
 int DrawStripWriteValue(const int slot, const double v)
 {
    //--- P-DRAW-64a: the box's own 50 % needs no "show the interior" rule — it moves
@@ -7487,6 +7828,16 @@ int DrawStripWriteValue(const int slot, const double v)
       if(nm == "" || ObjectFind(0, nm) < 0) continue;
       if(DrawSlotWrite(nm, slot, v)) done++;
    }
+   // DIAG-141 (2026-10-03) — THE GROUP LEAVES ITS NUMBER. One tap fanning out
+   // to several drawings («رنگ یکی را عوض میکنم روی دیگری هم اعمال میشه») is
+   // otherwise indistinguishable from a second writer. Discrete taps only.
+   // P-DRAW-09b retired the same day: `n > 1` is now IMPOSSIBLE (`DrawSelSnapshot`
+   // holds one name), so the line can no longer fire — which is the point. It stays
+   // as the witness that proves it: a fan-out reaching a second drawing would have
+   // to be a second WRITER, and that writer would have to go through here to be seen.
+   if(n > 1)
+      DrawStripDiagEmit("[drawstrip] GROUP n=" + IntegerToString(n) +
+                        " slot=" + IntegerToString(slot) + " obj=\"" + s_dsObj + "\"");
    return done;
 }
 
@@ -7510,6 +7861,13 @@ void DrawStripUndoLook(const string nm, const int i)
    s_duFont[i] = (int)DrawSlotRead(nm, DRAW_SLOT_FONT);
    s_duGlyph[i] = (int)DrawSlotRead(nm, DRAW_SLOT_GLYPH);
    s_duBack[i] = (DrawSlotRead(nm, DRAW_SLOT_BACK) > 0.5 ? 1 : 0);
+   //--- P-DRAW-BODY-UI: the handle rides the same single-step undo (same seats).
+   if(DrawSlotAvailable(DrawKindOf(nm), DRAW_SLOT_BODYCOLOR))
+   {
+      s_duBodyClr[i] = (color)(int)DrawSlotRead(nm, DRAW_SLOT_BODYCOLOR);
+      s_duBodyW[i] = (int)DrawSlotRead(nm, DRAW_SLOT_BODYWIDTH);
+      s_duBodySt[i] = (int)DrawSlotRead(nm, DRAW_SLOT_BODYSTYLE);
+   }
 }
 void DrawStripUndoPush()
 {
@@ -7537,9 +7895,10 @@ void DrawStripUndoPush()
       int nl = DrawLevelCount(s_dsObj);
       for(int l = 0; l < nl && s_duLvN < DSTRIP_UNDO_LV; l++)
       {
+         s_duLvT[s_duLvN] = ObjectGetString(0, s_dsObj, OBJPROP_LEVELTEXT, l);   // P-LVL-TEXT
          s_duLvV[s_duLvN] = DrawLevelValue(s_dsObj, l);
          s_duLvC[s_duLvN] = (color)(int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELCOLOR, l);
-         s_duLvW[s_duLvN] = (int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELWIDTH, l);
+         s_duLvW[s_duLvN] = FibPenLogicalWidth(s_dsObj, l);   // P-DRAW-74b: snapshot the remembered width
          s_duLvS[s_duLvN] = (int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELSTYLE, l);
          s_duLvN++;
       }
@@ -7581,9 +7940,16 @@ bool DrawStripUndoPop()
          DrawSlotWrite(nm, DRAW_SLOT_FILLCLR, (double)(int)s_duFillClr[i]);
          DrawSlotOpacitySet(nm, s_duFillOp[i], DRAW_SLOT_FILLCLR);
       }
+      if(DrawSlotAvailable(DrawKindOf(nm), DRAW_SLOT_BODYCOLOR))
+      {
+         DrawSlotWrite(nm, DRAW_SLOT_BODYCOLOR, (double)(int)s_duBodyClr[i]);
+         DrawSlotWrite(nm, DRAW_SLOT_BODYWIDTH, (double)s_duBodyW[i]);
+         DrawSlotWrite(nm, DRAW_SLOT_BODYSTYLE, (double)s_duBodySt[i]);
+      }
    }
    if(s_duLvN > 0 && s_dsObj != "" && ObjectFind(0, s_dsObj) >= 0 && DrawKindHasLevels(s_dsKind))
    {
+      FibPenTagDrop(s_dsObj);   // P-DRAW-74b: restored truth spends the memory
       ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELS, s_duLvN);
       for(int l = 0; l < s_duLvN; l++)
       {
@@ -7591,7 +7957,9 @@ bool DrawStripUndoPop()
          ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELCOLOR, l, s_duLvC[l]);
          ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELWIDTH, l, s_duLvW[l]);
          ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELSTYLE, l, s_duLvS[l]);
+         ObjectSetString(0, s_dsObj, OBJPROP_LEVELTEXT, l, s_duLvT[l]);   // P-LVL-TEXT
       }
+      FibPenSync(s_dsObj, false);   // P-DRAW-74b: the undo restores truth, the pair follows it
    }
    s_duValid = false;
    DrawStripPaint();
@@ -7681,16 +8049,26 @@ bool DrawStripPickApply(const int slot, const int row)
    if(k == DK_NONE) return false;
    if(DrawStripIsColorSlot(slot))
       return DrawStripColorCommit(slot, DrawStripPickColor(slot, row));
-   if(slot == DRAW_SLOT_WIDTH)
+   if(slot == DRAW_SLOT_WIDTH || slot == DRAW_SLOT_BODYWIDTH)
    {
       if(row < 0 || row > 4) return false;
       DrawStripUndoPush();
-      DrawStripWriteValue(DRAW_SLOT_WIDTH, (double)(row + 1));
+      DrawStripWriteValue(slot, (double)(row + 1));
+      return true;
+   }
+   //--- P-DRAW-BODY-UI: native five only — never a look tag, never the levels.
+   if(slot == DRAW_SLOT_BODYSTYLE)
+   {
+      if(row < 0 || row > 4) return false;
+      DrawStripUndoPush();
+      DrawStripWriteValue(DRAW_SLOT_BODYSTYLE, (double)row);
       return true;
    }
    if(slot == DRAW_SLOT_STYLE)
    {
-      if(row < 0 || row > 4) return false;
+      // P-LOOK: the count lives in DrawStripPickCount — a second bound here is
+      // how the fibo's own rows 5/6/7 arrived dead (painted, never applied).
+      if(row < 0 || row >= DrawStripPickCount(k, slot)) return false;
       DrawStripUndoPush();
       DrawStripWriteValue(DRAW_SLOT_STYLE, (double)row);
       return true;
@@ -7722,7 +8100,7 @@ bool DrawStripPickApply(const int slot, const int row)
 // ══════════════════════════════════════════════════════════════════════════
 // P-DRAW-13 — LEVEL MEMBERSHIP WRITES (held drawing only) + DUPLICATE.
 // ══════════════════════════════════════════════════════════════════════════
-bool DrawStripLevelsRewrite(double &vals[], color &clrs[], int &wds[], int &sts[], const int n)
+bool DrawStripLevelsRewrite(double &vals[], color &clrs[], int &wds[], int &sts[], string &txts[], const int n)
 {
    if(s_dsObj == "" || ObjectFind(0, s_dsObj) < 0) return false;
    if(!DrawKindHasLevels(s_dsKind)) return false;
@@ -7734,52 +8112,64 @@ bool DrawStripLevelsRewrite(double &vals[], color &clrs[], int &wds[], int &sts[
       ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELCOLOR, i, clrs[i]);
       ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELWIDTH, i, wds[i]);
       ObjectSetInteger(0, s_dsObj, OBJPROP_LEVELSTYLE, i, sts[i]);
+      //--- P-LVL-TEXT: texts ride index-aligned with values — a rewrite that
+      //--- moved values but not texts would glue notes onto the wrong levels.
+      ObjectSetString(0, s_dsObj, OBJPROP_LEVELTEXT, i, txts[i]);
    }
+   FibPenTagDrop(s_dsObj);   // P-DRAW-74b: rewritten truth spends the memory
+   FibPenSync(s_dsObj, false);   // P-DRAW-74b: rewritten truth converges here
    return true;
 }
-void DrawStripLevelsCollect(double &vals[], color &clrs[], int &wds[], int &sts[], int &n)
+void DrawStripLevelsCollect(double &vals[], color &clrs[], int &wds[], int &sts[], string &txts[], int &n)
 {
    n = 0;
    if(s_dsObj == "" || ObjectFind(0, s_dsObj) < 0) return;
    int cur = DrawLevelCount(s_dsObj);
    for(int i = 0; i < cur && n < 32; i++)
    {
-      double v = DrawLevelValue(s_dsObj, i);
+      //--- P-LVL-SCALE: the funnel migrates old percent-stored sets (23.6) to
+      //--- ratios (0.236) on the next rewrite — every toggle/add/set-all heals.
+      double v = DrawStripLevelNorm(DrawLevelValue(s_dsObj, i));
       if(!MathIsValidNumber(v)) continue;
       vals[n] = v;
       clrs[n] = (color)(int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELCOLOR, i);
-      wds[n] = (int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELWIDTH, i);
+      wds[n] = FibPenLogicalWidth(s_dsObj, i);   // P-DRAW-74b: collect the remembered width, not the thinned one
       sts[n] = (int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELSTYLE, i);
+      txts[n] = ObjectGetString(0, s_dsObj, OBJPROP_LEVELTEXT, i);
       n++;
    }
 }
 //--- toggle one membership value (multi-stay: the editor does NOT close).
 bool DrawStripLevelsToggle(const double v)
 {
-   if(!MathIsValidNumber(v)) return false;
+   //--- P-LVL-SCALE: the value rides normalized (ratio) — collected rows already
+   //--- are, so a percent-typed 88.6 meets the stored 0.886 instead of doubling it.
+   double nv = DrawStripLevelNorm(v);
+   if(!MathIsValidNumber(nv)) return false;
    if(s_dsObj == "" || ObjectFind(0, s_dsObj) < 0) return false;
    DrawStripUndoPush();
-   double vals[32]; color clrs[32]; int wds[32]; int sts[32]; int n = 0;
-   DrawStripLevelsCollect(vals, clrs, wds, sts, n);
+   double vals[32]; color clrs[32]; int wds[32]; int sts[32]; string txts[32]; int n = 0;
+   DrawStripLevelsCollect(vals, clrs, wds, sts, txts, n);
    int at = -1;
    for(int i = 0; i < n; i++)
-      if(MathAbs(vals[i] - v) < 0.000001) { at = i; break; }
+      if(MathAbs(vals[i] - nv) < 0.000001) { at = i; break; }
    if(at >= 0)
    {
       for(int j = at; j < n - 1; j++)
-      { vals[j] = vals[j + 1]; clrs[j] = clrs[j + 1]; wds[j] = wds[j + 1]; sts[j] = sts[j + 1]; }
+      { vals[j] = vals[j + 1]; clrs[j] = clrs[j + 1]; wds[j] = wds[j + 1]; sts[j] = sts[j + 1]; txts[j] = txts[j + 1]; }
       n--;
    }
    else
    {
       if(n >= 32) return false;
-      vals[n] = v;
+      vals[n] = nv;
       clrs[n] = (color)(int)DrawSlotRead(s_dsObj, DRAW_SLOT_COLOR);
       wds[n] = (int)DrawSlotRead(s_dsObj, DRAW_SLOT_WIDTH);
       sts[n] = (int)DrawSlotRead(s_dsObj, DRAW_SLOT_STYLE);
+      txts[n] = "";
       n++;
    }
-   return DrawStripLevelsRewrite(vals, clrs, wds, sts, n);
+   return DrawStripLevelsRewrite(vals, clrs, wds, sts, txts, n);
 }
 //--- All / None for the common nine.
 bool DrawStripLevelsSetAll(const bool on)
@@ -7789,22 +8179,30 @@ bool DrawStripLevelsSetAll(const bool on)
    DrawStripUndoPush();
    if(!on)
    {
-      double vals[32]; color clrs[32]; int wds[32]; int sts[32];
+      double vals[32]; color clrs[32]; int wds[32]; int sts[32]; string txts[32];
       int n = 0;
-      return DrawStripLevelsRewrite(vals, clrs, wds, sts, n);
+      return DrawStripLevelsRewrite(vals, clrs, wds, sts, txts, n);
    }
-   double vals2[32]; color clrs2[32]; int wds2[32]; int sts2[32];
-   int n2 = 0;
+   //--- P-LVL-KEEP: "All levels on" is a UNION — the hand's customs (0.3, 88.6)
+   //--- keep their own rows and colors; only the missing commons are appended in
+   //--- the slot's look. The old shape rewrote the nine commons alone and silently
+   //--- dropped every custom the user had added.
+   double vals[32]; color clrs[32]; int wds[32]; int sts[32]; string txts[32]; int n = 0;
+   DrawStripLevelsCollect(vals, clrs, wds, sts, txts, n);
    color c = (color)(int)DrawSlotRead(s_dsObj, DRAW_SLOT_COLOR);
    int w = (int)DrawSlotRead(s_dsObj, DRAW_SLOT_WIDTH);
    int st = (int)DrawSlotRead(s_dsObj, DRAW_SLOT_STYLE);
-   for(int i = 0; i < DrawStripLevelCommonCount(); i++)
+   for(int i = 0; i < DrawStripLevelCommonCount() && n < 32; i++)
    {
-      vals2[n2] = DrawStripLevelCommon(i);
-      clrs2[n2] = c; wds2[n2] = w; sts2[n2] = st;
-      n2++;
+      double cv = DrawStripLevelCommon(i);
+      bool has = false;
+      for(int j = 0; j < n; j++)
+         if(MathAbs(vals[j] - cv) < 0.000001) { has = true; break; }
+      if(has) continue;
+      vals[n] = cv; clrs[n] = c; wds[n] = w; sts[n] = st; txts[n] = "";
+      n++;
    }
-   return DrawStripLevelsRewrite(vals2, clrs2, wds2, sts2, n2);
+   return DrawStripLevelsRewrite(vals, clrs, wds, sts, txts, n);
 }
 //--- DUPLICATE: a true clone beside itself (anchors + look + levels), the copy
 //--- selected and served. Time anchors step one chart bar so the two do not sit
@@ -7861,8 +8259,8 @@ bool DrawStripDuplicate()
    if(DrawKindOf(nm) == DK_RECT) BoxMarkWrite(nm, false, BOXEXT_OFF, 0);
    if(DrawKindHasLevels(s_dsKind))
    {
-      double vals[32]; color clrs[32]; int wds[32]; int sts[32]; int n = 0;
-      DrawStripLevelsCollect(vals, clrs, wds, sts, n);
+      double vals[32]; color clrs[32]; int wds[32]; int sts[32]; string txts[32]; int n = 0;
+      DrawStripLevelsCollect(vals, clrs, wds, sts, txts, n);
       ObjectSetInteger(0, nm, OBJPROP_LEVELS, n);
       for(int l = 0; l < n; l++)
       {
@@ -7870,9 +8268,11 @@ bool DrawStripDuplicate()
          ObjectSetInteger(0, nm, OBJPROP_LEVELCOLOR, l, clrs[l]);
          ObjectSetInteger(0, nm, OBJPROP_LEVELWIDTH, l, wds[l]);
          ObjectSetInteger(0, nm, OBJPROP_LEVELSTYLE, l, sts[l]);
-         ObjectSetString(0, nm, OBJPROP_LEVELTEXT, l,
-                         ObjectGetString(0, s_dsObj, OBJPROP_LEVELTEXT, l));
+         //--- P-LVL-TEXT: the collected note rides its own value (source indices
+         //--- shift past invalid rows, so re-reading by index would mis-glue them).
+         ObjectSetString(0, nm, OBJPROP_LEVELTEXT, l, txts[l]);
       }
+      FibPenSync(nm, false);   // P-DRAW-74b: the copy converges beside the copy
    }
    s_duCopy = nm;
    ObjectSetInteger(0, nm, OBJPROP_SELECTED, true);
@@ -8049,6 +8449,26 @@ bool DrawStripActTap(const int a)
       ChartRedraw();
       return true;
    }
+   if(a == DSTRIP_ACT_DIR)
+   {
+      //--- P-BK-111: THE CELL IS A CALL ON THE KNOT LAYER, so the call and the rebuild
+      //--- are the same branch: the side is a published fact (the marker, the note's
+      //--- caption, the family's colours), so a flip that does not repaint is a flip the
+      //--- user cannot see. `BaseKnotSync` is the family's own owner for that reason.
+      DrawStripClosePicker();
+      string id = BaseKnotDirBoxFor(s_dsObj);
+      if(id != "" && BaseKnotFlipDirection(id))
+      {
+         BaseKnotSync(id);
+         DrawStripLayout();
+         DrawStripPaint();
+         ChartRedraw();   // P-DRAW-127: a user action flushes its own frame
+      }
+      //--- NOT A BASE BOX: the cell consumed the click and changed nothing, on purpose.
+      //--- A refused action must not fall through to a neighbour's tap, and it must not
+      //--- repaint either - there is nothing new on the chart to show.
+      return true;
+   }
    if(a == DSTRIP_ACT_DEL) { DrawStripFireDelete(); return true; }
    return true;
 }
@@ -8072,6 +8492,7 @@ void DrawStripFireDelete()
          if(DrawIsPathSeg(DrawSelAt(j))) { string tmpId = ""; if(PathIdOfName(DrawSelAt(j), tmpId)) PathDelete(tmpId, "strip bin"); continue; }
          BoxEdgeForget(DrawSelAt(j));   // P-UI-132: a deleted box spends its edge memo here, not by expiry
          BoxMarkDrop(DrawSelAt(j));   // P-UI-134: ...and so does its marks KEY
+         FibPenSync(DrawSelAt(j), true);   // P-DRAW-74b: strays and the tag die with the object
          BoxMidDrop(DrawSelAt(j)); FillChildDrop(DrawSelAt(j)); ObjectDelete(0, DrawSelAt(j));
       }
    }
@@ -8080,7 +8501,7 @@ void DrawStripFireDelete()
       if(DrawIsHRay(s_dsObj)) HRayDelete(s_dsObj, "strip bin");   // P-HR-04
       // P-UI-136: and the single held object is a segment — the whole path goes.
       else if(DrawIsPathSeg(s_dsObj)) { string tmpId = ""; if(PathIdOfName(s_dsObj, tmpId)) PathDelete(tmpId, "strip bin"); }
-      else { BoxEdgeForget(s_dsObj); BoxMarkDrop(s_dsObj); BoxMidDrop(s_dsObj); FillChildDrop(s_dsObj); ObjectDelete(0, s_dsObj); }
+      else { BoxEdgeForget(s_dsObj); BoxMarkDrop(s_dsObj); FibPenSync(s_dsObj, true); BoxMidDrop(s_dsObj); FillChildDrop(s_dsObj); ObjectDelete(0, s_dsObj); }
    }
    DrawStripClose();
    ChartRedraw();
@@ -8110,6 +8531,22 @@ bool DrawStripPickTap(const int row)
       return true;
    }
    DrawStripPickApply(s_dsPicker, row);
+   // DIAG-137 (2026-10-03) — EVERY tap leaves its number: slot, row, object and
+   // the read-back. A control that paints but never writes («هرچی ضخیم تر
+   // انتخاب میکنم تاثییری نداره») is otherwise indistinguishable from a paint
+   // that ignores the write. The tap IS the event, so there is no dirty-only.
+   if(s_dsPicker != DSTRIP_MORE && s_dsPicker != DSTRIP_SLOT_LEVELS)
+   {
+      // DIAG-138 (2026-10-03) — the tag ITSELF joins the line: lk/gi parsed value
+      // beside haslk/raw search tells a failed drop (haslk=1) from a misread.
+      string ptxt = ObjectGetString(0, s_dsObj, OBJPROP_TEXT);
+      int plk = FibPenLookGet(s_dsObj);
+      DrawStripDiagEmit("[drawstrip] PICK slot=" + IntegerToString(s_dsPicker) +
+                        " row=" + IntegerToString(row) + " obj=\"" + s_dsObj +
+                        "\" read=" + DoubleToString(DrawSlotRead(s_dsObj, s_dsPicker), 0) +
+                        " lk=" + IntegerToString(plk) +
+                        " haslk=" + (StringFind(ptxt, FIBPEN_LK) >= 0 ? "1" : "0"));
+   }
    //--- P-DRAW-48 — THE COLOUR BOARD STAYS. User order: «روی رنگ کلیک میکنم بسته
    //--- میشه نمیزاره شفافیت تنظیم بکنم» — the board carries the opacity bar, so a
    //--- pick that shuts it takes the bar away exactly when the next act is tuning
@@ -8352,6 +8789,7 @@ bool DrawStripGearRowTap(const int r)
       DrawStripPaint();
       return true;
    }
+   return true;
    if(kind == 5)
    {
       if(arg == 2)
@@ -8385,6 +8823,61 @@ bool DrawStripGearRowTap(const int r)
       DrawStripPaint();
       return true;
    }
+   return true;
+}
+//--- P-LVL-COLOR — ONE LEVEL'S SWATCH. The row's chip shows the ink that level
+//--- wears; tapping it opens the cards palette on that STORED level (same popup
+//--- as every color cell, P-PAL-19). A row whose level is not on the chart has
+//--- no ink to edit, so its swatch is the same act as the row: add it.
+bool DrawStripGearLevelColorTap(const int r)
+{
+   if(!s_dsOpen || s_dsObj == "") return false;
+   if(r < 0 || r >= s_dsGRN) return false;
+   if(s_dsGRKind[r] != 4) return DrawStripGearRowTap(r);
+   if(!DrawKindHasLevels(s_dsKind)) return false;
+   double v = DrawStripGearLevelAt(s_dsGRArg[r]);
+   if(!MathIsValidNumber(v)) return false;
+   int idx = DrawStripLevelFind(s_dsObj, v);
+   if(idx < 0)
+   {
+      DrawStripLevelsToggle(v);
+      DrawStripLayout();
+      DrawStripPaint();
+      return true;
+   }
+   DrawStripDiagEmit("[drawstrip] LVLCOLOR obj=\"" + s_dsObj + "\" level=" +
+                     IntegerToString(idx) + " v=" + DrawStripLevelName(v));
+   DrawStripPalAskLevel(DRAW_SLOT_COLOR, idx);
+   return true;
+}
+//--- P-LVL-TEXT — ONE LEVEL'S LABEL ZONE. Arms the e4 note field on that STORED
+//--- level, seeded with what it wears; a re-arm on another row drops the field
+//--- so it is reborn with the new seed instead of keeping the old row's word.
+//--- A row whose level is not on the chart has nothing to note: same as toggle.
+bool DrawStripGearLevelDescTap(const int r)
+{
+   if(!s_dsOpen || s_dsObj == "") return false;
+   if(r < 0 || r >= s_dsGRN || s_dsGRKind[r] != 4) return DrawStripGearRowTap(r);
+   if(!DrawKindHasLevels(s_dsKind)) return false;
+   double v = DrawStripGearLevelAt(s_dsGRArg[r]);
+   if(!MathIsValidNumber(v)) return false;
+   int idx = DrawStripLevelFind(s_dsObj, v);
+   if(idx < 0)
+   {
+      DrawStripLevelsToggle(v);
+      DrawStripLayout();
+      DrawStripPaint();
+      return true;
+   }
+   if(s_dsLvlDescArmed && (s_dsLvlDescObj != s_dsObj || s_dsLvlDescIdx != idx))
+      ObjectDelete(0, DrawStripEditName(4));
+   s_dsLvlDescArmed = true; s_dsLvlDescObj = s_dsObj; s_dsLvlDescIdx = idx;
+   DrawStripDiagEmit("[drawstrip] LVLDESC obj=\"" + s_dsObj + "\" level=" +
+                     IntegerToString(idx) + " v=" + DrawStripLevelName(v));
+   DrawStripLayout();
+   DrawStripPaint();
+   if(ObjectFind(0, DrawStripEditName(4)) >= 0)
+      ObjectSetInteger(0, DrawStripEditName(4), OBJPROP_STATE, true);
    return true;
 }
 //--- gear foot: Reset / All / Copy. P-DRAW-78: `Del` is retired from the panel —
@@ -8480,21 +8973,41 @@ bool DrawStripEditEnd(const int e)
    {
       string t = txt;
       StringTrimLeft(t); StringTrimRight(t);
-      double v = StringToDouble(t);
-      if(!MathIsValidNumber(v) || v < -100.0 || v > 500.0) return true;
+      //--- P-LVL-SCALE: typed percent rides /100 ("88.6" -> 0.886); a typed ratio
+      //--- rides as-is ("0.5" -> 0.5). Guard is the ratio band now, not percent.
+      double v = DrawStripLevelNorm(StringToDouble(t));
+      if(!MathIsValidNumber(v) || v < -10.0 || v > 10.0) return true;
       if(DrawStripLevelFind(s_dsObj, v) >= 0) return true;
       DrawStripUndoPush();
-      double vals[32]; color clrs[32]; int wds[32]; int sts[32]; int n = 0;
-      DrawStripLevelsCollect(vals, clrs, wds, sts, n);
+      double vals[32]; color clrs[32]; int wds[32]; int sts[32]; string txts[32]; int n = 0;
+      DrawStripLevelsCollect(vals, clrs, wds, sts, txts, n);
       if(n >= 32) return true;
       vals[n] = v;
       clrs[n] = (color)(int)DrawSlotRead(s_dsObj, DRAW_SLOT_COLOR);
       wds[n] = (int)DrawSlotRead(s_dsObj, DRAW_SLOT_WIDTH);
       sts[n] = (int)DrawSlotRead(s_dsObj, DRAW_SLOT_STYLE);
+      txts[n] = "";
       n++;
-      DrawStripLevelsRewrite(vals, clrs, wds, sts, n);
+      DrawStripLevelsRewrite(vals, clrs, wds, sts, txts, n);
       DrawStripLayout();
       DrawStripPaint();
+      return true;
+   }
+   //--- P-LVL-TEXT: the armed note commits onto its stored level (Enter). Empty
+   //--- clears the note back to the value alone. Undoable like every look write.
+   if(e == 4 && s_dsGear == DSTRIP_GEAR_LEVELS && DrawStripLvlDescWant())
+   {
+      string nt = txt;
+      StringTrimLeft(nt); StringTrimRight(nt);
+      if(StringLen(nt) > 63) nt = StringSubstr(nt, 0, 63);   // contract §2: object text truncates at 63
+      DrawStripUndoPush();
+      ObjectSetString(0, s_dsObj, OBJPROP_LEVELTEXT, s_dsLvlDescIdx, nt);
+      s_dsLvlDescArmed = false;
+      DrawStripDiagEmit("[drawstrip] LVLTEXT obj=\"" + s_dsObj + "\" level=" +
+                        IntegerToString(s_dsLvlDescIdx) + " text=\"" + nt + "\"");
+      DrawStripLayout();
+      DrawStripPaint();
+      ChartRedraw();   // P-UI-131: the line the user watches re-inks in its own frame
       return true;
    }
    if(e == 2 && DrawKindOf(s_dsObj) == DK_TEXT)
@@ -8689,39 +9202,18 @@ void DrawStripGripMove(const int mx, const int my, const bool left)
 
 
 // ══════════════════════════════════════════════════════════════════════════
-// P-UI-113 (2026-09-23) — LEFT-HOLD OPENS THE STRIP. User order: «مدیریت کلیک
-// راست ولش کن همون هولد با کلیک چپ باشه بهتره». One hold language with the
-// boxes (BkHold*): a 500 ms still LEFT press on one of the user's own drawings
-// opens the strip on it; a drag never opens, a release never opens (the fire
-// happens mid-hold, then disarms, so the release that follows opens nothing).
-// The release that ENDS the opening hold is swallowed for the whole press cycle
-// (`s_dsOpenerUntil` below) or the TV-style outside-click dismissal would close
-// what just opened (the P-DRAW-08k/08j guard, retired with right-click, reborn
-// here as P-UI-113c).
-// Zero-move presses emit no MOUSE_MOVE (P-LM-13), so DrawStripHoldPoll backs
-// the move path from RefreshKitOnBar, beside BkHoldPoll/CpHoldPoll.
-#define DSTRIP_HOLD_MS   500
-#define DSTRIP_HOLD_MOVE 8
-#define DSTRIP_HOLD_TTL  5000
-static uint   s_dsHoldMs = 0;
-static int    s_dsHoldX = 0, s_dsHoldY = 0;
-static string s_dsHoldObj = "";
-static bool   s_dsHoldDown = false;
-//--- P-UI-115c (2026-09-29) — THE RELEASE IS A WINDOW FOR THE HOLD'S OWN END TOO.
-//--- The opener's release has been a WINDOW since P-UI-113c; the hold's end still
-//--- treated every click-family event as the release itself. Measured on the live
-//--- chart (EURUSD,M1 18:38:20.170-21.089, one drawing, one pixel): four
-//--- `hold latch at 391,158 hit="THLevels_HRAY_380119684538"` in 919 ms — gaps
-//--- 179/252/488 ms — and only the 517 ms one reached `hold opened`. The terminal's
-//--- own button bit flaps mid-press (first measured by P-UI-113j), so a CLICK arrives
-//--- WHILE the hand is still down; the tail cleared the latch AND the press cycle on
-//--- each one, and the next flap re-latched — which RESTARTED the 500 ms clock. No
-//--- hand keeps every gap over 500 ms, so the strip opened by luck. A release is now
-//--- stamped here and PROVEN by the window (`DSTRIP_OPEN_TAIL_MS`); the poll resolves
-//--- the real one, and `DrawStripHoldLatch` refuses to re-time a press it already
-//--- named at the same point.
-static uint   s_dsHoldOffMs = 0;   // tick a release was SEEN at (0 = none)
-//--- P-UI-130 (2026-10-02) — A DRAWING THE TERMINAL IS MOVING IS NEVER HELD.
+// P-UI-113 (2026-09-23, click-toggle 2026-10-07) — ONE CLICK OPENS THE STRIP.
+// User order: «هولد بردار، کلیک که کرد و سلکت شد نوار فعال بشه» and «سلکت و
+// دیسلکت با یک کلیک، نه دابل‌کلیک». The 500 ms hold is gone: a single click on
+// one of the user's own drawings selects it and opens the strip; a single
+// click on the served drawing deselects it and closes. No timers anywhere in
+// this path — a press names, a release toggles, the opener window spends the
+// twin. A drag never toggles (travel veto + the drag heartbeat below); a
+// release never opens by itself.
+// Zero-move presses emit no MOUSE_MOVE (P-LM-13) and need no poll: a click
+// that names a drawing carries the name itself (OBJECT_CLICK sparam).
+// ══════════════════════════════════════════════════════════════════════════
+//--- P-UI-130 (2026-10-02) — A DRAWING THE TERMINAL IS MOVING IS NEVER TOGGLED.
 //--- The user's second report, in one sentence: «موقعی که باکس جابجا میکنم یا
 //--- ریساز میکنم نوار استریپ بالا میاد و مزاحم میشه». The press that STARTS a drag
 //--- is a press on the drawing, so it arms the latch exactly like a hold does, and
@@ -8760,11 +9252,10 @@ void DrawStripDragWitness(const string nm)
 {
    s_dsDragMs  = GetTickCount();
    s_dsDragObj = nm;
-   if(s_dsOpen) return;                       // an open strip owns no hold
-   if(s_dsHoldMs == 0 && s_dsHoldObj == "") return;
-   Print("[drawstrip] hold cancelled: native drag obj=\"", nm, "\"");
-   s_dsHoldMs = 0; s_dsHoldObj = ""; s_dsHoldOffMs = 0;
-   DrawStripPressCycleClear();   // proved a drag: this press may never become a hold
+   if(s_dsOpen) return;                       // an open strip owns no press naming
+   if(!DrawStripPressCycleLive()) return;     // nothing named: nothing to drop
+   Print("[drawstrip] press dropped: native drag obj=\"", nm, "\"");
+   DrawStripPressCycleClear();   // proved a drag: this press may never become a tap
 }
 //--- P-UI-113c (2026-09-23) — THE OPENING PRESS OWNS ITS OWN CLICK-FAMILY EVENTS.
 //--- Reported: «چرا با رها کردن هولد استریپ هم بسته میشه». The hold fires while the
@@ -8782,29 +9273,17 @@ void DrawStripDragWitness(const string nm)
 //--- place both sides can see.
 void DrawStripHoldLatch(const int mx, const int my)
 {
-   uint now = GetTickCount();
-   //--- P-UI-130: THE TERMINAL IS MOVING A DRAWING — the hand is not holding. FIRST
-   //--- because it is one compare, and first because every fence BELOW has already
-   //--- stamped a clock by the time it returns: a refusal here never leaves a live
-   //--- latch for the poll to fire on (the trap `DrawStripHoldForget` used to keep).
-   if(DrawStripDragLive())
-   {
-      if(!s_dsOpen) Print("[drawstrip] latch blocked: native drag obj=\"", s_dsDragObj, "\"");
-      return;
-   }
-   string named = DrawObjectAtCached(mx, my);   // the one hit test this latch pays for
-   //--- P-UI-115c — A FLAP IS NOT A NEW PRESS (P-UI-113j's own law: a press we
-   //--- already NAMED is not a new gesture). Same drawing, same press point, a live
-   //--- clock: the flap the log above measures. Re-arming the clock there is what made
-   //--- the strip open only on the lucky gap, so it keeps the one it has.
-   bool samePress = (s_dsHoldMs != 0 && s_dsHoldObj != "" && s_dsHoldObj == named &&
-                     MathAbs(mx - s_dsHoldX) <= DSTRIP_HOLD_MOVE &&
-                     MathAbs(my - s_dsHoldY) <= DSTRIP_HOLD_MOVE &&
-                     (now - s_dsHoldMs) < DSTRIP_HOLD_TTL);
-   s_dsHoldDown = true;
-   if(!samePress) { s_dsHoldMs = now; s_dsHoldX = mx; s_dsHoldY = my; }
-   s_dsHoldObj = "";
-   DrawStripOpenerDisarm();   // P-UI-113c: a latch is a press cycle of its OWN
+   // Press NAMING (the fire-on-timer is gone; the click toggles). Hit-test the
+   // press pixel, set the press cycle when it names a drawing, fence sessions.
+    //--- P-UI-130: THE TERMINAL IS MOVING A DRAWING — the hand is not pressing it. FIRST
+    //--- because it is one compare, and a press during a live drag names nothing.
+    if(DrawStripDragLive())
+    {
+       if(!s_dsOpen) Print("[drawstrip] latch blocked: native drag obj=\"", s_dsDragObj, "\"");
+       return;
+    }
+    string named = DrawObjectAtCached(mx, my);   // the one hit test this latch pays for
+    DrawStripOpenerDisarm();   // P-UI-113c: a new press is never the old gesture
    //--- DIAG-116 (temporary, P-UI-115b). These seven fences return SILENTLY, so
    //--- a press they swallow leaves no line anywhere: the 2026-09-29 log has NO
    //--- `hold latch` at all after the 13:35 reload, and a line that is never
@@ -8823,37 +9302,18 @@ void DrawStripHoldLatch(const int mx, const int my)
    // terminal's selected controls are not part of any drawn body. Cost: the one
    // hit test this latch already pays for on a press edge (P-DRAW-04), memoised;
    // the guards above stay first so a session that owns the mouse pays nothing.
-   s_dsPressX = mx; s_dsPressY = my; s_dsTravel = 0; s_dsPressTracked = true;
-   s_dsHoldObj = named;
-   // P-UI-115: THE CYCLE BELONGS TO A PRESS THAT NAMED A DRAWING. It was armed
-   // unconditionally, so the poll's own latch at the never-moved cursor (the
-   // 2026-09-29 log's `hold latch at 0,0 hit="" lbtn=1`, 11 ms after attach)
-   // owned the 10 s window with nothing under it and swallowed every real press
-   // that followed. A press on empty chart names nothing, and it has nothing to
-   // open — it must not spend the gesture budget of the press after it.
-   if(s_dsHoldObj != "") DrawStripPressCycleSet(s_dsHoldObj);
-   if(s_dsOpen) return;   // an open strip owns no hold - the press is only NAMED
-   // DIAG-113 (temporary): one line per hold latch so the log proves whether the
-   // press reached us, what the hit test saw, and what the live probe reads.
-   Print("[drawstrip] hold latch at ", mx, ",", my, " hit=\"", s_dsHoldObj,
-         "\" lbtn=", (UILeftButtonDown() ? 1 : 0));
+    s_dsPressX = mx; s_dsPressY = my; s_dsTravel = 0; s_dsPressTracked = true;
+    // P-UI-115: THE CYCLE BELONGS TO A PRESS THAT NAMED A DRAWING. A press on
+    // empty chart names nothing, and it has nothing to open — it must not spend
+    // the gesture budget of the press after it.
+    if(named != "") DrawStripPressCycleSet(named);
+    if(s_dsOpen) return;   // an open strip owns no press cycle - the press is only NAMED
+    // DIAG-113 (temporary): one line per named press so the log proves whether the
+    // press reached us, what the hit test saw, and what the live probe reads.
+    Print("[drawstrip] press named at ", mx, ",", my, " hit=\"", named,
+          "\" lbtn=", (UILeftButtonDown() ? 1 : 0));
 }
-//--- P-UI-130: A DROPPED LATCH IS NOT A GESTURE. This was ONE store (`s_dsHoldObj =
-//--- ""`) and left the CLOCK running, so `DrawStripHoldGestureLive()` read a latch the
-//--- position test had already dropped as LIVE at the release — and the release then
-//--- stamped a window instead of clearing the press cycle, which is how a refusal
-//--- outlived a release that DID arrive. The clock is the latch's own; when the
-//--- latch is forgotten the clock goes with it. `s_dsHoldDown` deliberately stays:
-//--- the hand may still be down, and the poll's zero-move latch must not re-arm on it.
-void DrawStripHoldForget() { s_dsHoldMs = 0; s_dsHoldObj = ""; }
-void DrawStripHoldClear() { s_dsHoldMs = 0; s_dsHoldObj = ""; s_dsHoldDown = false; s_dsHoldOffMs = 0; }
-//--- P-UI-115c: is a latch live and young enough that a click-family event may only
-//--- be a release SEEN, never its PROOF? (The window in the poll decides.)
-bool DrawStripHoldGestureLive()
-{
-   return (s_dsHoldMs != 0 && !s_dsOpen && (GetTickCount() - s_dsHoldMs) < DSTRIP_HOLD_TTL);
-}
-//--- P-UI-113f (2026-09-24): THE HOLD LEAVES THE DRAWING NATIVELY SELECTED.
+//--- P-UI-113f (2026-09-24): THE CLICK LEAVES THE DRAWING NATIVELY SELECTED.
 //---
 //--- The strip's rectangle hit test deliberately owns a hollow box's INTERIOR
 //--- (P-DRAW-08g), while MT4's own hit test sees only the drawn border. Therefore
@@ -8910,149 +9370,59 @@ void DrawStripHoldSelectPoll()
    // Keep the guarded read alive until the short TTL: the timer is the proof that
    // MT4's delayed click state has committed. It never owns selection afterwards.
 }
-void DrawStripHoldFire()
+// P-UI-113d CLICK-TOGGLE (2026-10-07) — single click selects+opens, single
+// click deselects+closes. No hold, no double-click. Decided by STRIP STATE,
+// never by selection state (MT4 mutates selection around the click event, so
+// no order of native-vs-handler writes can misread it). A drag-release never
+// toggles (travel veto + the drag heartbeat); a modal card owns its clicks.
+// Returns true when the click was spent here.
+// Leaned on: DrawStripOpenAt validates + switches (s_dsObj==name re-states),
+// DrawStripClose is idempotent, DrawStripDragLive is the terminal's own drag
+// voice, DrawStripOpenerArm spends this release's twin.
+bool DrawStripClickToggle(const string nm, const bool wasDrag)
 {
-   string hit = s_dsHoldObj;
-   int hx = s_dsHoldX, hy = s_dsHoldY;
-   s_dsHoldMs = 0; s_dsHoldObj = "";
-   if(hit == "" || s_dsOpen) return;
-   if(!DrawStripOpenAt(hit, hx, hy)) return;
-   // P-HR-06: the dot IS the ray's selection — no native flag to assert and no
-   // repair poll to arm (that poll would redraw + log on every ray open).
-   if(!DrawIsHRay(hit) && !DrawIsPathSeg(hit))
-   {
-      DrawStripHoldSelect();     // P-UI-113f: native anchors/settings survive the hold
-      DrawStripHoldSelectArm();  // P-UI-113g: prove it again after MT4 commits the release
-   }
-   DrawStripOpenerArm();   // P-UI-113c: the press that opened it owns its own clicks
-   Print("[drawstrip] hold opened on \"", hit, "\" selected=",
-         (bool)ObjectGetInteger(0, hit, OBJPROP_SELECTED));
+    if(nm == "" || ObjectFind(0, nm) < 0) return false;
+    if(wasDrag) return false;               // P-UI-113d: a drag-release never toggles
+    if(DrawStripDragLive()) return false;   // P-UI-130: the terminal is still moving it
+    if(g_PnlOpen >= 0) return false;        // modal card/mini owns clicks
+    if(BaseKnotSessionActive() || TH3SessionActive() || TH3BaseMarkArmed() ||
+       LegMeasureSessionActive() || g_waitingForCustomPriceClick) return false;
+    if(s_dsOpen)
+    {
+        if(nm == s_dsObj)
+        {
+            // P-UI-155: twin of this gesture's own fallback open (the chart
+            // channel arrived first on a hollow interior) — spent here, never
+            // closed. Time-bounded (twin channels arrive milliseconds apart),
+            // never token-counted: a stale token budget ate genuine clicks for
+            // ten seconds. A genuine second click after the deadline closes.
+            if(DrawStripTwinSpent()) return DrawStripClickFamily();
+            if((bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED))
+                ObjectSetInteger(0, nm, OBJPROP_SELECTED, false);   // single-click deselect
+            Print("[drawstrip] click closed on \"", nm, "\"");
+            DrawStripClose();
+            DrawStripOpenerArm();   // this release's twin is spent, not a re-open
+            return DrawStripClickFamily();
+        }
+        // Switch candidate: validate BEFORE touching anything — panel buttons,
+        // menu buttons and foreign lines are not ours and must fall through.
+        if(DrawKindOf(nm) == DK_NONE) return false;
+        DrawStripGearClose();   // switch: the gear panel serves one drawing; reopen it there if wanted
+        DrawStripClose();
+    }
+    if(!DrawStripOpen(nm)) return false;
+    // P-HR-06: the dot IS the ray's selection — no native flag to assert and no
+    // repair poll to arm (that poll would redraw + log on every ray open).
+    if(!DrawIsHRay(nm) && !DrawIsPathSeg(nm))
+    {
+        DrawStripHoldSelect();     // P-UI-113f: native anchors/settings survive the click
+        DrawStripHoldSelectArm();  // P-UI-113g: prove it again after MT4 commits the release
+    }
+    DrawStripOpenerArm();   // P-UI-113c: the click that opened it owns its twin
+    Print("[drawstrip] click opened on \"", nm, "\" selected=",
+          (bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED));
+    return DrawStripClickFamily();
 }
-void DrawStripHoldStep(const int mx, const int my, const bool leftDown, const bool pressStart)
-{
-   // P-UI-113j: a press we already NAMED is not a new gesture. The terminal's own
-   // object machinery flaps the button bit mid-press (a selected drawing's native
-   // drag), and re-latching there restarted the 500 ms clock every time it did.
-   if(pressStart)
-   {
-      //--- P-UI-115c: a down-frame IS the hand — the release that arrived before it was
-      //--- the flap, and the window it opened has no say any more.
-      s_dsHoldOffMs = 0;
-      if(!DrawStripPressCycleLive()) DrawStripHoldLatch(mx, my);
-      //--- DIAG-116 (temporary): the edge ARRIVED and the cycle refused it. This is
-      //--- the ONE case a missing `hold latch` line cannot be told apart from a dead
-      //--- edge, and the cycle's own owner is the press before this one.
-      else if(!s_dsOpen) Print("[drawstrip] press refused: cycle live obj=\"", s_dsPressCycleObj, "\"");
-      return;
-   }
-   //--- P-UI-115b (2026-09-29) — A NON-EVENT WITNESS MAY NOT END A LIVE GESTURE.
-   //--- P-UI-115's first half removed the fence that skipped the click-family
-   //--- release, so the tail below (7570 `DrawStripPressCycleClear`, 7578
-   //--- `DrawStripHoldClear`) now runs on every real release — and THIS term,
-   //--- added in the same hour on the belief that the tail was unreachable, is
-   //--- what is left killing the gesture: the terminal's button bit FLAPS
-   //--- mid-press (P-UI-113j's own measurement, on a selected drawing's native
-   //--- drag), and one up frame cleared the latch and the cycle together, so the
-   //--- 500 ms clock never reached 500 ms and `hold opened` never printed. It is
-   //--- the same law P-UI-83 wrote for the panel: no non-event witness may end a
-   //--- gesture whose event channel is still delivering down-readings. The tap it
-   //--- was meant to protect is the click-family release's own `DrawStripHoldClear`
-   //--- (the note above the branch states exactly that), and the TTL bounds what
-   //--- neither channel reports. Cost: the up frame is two compares and no write.
-   if(s_dsHoldMs == 0 || s_dsHoldObj == "") return;
-   //--- P-UI-130: THE TERMINAL'S OWN DRAG ENDS THE HOLD. A press that has MOVED the
-   //--- drawing is a drag however few pixels it travelled, and the strip may not come
-   //--- up mid-gesture over the thing the user is moving. (The witness has almost
-   //--- always killed the latch before this line can see it — it stands as the
-   //--- second reader of the same fact, so the fire can never outrun the drag.)
-   if(DrawStripDragLive())
-   {
-      if(!s_dsOpen) Print("[drawstrip] hold dropped: native drag obj=\"", s_dsDragObj, "\"");
-      DrawStripHoldForget(); return;
-   }
-   //--- P-UI-115c: inside the release's window a SEEN release may be the flap, so the
-   //--- move path may not FIRE it — and it is not the move path's to end either (the
-   //--- poll resolves the real one). One unsigned read on a live latch.
-   if(s_dsHoldOffMs != 0 && GetTickCount() - s_dsHoldOffMs <= DSTRIP_OPEN_TAIL_MS) return;
-   if(MathAbs(mx - s_dsHoldX) > DSTRIP_HOLD_MOVE || MathAbs(my - s_dsHoldY) > DSTRIP_HOLD_MOVE)
-   {
-      //--- DIAG-116 (temporary): the hand left the press point, so the gesture is a
-      //--- drag and NOT a hold. One line per gesture; without it this exit is the
-      //--- same silence as a press that never arrived.
-      if(!s_dsOpen) Print("[drawstrip] hold dropped: moved from ", s_dsHoldX, ",", s_dsHoldY,
-                          " to ", mx, ",", my, " obj=\"", s_dsHoldObj, "\"");
-      DrawStripHoldForget(); return;
-   }
-   if(GetTickCount() - s_dsHoldMs >= DSTRIP_HOLD_MS) DrawStripHoldFire();
-}
-//--- P-UI-113: the POLL half rides a cursor it is GIVEN (DrawStripHoldPollAt,
-//--- from RefreshKitOnBar) because the zero-move cursor (g_LastUIX/g_LastUIY)
-//--- is declared in BiotakPanels.mqh, after this file. Same guards, same fire.
-//---
-//--- AND IT NEVER ENDS A HOLD BY ITSELF (P-UI-113b, 2026-09-23). The KEYSTATE
-//--- probe it is handed does not answer "is the left mouse button down?" on this
-//--- terminal: MQL4's `TERMINAL_KEYSTATE_LEFT` is the LEFT ARROW key, and the log
-//--- proves the reading — every `[drawstrip] hold latch` line of the 20:17
-//--- session prints `lbtn=0` while the mouse stream's own bit says the button is
-//--- DOWN. Clearing on that reading killed every latch inside one 250 ms pass,
-//--- i.e. before the 500 ms it needed to fire, so the hold could not open
-//--- anything on ANY surface no matter how long the hand stayed still.
-//--- The boxes' own law (P-BK-05) is the answer, worn here unchanged: the probe
-//--- may only detect a down-transition when NOTHING is latched, never clear or
-//--- re-time a live latch. A release is witnessed by the terminal's own button-up
-//--- channels, which end the latch in the router below.
-void DrawStripHoldPollAt(const int mx, const int my, const bool leftDown)
-{
-   if(s_dsHoldMs == 0)
-   {
-      // The zero-move press's backup latch, the box hold's own shape: nothing
-      // latched, no press tracked, and the probe says the button is down.
-      if(!s_dsHoldDown && !s_dsOpen && !DrawStripPressCycleLive() && leftDown) DrawStripHoldLatch(mx, my);
-      else if(s_dsHoldDown && !leftDown) s_dsHoldDown = false;   // expire a stuck flag
-      return;
-   }
-   uint now = GetTickCount();
-   //--- P-UI-115c: THE RELEASE'S OWN WINDOW. A release SEEN inside `DSTRIP_OPEN_TAIL_MS`
-   //--- may still be the hand's own press (the flap measured above), so it neither fires
-   //--- nor ends the hold; past the window the hand let go and the gesture is over — the
-   //--- tap case the tail's clear protects, resolved here because the KEYSTATE probe
-   //--- cannot answer and the move stream never reports the missing down-frame.
-   if(s_dsHoldOffMs != 0)
-   {
-      if(now - s_dsHoldOffMs <= DSTRIP_OPEN_TAIL_MS) return;
-      DrawStripHoldClear(); DrawStripPressCycleClear(); return;
-   }
-   //--- P-UI-130: AND THE CYCLE GOES WITH IT. This branch is the "the press is over"
-   //--- backstop, and it used to end the HOLD only — leaving the press cycle to run
-   //--- down its own cap and refuse every press inside it, with no latch left alive
-   //--- for any reader to explain why (the log's refusals all name an object that no
-   //--- live latch owns). One fact, one clear.
-   if(now - s_dsHoldMs > DSTRIP_HOLD_TTL) { DrawStripHoldClear(); DrawStripPressCycleClear(); return; }
-   if(s_dsHoldObj == "" || s_dsOpen) return;
-   //--- P-UI-130: and the POLL is the path that fires a hold the move stream never
-   //--- saw (a motionless press emits no MOUSE_MOVE, P-LM-13) — which is exactly the
-   //--- path a drag could not otherwise close: with the finger still and the object
-   //--- under it, every other witness is quiet. The heartbeat is not.
-   if(DrawStripDragLive())
-   {
-      if(!s_dsOpen) Print("[drawstrip] hold dropped: native drag obj=\"", s_dsDragObj, "\"");
-      DrawStripHoldForget(); return;
-   }
-   if(now - s_dsHoldMs < DSTRIP_HOLD_MS) return;
-   if(MathAbs(mx - s_dsHoldX) > DSTRIP_HOLD_MOVE || MathAbs(my - s_dsHoldY) > DSTRIP_HOLD_MOVE)
-   { DrawStripHoldForget(); return; }
-   if(DrawObjectAtCached(mx, my) != s_dsHoldObj)
-   {
-      //--- DIAG-116 (temporary): the cursor is on the same pixel the hold latched,
-      //--- but the hit test now names something else (or nothing) - the one silent
-      //--- exit between a live latch and its fire.
-      if(!s_dsOpen) Print("[drawstrip] hold dropped: hit changed at ", mx, ",", my,
-                          " was=\"", s_dsHoldObj, "\" now=\"", DrawObjectAtCached(mx, my), "\"");
-      DrawStripHoldForget(); return;
-   }
-   DrawStripHoldFire();
-}
-
 //--- P-UI-113i (2026-09-24): RELEASE OWNERSHIP IS GEOMETRY, NOT SELECTION STATE.
 //--- User proof: the same left release works while the drawing is unselected and
 //--- closes the strip while that drawing is selected. The old dismissal asked
@@ -9083,6 +9453,9 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
    // one invocation, so this is a local, not state).
    bool relWasDrag = false;
    string relPressObj = "";   // P-UI-113i: this button-up's own press owner
+   static uint s_drN = 0;      // DIAG-140: drag events in the open window
+   static uint s_drMs = 0;     // ...window start (ms)
+   static string s_drObj = ""; // ...owner under the hand
    //--- P-DRAW-64 addendum 5 (2026-09-27) — THE INTERIOR'S STEP IS NOT THE STRIP'S.
    //--- This witness stands ABOVE EVERY GUARD below, because the split belongs to
    //--- the DRAWING: with the strip shut, the old placement sat two hundred lines
@@ -9111,6 +9484,31 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       //--- a hairline is three frames the user explicitly refused). The pump stays the
       //--- net for gestures that fire no event at all.
       BoxMidSync(sparam);
+      FibPenSync(sparam, false);   // P-DRAW-74b: the pair rides the same event (reads on a still frame)
+      // P-DRAGF: arm the chase — the drag event names the hand's object, the moves
+      // do the following (FibPen.mqh). Drag-rate cost: kind + existence reads.
+      if(id == CHARTEVENT_OBJECT_DRAG) FibPenDragArm(sparam);
+      // P-DRAW-74b-f (2026-10-03) — A DRAG FLUSHES ITS OWN FRAME. The terminal
+      // blits the dragged master live and repaints followers on its own cadence,
+      // so a resized fibo's stack trailed one frame behind for the whole gesture
+      // («موقع ریسایز کردن فریمش عقب میمونه»). P-DRAW-127's law, same shape as the
+      // GEAR branch: a user action gets one flush, a paint pass never does.
+      ChartRedraw();
+      // DIAG-140 (2026-10-03) — THE DRAG RATE, MEASURED NOT GUESSED. A lag report
+      // during a gesture is either an event queue the handler cannot drain or
+      // paint the terminal defers — events per second tell which. One line per
+      // gesture-second; still frames are silent.
+      if(id == CHARTEVENT_OBJECT_DRAG)
+      {
+         uint nowMs = GetTickCount();
+         if(s_drObj != sparam || nowMs - s_drMs >= 1000)
+         {
+            if(s_drN > 0 && s_drObj != "")
+               DrawStripDiagEmit("[drawstrip] DRAGSTAT obj=\"" + s_drObj + "\" n=" + IntegerToString(s_drN));
+            s_drObj = sparam; s_drN = 0; s_drMs = nowMs;
+         }
+         s_drN++;
+      }
    }
    // P-DRAW-17: the left button's press edge and travel, on EVERY move — the
    // trigger needs them while the strip is CLOSED, the grip carry needs the edge
@@ -9136,19 +9534,20 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       if(s_dsLeftPress)
       {
          //--- DIAG-116 (temporary): THE EDGE ITSELF. Every witness downstream prints
-         //--- only once the press reached IT, so a press that dies before the latch
-         //--- is invisible by construction - and that is the whole state of the
-         //--- 2026-09-29 log after the 13:35 reload (no line of any kind). Gated to
-         //--- the shut strip: a hold only opens from there, and an open strip's
-         //--- presses are the panel's own. One line per press edge.
+          //--- only once the press reached IT, so a press that dies before the latch
+          //--- is invisible by construction - and that is the whole state of the
+          //--- 2026-09-29 log after the 13:35 reload (no line of any kind). Gated to
+          //--- the shut strip: a toggle only opens from there, and an open strip's
+          //--- presses are the panel's own. One line per press edge.
          if(!s_dsOpen) Print("[drawstrip] press edge at ", tmx, ",", tmy, " bit=", (tleft ? 1 : 0));
-         // P-UI-113j: the LATCH already named this press (a still press takes its
-         // edge from the poll, and a flapping bit re-reports ONE press as many).
-         // Its owner, its press point and the opening window survive untouched -
-         // re-declaring them here is what let a mid-press flap kill the window.
-         if(!DrawStripPressCycleLive())
-         {
+          // P-UI-113j: the latch names this press (a flapping bit re-reports ONE
+          // press as many). Its owner, its press point and the opening window
+          // survive untouched - re-declaring them here is what let a mid-press
+          // flap kill the window.
+          if(!DrawStripPressCycleLive())
+          {
              s_dsPressX = tmx; s_dsPressY = tmy; s_dsTravel = 0;
+             s_dsPressEdgeMs = GetTickCount();   // P-UI-155: freshness stamp for the travel veto
              s_dsPressTracked = true;   // P-UI-113d: this cycle's travel is a fact we own
              //--- P-DRAW-102: A NEW PRESS IS NEVER THE PREVIOUS GESTURE'S RELEASE.
              //--- `s_dsGearPressSpent` is armed by the panel's coordinate channel
@@ -9165,8 +9564,9 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
             DrawHitCacheClear();   // the hit memo is a GESTURE's, never a session's
             s_dsPressObj = DrawObjectAtCached(tmx, tmy);  // P-UI-113i: own the press
             FillChildStampArm(s_dsPressObj);   // P-DRAW-64 addendum 6: the hand's own ride
-            DrawStripOpenerDisarm();   // P-UI-113c: a NEW press is never the old gesture
-            DrawStripHoldSelectionDisarm();  // P-UI-113g: nor may the repair fight it
+             DrawStripOpenerDisarm();   // P-UI-113c: a NEW press is never the old gesture
+             DrawStripHoldSelectionDisarm();  // P-UI-113g: nor may the repair fight it
+             DrawStripHoldLatch(tmx, tmy);   // names the press hit + sets the cycle (was the step's call)
             //--- P-DRAW-84 (2026-09-29) — THE PANEL'S BUTTONS, ON THE PRESS EDGE.
             // Every painter in this file is born OBJPROP_SELECTABLE=false (3317,
             // 3366, 3413, 3444), so MT4 never fires OBJECT_CLICK for a control and
@@ -9183,7 +9583,7 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
             // It does NOT return: this is the middle of the mouse-move block, and
             // an early return here would also cancel the hover, the hold latch and
             // the travel bookkeeping every later branch below this one owns. It
-            // only SPENDS the press — the carry, the opener and the hold are
+            // only SPENDS the press — the carry and the opener are
             // disarmed, so the rest of this block finds nothing to do with it.
             //
             //--- P-DRAW-113 (2026-10-01): AND `DrawStripGearSurfaceAt` IS THE OTHER
@@ -9208,8 +9608,9 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
                s_dsGearPressSpent = true;       // the release knows the panel had it
             }
          }
-      }
-      else if(tleft)
+         else if(!s_dsOpen) Print("[drawstrip] press refused: cycle live obj=\"", s_dsPressCycleObj, "\"");
+       }
+       else if(tleft)
       {
          int adx = tmx - s_dsPressX; if(adx < 0) adx = -adx;
          int ady = tmy - s_dsPressY; if(ady < 0) ady = -ady;
@@ -9219,30 +9620,40 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
          //--- pays the guarded sync, a still frame costs four reads and nothing else.
          FillChildStamp(s_dsPressObj);
       }
-      else if(s_dsOpenerUntil != 0)
-      {
-         // P-UI-113c: THE STREAM'S OWN RELEASE WITNESS. The opening press is
-         // over, so the guard drops to the twin-event tail: the terminal's other
-         // report of this ONE release may still be in flight behind this move.
-         s_dsOpenerUntil = 0;
-         s_dsOpenerTailUntil = GetTickCount() + DSTRIP_OPEN_TAIL_MS;
-      }
-       DrawStripHoldStep(tmx, tmy, tleft, s_dsLeftPress);   // P-UI-113: left-hold opens
-       if(!tleft) DrawStripColorHoverAt(tmx, tmy);
+       else if(s_dsOpenerUntil != 0)
+       {
+          // P-UI-113c: THE STREAM'S OWN RELEASE WITNESS. The opening press is
+          // over, so the guard drops to the twin-event tail: the terminal's other
+          // report of this ONE release may still be in flight behind this move.
+          s_dsOpenerUntil = 0;
+          s_dsOpenerTailUntil = GetTickCount() + DSTRIP_OPEN_TAIL_MS;
+       }
+        if(!tleft) DrawStripColorHoverAt(tmx, tmy);
+       //--- P-DRAGF2 (2026-10-04) — THE CHASE IS THE DRAWING'S, NOT THE STRIP'S. The
+       //--- follow used to sit BELOW the shut-strip guard (the second MOUSE_MOVE branch,
+       //--- with the grip carry), so with the strip shut a dragged fibo's stack moved
+       //--- ONLY on the terminal's own drag events — measured DRAGSTAT 0.6-1.6 s apart —
+       //--- the same shape P-DRAW-64d fixed for the box's mid line one seat down
+       //--- («این خط 50 درصد چند فریم عقب زمانی که باکس و جابجا میکنم»). A drawing's
+       //--- followers belong to the drawing: the chase stands here, above every guard,
+       //--- beside the press edge that already owns the button. Cost with nothing armed:
+       //--- two compares.
+       // P-DRAGF: the chase rides the hand's own stream — drag events arrive ~1-2/s
+       // (measured DRAGSTAT) while moves arrive ~60-100/s. Button-held only;
+       // anything else disarms instead of following.
+       if(tleft) FibPenDragFollow((int)lparam, (int)dparam);
+       else FibPenDragDisarm();
     }
 
     // P-DRAW-17: THE OPEN PATH RUNS BEFORE THE GUARD — the guard below says the strip
     // must be open, and the open trigger used to sit under it ("the strip never appears").
-    // P-UI-113/113b — the release that ENDS the opening hold belongs to the gesture that
+    // P-UI-113/113b — the release that ENDS the opening click belongs to the gesture that
     // opened it, so it is SPENT as a WINDOW (P-UI-113c, `s_dsOpenerUntil`), never as a
     // one-shot: one physical release arrives on CHARTEVENT_CLICK and on the object's
-    // OBJECT_CLICK, and spending only the first lets the second dismiss the strip the hold
+    // OBJECT_CLICK, and spending only the first lets the second dismiss the strip the click
     // just opened — or, landing on the strip's own cells (it floats 12 px off the cursor),
     // DELETE the drawing. MT4 has exactly two release channels and neither is ever a press,
-    // so the hold is ARMED from the mouse stream's own edge and DISARMED here, never by the
-    // poll (whose probe cannot answer at all). Clearing on the OBJECT channel is what lets
-    // a HOLD reach its 500 ms: a plain tap's release arrives here as OBJECT_CLICK, and
-    // without this term the latch stays live and the poll opens the strip on a tap.
+    // so the press is NAMED from the mouse stream's own edge and the toggle answers here.
      if(id == CHARTEVENT_CLICK || id == CHARTEVENT_OBJECT_CLICK)
      {
          // P-UI-115 (2026-09-29) — THE PROBE MAY NOT GATE THE RELEASE. This read
@@ -9251,15 +9662,14 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
          // terminal's KEYSTATE probe said "pressed", which on this terminal is
          // every time: the 2026-09-29 log prints `lbtn=1` on all 368
          // `[drawstrip] hold latch` lines, one of them 11 ms after attach when no
-         // button can be down. The cycle the tail ends lives
-         // `DSTRIP_OPEN_PRESS_MAX_MS` = 10 s, and `DrawStripHoldStep` refuses
-         // every press inside it: latch-to-latch spacing in the log is exactly
-         // 10 s (`12:53:07 -> :17 -> :27`) and only 36 of 368 latches opened the
-         // strip. The fence was also the opposite of the law the comment below
-         // states — «a click-family event IS a release on this terminal» — and
-         // MT4 emits a click on release only, so the release is not a probe's to
-         // guess. The tap protection it was meant to add is the tail's own
-         // `DrawStripHoldClear()`, which the fence is what skipped.
+          // button can be down. The cycle the tail ends lives
+          // `DSTRIP_OPEN_PRESS_MAX_MS` = 10 s. Latch-to-latch spacing in the log
+          // was exactly 10 s (`12:53:07 -> :17 -> :27`) while the cycle lived that
+          // long; it lives 2 s now (DSTRIP_PRESS_CYCLE_MS) and every release ends
+          // it above. The fence was also the opposite of the law the comment below
+          // states — «a click-family event IS a release on this terminal» — and
+          // MT4 emits a click on release only, so the release is not a probe's to
+          // guess.
          if(UIPeekClickClaim()) return true;
          // P-UI-113c: the opening press cycle owns its own events — all of them.
          bool openerSpent = DrawStripOpenerClickSpent();
@@ -9280,34 +9690,74 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
        //--- end of every gesture AND names its own object — so this one call is the
        //--- cheap witness that repairs it in the frame the hand lets go, before the
        //--- dismissal below can return. Once per gesture, ~12 guarded reads.
-        if(relPressObj != "")
-        {
-           FillChildSync(relPressObj);
-           BoxMidSync(relPressObj);
-        }
+         if(relPressObj != "")
+         {
+            FillChildSync(relPressObj);
+            BoxMidSync(relPressObj);
+            FibPenSync(relPressObj, false);   // P-DRAW-74b: the release re-states the pair too
+            FibPenDragDisarm();   // P-DRAGF: the gesture is over, the chase stands down
+            ChartRedraw();   // P-DRAW-74b-f: the release flushes the re-stamp
+         }
         FillChildStampRelease();   // P-DRAW-64 addendum 6: the hand let go, so the memo rests
 
        s_dsPressObj = "";
 
        s_dsPressTracked = false;
-       //--- P-UI-115c: a release SEEN is not a release PROVEN while the latch is live —
-       //--- the window in the poll decides, and the cycle is kept with the hold so the
-       //--- flap's next down-frame cannot re-time the gesture's clock.
-       bool relHoldSeen = DrawStripHoldGestureLive();
-       if(relHoldSeen) s_dsHoldOffMs = GetTickCount();
-       else            DrawStripPressCycleClear();   // P-UI-113j: this event IS this press's release
+       DrawStripPressCycleClear();   // no pending fire exists: every release ends its press here
        if(openerSpent)
        {
           DrawStripHoldSelect();   // P-UI-113f: the release must not steal the anchors back
           DrawStripHoldSelectArm();  // P-UI-113g: repair it again AFTER the callback
           return true;
        }
+       // CLICK-TOGGLE: a named click on a drawing opens/closes/switches the strip.
+       if(id == CHARTEVENT_OBJECT_CLICK)
+       {
+          if(DrawStripClickToggle(sparam, relWasDrag)) return true;
+       }
        DrawStripHoldSelectionDisarm();  // P-UI-113g: a later click owns selection now
-       if(!relHoldSeen) DrawStripHoldClear();   // P-UI-115c: else the window proves it (poll)
        s_dsLeftPrev = false;   // (every release emits one: the boxes' own law, BkHoldOnBoxUp)
     }
+    // P-UI-155 (2026-10-08) — A CLICK INSIDE A HOLLOW DRAWING NAMES NOTHING AT
+    // RELEASE. MT4 hit-tests only the drawn border, so a release inside a
+    // rectangle arrives as a chart click while the PRESS already named it (our
+    // hit test owns the interior, P-DRAW-08g) — measured: five named presses
+    // on one rectangle, zero opens, while the trendline beside it opened every
+    // time. Decide by EITHER channel: the release pixel re-resolves live, else
+    // the press cycle answers (fresh, 2 s TTL). The travel veto reads only a
+    // FRESH edge: a zero-move press runs no edge, so stale travel from a
+    // previous drag must not refuse it (it may still refuse nothing else —
+    // a drag always moves, so its edge is fresh by definition). Every other
+    // veto still applies inside DrawStripClickToggle. The open arms the twin
+    // flag, so whichever channel arrives second is spent instead of closing.
+    if(id == CHARTEVENT_CLICK && !s_dsOpen)
+    {
+       DrawHitCacheClear();   // the release pixel deserves a live answer, not the press memo
+       int rx = (int)lparam, ry = (int)dparam;
+       string relHit = DrawObjectAtCached(rx, ry);
+       string cyc = (DrawStripPressCycleLive() ? s_dsPressCycleObj : "");
+       string nm = (relHit != "" ? relHit : cyc);
+       bool edgeFresh = (s_dsPressEdgeMs != 0 && (int)(GetTickCount() - s_dsPressEdgeMs) < DSTRIP_PRESS_CYCLE_MS);
+       bool travelOk = !edgeFresh || !(s_dsPressTracked && s_dsTravel > DSTRIP_CLICK_SLOP);
+       // DIAG-156 (temporary): name the refusing stage for hollow-interior clicks.
+       if(nm != "") Print("[drawstrip] interior-click relHit=\"", relHit, "\" cyc=\"", cyc,
+             "\" edgeFresh=", (edgeFresh ? 1 : 0), " travel=", s_dsTravel,
+             " draglive=", (DrawStripDragLive() ? 1 : 0),
+             " modal=", (g_PnlOpen >= 0 ? 1 : 0));
+       if(nm != "" && ObjectFind(0, nm) >= 0 && DrawKindOf(nm) != DK_NONE && travelOk)
+       {
+          if(DrawStripClickToggle(nm, false)) { DrawStripTwinArm(); return true; }
+       }
+       return false;
+    }
     if(id == CHARTEVENT_CLICK && !s_dsOpen) return false;
-   if(!s_dsOpen) return false;
+    // P-DEL-NOWb: a delete is not a click — the shut-strip gate above exists so
+    // a release cannot open anything, but it also buried the OBJECT_DELETE
+    // branch below: with the strip shut (the normal state) no native delete
+    // ever cascaded, and every fill fell through to the 2 s orphan sweep
+    // («fill دیرتر پاک میشه», measured: ORPHAN drops for Rectangle _FL while
+    // no CASCADE line preceded them). Deletes skip the gate, clicks keep it.
+    if(!s_dsOpen && id != CHARTEVENT_OBJECT_DELETE) return false;
      //--- P-DRAW-84: the gear panel's press already acted (7337). This release is
      //--- the SAME gesture on the other channel: it must be spent here, or the
      //--- "clicked away" branch below reads a press on the panel as a press on the
@@ -9458,9 +9908,35 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       // A deleted CHILD is its parent's business: drop the child, heal parent.
       if(BoxIsMidChild(sparam)) { string par = BoxMidParent(sparam); if(par != "" && ObjectFind(0, par) >= 0) BoxMidSync(par); return false; }
       if(FillIsChild(sparam)) { string fpar = FillChildParent(sparam); if(fpar != "" && ObjectFind(0, fpar) >= 0) FillChildSync(fpar); return false; }
+      //--- P-DEL-ALL (2026-10-03) — EVERYTHING A DRAWING OWNS DIES WITH IT. The
+      //--- bin paths already drop each family; a NATIVE delete (Delete key, object
+      //--- list) fires this event instead and must do the same, or strays stay on
+      //--- the chart over the next drawing. Every drop below is name-keyed and a
+      //--- no-op when absent; the indicator's own objects never carry FibPen
+      //--- children (the sync refuses them outright), and rays/paths are healed
+      //--- by their own tools (P-HR-01, PathTool:833) — never a second owner here.
+      bool casc = false;
+      if(!DrawIsIndicatorObject(sparam))
+      {
+         if(FibPenStraysDrop(sparam)) casc = true;
+         if(FibPenTagDrop(sparam)) casc = true;
+         if(FibPenLookDrop(sparam)) casc = true;
+      }
+      BoxEdgeForget(sparam);
       BoxMidDrop(sparam);
-      FillChildDrop(sparam);
+      if(FillChildDrop(sparam)) casc = true;
       BoxMarkDrop(sparam);   // P-UI-134: a deleted box's KEY goes with it
+      // P-DEL-NOWb: one flush for every HAND delete, family or not. Our own
+      // bulk paths arm the suppression window (their repaint is owned
+      // elsewhere); an unsuppressed delete is the user's hand, and under a
+      // thousand objects the terminal's own repaint lags a tick behind.
+      bool userDel = !g_suppressDeleteEvents && !TickDeadlinePending(g_suppressDeleteEventsUntilMs);
+      if(casc) DrawStripDiagEmit("[drawstrip] CASCADE obj=\"" + sparam + "\"");
+      if(!casc && userDel) DrawStripDiagEmit("[drawstrip] DELFLUSH obj=\"" + sparam + "\"");
+      //--- P-DEL-NOW: a native delete drops the family in THIS event, so it owns
+      //--- this frame too — without it the strays leave the object list at once
+      //--- but their pixels wait for the next tick/pass («وابستگی دیر حذف میشه»).
+      if(casc || userDel) ChartRedraw();
       return false;
    }
    // P-DRAW-41 (2026-09-25) — THIS CHANNEL USED TO FOLLOW. P-DRAW-08c/08e/09d made
@@ -9485,6 +9961,9 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       // leaves the plate; the strip is already the right picture at the right spot.
       // All this channel still owes is the window's clamp (compare-only when kept).
       DrawStripHomeClamp();
+      // P-DRAW-74b-f: a zoom re-measures pixel offsets (scroll is reads-only, the
+      // moves compare equal). Served object only — no walks on the scroll path.
+      if(id == CHARTEVENT_CHART_CHANGE) FibPenSync(s_dsObj, false);
       return false;
    }
    // P-DRAW-13: the grip carry rides the terminal's own move stream (left = bit 0,
@@ -9493,6 +9972,9 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
    {
       int st = (int)StringToInteger(sparam);
       DrawStripGripMove((int)lparam, (int)dparam, ((st & 1) != 0));
+      // P-DRAGF2: the chase itself moved to the UNGUARDED move branch above — a
+      // drawing's followers are not the strip's to carry. This branch keeps the grip
+      // carry, which IS the strip's own gesture.
       return false;
    }
     // P-DRAW-13: Esc dismisses inside-out (gear, then popover, then strip — even
