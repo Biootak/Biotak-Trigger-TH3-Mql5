@@ -1044,6 +1044,31 @@ void HTFCullUntrack(const string name)
 
 void HTFCullForget(const string name) { HTFCullUntrack(name); }
 
+// P-UI-142: "does this key family exist here" — the restart layer picks the
+// chart prefix when it has any key, else the symbol twin, else inputs.
+// Port of MT4 HTFCandles_Life.mqh lines 13-22.
+bool HTFHasKeys(const string pfx)
+{
+   string sfx[15];
+   sfx[0]="TfMode"; sfx[1]="IsAuto"; sfx[2]="Period"; sfx[3]="BullColor"; sfx[4]="BearColor";
+   sfx[5]="WickColor"; sfx[6]="BorderColor"; sfx[7]="Opacity"; sfx[8]="ShowWicks"; sfx[9]="WickWidth";
+   sfx[10]="GapPct"; sfx[11]="ShadowPct"; sfx[12]="BorderWidth"; sfx[13]="BoxMode"; sfx[14]="ShowBody";
+   for(int i = 0; i < 15; i++)
+      if(GlobalVariableCheck(pfx + sfx[i])) return true;
+   return false;
+}
+
+// P-HTF-KEY — ONE composer for an HTF box's mask. The toggle, the F mute and
+// the panel cover share one visibility bit each; every writer (toggle walk,
+// cull cover/release) asks here, so no path can resurrect a box another put
+// away (paint and hit-test agree because nothing else writes the mask).
+// Port of MT4 HTFCandles_Draw.mqh lines 166-170.
+long HTFBoxMask(const bool covered)
+{
+    if(!g_UI.showHTF || IsIndicatorHidden()) return OBJ_NO_PERIODS;
+    return covered ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+}
+
 // P-HTF-PROBE (2026-09-30): the cull is the ONE place in this module that can hide
 // an already-drawn box WITHOUT deleting it (`OBJ_TIMEFRAMES = OBJ_NO_PERIODS` on the
 // names a published card rect covers), and a hidden box looks exactly like "the
@@ -1151,13 +1176,14 @@ void HTFCardCullRefresh()
          bool tracked = HTFCullHas(nm[k]);
          if(cover && !tracked)
          {
-            ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES, HTFBoxMask(true));
             HTFCullTrack(nm[k]);
          }
          else if(!cover && tracked)
          {
-            ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES,
-                             IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+            long want = HTFBoxMask(false);
+            if((long)ObjectGetInteger(0, nm[k], OBJPROP_TIMEFRAMES) != want)
+               ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES, want);
             HTFCullUntrack(nm[k]);
          }
       }
@@ -1168,13 +1194,39 @@ void HTFCardCullRefresh()
 // Give back exactly what the cull took (open-order callers only).
 void HTFCullRelease()
 {
-   if(s_htfCulledN <= 0) return;
-   long back = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-   for(int i = 0; i < s_htfCulledN; i++)
-      ObjectSetInteger(0, s_htfCulled[i], OBJPROP_TIMEFRAMES, back);
-   ArrayResize(s_htfCulled, 0);
-   s_htfCulledN = 0;
-   HTFProbeCull();   // P-HTF-PROBE: the mask count is back to 0
+  if(s_htfCulledN <= 0) return;
+  for(int i = 0; i < s_htfCulledN; i++)
+     ObjectSetInteger(0, s_htfCulled[i], OBJPROP_TIMEFRAMES, HTFBoxMask(false));
+  ArrayResize(s_htfCulled, 0);
+  s_htfCulledN = 0;
+  HTFProbeCull();   // P-HTF-PROBE: the mask count is back to 0
+}
+
+// P-HTF-KEY — toggle walk: masking, not deleting. OFF hides the family in
+// place (guarded flips only); ON unmasks it — instant both ways, no history
+// re-read, rapid-press safe. First ON with no family builds once, like before.
+// Port of MT4 HTFCandles_Draw.mqh lines 859-880.
+void HTFApplyVisibleMasks()
+{
+  if(StringLen(g_HTFPrefix) == 0) return;
+  if(g_UI.showHTF && !HTFAnyBoxesExist()) { RefreshHTFCandles(); return; }
+  for(int i = 0; i < g_HTFDrawnCount; i++)
+  {
+     string id = IntegerToString(i);
+     string nm[5];
+     nm[0] = g_HTFPrefix + id;
+     nm[1] = g_HTFPrefix + id + "_F";
+     nm[2] = g_HTFPrefix + id + "_B";
+     nm[3] = g_HTFPrefix + "WU" + id;
+     nm[4] = g_HTFPrefix + "WL" + id;
+     for(int k = 0; k < 5; k++)
+     {
+        if(ObjectFind(0, nm[k]) < 0) continue;
+        long want = HTFBoxMask(HTFCullHas(nm[k]));
+        if((long)ObjectGetInteger(0, nm[k], OBJPROP_TIMEFRAMES) != want)
+           ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES, want);
+     }
+  }
 }
 
 //+------------------------------------------------------------------+
@@ -1772,6 +1824,11 @@ void InitializeHTFCandles()
 
    string chartIdStr = GetCachedChartIdStr();
    string prefix = "Biotak_HTF_" + chartIdStr + "_";
+   // P-UI-142: restart layer — chart ids are per-session, so when this window has
+   // no keys of its own the symbol twin (written beside every chart write below)
+   // answers instead of the inputs. Chart keys always win when present.
+   string twinPfx = "Biotak_HTFSym_" + GetCachedSymbol() + "_";
+   if(!HTFHasKeys(prefix) && HTFHasKeys(twinPfx)) prefix = twinPfx;
 
    // P-UI-92: the MODE is the restored state (0 Structure · 1 Pattern · 2
    // fixed). A chart saved by a build that only knew the bool reads through
@@ -1846,39 +1903,42 @@ void SaveHTFCandlesSettings()
    int htfChanged = 0;
    string chartIdStr = GetCachedChartIdStr();
    string prefix = "Biotak_HTF_" + chartIdStr + "_";
+   // P-UI-142: the symbol twin rides every chart write (same guard: same value),
+   // so a restart restores it when the chart id is new. Teardown-only writes.
+   string twin = "Biotak_HTFSym_" + Symbol() + "_";
    // P-UI-92: "TfMode" is the state; "IsAuto" is still written (1 = either
    // dynamic rung) so ONE downgrade to a previous build keeps its own
    // Auto/Manual meaning instead of reading Structure as a manual period.
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 0, (double)g_HTFTfMode))
-      { GlobalVariableSet(prefix + "TfMode",      (double)g_HTFTfMode); htfChanged++; }
+      { GlobalVariableSet(prefix + "TfMode",      (double)g_HTFTfMode); GlobalVariableSet(twin + "TfMode", (double)g_HTFTfMode); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 1, HTFTfIsDynamic() ? 1.0 : 0.0))
-      { GlobalVariableSet(prefix + "IsAuto",      HTFTfIsDynamic() ? 1.0 : 0.0); htfChanged++; }
+      { GlobalVariableSet(prefix + "IsAuto",      HTFTfIsDynamic() ? 1.0 : 0.0); GlobalVariableSet(twin + "IsAuto", HTFTfIsDynamic() ? 1.0 : 0.0); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 2, (double)g_HTFPeriod))
-      { GlobalVariableSet(prefix + "Period",      (double)g_HTFPeriod); htfChanged++; }
+      { GlobalVariableSet(prefix + "Period",      (double)g_HTFPeriod); GlobalVariableSet(twin + "Period", (double)g_HTFPeriod); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 3, (double)g_HTFBullColor))
-      { GlobalVariableSet(prefix + "BullColor",   (double)g_HTFBullColor); htfChanged++; }
+      { GlobalVariableSet(prefix + "BullColor",   (double)g_HTFBullColor); GlobalVariableSet(twin + "BullColor", (double)g_HTFBullColor); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 4, (double)g_HTFBearColor))
-      { GlobalVariableSet(prefix + "BearColor",   (double)g_HTFBearColor); htfChanged++; }
+      { GlobalVariableSet(prefix + "BearColor",   (double)g_HTFBearColor); GlobalVariableSet(twin + "BearColor", (double)g_HTFBearColor); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 5, (double)g_HTFWickColor))
-      { GlobalVariableSet(prefix + "WickColor",   (double)g_HTFWickColor); htfChanged++; }
+      { GlobalVariableSet(prefix + "WickColor",   (double)g_HTFWickColor); GlobalVariableSet(twin + "WickColor", (double)g_HTFWickColor); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 6, (double)g_HTFBorderColor))
-      { GlobalVariableSet(prefix + "BorderColor", (double)g_HTFBorderColor); htfChanged++; }
+      { GlobalVariableSet(prefix + "BorderColor", (double)g_HTFBorderColor); GlobalVariableSet(twin + "BorderColor", (double)g_HTFBorderColor); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 7, (double)g_HTFOpacity))
-      { GlobalVariableSet(prefix + "Opacity",     (double)g_HTFOpacity); htfChanged++; }
+      { GlobalVariableSet(prefix + "Opacity",     (double)g_HTFOpacity); GlobalVariableSet(twin + "Opacity", (double)g_HTFOpacity); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 8, g_HTFShowWicks ? 1.0 : 0.0))
-      { GlobalVariableSet(prefix + "ShowWicks",   g_HTFShowWicks ? 1.0 : 0.0); htfChanged++; }
+      { GlobalVariableSet(prefix + "ShowWicks",   g_HTFShowWicks ? 1.0 : 0.0); GlobalVariableSet(twin + "ShowWicks", g_HTFShowWicks ? 1.0 : 0.0); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 9, (double)g_HTFWickWidth))
-      { GlobalVariableSet(prefix + "WickWidth",   (double)g_HTFWickWidth); htfChanged++; }
+      { GlobalVariableSet(prefix + "WickWidth",   (double)g_HTFWickWidth); GlobalVariableSet(twin + "WickWidth", (double)g_HTFWickWidth); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 10, (double)g_HTFGapPct))
-      { GlobalVariableSet(prefix + "GapPct",      (double)g_HTFGapPct); htfChanged++; }
+      { GlobalVariableSet(prefix + "GapPct",      (double)g_HTFGapPct); GlobalVariableSet(twin + "GapPct", (double)g_HTFGapPct); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 11, (double)g_HTFShadowPct))
-      { GlobalVariableSet(prefix + "ShadowPct",   (double)g_HTFShadowPct); htfChanged++; }
+      { GlobalVariableSet(prefix + "ShadowPct",   (double)g_HTFShadowPct); GlobalVariableSet(twin + "ShadowPct", (double)g_HTFShadowPct); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 12, (double)g_HTFBorderWidth))
-      { GlobalVariableSet(prefix + "BorderWidth", (double)g_HTFBorderWidth); htfChanged++; }
+      { GlobalVariableSet(prefix + "BorderWidth", (double)g_HTFBorderWidth); GlobalVariableSet(twin + "BorderWidth", (double)g_HTFBorderWidth); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 13, (double)g_HTFBoxMode))
-      { GlobalVariableSet(prefix + "BoxMode",     (double)g_HTFBoxMode); htfChanged++; }
+      { GlobalVariableSet(prefix + "BoxMode",     (double)g_HTFBoxMode); GlobalVariableSet(twin + "BoxMode", (double)g_HTFBoxMode); htfChanged++; }
    if(GVSlotChanged(s_htfEpoch, s_htfKnown, s_htfShadow, 14, g_HTFShowBody ? 1.0 : 0.0))
-      { GlobalVariableSet(prefix + "ShowBody",    g_HTFShowBody ? 1.0 : 0.0); htfChanged++; }
+      { GlobalVariableSet(prefix + "ShowBody",    g_HTFShowBody ? 1.0 : 0.0); GlobalVariableSet(twin + "ShowBody", g_HTFShowBody ? 1.0 : 0.0); htfChanged++; }
    GVLedgerReport(GV_BLOCK_HTF, htfChanged, HTF_SAVE_SLOTS);
    if(htfChanged == 0) return;
    GVFlushRequest();   // P-PERF-44 (2): ASK; the teardown's one commit pays for it
@@ -1915,6 +1975,23 @@ void CleanupHTFCandlesGVs()
    GlobalVariableDel(prefix + "BorderWidth");
    GlobalVariableDel(prefix + "BoxMode");
    GlobalVariableDel(prefix + "ShowBody");
+   // P-UI-142: the symbol twins die with the uninstall too.
+   string twin = "Biotak_HTFSym_" + Symbol() + "_";
+   GlobalVariableDel(twin + "TfMode");
+   GlobalVariableDel(twin + "IsAuto");
+   GlobalVariableDel(twin + "Period");
+   GlobalVariableDel(twin + "BullColor");
+   GlobalVariableDel(twin + "BearColor");
+   GlobalVariableDel(twin + "WickColor");
+   GlobalVariableDel(twin + "BorderColor");
+   GlobalVariableDel(twin + "Opacity");
+   GlobalVariableDel(twin + "ShowWicks");
+   GlobalVariableDel(twin + "WickWidth");
+   GlobalVariableDel(twin + "GapPct");
+   GlobalVariableDel(twin + "ShadowPct");
+   GlobalVariableDel(twin + "BorderWidth");
+   GlobalVariableDel(twin + "BoxMode");
+   GlobalVariableDel(twin + "ShowBody");
 }
 
 #endif // HTF_CANDLES_LIFE_MQH

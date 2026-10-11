@@ -4475,17 +4475,17 @@ int HandleButtonClick(const string clickedObject)
    }
    else if(feat == CIR_HTF)
    {
+      uint htfT0 = GetTickCount();
       g_UI.showHTF = !g_UI.showHTF;
-      // P-UI-40b (2026-09-13): the HTF card's row 0 displays THIS flag, and this
-      // file is included BEFORE the panel's - so the ring cannot repaint that card
-      // itself. The ring repairs its own light/status on the next tick
-      // (UpdateMenuSyncIfChanged fingerprints CircFeatureOn), but an open card has
-      // no such net: without this request it kept the previous switch position
-      // until it was reopened. Same asymmetry P-UI-40 fixed for the other
-      // switches; this one was missed because `g_UI.showHTF` was not on the
-      // gate's displayed-state list (it is now).
+      GlobalVariableSet(GetGVName("HTF_EN"), g_UI.showHTF ? 1.0 : 0.0);
+      // P-HTF-KEY: mask walk — instant both ways, no delete/rebuild; first ON
+      // builds via the walk if no family exists yet. Port of MT4 SetHTFVisible().
+      HTFApplyVisibleMasks();
+      Print("[HTF] set on=", (g_UI.showHTF ? 1 : 0), " drawn=", g_HTFDrawnCount,
+            " ms=", (int)(GetTickCount() - htfT0));
+      // P-UI-40b (2026-09-13): the HTF card's row 0 displays THIS flag.
       RequestUISync();   // P-UI-40b: the HTF card's SHOW row displays this flag
-      refreshFlags = REFRESH_HTF;
+      refreshFlags = REFRESH_NONE;   // mask walk already handled the repaint path
    }
    else if(feat == CIR_BASEKNOT)
    {

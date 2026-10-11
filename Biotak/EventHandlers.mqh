@@ -5196,6 +5196,23 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         }
 #endif
 
+#ifndef BUILD_LITE
+        //
+        // R key   Toggle HTF Candles overlay (left-hand cluster)
+        //
+        if(IsHotkeyPressed(lparam, sparam, inpHTFKey))
+        {
+            // P-HTF-KEY: mask walk — instant both ways, no delete/rebuild.
+            // Port of MT4 EventHandlers_Router.mqh lines 325-332.
+            g_UI.showHTF = !g_UI.showHTF;
+            GlobalVariableSet(GetGVName("HTF_EN"), g_UI.showHTF ? 1.0 : 0.0);
+            HTFApplyVisibleMasks();
+            RequestUISync();   // P-UI-40b: the HTF card's SHOW row displays this flag
+            LOG_I(LOG_CAT_LINES, "HTF " + (g_UI.showHTF ? "VISIBLE" : "HIDDEN"));
+            return;
+        }
+#endif
+
         //
         // P key   Arm the leg meter (a measurement only).
         // P-TH3-PB-OFF (2026-09-21): the old coupling that stored a dragged leg

@@ -37,7 +37,7 @@
 //                                                                   
 //           DEBUG                          :
 //                                                                   
-#define DEBUG_BUILD   // P-LOG-3: TEMPORARY — enabled 2026-10-01 for the gear-panel hunt; comment out to return to PRODUCTION
+//#define DEBUG_BUILD   // P-LOG-3: re-enable for a hunt, never for a release.
 
 //                                                                   
 
@@ -133,7 +133,7 @@
 //+------------------------------------------------------------------+
 //| Version info                                                     |
 //+------------------------------------------------------------------+
-#define INDICATOR_VERSION "3.10"
+#define INDICATOR_VERSION "3.12"
 
 //--- P-BUILD-08: THE BUILD IDENTITY IS THE SOURCE, NOT A HAND-TYPED TAG.
 //--- `INDICATOR_BUILD_TAG "D4m-native 2026-09-20"` and `__DATE__` were the two
@@ -209,6 +209,7 @@ void PrintBuildInfo()
     #else
     Print("     PRODUCTION BUILD - Optimized for performance");
     #endif
+    Print("   FREEWARE - not for sale.");
     Print("====================");
 }
 

@@ -96,6 +96,7 @@ string GetGVName(string key) { return g_UI.gvPrefix + key; }
 static int  g_PnlX[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static int  g_PnlY[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+static bool g_PnlPinSpot = false;   // P-UI-142: restore-to-exact-saved-position flag
 
 //==============================================================================
 // PALETTE COLOR KINDS — one kind per colorable setting of THIS indicator.

@@ -13,12 +13,12 @@
   #ifndef PROPERTIES_AND_INPUTS_MQH
 #define PROPERTIES_AND_INPUTS_MQH
 
-#property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
-#property link "@biotak"
-#property version "3.10"
+#property copyright "Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property link      "@biotak"
+#property version   "3.12"
 #property strict
 #property indicator_chart_window
-#property description "Version 3.10 - GOLD: Post-Audit - All Critical Issues Fixed"
+#property description "Biotak Trigger TH3 v3.12 - Freeware, not for sale."
 
 #include "ConstantsAndEnums.mqh"
 
@@ -44,26 +44,8 @@ input ENUM_ADAPTIVE_MODE inpAdaptiveMode = ADAPTIVE_FRACTAL;      // Adaptive Mo
 input double inpAdaptiveBlendRatio = 0.5;                        // Adaptive Blend Ratio
 input int inpAdaptiveSmoothingPeriod = 10;                       // Adaptive Smoothing (v3.11: reduced to 10 for better response)
 input ENUM_FRACTAL_JUMP_STRATEGY inpFractalJumpStrategy = JUMP_AGGRESSIVE; // Fractal Jump Strategy
-// P-TH-01 (2026-09-18) — THE TH PERCENTAGE, AS A RESEARCH KNOB.
-//
-// User: «این درصد محاسبات هم th هم بشه تنظیم کرد برای تحقیقات لازم دارمش».
-//
-// The percentage is NOT one number and NOT an Input today: it is the nine-rung
-// ladder `MODIFIED_FRACTAL_PERCENTAGES` (ConstantsAndEnums.mqh:230), and the rung
-// this chart reads is picked by its own TF (FractalTimeframes.mqh:5). On D1 that
-// rung is H17+M4 = 66.66%.
-//
-// WHAT THIS KNOB ACTUALLY SETS — read this before changing its meaning: the value
-// is the percentage for THIS chart's own rung, and every other rung scales by the
-// SAME ratio (`FractalPercentScale`). So 66.66 -> 75 makes the whole ladder
-// 2.34/4.69/9.38/18.75/37.5/75/150/300/600 — every x2 relationship the ladder is
-// built on survives. Replacing only ONE rung would be a different feature: Pattern
-// and Trigger are read one and two rungs DOWN (GetLowerTimeframeTH), so a
-// single-rung override silently breaks their half/quarter relationship with the
-// Structure step and the zone hierarchy stops being provable.
-//
-// 0 (the default) = OFF: the professor's table, byte for byte.
-input double inpTHPercentOverride = 0.0;   // TH % for THIS chart's rung (0 = professor's table)
+// P-TH-01 RETIRED 2026-10-08: the knob was a research tool; FractalPercentScale()
+// now always returns 1.0 (professor's table, byte for byte). Input removed from MT4.
 
 input group "02) BASE PRICE - ANCHOR"
 input string S4 = "[02] BASE PRICE / ANCHOR";
@@ -421,6 +403,9 @@ input string inpStepModeKey = "E";
 #ifndef BUILD_LITE
 input string inpTH3ToolKey = "V";
 input bool   inpTH3AutoPivots = true;   // P-TH3-P6: auto-find the course's six-condition pivots (PDF pp. 6-7) on the chart TF and one fractal step up; marks them on the chart and snaps the draw-session clicks onto them
+#endif
+#ifndef BUILD_LITE
+input string inpHTFKey = "R";            // Toggle HTF Candles overlay on/off (left-hand cluster)
 #endif
 input string inpATRLabelsKey = "A";        // Toggle ATR labels on/off
 input string inpTHLabelsKey = "S";          // Toggle TH labels on/off

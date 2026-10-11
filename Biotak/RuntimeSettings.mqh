@@ -425,7 +425,7 @@ void RuntimeSettingsInit()
    g_factoryDefaults[FF_TH_STANDARD]         = inpShowStandardTHs;
    g_factoryDefaults[FF_TH_TARGETS]          = inpShowTHTargets;
    g_factoryDefaults[FF_TH_MARGIN_BOTTOM]    = inpTHLabelsMarginBottom;
-   g_factoryDefaults[FF_TH_PERCENT]          = inpTHPercentOverride;   // P-TH-01
+   g_factoryDefaults[FF_TH_PERCENT]          = 0.0;   // P-TH-01 RETIRED 2026-10-08 — slot kept, always 0
    g_factoryDefaults[FF_LABEL_SIZE]          = inpFontSize;            // P-UI-131
    g_factoryDefaults[FF_LABEL_ROW_GAP]       = inpLabelRowGap;         // P-UI-131
    g_factoryDefaults[FF_LABEL_FONT]          = LabelFontIdxOf(inpFontName);
@@ -615,10 +615,8 @@ void RuntimeSettingsInit()
    g_sectionGap = inpSectionGap;
    g_maxLabelWidth = inpMaxLabelWidth;
 
-   // P-TH-01: the TH-percentage knob. MUST be seeded HERE, above the #define
-   // block — below it `inpTHPercentOverride` already IS the mirror and this
-   // line would be a no-op self-assign (this file's own header warning).
-   g_thPercentOverride = inpTHPercentOverride;
+   // P-TH-01 RETIRED 2026-10-08: knob gone from inputs, scale is 1.0, override is 0.
+   g_thPercentOverride = 0.0;
 
 #ifndef BUILD_LITE
     // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
@@ -1154,7 +1152,8 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "TS2", g_showStandardTHs ? 1 : 0);
    RSSetNext(p + "TG",  g_showTHTargets ? 1 : 0);
    RSSetNext(p + "TB",  g_thLabelsMarginBottom);
-   RSSetNext(p + "TPC", g_thPercentOverride);   // P-TH-01 — 0 = professor's table
+   // P-TH-01 RETIRED: sweep any orphan TPC key so old charts don't restore a stale override.
+   if(GlobalVariableCheck(p + "TPC")) GlobalVariableDel(p + "TPC");
    RSSetNext(p + "E3",  g_enableTH3Tool ? 1 : 0);
    RSSetNext(p + "D3",  g_th3DrawingMode);
    RSSetNext(p + "B3",  g_th3BaseStepPercent);
