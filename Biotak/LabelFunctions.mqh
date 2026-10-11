@@ -1592,6 +1592,9 @@ void TradePlanLiveTick()
 // Labels_B.mqh - LabelFunctions.mqh split 2026-09-29: exact lines 1404-2072, byte-identical, zero renames.
 #ifndef LABELS_B_MQH
 #define LABELS_B_MQH
+#include "THVolNorm.mqh"
+
+
 
 void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
     string uniquePrefix = objectPrefix + "LBL_";

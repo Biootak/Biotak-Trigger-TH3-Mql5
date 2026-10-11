@@ -1793,6 +1793,8 @@ void CircTipPinnedTouch() { s_TipDirty = true; }
 static bool s_TipDrag = false;
 static bool s_TipMoved = false;   // a real move (>= 1 px) eats the release's click echo
 static int  s_TipGrabDX = 0, s_TipGrabDY = 0;
+bool CircTipDragging() { return s_TipDrag; }
+
 
 bool CircTipGrabStart(const int mx, const int my)
 {
@@ -2889,6 +2891,58 @@ void ToolsBadgePos(const int i, int &x, int &y)
 }
 
 #endif // BIOTAK_MENU_B_MQH
+
+// P-UI-140: BiotakHomes helpers needed by CircHomesRefresh (ported from BiotakHomes.mqh).
+string GVHomeFracName(const string id, const bool y) { return "BIOMENU_HOME_" + id + (y ? "_FY" : "_FX"); }
+void HomeChartSize(int &cw, int &ch)
+{
+   cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   if(cw <= 0) cw = 1920;  if(ch <= 0) ch = 1080;
+}
+bool GVHomeFracKnown(const string id)
+{
+   return GlobalVariableCheck(GVHomeFracName(id,false)) && GlobalVariableCheck(GVHomeFracName(id,true));
+}
+double HomeFracClamp(const double f) { return f < 0.0 ? 0.0 : (f > 1.0 ? 1.0 : f); }
+bool GVHomeFracRead(const string id, int &x, int &y)
+{
+   if(!GVHomeFracKnown(id)) return false;
+   const double fx = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false)));
+   const double fy = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true)));
+   int cw = 0, ch = 0; HomeChartSize(cw, ch);
+   x = (int)MathRound(fx * cw);
+   y = (int)MathRound(fy * ch);
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-140: Re-derive the orb's and chip's HOME from their stored  |
+//| fractions on every chart-size change.                             |
+//| Called from the CHART_CHANGE branch (immediately, so a resize    |
+//| lands on the same frame) and from the 250 ms OnTimer pass (the   |
+//| safety net for a missed notification, exactly P-PERF-16's shape).|
+//+------------------------------------------------------------------+
+void CircHomesRefresh()
+{
+   int cw = 0, ch = 0; HomeChartSize(cw, ch);
+   static int s_cw = 0, s_ch = 0;
+   if(cw == s_cw && ch == s_ch) return;
+   s_cw = cw; s_ch = ch;
+   int x = 0, y = 0;
+   if(!g_OrbDragging && GVHomeFracRead("ORB", x, y))
+   {
+      CircOrbHomeSet(x, y);
+      if(g_UI.menuVisible) UpdateCircularMenuPosition();
+   }
+   if(!CircTipDragging() && GVHomeFracRead("CHIP", x, y))
+   {
+      CircTipHomeSet(x, y);
+      CircTipPinnedTouch();
+   }
+}
+
+
 // BiotakMenu_C.mqh - BiotakMenu.mqh split 2026-09-29: exact lines 2842-4015, byte-identical, zero renames.
 #ifndef BIOTAK_MENU_C_MQH
 #define BIOTAK_MENU_C_MQH

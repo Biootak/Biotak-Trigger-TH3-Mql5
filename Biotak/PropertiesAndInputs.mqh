@@ -85,6 +85,9 @@ input bool inpShowMidpointLine = true;
 input bool inpShowTimeframeInLabels = true;
 input bool inpShowFractalTHs = false;
 input bool inpShowStandardTHs = false;
+// P-TH-VOLNORM (2026-10-08): TH label columns scaled by the price's own
+// relative range (THVolNorm.mqh). OFF = the professor's table, byte-identical.
+input bool inpTHVolNorm = false;                // Scale TH labels to the pair's own volatility (OFF = classic TH)
 input bool inpShowATRLabels = false;              // Show ATR Labels
 input bool inpShowATRTargets = true;             // Show ATR Targets
 input bool inpShowATRTradeLabels = true;         // Master switch for ATR trade labels
@@ -428,6 +431,7 @@ input string inpResetKey = "Q";
 input string inpLogDumpKey = "X";           // On-demand log dump ([TRADEPLAN]+[SNAP]+[ATRLEGS]+[PROF*]) — no background auto-logging
 input string inpCountdownKey = "D";         // Toggle the bar-close countdown tag (independent of the ATR labels key)
 input bool inpUseAltTradeFormulas = false;  // EXPERIMENTAL (user 2026-09-10): chart-TF formulas SL=TR*1.66666, Eng=TR/4.266666, Hunt=TR/1.66666 — default OFF keeps the verified ladder
+input bool inpUseLegATR = false;          // P-LEGATR: plan reads the pre-CP leg ATR (as-of composite at the compression run's start) — default OFF is the live read, byte-identical
 // Eng divisor is HARD-CODED (TRADEPLAN_ENG_DIVISOR 4.266666 in TradePlanFormulas.mqh) —
 // user decision 2026-09-10 (R-ENGONE): not an Input, one formula only.
 

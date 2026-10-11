@@ -269,6 +269,7 @@ void HandsetHandleAt(const string hn, const double price, const string bmp)
 static bool g_customPriceLineCreated = false;
 static double g_customTHStartPrice = 0.0;
 static ENUM_TH_START_POINT_TYPE g_thStartPointType = TH_START_POINT_PREVIOUS_CLOSE;
+static int g_startPointOverride = -1;   // panel START POINT row: -1 = none (dialog+placement rules), else 0..4
 static uint g_lastClickTickCount = 0;
 static bool g_customPriceLineDragging = false;
 // P-UI-45: "this gesture touched the custom price line" (a native drag, or a plain
@@ -1289,7 +1290,7 @@ void CleanupAllGlobalVariables() {
     string rawSymbolName = GetCachedSymbol();
     string sanitizedSymbolName = SanitizeSymbolName(rawSymbolName);
     string gvars[];
-    ArrayResize(gvars, 30);
+    ArrayResize(gvars, 32);
     gvars[24] = "Biotak_CustomPrice_" + chartIdStr;             // P-UI-56: the live (chart-scoped) pair
     gvars[25] = "Biotak_CustomPriceOverride_" + chartIdStr;     //   must not outlive the indicator
     gvars[0]  = "Biotak_isHidden_" + chartIdStr;
@@ -1324,6 +1325,8 @@ void CleanupAllGlobalVariables() {
     gvars[27] = "Biotak_ViewCtx_" + chartIdStr;
     gvars[28] = "Biotak_ViewKnown_" + chartIdStr;
     gvars[29] = "Biotak_StepFactor_" + chartIdStr;              // P-UI-98: the step override dies with the chart
+    gvars[30] = "Biotak_LockTFSym_" + rawSymbolName;              // P-UI-142: the lock's symbol twins
+    gvars[31] = "Biotak_LockTFPeriodSym_" + rawSymbolName;
     for(int i = 0; i < ArraySize(gvars); i++) {
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }
@@ -1332,10 +1335,12 @@ void CleanupAllGlobalVariables() {
     // (P-DRAW-05 retired: the drawing toolbar's templates live in a FILE now —
     //  P-DRAW-07 — because a slot's NAME does not fit in a double. Nothing of
     //  ours is left in the GV table, so this sweep stays the box's own.)
+    // P-UI-142: the BKS_ symbol twins die here too (same boxes, other prefix).
     for(int k = GlobalVariablesTotal() - 1; k >= 0; k--)
     {
         string bkn = GlobalVariableName(k);
         if(StringFind(bkn, "Biotak_BK_") == 0) GlobalVariableDel(bkn);
+        if(StringFind(bkn, "Biotak_BKS_") == 0) GlobalVariableDel(bkn);
     }
 }
 

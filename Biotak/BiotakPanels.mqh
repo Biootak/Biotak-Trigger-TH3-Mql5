@@ -10481,6 +10481,16 @@ void SaveBiotakKit()
    SaveUISupport();
 }
 
+// P-UI-142: snapshot the open surfaces at teardown START (Full entry calls this
+// BEFORE PnlCloseAll/DeleteMenu clear the flags they would otherwise persist as
+// closed). Plain Sets: teardown-time only, the teardown flush makes them durable.
+// Lite owns no surfaces and never calls this (its unit has no panels/menu).
+void SnapshotOpenSurfaces()
+{
+   GlobalVariableSet(GetGVName("PNLOPN"), (double)(g_PnlOpen == 13 ? -1 : g_PnlOpen));   // mini strip is box-bound: never reopened blind
+   GlobalVariableSet(GetGVName("TOOLS"), g_ToolsOpen ? 1.0 : 0.0);
+}
+
 //--- per-tick / per-bar UI refresh (HTF forming candle + menu badge sync)
 //--- P-UI-75a: THE DRAG'S POLLED SHADOW — the tick/timer half of the grab.
 //|     A press that never moved emits NO CHARTEVENT_MOUSE_MOVE (the P-BK-03

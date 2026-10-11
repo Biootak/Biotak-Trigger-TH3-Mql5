@@ -9,7 +9,7 @@
 //+------------------------------------------------------------------+
 #property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
-#property version   "3.10"
+#property version   "3.12"
 #property strict
 #property indicator_chart_window
 // MT5-ONLY PLATFORM PROPERTY: MQL5 warns when an indicator declares no plot;
