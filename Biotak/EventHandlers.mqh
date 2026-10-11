@@ -891,8 +891,15 @@ int OnInitHandler() {
 
     InitializeATRCache();
 
-    // ATR warmup debounce: skip if recently warmed up (within 90s)
-    if(inpShowATRLabels && !shouldBeHidden) {
+    // P-PERF-MT5-03 (2026-10-11): ATR warmup is UNCONDITIONAL on MT5.
+    // iATR handles are async — they calculate in the background after creation.
+    // Until BarsCalculated() > 0, every CalculateWeightedATR call falls back to
+    // CopyRates(3000 bar) per timeframe. The 8-TF warmup QUEUES handle creation
+    // for all timeframes at attach time, so by the first tick they are warm
+    // (or nearly warm) regardless of whether ATR labels are visible.
+    // The debounce gvar is kept to avoid re-queueing on a TF switch that
+    // happens within 90 s of the previous attach on the same chart.
+    {
         datetime nowWarmup = TimeCurrent();
         string warmupGvar = "Biotak_ATRWarmup_" + chartIdStr;
         datetime lastWarmup = 0;

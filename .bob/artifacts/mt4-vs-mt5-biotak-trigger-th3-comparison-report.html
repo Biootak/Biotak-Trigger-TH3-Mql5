@@ -1,0 +1,319 @@
+
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<title>MT4 vs MT5 — Biotak Trigger TH3 Comparison</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.6; color: #1f2328; background: #fff; padding: 24px; direction: rtl; }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .subtitle { color: #57606a; margin-bottom: 24px; font-size: 13px; }
+  h2 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+  h3 { font-size: 14px; font-weight: 600; margin: 18px 0 8px; color: #57606a; }
+  .badge { display: inline-block; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+  .badge-red { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .badge-orange { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+  .badge-green { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .badge-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .badge-gray { background: #f7f8fa; color: #57606a; border: 1px solid #e5e7eb; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
+  th { background: #f7f8fa; padding: 8px 12px; text-align: right; font-weight: 600; border: 1px solid #e5e7eb; }
+  td { padding: 8px 12px; border: 1px solid #e5e7eb; vertical-align: top; }
+  tr:hover td { background: #f7f8fa; }
+  .col-feature { min-width: 200px; font-weight: 500; }
+  .col-mt4 { min-width: 200px; }
+  .col-mt5 { min-width: 200px; }
+  .col-status { width: 90px; text-align: center; }
+  .highlight-row td { background: #fff7ed; }
+  .critical-row td { background: #fef2f2; }
+  code { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; font-size: 12px; font-family: monospace; direction: ltr; display: inline-block; }
+  .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+  .summary-card { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; }
+  .summary-card .num { font-size: 28px; font-weight: 700; color: #b91c1c; }
+  .summary-card .label { font-size: 12px; color: #57606a; margin-top: 2px; }
+  .note { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 12px 16px; margin: 12px 0; font-size: 13px; }
+  .note-warn { background: #fff7ed; border-color: #fed7aa; }
+  .note-danger { background: #fef2f2; border-color: #fecaca; }
+  footer { text-align: center; color: #57606a; font-size: 12px; border-top: 1px solid #e5e7eb; margin-top: 32px; padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>جدول مقایسه MT4 vs MT5 — Biotak Trigger TH3</h1>
+<p class="subtitle">تاریخ تحلیل: ۱۴۰۵ — شاخه: sync-mt4-reference — MT4 نسخه ۳.۱۲  |  MT5 نسخه ۳.۱۱</p>
+
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="num">3.11</div>
+    <div class="label">نسخه MT5 (عقب‌تر از MT4 که 3.12 است)</div>
+  </div>
+  <div class="summary-card">
+    <div class="num">66/66</div>
+    <div class="label">فایل‌های مشترک که تفاوت دارند (همه متفاوت)</div>
+  </div>
+  <div class="summary-card">
+    <div class="num">7+</div>
+    <div class="label">ویژگی‌های MT4 که در MT5 پیاده‌سازی نشده</div>
+  </div>
+</div>
+
+
+<h2>۱. تفاوت‌های نسخه و Entry Point</h2>
+<table>
+  <tr>
+    <th class="col-feature">موضوع</th>
+    <th class="col-mt4">MT4 (منبع اصلی)</th>
+    <th class="col-mt5">MT5 (نسخه فعلی)</th>
+    <th class="col-status">وضعیت</th>
+  </tr>
+  <tr class="critical-row">
+    <td class="col-feature">شماره نسخه</td>
+    <td><code>#property version "3.12"</code></td>
+    <td><code>#property version "3.11"</code></td>
+    <td class="col-status"><span class="badge badge-red">عقب‌افتاده</span></td>
+  </tr>
+  <tr class="critical-row">
+    <td class="col-feature"><code>SnapshotOpenSurfaces()</code> در OnDeinit</td>
+    <td>بله — قبل از <code>PnlCloseAll()</code> صدا می‌زند تا panel/tools باز را ثبت کند (P-UI-142)</td>
+    <td>نه — این خط وجود ندارد. پنل‌های باز روی TF switch ذخیره نمی‌شوند</td>
+    <td class="col-status"><span class="badge badge-red">حذف‌شده</span></td>
+  </tr>
+  <tr class="highlight-row">
+    <td class="col-feature"><code>TH3RecorderFlashTick()</code> در OnTimer</td>
+    <td>بله — اولین خط OnTimer. فلش M-press را پاک می‌کند</td>
+    <td>نه — وجود ندارد. ضبط‌کننده TH3 در MT5 نیست</td>
+    <td class="col-status"><span class="badge badge-orange">ناقص</span></td>
+  </tr>
+  <tr class="highlight-row">
+    <td class="col-feature"><code>CircHomesRefresh()</code> در OnTimer</td>
+    <td>بله — موقعیت orb و chip پس از resize تصحیح می‌شود (P-UI-140)</td>
+    <td>نه — این تابع در OnTimer MT5 صدا نمی‌زند. بعد از resize پنجره، orb جابجا نمی‌شود</td>
+    <td class="col-status"><span class="badge badge-orange">ناقص</span></td>
+  </tr>
+  <tr>
+    <td class="col-feature"><code>MT5-ONLY</code> block در OnCalculate</td>
+    <td>ندارد</td>
+    <td>دارد — <code>ArraySetAsSeries</code> + <code>CompatRefreshChartData()</code></td>
+    <td class="col-status"><span class="badge badge-blue">درست</span></td>
+  </tr>
+</table>
+
+
+<h2>۲. ویژگی‌های MT4 که در MT5 پیاده‌سازی نشده</h2>
+<table>
+  <tr>
+    <th class="col-feature">ویژگی / ماژول</th>
+    <th class="col-mt4">توضیح MT4</th>
+    <th class="col-mt5">وضع MT5</th>
+    <th class="col-status">اثر</th>
+  </tr>
+  <tr class="critical-row">
+    <td class="col-feature"><b>TH Vol Norm</b><br /><code>inpTHVolNorm</code> / <code>THAbilityPriceNorm()</code> / <code>THVolNormDrawnV()</code></td>
+    <td>وزن حجم روی ladder ability. در <code>AdaptiveScaling</code>، <code>BiotakKit</code>، <code>BiotakPanels</code> و <code>THCalculations</code> استفاده می‌شود</td>
+    <td>هیچ اثری از این تابع‌ها در ماژول‌های MT5 نیست. <code>THAbilityPriceNorm</code> در MT5 وجود ندارد — فقط <code>THAbilityPrice</code> بدون normalization صدا می‌شود</td>
+    <td class="col-status"><span class="badge badge-red">سطوح اشتباه</span></td>
+  </tr>
+  <tr class="critical-row">
+    <td class="col-feature"><b>LegATR</b><br /><code>inpUseLegATR</code> / <code>TradePlanLegAnchor()</code></td>
+    <td>ATR از نقطه قبل از compression محاسبه می‌شود — نه ATR لحظه‌ای که معمولاً inside CP کوچک است. روی SL/TP/Eng اثر دارد</td>
+    <td>در MT5، <code>TradePlanStripPips</code> بدون LegATR منطق کار می‌کند. <code>inpUseLegATR</code> و <code>TradePlanLegAnchor</code> وجود ندارند. SL/TP روی ATR کوچک‌شده داخل CP حساب می‌شوند</td>
+    <td class="col-status"><span class="badge badge-red">SL/TP اشتباه</span></td>
+  </tr>
+  <tr class="critical-row">
+    <td class="col-feature"><b>Start Point Override</b><br /><code>g_startPointOverride</code></td>
+    <td>پانل می‌تواند نقطه شروع TH را override کند. در <code>GlobalVariables</code> تعریف، در <code>BiotakPanels_Apply</code> و <code>EventHandlers</code> استفاده می‌شود</td>
+    <td>در <code>GlobalVariables.mqh</code> MT5 این متغیر وجود ندارد. بنابراین تغییر Start Point از پانل در MT5 کار نمی‌کند</td>
+    <td class="col-status"><span class="badge badge-red">پانل بی‌اثر</span></td>
+  </tr>
+  <tr class="highlight-row">
+    <td class="col-feature"><b>Lock TF Symbol Twins</b><br /><code>Biotak_LockTFSym_</code></td>
+    <td><code>gvars[30/31]</code> — قفل TF به symbol و period قفل می‌شود (P-UI-142)</td>
+    <td>MT5 فقط <code>gvars[29]</code> دارد (30 عنصر بجای 32). دو GV آخر برای LockTFSym وجود ندارند</td>
+    <td class="col-status"><span class="badge badge-orange">ناقص</span></td>
+  </tr>
+  <tr class="highlight-row">
+    <td class="col-feature"><b>TH3 Recorder</b><br /><code>TH3Recorder.mqh</code></td>
+    <td>ضبط‌کننده نقاط TH3 با کلید M. فایل <code>TH3Recorder.mqh</code> در MT4 وجود دارد</td>
+    <td>در MT5 هیچ اثری از TH3Recorder نیست. کلید M بدون flash</td>
+    <td class="col-status"><span class="badge badge-orange">ناقص</span></td>
+  </tr>
+  <tr>
+    <td class="col-feature"><b>THVolNorm Knob</b> (حذف‌شده در MT4)</td>
+    <td>در MT4 3.12 حذف شده — <code>P-TH-01 RETIRED 2026-10-08</code></td>
+    <td>در MT5 همچنان ساختار قدیمی knob در <code>ConstantsAndEnums</code> باقیست</td>
+    <td class="col-status"><span class="badge badge-gray">قدیمی</span></td>
+  </tr>
+  <tr>
+    <td class="col-feature"><b>Level Budget Constants</b><br /><code>LVL_SPLIT_MARGIN/CTXDIV/TOTAL_BUDGET</code></td>
+    <td>MT4 (3.12): <code>LVL_SPLIT_MARGIN=8</code>, <code>LVL_SPLIT_CTXDIV=8</code>, <code>LVL_TOTAL_BUDGET=400</code> تعریف شده (P-LEVEL-BOUND-03)</td>
+    <td>در MT5 این سه #define وجود ندارند. budget management سطوح در MT5 ناقص است</td>
+    <td class="col-status"><span class="badge badge-red">سطوح اشتباه</span></td>
+  </tr>
+</table>
+
+
+<h2>۳. چرا سطوح در MT5 درست رسم نمی‌شوند؟</h2>
+<div class="note note-danger">
+  <b>علت اصلی: THAbilityPriceNorm حذف شده از MT5</b><br />
+  در MT4، هر سطح TH از <code>THAbilityPriceNorm(inpTHVolNorm, tfMin, anchor)</code> می‌گذرد که وزن حجم V را روی ability اعمال می‌کند. در MT5 فقط <code>THAbilityPrice()</code> صدا می‌شود — بدون normalization. نتیجه: تمام ارتفاع‌های ladder با وزن V متفاوتند، سطوح جابجا می‌شوند.
+</div>
+<div class="note note-danger">
+  <b>علت دوم: LegATR حذف شده از MT5</b><br />
+  وقتی ATR داخل یک CP (consolidation period) محاسبه می‌شود، مقدار آن تا ۵۰٪ کمتر از leg قبل از CP است. MT4 با <code>TradePlanLegAnchor()</code> به اولین bar بزرگ قبل از CP می‌رود. MT5 ATR لحظه‌ای می‌خواند → SL کوچک‌تر از واقعی → Knot با SL اشتباه.
+</div>
+<div class="note note-danger">
+  <b>علت سوم: LVL_SPLIT_MARGIN/LVL_TOTAL_BUDGET تعریف نشده در MT5</b><br />
+  بدون این ثابت‌ها، budget management سطوح در MT5 فرق می‌کند. تعداد و توزیع سطوح بالا/پایین قیمت فعلی با MT4 یکسان نیست.
+</div>
+<div class="note">
+  <b>علت چهارم: Start Point Override ندارد</b><br />
+  <code>g_startPointOverride</code> که پانل می‌نویسد در MT5 تعریف نشده. اگر کاربر از پانل Start Point را عوض کند، MT5 از input dialog می‌خواند و سطوح از نقطه اشتباه شروع می‌شوند.
+</div>
+
+
+<h2>۴. چرا MT5 کندتر است؟</h2>
+<table>
+  <tr>
+    <th class="col-feature">دلیل</th>
+    <th style="width:60%">توضیح</th>
+    <th class="col-status">شدت</th>
+  </tr>
+  <tr>
+    <td><b>Handle-based iATR</b></td>
+    <td>در MT5 هر <code>iATR()</code> یک indicator handle async ایجاد می‌کند. در startup تا چند ثانیه <code>BarsCalculated()=0</code> است و از fallback CopyRates استفاده می‌شود (3000+ bar برای هر timeframe). MT4 مستقیم از series array می‌خواند — هیچ async-ای ندارد.</td>
+    <td class="col-status"><span class="badge badge-red">زیاد</span></td>
+  </tr>
+  <tr>
+    <td><b>CompatRefreshChartData() هر tick</b></td>
+    <td>در هر <code>OnCalculate</code> و <code>OnTimer</code> باید Time/Open/High/Low/Close بازسازی شوند (5 × CopyXxx). MT4 این آرایه‌ها را native دارد.</td>
+    <td class="col-status"><span class="badge badge-orange">متوسط</span></td>
+  </tr>
+  <tr>
+    <td><b>ATR Fallback Cache (3000 bar)</b></td>
+    <td>در MT5 ATR fallback با <code>ATR_FALLBACK_MIN_BARS=3000</code> تنظیم شده تا با MT4 برابر باشد (Wilder's recursion seeding). هر timeframe جدید در startup یک block 3000-bar کپی می‌کند.</td>
+    <td class="col-status"><span class="badge badge-orange">متوسط</span></td>
+  </tr>
+  <tr>
+    <td><b>OBJPROP_TIME1/PRICE1/PRICE2 shim</b></td>
+    <td>هر <code>ObjectSetDouble(PRICE1)</code> از طریق compat compat→real compat رد می‌شود. در MT4 direct call است.</td>
+    <td class="col-status"><span class="badge badge-gray">کم</span></td>
+  </tr>
+  <tr>
+    <td><b>EventHandlers monolith در MT5</b></td>
+    <td>MT4 فایل‌های جداگانه دارد (<code>EventHandlers_Calc/Router/Init/...</code>). MT5 همه را در یک فایل 6935 خطی inline کرده. کامپایل کندتر، اما runtime تفاوتی ندارد.</td>
+    <td class="col-status"><span class="badge badge-gray">بدون اثر runtime</span></td>
+  </tr>
+  <tr>
+    <td><b>SymbolSelect در هر iATR batch</b></td>
+    <td>در MT5، <code>iATRMQL4</code> یکبار <code>SymbolSelect(symbol,true)</code> صدا می‌زند. MT4 این نیاز را ندارد.</td>
+    <td class="col-status"><span class="badge badge-gray">کم</span></td>
+  </tr>
+</table>
+
+
+<h2>۵. فایل‌های تنها در MT4 (در MT5 inline شده یا وجود ندارند)</h2>
+<table>
+  <tr>
+    <th>دسته</th>
+    <th>فایل‌های MT4 که MT5 ندارد</th>
+    <th>وضع در MT5</th>
+  </tr>
+  <tr>
+    <td>TH3 Recorder</td>
+    <td><code>TH3Recorder.mqh</code></td>
+    <td><span class="badge badge-red">اصلاً وجود ندارد</span></td>
+  </tr>
+  <tr>
+    <td>TH Volume Norm</td>
+    <td><code>THVolNorm.mqh</code></td>
+    <td><span class="badge badge-red">اصلاً وجود ندارد</span></td>
+  </tr>
+  <tr>
+    <td>Part files (inline در MT5)</td>
+    <td><code>ATR_A/B، EventHandlers_Calc/Router/...، BiotakMenu_A/B/C/D، BiotakPanels_Apply/Build/...، DrawStrip_Base/Head/...، Labels_A/B، LevelPipe_A/B، Runtime_A/B، TH3Tool_A/B/C/D، Toolbar_A/B، Util_A/B، TH3Renderer_A/B/C، TH3Pivots_A/B، ...</code></td>
+    <td><span class="badge badge-blue">Inline شده در فایل اصلی MT5</span></td>
+  </tr>
+  <tr>
+    <td>Legacy compatibility</td>
+    <td><code>BiotakHomes.mqh، FibPen.mqh</code></td>
+    <td><span class="badge badge-gray">ندارد / inline</span></td>
+  </tr>
+  <tr>
+    <td>TH3 Dataset</td>
+    <td><code>TH3DatasetPaths.mqh</code></td>
+    <td><span class="badge badge-gray">در MT5 inline</span></td>
+  </tr>
+</table>
+
+
+<h2>۶. اقدامات لازم برای یکسان‌سازی</h2>
+<table>
+  <tr>
+    <th style="width:50px">#</th>
+    <th>اقدام</th>
+    <th>فایل‌های تأثیرگذار</th>
+    <th>اولویت</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td><b>پورت THAbilityPriceNorm + THVolNorm</b> از MT4 به MT5: ابتدا <code>THVolNorm.mqh</code> را کپی و در entry include کنید، سپس <code>THCalculations.mqh</code> MT5 را با نسخه MT4 (که <code>THAbilityPriceNorm</code> دارد) sync کنید</td>
+    <td><code>Biotak/THCalculations.mqh</code>, entry file</td>
+    <td><span class="badge badge-red">فوری — سطوح اشتباه</span></td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><b>پورت LVL_SPLIT_MARGIN/CTXDIV/LVL_TOTAL_BUDGET</b> به <code>ConstantsAndEnums.mqh</code> MT5 — این سه #define که در MT4 3.12 اضافه شده</td>
+    <td><code>Biotak/ConstantsAndEnums.mqh</code></td>
+    <td><span class="badge badge-red">فوری — budget اشتباه</span></td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><b>اضافه کردن g_startPointOverride</b> به <code>GlobalVariables.mqh</code> MT5 و وصل کردن آن به <code>EventHandlers</code></td>
+    <td><code>Biotak/GlobalVariables.mqh</code></td>
+    <td><span class="badge badge-red">مهم — Start Point بی‌اثر</span></td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><b>پورت LegATR</b> (<code>TradePlanLegAnchor</code>) به MT5: <code>TradePlanFormulas.mqh</code> MT5 را با نسخه MT4 که LEGATR دارد sync کنید</td>
+    <td><code>Biotak/TradePlanFormulas.mqh</code></td>
+    <td><span class="badge badge-orange">مهم — SL/TP اشتباه</span></td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><b>اضافه کردن SnapshotOpenSurfaces()</b> به <code>OnDeinit</code> در entry MT5 (قبل از PnlCloseAll)</td>
+    <td><code>Biotak Trigger TH3.mq5</code>, <code>Biotak Trigger TH3 Lite.mq5</code></td>
+    <td><span class="badge badge-orange">مهم — restore پانل کار نمی‌کند</span></td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td><b>اضافه کردن CircHomesRefresh()</b> به <code>OnTimer</code> در entry MT5 (بعد از CircUIMetricsInvalidate)</td>
+    <td><code>Biotak Trigger TH3.mq5</code>, <code>Biotak Trigger TH3 Lite.mq5</code></td>
+    <td><span class="badge badge-orange">مهم — orb بعد از resize جابجا نمی‌شود</span></td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td><b>LockTFSym GV slots</b>: آرایه gvars در <code>GlobalVariables.mqh</code> MT5 را از 30 به 32 گسترش داده و <code>gvars[30/31]</code> برای LockTFSym اضافه کنید</td>
+    <td><code>Biotak/GlobalVariables.mqh</code></td>
+    <td><span class="badge badge-gray">متوسط</span></td>
+  </tr>
+  <tr>
+    <td>8</td>
+    <td><b>به‌روزرسانی version</b> از 3.11 به 3.12 در entry MT5</td>
+    <td><code>Biotak Trigger TH3.mq5</code>, <code>Biotak Trigger TH3 Lite.mq5</code></td>
+    <td><span class="badge badge-gray">آخر</span></td>
+  </tr>
+</table>
+
+
+<h2>۷. یادداشت کندی MT5 — قابل بهبود اما ذاتی</h2>
+<div class="note">
+  کندی MT5 نسبت به MT4 تا حدی <b>ذاتی است</b>: MT5 هیچ series array داخلی ندارد و iATR باید async handle warm کند. با این حال چند بهینه‌سازی اعمال شده: <code>CompatRefreshChartData</code> فقط bar جاری را update می‌کند اگر bar count تغییر نکرده باشد (P-MT5-01)، و ATR handle cache از 64 slot استفاده می‌کند. <b>راه‌حل جزئی</b>: روی نمودارهای با history کوتاه یا warm شده، کندی صرفاً در چند ثانیه اول attach است. روی D1/W1/MN1 در startup ممکن است 2-5 ثانیه طول بکشد تا handle‌ها آماده شوند.
+</div>
+
+</div>
+<footer>Made with IBM Bob  |  Biotak Trigger TH3 MT4↔MT5 Parity Analysis</footer>
+</body>
+</html>
