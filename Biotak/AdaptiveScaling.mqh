@@ -258,8 +258,8 @@ int GetFractalShift() {
 //| @return Adapted step size matching real market volatility        |
 //+------------------------------------------------------------------+
 double GetAdaptedStepSize(const double originalStepSize) {
-    // FIXED mode: return unchanged
-    if(inpAdaptiveMode == ADAPTIVE_FIXED) {
+    // FIXED mode: return unchanged. VOL NORM on: same bypass (see above).
+    if(inpAdaptiveMode == ADAPTIVE_FIXED || inpTHVolNorm) {
         return originalStepSize;
     }
     

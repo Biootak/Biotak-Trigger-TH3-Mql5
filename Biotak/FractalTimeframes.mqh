@@ -67,21 +67,16 @@ int FractalRungIndex(const string timeframe)
     return -1;
 }
 
-//--- the knob as ONE ratio. 1.0 = OFF (the professor's table untouched).
+//--- retired with the knob (P-TH-01, 2026-10-08): the ratio is 1.0, always.
+//--- Kept as the ONE reader below so no caller changes: restore = return the
+//--- override math, never rewrite the callers.
 double FractalPercentScale()
 {
-    // P-UI-57: NaN <= 0.0 is false, so a non-finite override fell through and
-    // poisoned every rung. Finite gate first; 0 = OFF (professor's table).
-    if(!MathIsValidNumber(g_thPercentOverride) || g_thPercentOverride <= 0.0) return 1.0;
-    int baseIdx = FractalRungIndex(GetBaseFractalTimeframeForCurrent());
-    if(baseIdx < 0) return 1.0;
-    double base = FractalPercentRaw(baseIdx);
-    if(base <= 0.0) return 1.0;
-    return g_thPercentOverride / base;
+    return 1.0;
 }
 
-//--- the professor's table x the knob's ratio: the ONE reader every
-//--- DRAWING and LABEL path must use (THCalculations, FractalTimeframes'
+//--- the professor's table x the retired ratio (always 1.0): the ONE reader
+//--- every DRAWING and LABEL path must use (THCalculations, FractalTimeframes'
 //--- own two resolvers, LabelFunctions' TH strip).
 double FractalPercentScaled(const int index)
 {
