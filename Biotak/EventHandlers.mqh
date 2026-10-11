@@ -2251,16 +2251,12 @@ void ClearAllLevels(const string objectPrefix, bool clearZones = true)
     InvalidateObjectCountCache();
 }
 
-//| Get adaptive level counts (matching MT5: simple single inpMaxLevels) |
+//| Get adaptive level counts: split leans toward the live price.   |
+//| Port of MT4 EventHandlers_Calc.mqh:481-484.                     |
 //+------------------------------------------------------------------+
 void GetAdaptiveLevelCounts(int &maxAbove, int &maxBelow)
 {
-    maxAbove = inpMaxLevels;
-    maxBelow = inpMaxLevels;
-    if(maxAbove > MAX_SAFE_LEVELS) maxAbove = MAX_SAFE_LEVELS;
-    if(maxBelow > MAX_SAFE_LEVELS) maxBelow = MAX_SAFE_LEVELS;
-    if(maxAbove < 1) maxAbove = 1;
-    if(maxBelow < 1) maxBelow = 1;
+    LevelSplitCounts(inpMaxLevels, maxAbove, maxBelow);
 }
 //| Calculate common values used across all step modes              |
 //| TH-based only (ATR basis removed, matching MT5)                |
