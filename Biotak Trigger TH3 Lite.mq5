@@ -194,7 +194,13 @@ int OnCalculate(const int rates_total,
     // filled as timeseries by CompatRefreshChartData and are what all shared code
     // reads — the parameter arrays are only used for the two index lookups in
     // OnCalculateHandler (currentPrice, currentBarTime). MT5-ONLY fix.
-    CompatRefreshChartData();
+    // P-MT5-PERF: same optimisation as the Full entry — see that file's comment.
+    CompatRefreshChartData(
+        rates_total,
+        (rates_total > 0) ? close[rates_total - 1] : EMPTY_VALUE,
+        (rates_total > 0) ? high[rates_total - 1]  : EMPTY_VALUE,
+        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE
+    );
     return OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
 }
 

@@ -621,9 +621,24 @@ static int         g_seriesSyncedAt = -1;
 // true number; only the backing arrays are capped.
 #define COMPAT_SERIES_WINDOW 12000
 
-void CompatRefreshChartData()
+// R-TF-UNIT / P-MT5-PERF: overload that accepts the bar count already known
+// from OnCalculate's `rates_total` parameter, skipping the iBars() kernel
+// call on the per-tick path.  OnTimer / OnInit pass -1 (unknown) and the
+// function falls back to iBars() as before.
+//
+// The live forming-bar values (close/high/low) are also passed from the
+// OnCalculate parameter arrays when known: they are already in MQL5 memory
+// (no kernel crossing), saving three iHigh/iLow/iClose kernel calls per tick
+// in steady state.  Unknown callers pass EMPTY_VALUE for all three and the
+// function uses the scalar series reads as before.
+void CompatRefreshChartData(const int knownBars   = -1,
+                            const double livClose = EMPTY_VALUE,
+                            const double livHigh  = EMPTY_VALUE,
+                            const double livLow   = EMPTY_VALUE)
 {
-    int bars = iBars(_Symbol, PERIOD_CURRENT);
+    // P-MT5-PERF: use the bar count supplied by OnCalculate (free — already
+    // a local in the caller's frame) rather than paying a kernel call per tick.
+    int bars = (knownBars > 0) ? knownBars : iBars(_Symbol, PERIOD_CURRENT);
     if(bars <= 0) return;
 
     // Full re-sync whenever the bar count changes (new bar / history download).
@@ -690,13 +705,24 @@ void CompatRefreshChartData()
     }
 
     // Same bar count (or full sync not yet due / just failed): refresh only
-    // the forming bar's moving values (Time[0]/Open[0] are fixed once the bar
-    // opens).
+    // the forming bar's moving values.
+    // P-MT5-PERF: when called from OnCalculate the live values arrive as
+    // parameters (already in MQL5 memory — zero extra kernel crossings).
+    // Unknown callers (OnTimer, OnInit) still fall back to the scalar reads.
     if(g_seriesBars > 0)
     {
-        g_seriesHigh[0]  = iHigh(_Symbol, PERIOD_CURRENT, 0);
-        g_seriesLow[0]   = iLow(_Symbol, PERIOD_CURRENT, 0);
-        g_seriesClose[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
+        if(livClose != EMPTY_VALUE && livHigh != EMPTY_VALUE && livLow != EMPTY_VALUE)
+        {
+            g_seriesHigh[0]  = livHigh;
+            g_seriesLow[0]   = livLow;
+            g_seriesClose[0] = livClose;
+        }
+        else
+        {
+            g_seriesHigh[0]  = iHigh(_Symbol, PERIOD_CURRENT, 0);
+            g_seriesLow[0]   = iLow(_Symbol, PERIOD_CURRENT, 0);
+            g_seriesClose[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
+        }
     }
 }
 

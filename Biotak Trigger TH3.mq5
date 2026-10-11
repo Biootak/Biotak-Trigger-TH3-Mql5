@@ -304,7 +304,18 @@ int OnCalculate(const int rates_total,
     // filled as timeseries by CompatRefreshChartData and are what all shared code
     // reads — the parameter arrays are only used for the two index lookups in
     // OnCalculateHandler (currentPrice, currentBarTime). MT5-ONLY fix.
-    CompatRefreshChartData();
+    // P-MT5-PERF: pass rates_total (free — already a parameter) so
+    // CompatRefreshChartData skips the iBars() kernel call; pass the forming
+    // bar's live values from the OnCalculate arrays (zero extra kernel
+    // crossings) so the steady-state path skips three iHigh/iLow/iClose calls.
+    // close/high/low[rates_total-1] is the CURRENT (newest) bar — same bar
+    // index 0 in the emulated timeseries.
+    CompatRefreshChartData(
+        rates_total,
+        (rates_total > 0) ? close[rates_total - 1] : EMPTY_VALUE,
+        (rates_total > 0) ? high[rates_total - 1]  : EMPTY_VALUE,
+        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE
+    );
     int result = OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
     // --- UI kit: HTF forming-candle live update + new-bar redraw ---
     RefreshKitOnBar();

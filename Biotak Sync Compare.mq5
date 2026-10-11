@@ -539,7 +539,13 @@ int OnCalculate(const int rates_total,
     // Reversing them would make close[rates_total-1] point to the OLDEST bar,
     // causing currentPrice/currentBarTime to read the wrong end of history.
     // MT5-ONLY fix.
-    CompatRefreshChartData();
+    // P-MT5-PERF: same optimisation as the Full entry.
+    CompatRefreshChartData(
+        rates_total,
+        (rates_total > 0) ? close[rates_total - 1] : EMPTY_VALUE,
+        (rates_total > 0) ? high[rates_total - 1]  : EMPTY_VALUE,
+        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE
+    );
     int result = OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
 
     SyncCompareTick();   // SYNC COMPARE: dump on a new bar
