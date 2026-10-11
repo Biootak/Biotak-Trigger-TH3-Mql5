@@ -304,6 +304,8 @@ void InitializeUISupport()
    LoadPalRecent();
 
    // panel drag positions (persisted per chart)
+   int kcw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0); if(kcw <= 0) kcw = 1920;
+   int kch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0); if(kch <= 0) kch = 1080;
    for(int i = 0; i < PNL_COUNT; i++)
    {
       string vn = GetGVName("PNLP" + IntegerToString(i));
@@ -312,6 +314,9 @@ void InitializeUISupport()
          double packed = GlobalVariableGet(vn);
          g_PnlX[i] = (int)(packed / 10000.0);
          g_PnlY[i] = (int)MathMod(packed, 10000.0);
+         // P-UI-142: a smaller window must not strand the manual spot off-screen.
+         if(g_PnlX[i] < 0) g_PnlX[i] = 0; if(g_PnlX[i] > kcw) g_PnlX[i] = kcw;
+         if(g_PnlY[i] < 0) g_PnlY[i] = 0; if(g_PnlY[i] > kch) g_PnlY[i] = kch;
          g_PnlManualPos[i] = true;
       }
    }
@@ -349,7 +354,7 @@ void RefreshUIPerTick()
       // and TH lives in THCalculations (below this file), so the pump pushes it in
       // and the domain never reads it (layer law). Change-guarded inside: one cached
       // TH read and one compare per round, and only a value that MOVED re-arms the re-read.
-      BaseKnotStepPush(THAbilityPrice(Period(), 0));
+      BaseKnotStepPush(THAbilityPriceNorm(inpTHVolNorm, Period(), 0));
       // P-BK-46: the knot's trade is measured in EngSL of ITS OWN TF, and EngSL is
       // trade-plan math (TradePlanFormulas, above this file too) — the same pump
       // hands it in: it asks the tool which TFs its boxes call their own, computes
