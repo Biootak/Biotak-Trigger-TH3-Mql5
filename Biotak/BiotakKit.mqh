@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/BiotakKit.mqh
+//   regenerate : python tools/parity/resync-module.py --write BiotakKit.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
 //+------------------------------------------------------------------+
 //|                                              BiotakKit.mqh     |
 //|  UI support module for the Biotak Trigger TH3 circular menu:     |
@@ -66,26 +78,31 @@ struct UIState {
    int    menuX;            // orb center (pixels, top-left origin)
    int    menuY;
    bool   showHTF;
+   // P-UI-126: the hover chip's MODE — false = «با موس» (a hover tip, the shipped
+   // default, the user's own pick), true = «همیشه فعال» (the orb's banner stays up at
+   // its place). The PLACE itself is the chip's own state (BiotakMenu's s_TipHomeX/Y)
+   // and rides the same UI-state block as this flag.
+   bool   tipPin;
 };
 static UIState g_UI;
 
 string GetGVName(string key) { return g_UI.gvPrefix + key; }
 
-//--- settings-panel geometry (drag-to-move persistence; panel slots 0..12,
-//     1 = the main Zones & Levels card; 12 = Base Box card).
+//--- settings-panel geometry (drag-to-move persistence; panel slots 0..14,
+//     1 = the main Zones & Levels card; 12 = Base Box card; 14 = General Settings).
 //     PNL_COUNT lives here (Kit is included before Panels) so every loop
 //     and slot array in both files stays in sync from one define.
-#define PNL_COUNT 14
-static int  g_PnlX[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-static int  g_PnlY[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+#define PNL_COUNT 15
+static int  g_PnlX[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+static int  g_PnlY[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
 
 //==============================================================================
 // PALETTE COLOR KINDS — one kind per colorable setting of THIS indicator.
 // Names/labels for the "Apply to" cycler live in BiotakPanels.mqh.
 //==============================================================================
 #define PAL_TRIGGER       0   // Trigger base color
-#define PAL_TRIGGER_LABEL 1   // Trigger label color
+#define PAL_TRIGGER_LABEL 1   // Trigger label color (clrNONE = AUTO); its TR channel is the LABEL OPACITY row (P-UI-131j)
 #define PAL_SS            2   // SS level color
 #define PAL_LS            3   // LS level color
 #define PAL_TH3           4   // TH3 line color
@@ -113,20 +130,41 @@ static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,fal
 #define PAL_ATR_HUNTER 22   // TRex card: the Hunter SL / Eng.SL row
 #define PAL_ATR_TRADE  23   // TRex card: the #SL/#TP row
 #define PAL_ATR_SPREAD 24   // TRex card: the live-spread superscript
-#define PAL_BASE_TARGETS 25
+// P-UI-131h — the MID ZONE EDGE's TWO HALVES as surfaces of their own. They are palette
+// kinds so the ONE picker, the RECENT ring, the persistence and the row↔kind map all
+// serve them unchanged; clrNONE is AUTO (the derived lit/shaded tone), which is why they
+// sit OUTSIDE the count below: the "apply to" cycler is for surfaces a bulk pick makes
+// sense on, and a bulk pick here would only turn AUTO off everywhere.
+#define PAL_ZONE_EDGE_TOP    26   // MID ZONE edge upper line (the LIT half)
+#define PAL_ZONE_EDGE_BOTTOM 27   // MID ZONE edge lower line (the SHADED half)
+//--- P-PAL-19 (2026-10-02) — THE STRIP'S OWN TWO TARGETS. The strip no longer has a
+//--- colour board of its own: it opens THIS palette (the one every card already
+//--- uses) on the drawing it serves, and these two kinds are how the popup says
+//--- which. They are APPENDED, never inserted — a kind index is persisted in the
+//--- panel's own state and in the recent/target rings, so renumbering one would
+//--- repaint old targets with new meanings.
+#define PAL_DRAW_BORDER   28  // the strip's drawing BORDER colour
+#define PAL_DRAW_FILL     29  // …and its FILL
+//--- P-PAL-19c: the RING now reaches the strip's two, so «cycle >>» walks
+//--- Edge Top / Edge Bottom / Drawing Border / Drawing Fill at its end. The name
+//--- table (PAL_TGT_NAMES_N 29) already maps that tail; the ring's stop was still
+//--- 25, which made a page opened on a drawing unreachable BY cycling — the user
+//--- asked for border and fill to be separate, and a target you cannot cycle to is
+//--- not separate, it is missing.
+#define PAL_BASE_TARGETS 29
 
 //--- factory default colors (Reset actions)
 color DefTriggerColor()      { return clrBlack; }
-color DefTriggerLabelColor() { return clrBlack; }
-color DefSSLevelColor()      { return clrGoldenrod; }
-color DefLSLevelColor()      { return clrOrange; }
+// P-UI-131j: AUTO — the factory look IS the derivation (follow the Lines colour),
+// so a Reset returns to "never pinned" instead of pinning a colour nobody chose.
+color DefTriggerLabelColor() { return clrNONE; }
 color DefTH3Color()          { return clrDarkBlue; }
 color DefTH3PipColor()       { return clrDarkBlue; }
 color DefCustomPriceColor()  { return clrDodgerBlue; }
 color DefFactorColor()       { return C'0,100,0'; }
 color DefLineColor()         { return clrBlack; }
-color DefBoxBorderColor()    { return C'255,171,0'; }   // amber — the shipped Base Box look
-color DefBoxFillColor()      { return C'255,171,0'; }   // amber fill (invisible until FILL TR < 100)
+color DefBoxBorderColor()    { return clrDarkBlue; }   // P-BK-69: DARK BLUE — the shipped Base Box look; it is the mark's ink AND the ink of its two points
+color DefBoxFillColor()      { return BIO_CLR_BRAND; }  // amber fill (invisible until FILL TR < 100) — P-UI-117: the brand token, not a copy of it
 color DefBKTextColor()       { return C'255,255,255'; } // white user text inside the box
 color DefBKEntryColor()      { return C'30,144,255'; }    // dodger blue Entry ray
 color DefBKStopColor()       { return C'220,50,50'; }     // red Stop ray
@@ -195,11 +233,11 @@ void ApplyRefreshFlags(const int flags)
    if((apply & (REFRESH_ALL | REFRESH_BUFFERS | REFRESH_RECALC | REFRESH_LABELS | REFRESH_TH3)) != 0)
    {
       if((apply & (REFRESH_LABELS | REFRESH_ALL)) != 0) g_labelsRelayoutNeeded = true;
-      // TH3TOOL-OFF:
-      //if((apply & (REFRESH_TH3 | REFRESH_ALL)) != 0)
-      //{
-      //   UpdateAllTH3Objects();
-      //}
+      // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+      if((apply & (REFRESH_TH3 | REFRESH_ALL)) != 0)
+      {
+         UpdateAllTH3Objects();
+      }
       // P-PERF-30: this dispatcher is only ever reached from a USER action
       // (click, key, gesture end) - never from the tick or a drag loop - so the
       // edit must paint even when the geometry signature cannot see the input
@@ -256,8 +294,6 @@ void UIDragBudgetEnd()
    if(owed != REFRESH_NONE) ApplyRefreshFlags(owed);   // the final value lands
 }
 
-bool UIDragBudgetLive() { return s_UIDragLive; }
-
 //==============================================================================
 // INIT / SAVE / PER-TICK
 //==============================================================================
@@ -308,12 +344,12 @@ void RefreshUIPerTick()
    {
       s_LastMenuSync = now;
       UpdateMenuSyncIfChanged();
-      // P-BK-29/47: the note's BREAK STORY is measured in MOVEMENT STEPS (ATR) — the
-      // type itself is the node's LENGTH and needs no size — and ATR lives ABOVE
-      // BaseKnotTool (ATRCalculations), so the pump pushes it in and the domain never
-      // reads it (layer law). Change-guarded inside: one cached ATR read and one
-      // compare per round, and only a value that MOVED re-arms the re-read.
-      BaseKnotStepPush(CalculateWeightedATR_Locked());
+      // P-BK-29/47: the note's BREAK STORY is measured in MOVEMENT STEPS (TH points,
+      // P-BK-92, was ATR) - the type itself is the node's LENGTH and needs no size -
+      // and TH lives in THCalculations (below this file), so the pump pushes it in
+      // and the domain never reads it (layer law). Change-guarded inside: one cached
+      // TH read and one compare per round, and only a value that MOVED re-arms the re-read.
+      BaseKnotStepPush(THAbilityPrice(Period(), 0));
       // P-BK-46: the knot's trade is measured in EngSL of ITS OWN TF, and EngSL is
       // trade-plan math (TradePlanFormulas, above this file too) — the same pump
       // hands it in: it asks the tool which TFs its boxes call their own, computes

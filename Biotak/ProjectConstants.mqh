@@ -1,4 +1,16 @@
-﻿  //+------------------------------------------------------------------+
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/ProjectConstants.mqh
+//   regenerate : python tools/parity/resync-module.py --write ProjectConstants.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  //+------------------------------------------------------------------+
 //|                                      ProjectConstants.mqh        |
 //|                     Centralized Constants - PLATINUM VERSION     |
 //|                     Centralized Constants - Platinum Version     |
@@ -13,12 +25,17 @@
 #define PROJECT_CONSTANTS_MQH
 #property strict
 
-// Build generation tag: printed once per OnInit as [BUILD], so any log set
-// is attributable to the exact formula generation running — no more
-// ghost-build forensics. Bump BY HAND on every behavior-affecting release
-// (not per compile).
-//   T2 = SMA composite M1–D1 + iATR(W1,55) + iATR(MN,30)  (2026-09-10)
-#define TH3_BUILD_TAG "T2"
+//--- P-BUILD-08: THE TAG IS THE HASH, NOT A HAND-TYPED WORD.
+//--- This used to read "T2" and be bumped BY HAND. It never changed on
+//--- 2026-09-29 while the strip's code changed many times, so a chart holding a
+//--- stale ex4 printed the same [BUILD] line as the fresh one — eight days spent
+//--- comparing two numbers that were not about the code. TH3_BUILD_TAG is now
+//--- the content hash of the tree these entries compile (source + embedded
+//--- rasters), owned by tools/gen-build-hash.js: same tree -> same tag, any edit
+//--- -> a different tag. It is the ONLY build identity printed; there is nothing
+//--- left to bump by hand and nothing left to forget.
+#include "BuildHash.mqh"
+#define TH3_BUILD_TAG TH3_SRC_HASH
 
 //+------------------------------------------------------------------+
 //| TH3 Binary Subdivision Frequency System                          |

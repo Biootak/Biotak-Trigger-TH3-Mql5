@@ -1,4 +1,16 @@
-﻿  //+------------------------------------------------------------------+
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/ObjectCountManager.mqh
+//   regenerate : python tools/parity/resync-module.py --write ObjectCountManager.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  //+------------------------------------------------------------------+
 //|                                          ObjectCountManager.mqh  |
 //|                     Object Count Management & Overflow Prevention|
 //|                                                     Overflow      |

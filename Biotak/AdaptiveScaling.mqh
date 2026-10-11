@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/AdaptiveScaling.mqh
+//   regenerate : python tools/parity/resync-module.py --write AdaptiveScaling.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   //+------------------------------------------------------------------+
 //|                                            AdaptiveScaling.mqh   |
 //|                                                                  |
@@ -266,7 +278,10 @@ double GetAdaptedStepSize(const double originalStepSize) {
             // Blended: interpolate between original and ATR-adapted
             // result = original * (1 - blendRatio) + (original * scalingFactor) * blendRatio
             // Simplified: result = original * ((1 - blendRatio) + scalingFactor * blendRatio)
-            double blendRatio = MathMax(0.0, MathMin(1.0, inpAdaptiveBlendRatio));
+            // P-UI-57: NaN poisons MathMax/Min (any comparison false), so guard finite first.
+            double blendRaw = inpAdaptiveBlendRatio;
+            if(!MathIsValidNumber(blendRaw)) blendRaw = 0.5;
+            double blendRatio = MathMax(0.0, MathMin(1.0, blendRaw));
             double blendedFactor = (1.0 - blendRatio) + factor * blendRatio;
             return originalStepSize * blendedFactor;
         }

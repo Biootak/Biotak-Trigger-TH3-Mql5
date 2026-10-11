@@ -1,8 +1,25 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/ExtendedDrawingFunctions.mqh
+//   regenerate : python tools/parity/resync-module.py --write ExtendedDrawingFunctions.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   //+------------------------------------------------------------------+
 //|                                   ExtendedDrawingFunctions.mqh   |
 //+------------------------------------------------------------------+
 #ifndef EXTENDED_DRAWING_FUNCTIONS_MQH
 #define EXTENDED_DRAWING_FUNCTIONS_MQH
+
+// ExtDraw_A.mqh - ExtendedDrawingFunctions.mqh split 2026-09-29: exact lines 6-1381, byte-identical, zero renames.
+#ifndef EXT_DRAW_A_MQH
+#define EXT_DRAW_A_MQH
+
 
 #property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link "@biotak"
@@ -230,7 +247,7 @@ bool CreateFactorMidZone(const string zoneName,
     double halfHeight = (upperPrice - lowerPrice) / 2.0;
     
     // Create zone using unified system
-    SZoneCreationRequest request;
+    SZoneCreationRequest request = ZoneRequestNew();   // P-UI-131h
     request.name = zoneName;
     request.topPrice = upperPrice;
     request.bottomPrice = lowerPrice;
@@ -239,6 +256,11 @@ bool CreateFactorMidZone(const string zoneName,
     // P-UI-63: the edge fades on its own - the Factor bands answer to the same two rows
     // the mid zones do (the card is titled "MID ZONES", the bands are the same family).
     request.borderTransparency = inpMidZoneBorderTransparency;
+    // P-UI-131h: the Factor bands answer to the same two half-surfaces the mid zones do.
+    request.borderTopColor = inpZoneEdgeTopColor;
+    request.borderBottomColor = inpZoneEdgeBottomColor;
+    request.borderTopTransparency = inpZoneEdgeTopTransparency;
+    request.borderBottomTransparency = inpZoneEdgeBottomTransparency;
     // P-UI-62: the band and its edge are independent halves of the picture.
     request.filled  = (zoneStyle != FACTOR_ZONE_BOX_EMPTY);
     request.outline = (zoneStyle != FACTOR_ZONE_BOX_FILLED);
@@ -645,8 +667,11 @@ double GetStepSizeForBasisTypeFromTH(const double basePrice, const double multip
     }
     
     #ifdef ENABLE_DEBUG_LOGS
-    Print("  GetStepSizeForBasisType: TF=", timeframe, ", Mult=", multiplier, 
-          ", TH%=", DoubleToString(thPercentage, 4), ", Step=", DoubleToString(stepSize, Digits));
+    // P-LOG-3: this debug-only line named `timeframe`, which lives in the CALLER
+    // (`GetStepSizeForBasisType`); this function takes `thPercentage` instead, so the
+    // line never compiled — the error only surfaced the day DEBUG_BUILD was enabled.
+    Print("  GetStepSizeForBasisTypeFromTH: TH%=", DoubleToString(thPercentage, 4),
+          ", Mult=", multiplier, ", Step=", DoubleToString(stepSize, Digits));
     #endif
     
     return stepSize;
@@ -1374,6 +1399,11 @@ void GetCachedIntervals(const int baseMultiplier, int &intervals[]) {
     intervals[4] = g_cachedIntervals[4];
 }
 
+#endif // EXT_DRAW_A_MQH
+// ExtDraw_B.mqh - ExtendedDrawingFunctions.mqh split 2026-09-29: exact lines 1382-2316, byte-identical, zero renames.
+#ifndef EXT_DRAW_B_MQH
+#define EXT_DRAW_B_MQH
+
 //+------------------------------------------------------------------+
 //| Get highest structure level for a given step                     |
 //|                                                                 |
@@ -1695,7 +1725,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, highLabelName, OBJPROP_COLOR, inpHighColor);
     ObjectSetInteger(0, highLabelName, OBJPROP_FONTSIZE, 8);
     ObjectSetInteger(0, highLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
-    ObjectSetString(0, highLabelName, OBJPROP_FONT, "Arial");
+    ObjectSetString(0, highLabelName, OBJPROP_FONT, BioChromeFont(false));
     ObjectSetString(0, highLabelName, OBJPROP_TEXT,
         StringFormat("  HIGH %s | Range: %.0f pips | F=%.2f | Step: %.1f pips",
             DoubleToString(highPrice, Digits), rangePips, factor, stepPips));
@@ -1711,7 +1741,7 @@ void DrawFactorBoundaryLines(const string objectPrefix, const double highPrice,
     ObjectSetInteger(0, lowLabelName, OBJPROP_COLOR, inpLowColor);
     ObjectSetInteger(0, lowLabelName, OBJPROP_FONTSIZE, 8);
     ObjectSetInteger(0, lowLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-    ObjectSetString(0, lowLabelName, OBJPROP_FONT, "Arial");
+    ObjectSetString(0, lowLabelName, OBJPROP_FONT, BioChromeFont(false));
     ObjectSetString(0, lowLabelName, OBJPROP_TEXT, 
         StringFormat("  LOW %s | Range: %.0f pips | F=%.2f | Step: %.1f pips", 
             DoubleToString(lowPrice, Digits), rangePips, factor, stepPips));
@@ -2308,6 +2338,8 @@ void ClearFactorLevels(const string objectPrefix)
 }
 
 #endif // BUILD_LITE
+
+#endif // EXT_DRAW_B_MQH
 
 #endif // EXTENDED_DRAWING_FUNCTIONS_MQH
 

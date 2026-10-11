@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/ConstantsAndEnums.mqh
+//   regenerate : python tools/parity/resync-module.py --write ConstantsAndEnums.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
    #ifndef CONSTANTS_AND_ENUMS_MQH
 #define CONSTANTS_AND_ENUMS_MQH
 
@@ -7,6 +19,9 @@
 #define TH3_PATTERN_PREFIX      "ABCD_Pattern_"
 #define TH3_TEMP_PREFIX         "ABCD_Temp_"
 #define TH3_TEMP_LINE_PREFIX    "ABCD_Temp_Line_"
+// P-LM-01: the leg-measure family (TH3Tool). Its own namespace so the REASON_REMOVE
+// teardown can wipe it like every other family this tool creates.
+#define TH3_LEG_PREFIX          "LM_"
 #define CACHE_TIMEOUT 60
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -59,10 +74,24 @@
 
 #define Z_CHART_ZONE 0      // zone bodies/borders, Trigger level lines
 #define Z_CHART_LINE     1      // Factor level lines (drawn above their zone)
+// P-LM-20: the leg metre's handle discs. They must paint ABOVE the measurement
+// line they sit on - a line widened for the selection face (LEG_LINE_W_SEL)
+// otherwise covers its own discs - and below every tool dot and label. The rung
+// was introduced beside the leg metre as `LEG_HANDLE_ZORDER`; it carries its own
+// Z_ ladder name now, because the Z ladder IS the paint order the zorder audit
+// proves and a rung outside it is a rung nothing can reason about.
+#define Z_CHART_LEG_HANDLE 3    // leg-metre handle discs (P-LM-20)
 #define Z_CHART_TOOL    10      // TH3 tool dots
 #define Z_BOX_RAY       50      // Base/Knot rays
 #define Z_BOX_FILL      55      // box fill layer + drag handle
 #define Z_BOX_EDGE      56      // box border edges
+// P-BK-71 (2026-09-17): THE MARK IS A BOX AGAIN, WITH NO POINTS OF OURS. The carrier
+// is MT4's OWN rectangle — moved and selected natively — so no family needs to cover
+// or repeat the terminal's markers: the centre cover (P-BK-59/BKDOT-OFF), the resize
+// chips (P-BK-61/BKGRIP-OFF) and the trendline points (P-BK-69/BKPOINT-OFF) are all
+// retired, and Z_BOX_DOT / Z_BOX_GRIP stay UNUSED rungs. Both NUMBERS stay where they
+// are: the ladder is a contract every rung above and below it is measured against,
+// and the restore path wants them exactly where the P-BK-59/P-BK-61 notes put them.
 // P-BK-59: the box' centre GRIP — a 5x5 SCREEN square in the box' border ink. It is not
 // decoration: MetaTrader paints its OWN selection marker (a 2x2 WHITE square) at the centre of
 // a SELECTED rectangle and gives the EA no colour for it («توی پس زمینه سفید به خوبی دیده
@@ -76,8 +105,15 @@
 // only two screen objects of the box), so they sit on the same rung band: above the box' art,
 // below the text layer, and — like every rung here — under the card/strip rungs far above.
 #define Z_BOX_GRIP      59
-#define Z_BOX_INFO      60      // box info text — P-BK-56: the base note moved to Z_CHART_LABEL (the rung is kept for a one-line restore)
+#define Z_BOX_INFO      60      // the base note's PLATE — P-BK-86: the note itself is a SCREEN object now and rides Z_CHART_LABEL, so this rung is what its background bar wears (under the ink, above the chart art). P-BK-56 left it free for a one-line restore; P-BK-86 is the second owner of the same number.
 #define Z_BOX_TEXT      61      // box user text
+// P-TH3-INFO-08 (2026-09-21) — THE READOUT'S OWN RUNGS. TH3ROPlateAt/TH3RORowAt
+// (TH3Renderer.mqh) draw the AB=CD caption AND the leg box on the same fixed
+// dark plate. Both wore the default ZORDER 0, so the paint order was creation
+// order: a plate newer than its rows covered its own text (the top-left dark
+// empty bar). Plate 62, ink 63 — above the box art, below the chart text layer.
+#define Z_TH3_RO_PLATE  62      // readout plate (caption + leg box)
+#define Z_TH3_RO_TEXT   63      // readout ink (always above its own plate)
 #define Z_CHART_LABEL  100      // price/level labels, view anchor, countdown tag
 
 // ── Base/Knot floating pills — over the chart, UNDER the settings card
@@ -86,6 +122,7 @@
 
 // ── the mini Base Box strip (item 13) — its own drawing family, still under
 //    the full card 12 that it opens
+#define Z_STRIP_BG    1439      // P-DRAW-35: solid underlayer below the skin (alpha fill)
 #define Z_STRIP       1440      // bk_strip.bmp, the toolbar body
 #define Z_STRIP_ICON  1441      // strip slot glyphs
 #define Z_STRIP_OVER  1442      // strip popover chevrons
@@ -93,6 +130,14 @@
 // ── the ring menu — the card covers it (consequence 1 above)
 #define Z_MENU_PANEL    1004    // sub-menu panel chrome
 #define Z_MENU_DOT      1005    // sub-menu title dot
+#define Z_MENU_CELL     1006    // RETIRED (P-UI-69c, 2026-09-25): its owner was the ctx menu's
+                                        // icon-cell hover face (P-UI-105), and the whole right-click
+                                        // era was DELETED by user order (P-UI-113/114, 2026-09-23).
+                                        // The rung is kept, unused, exactly like Z_BOX_DOT/Z_BOX_GRIP:
+                                        // the ladder's numbers are what every rung above and below is
+                                        // measured against, so retiring the owner never renumbers it.
+                                        // A grep for Z_MENU_CELL answers THIS LINE and nothing else —
+                                        // that single hit IS the measurement that the face is gone.
 #define Z_MENU_ITEM     1010    // ring/Tools item faces
 #define Z_MENU_ICON     1011    // item glyphs
 #define Z_MENU_BADGE    1012    // item badge bodies + captions
@@ -136,6 +181,19 @@
 
 // Performance & Safety Constants
 #define MAX_SAFE_LEVELS 2000          // Maximum safe number of levels per side
+//--- P-LEVEL-BOUND-03 (2026-09-29) — THE HISTORICAL BOUND DRAWS A FEW RUNGS PAST
+//--- ITSELF. User report on the Monthly chart: «توی ماهانه چرا یکم بیشتر رسم نمیشه
+//--- چندتای بیرون از های و لو تاریخی باشه بهتره دید داریم» — the ladder stopped dead on
+//--- `g_highestHigh` / `g_lowestLow`, so the visible room above the all-time high (and
+//--- below the low) held nothing while the chart had the space to show where the next
+//--- rungs WOULD be. This is a VIEW margin, not a claim about history: the ladder is
+//--- still built from the centre with the same steps and the same names, it just no
+//--- longer stops at the extreme. Bounded twice, so it cannot run away: by the count
+//--- the mode already asked for (`maxLevelsAbove/Below`) and by MAX_SAFE_LEVELS — the
+//--- overdraw can only ever spend rungs the count had left. Cost: at most this many
+//--- extra level objects per side, and only on charts whose bound is closer than the
+//--- count (a chart whose ladder already ends on its count pays nothing).
+#define P_LEVEL_BOUND_OVERDRAW 3
 #define MAX_SAFE_OBJECTS 5000         // Warning threshold for total objects
 #define CRITICAL_OBJECT_LIMIT 50000   // Critical threshold (MT4 limit ~64K)
 #define CPU_WARNING_MS 50             // Warning if OnCalculate takes >50ms
@@ -191,6 +249,53 @@
 // screen, and the chart-height clamp in the owner is the second bound.
 #define TREX_CARD_MAX_MARGIN_BOTTOM 200
 
+// P-UI-131 — THE LABEL FAMILY'S FONT IS AN INDEX AT LAST. `inpFontName` is a
+// STRING while every settings control is an INDEXED one (a dropdown), so the
+// list is the owner here and the string is one of its faces: the readers keep
+// reading `inpFontName` (RuntimeSettings re-points it at `LabelFontName()`),
+// the panel row stores `g_labelFontIdx`, and ONE integer (`OV_LFI`) persists it.
+// A font typed straight into the MT4 dialog still works — it is index -1 and
+// the string wins until the row is used.
+#define LABEL_FONT_N 6
+string LabelFontNameAt(const int i)
+{
+   switch(i)
+   {
+      case 0: return "Arial Bold";   // the shipped default (P-UI-42 hands MT4 this)
+      case 1: return "Arial";
+      case 2: return "Tahoma";
+      case 3: return "Verdana";
+      case 4: return "Trebuchet MS";
+      case 5: return "Courier New";
+   }
+   return "Arial Bold";
+}
+int LabelFontIdxOf(const string name)
+{
+   for(int i = 0; i < LABEL_FONT_N; i++)
+      if(LabelFontNameAt(i) == name) return i;
+   return -1;   // typed in the dialog: the string is the setting, not a list slot
+}
+string LabelFontOpts()   // the dropdown's own text, from the same list (one owner)
+{
+   string s = LabelFontNameAt(0);
+   for(int i = 1; i < LABEL_FONT_N; i++) s += "|" + LabelFontNameAt(i);
+   return s;
+}
+
+//--- THE CHROME'S OWN FACES. Every card, panel, menu and strip label draws through these four
+//--- names; the user's chart-label font is a different question (`LabelFontNameAt` above,
+//--- P-UI-131). A literal at a call site was the P-DRAW-68 defect — one row drawn regular read
+//--- as a different product — and 36 of them had grown back after that fix.
+#define BIO_FONT_CHROME       "Arial Bold"   // the shipped weight for labels and captions
+#define BIO_FONT_CHROME_PLAIN "Arial"        // the same face when a control is off/muted
+#define BIO_FONT_MONO         "Consolas"     // hex fields and numeric readouts: digits align
+#define BIO_FONT_BADGE        "Segoe UI"     // the small measurement badges
+string BioChromeFont(const bool bold = true)
+{
+   return (bold ? BIO_FONT_CHROME : BIO_FONT_CHROME_PLAIN);
+}
+
 // Division Safety Constants (GOLD FIX v3)
 #define MIN_SAFE_DIVISIONS 0.001      // Minimum divisions to prevent precision loss
 #define MAX_SAFE_FACTOR 10000.0       // Maximum factor value to prevent overflow
@@ -231,13 +336,42 @@ const double MODIFIED_FRACTAL_PERCENTAGES[] = {
     2.6664,   // D11+H9+M4: 266.64%
     5.3328    // D45+H12+M16: 533.28%
 };
+
+//==============================================================================
+// P-TH-01 (2026-09-18) — THE TH PERCENTAGE KNOB'S ONE BOUND.
+//
+// The table above is the professor's ladder and it is NEVER edited. The knob
+// (`inpTHPercentOverride`) is read as "the percentage for THIS chart's own
+// rung" and turns into ONE ratio (`FractalPercentScale()`,
+// FractalTimeframes.mqh), which every rung is multiplied by — so the ladder's
+// nine x2 relationships survive whatever the knob says.
+//
+// WHY 200 IS THE END STOP. The panel's slider is a POSITION, not a value:
+// `PnlValueFromX` maps the track's ~230 px of travel onto [minV, maxV] and
+// then rounds to `step`. At `step = 1` every integer is reachable only while
+// `maxV <= the travel`, because a grid coarser than 1 makes the knob skip
+// integers (at maxV = 533 one pixel is 2.32 and 75 is simply unreachable —
+// the user's own example would be impossible to dial). 200 covers the whole
+// research range on the charts that matter (D1's own rung is 66.66, so 100
+// and 133.32 are inside it) and keeps every integer reachable. A value above
+// 200 is still legal through the INPUT — only the slider stops there, and
+// this bound is also what the persisted-override load clamps to, so a saved
+// GV can never ask for a ladder the slider cannot reproduce.
+//
+// It is an INT on purpose: `PnlSetDef`'s `maxV` is `int&`, and the panel
+// simulator resolves this name straight out of this file to draw the same
+// track the MQL compiles — a `200.0` here would need a cast in the panel and
+// the simulator's `int(eval(...))` would silently read 0.
+#define TH_PERCENT_OVERRIDE_MAX 200
+
 const color FRACTAL_COLORS[] = {
     clrBlack, clrBlack, clrBlack, clrBlue, clrRed,
     clrRed, clrGreen, clrBlack, clrBlack
 };
-const string STANDARD_TIMEFRAMES[] = {"D1", "W1", "MN1"};
-const int STANDARD_MINUTES[] = {1440, 10080, 43200};
-const color STANDARD_COLORS[] = {clrBlue, clrBlue, clrBlue};
+const string STANDARD_TIMEFRAMES[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
+const int STANDARD_MINUTES[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
+// Column colors shared by the ATR overview and the standard TH strip (one owner).
+const color STANDARD_COLORS[] = {clrBlack, clrBlack, clrBlack, clrBlue, clrRed, clrGreen, clrBlack, clrBlack};
 
 enum ENUM_TH_START_POINT_TYPE {
     TH_START_POINT_MIDPOINT = 0,      // Midpoint (historical H+L / 2)
@@ -750,5 +884,442 @@ struct FrequencyHistoryEntry {
         isUsed = false;
     }
 };
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-DRAW-46 (2026-09-26) — ONE PALETTE, AND IT IS THE USER'S OWN 64.
+// The user sent a palette chart (8 rows x 8 cells) and ordered it to BE the
+// palette. This table is the single owner: `BioPickColor` is its only reader,
+// `BioPal`'s quick row is its own first row, and BOTH pickers (the strip's
+// popover, the cards' popup) iterate the same 64 through faces. The retired
+// Material 19x10 matrix and its hue/shade mapping (P-DRAW-39) are deleted with
+// it: a curated chart has no families and no shades, so the family/shade
+// captions had nothing left to name and every cell reads as its own hex.
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-69c: the brand amber IS the palette's cell 0 — ONE literal, and it must be
+// declared BEFORE its readers: MQL4 is define-before-use, and a define placed
+// after its user is `error 256: undeclared identifier` (measured 2026-09-25).
+#define BIO_CLR_BRAND      C'255,171,0'     // #FFAB00 brand amber = cell 0
+#define BIOPICK_COLS 8
+// P-DRAW-50 (2026-09-27): 16 FAMILIES of 8, not 8 rows of 8. The user's chart
+// was the palette (P-DRAW-46) and every one of its 64 cells is still here, in
+// place — the quick row is still family 1 — so nothing a saved look or a
+// persisted OV_ colour can break. What was missing is what "complete" means:
+// the neutral ramps in steps, the pure/primary/vivid families, and a ramp per
+// brand hue. ONE ROW = ONE FAMILY, which is what makes the two-page grid legible
+// (the row under the pointer has a name) and what the pager walks.
+#define BIOPICK_FAMS   16
+#define BIOPICK_ROWS   BIOPICK_FAMS
+#define BIOPICK_N      (BIOPICK_COLS * BIOPICK_ROWS)
+//--- P-DRAW-50: the grid is paged, and the PAGE belongs to the PALETTE (one
+//--- table, one place) — not to a picker. Both pickers read it, so the card
+//--- popup and the strip's board always show the same 64 of the 128.
+#define BIOPICK_PAGE_ROWS 8
+#define BIOPICK_PAGES     (BIOPICK_ROWS / BIOPICK_PAGE_ROWS)
+
+//--- P-DRAW-50: the PAGE, the palette's own view state (MQL4 cannot assign to a
+//--- function's local, so the slot is a file static behind two accessors).
+static int g_bioPickPage = 0;
+int  BioPickPage() { return g_bioPickPage; }
+void BioPickPageSet(const int p)
+{
+   if(p < 0) return;
+   if(p >= BIOPICK_PAGES) return;
+   g_bioPickPage = p;
+}
+
+//--- the user's chart, read left to right then top to bottom; row 1 is the
+//--- quick row. Every cell a flat fill, read off the chart itself.
+color BioPickColor(const int row, const int col)
+{
+   static color pal[BIOPICK_N] =
+   {
+      // 1 BRAND — the quick row, unchanged (P-DRAW-46's eight)
+      BIO_CLR_BRAND,  C'240,69,95',   C'18,184,134',  C'76,141,255',  C'155,93,229',  C'0,194,209',   C'255,138,0',   C'243,246,251',
+      // 2 VIVID — the pure, fully-saturated end of every hue
+      C'255,59,48',   C'255,149,0',   C'255,195,0',   C'155,229,100', C'50,215,75',   C'0,199,190',   C'10,132,255',  C'94,92,230',
+      // 3 PRIMARY — the material primaries, one step off pure
+      C'229,57,53',   C'224,123,0',   C'199,180,0',   C'124,179,66',  C'67,160,71',   C'0,160,180',   C'30,136,229',  C'57,73,171',
+      // 4 COOL — cyan through violet
+      C'0,184,212',   C'0,172,193',   C'0,145,174',   C'28,109,208',  C'43,80,200',   C'90,63,192',   C'142,59,200',  C'176,58,196',
+      // 5 CRIMSON — reds and roses
+      C'142,31,47',   C'166,27,41',   C'142,36,69',   C'155,27,90',   C'179,36,59',   C'217,45,91',   C'232,85,126',  C'244,163,184',
+      // 6 AMBER — the brand's own ramp, dark to light
+      C'122,82,0',    C'201,138,0',   C'180,83,9',    C'255,171,0',   C'255,194,71',  C'255,208,134', C'255,233,199', C'255,243,220',
+      // 7 GREEN
+      C'10,90,66',    C'6,122,92',    C'18,184,134',  C'21,128,61',   C'110,231,183', C'141,227,201', C'167,243,208', C'217,247,228',
+      // 8 RED
+      C'74,14,27',    C'122,31,46',   C'124,45,18',   C'179,36,59',   C'229,72,77',   C'255,107,107', C'255,201,201', C'252,165,165',
+      // 9 BLUE
+      C'11,37,69',    C'19,50,94',    C'61,70,97',    C'32,64,112',   C'76,141,255',  C'143,182,255', C'191,219,254', C'230,239,255',
+      // 10 CYAN
+      C'0,49,47',     C'0,94,102',    C'0,99,107',    C'0,163,163',   C'14,165,233',  C'103,232,249', C'165,243,252', C'207,250,254',
+      // 11 PURPLE
+      C'36,21,70',    C'74,44,116',   C'94,58,153',   C'124,58,237',  C'155,93,229',  C'205,180,246', C'221,214,254', C'240,231,255',
+      // 12 PINK
+      C'74,16,41',    C'122,31,75',   C'166,27,114',  C'219,39,119',  C'244,114,182', C'255,163,179', C'249,168,212', C'252,231,243',
+      // 13 SLATE — the cool neutrals, dark to light
+      C'5,7,10',      C'17,24,39',    C'29,34,44',    C'42,49,61',    C'55,65,81',    C'107,114,128', C'140,150,166', C'156,163,175',
+      // 14 STONE — the warm neutrals
+      C'18,22,29',    C'28,26,23',    C'46,42,36',    C'90,101,119',  C'107,98,87',   C'140,131,119', C'179,170,156', C'216,210,198',
+      // 15 SURFACE — the chart's own whites and greys
+      C'247,249,252', C'240,242,247', C'232,237,245', C'229,231,235', C'209,213,219', C'203,212,226', C'154,164,178', C'174,184,198',
+      // 16 PASTEL
+      C'140,230,238', C'169,198,255', C'205,180,246', C'255,201,163', C'255,214,231', C'255,227,201', C'253,230,138', C'253,186,116'
+   };
+   if(row < 0 || row >= BIOPICK_ROWS) return clrNONE;
+   if(col < 0 || col >= BIOPICK_COLS) return clrNONE;
+   return pal[row*BIOPICK_COLS + col];
+}
+
+//--- P-DRAW-50: the family's NAME — one row is one family, so the grid can say
+//--- which one the pointer is on and the pager can list the page. MQL4 has no
+//--- arrays of string literals in a static, so the names are returned by index.
+string BioPickFamily(const int row)
+{
+   static string names[BIOPICK_FAMS] =
+   {
+      "BRAND", "VIVID", "PRIMARY", "COOL", "CRIMSON", "AMBER", "GREEN", "RED",
+      "BLUE", "CYAN", "PURPLE", "PINK", "SLATE", "STONE", "SURFACE", "PASTEL"
+   };
+   if(row < 0 || row >= BIOPICK_FAMS) return "";
+   return names[row];
+}
+
+//--- the first cell of the page, and its row count — the ONE way a picker asks
+//--- "which 64 of the 128 am I showing" (P-DRAW-50).
+int BioPickPageRow0() { return BioPickPage() * BIOPICK_PAGE_ROWS; }
+color BioPickAt(const int i)
+{
+   if(i < 0 || i >= BIOPICK_N) return clrNONE;
+   return BioPickColor(i / BIOPICK_COLS, i % BIOPICK_COLS);
+}
+//--- P-DRAW-24's quick row survives as the table's FIRST row: one table, so a
+//--- reorder of the quick row can no longer disagree with the pickers.
+#define BIOPAL_N BIOPICK_COLS
+color BioPal(const int i)
+{
+   if(i < 0 || i >= BIOPAL_N) return clrBlack;
+   return BioPickColor(0, i);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-69b (2026-09-25) — THE INK HAS ONE OWNER, AND THE SWATCH FLOOR MOVES
+// DOWN WITH IT.
+//
+// `BioPal` above is the palette's one owner, and THIS file is include #1 in
+// every entry (Biotak Trigger TH3.mq4 line 26) — the only address a rule can
+// have that BOTH the drawing strip (include 97) and the settings cards
+// (include 116) obey. The ink used to be quoted twice: `PNL_CLR_*`
+// (BiotakPanels) and `DSTRIP_CLR_*` (DrawStrip), nine of them byte-for-byte
+// identical. Two tables that agree today are two tables that disagree
+// tomorrow, so the ink lives here now and both old families are ALIASES:
+// same names, same call sites, one literal each.
+//
+// P-UI-34 made the same move for the text metrics (`PnlPt`/`PnlTextW` left
+// BiotakPanels for UtilityFunctions): a rule the surfaces NEEDING it most
+// cannot see gets copied. And a copied swatch floor is exactly how the strip's
+// own colour grids went on painting #141414 on #1D222C through a 1.04:1
+// hairline — the "empty slot" the user reports as «رنگ ها کار نمیکنه» — the
+// same report P-UI-69 closed on the cards eleven days earlier.
+// ══════════════════════════════════════════════════════════════════════════
+#define BIO_CLR_INK        C'243,246,251'   // #F3F6FB --title / --val
+#define BIO_CLR_MUTED      C'140,150,166'   // #8C96A6 --muted (+ the swatch outline)
+#define BIO_CLR_LABEL      C'203,212,226'   // #CBD4E2 --lbl
+#define BIO_CLR_ACCENT     C'255,194,71'    // #FFC247 --a1 (gold ramp top)
+#define BIO_CLR_ACCENT_INK C'26,18,6'       // #1A1206 --aInk on the primary
+#define BIO_CLR_HAIRLINE   C'34,40,50'      // #222832 rows/controls — NOT a text ink
+#define BIO_CLR_FIELD      C'24,29,39'      // #181D27 edit fields + popover faces
+#define BIO_CLR_FIELD_BD   C'51,60,76'      // #333C4C edit/DD rims
+#define BIO_CLR_CARD       C'29,34,44'      // #1D222C card + plate body
+#define BIO_CLR_FOOT       C'18,22,29'      // #12161D card footer
+#define BIO_CLR_PANEL      C'23,28,37'      // #171C25 strip / popover body
+//--- P-DRAW-67 (2026-09-27) — THE CARD RAMP'S OWN TOP STOP. `pnl_cardN.bmp` bakes
+//--- a three-stop vertical gradient (tools/gen-th3-icons.js: CARD_TOP #1E242F ->
+//--- CARD_MID #171C25 at 52% -> CARD_BOT #12161D), and the two lower stops already
+//--- have names here (BIO_CLR_PANEL / BIO_CLR_FOOT). The light end had none, so a
+//--- drawn surface could not walk the cards' own ramp and settled for one flat
+//--- tone — the report «چرا رنگ پس‌زمینه مثل این شیشه نیست». One owner, one token.
+#define BIO_CLR_CARD_TOP   C'30,36,47'      // #1E242F the card bake's top stop
+#define BIO_CARD_MID_T     0.52             // the bake's own knee (CARD_MID's stop)
+#define BIO_CLR_ACCENT2    C'255,138,0'     // #FF8A00 gold ramp bottom
+#define BIO_CLR_DEEP       C'18,22,33'      // deep navy ink — the ring badge's ink, the
+                                            // retired box badge's rim and the TH3 readout
+                                            // plate's own fill. Pasted at all three before
+                                            // P-UI-117 gave it a name (one value, one owner).
+#define BIO_CLR_ON_LIGHT   C'150,70,0'      // deep amber — the readable ink on a LIGHT chart
+                                            // background. Was pasted twice, next to a second
+                                            // copy of the gate below (P-UI-117).
+#define BIO_BG_LUM_THRESHOLD 128            // the ONE boundary of "this background is light":
+                                            // ask BioChartBgIsLight(), never re-derive it.
+
+//+------------------------------------------------------------------+
+//| P-UI-117 — THE READABLE-INK GATE, ONE OWNER (A-05/A-10/A-12).     |
+//|                                                                  |
+//| Two surfaces ask the same question — "is this chart's background |
+//| light?" — and each answered with its own copy of the same        |
+//| 299/587/114 luminance arithmetic AND its own `C'150,70,0'`        |
+//| (BaseKnotTool's corner hint, `BaseKnotFgForBg`, and               |
+//| RuntimeSettings' `GetBKTextRenderColor`). A palette change could  |
+//| only ever fix one of the two, and the second copy was already     |
+//| annotated "same luminance gate as the INFO label" — the comment   |
+//| knew, which is exactly the shape A-10 names.                      |
+//|                                                                  |
+//| The owner lives HERE because `ConstantsAndEnums` is included      |
+//| before `RuntimeSettings` (43) and before every UI file, so both    |
+//| readers can reach it — and, per A-12, neither may copy it up.      |
+//|                                                                  |
+//| The decision itself stays with the caller: the hint wears brand    |
+//| amber on a dark chart and `BIO_CLR_ON_LIGHT` on a light one; the   |
+//| box user text keeps the colour the user picked and only FACTORY    |
+//| WHITE is routed to the readable ink (an explicit pick is honoured  |
+//| untouched).                                                        |
+//+------------------------------------------------------------------+
+bool BioChartBgIsLight()
+{
+   static color s_bg = clrNONE;
+   static bool  s_light = false;
+   color bg = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
+   if(bg != s_bg)
+   {
+      s_bg = bg;
+      int lum = ((((int)bg) & 0xFF) * 299 + ((((int)bg) >> 8) & 0xFF) * 587 +
+                 ((((int)bg) >> 16) & 0xFF) * 114) / 1000;
+      s_light = (lum > BIO_BG_LUM_THRESHOLD);
+   }
+   return s_light;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-69 (2026-09-14) — A SWATCH THAT IS THE BACKDROP'S OWN COLOUR IS A HOLE.
+// MOVED here by P-UI-69b; the VALUES are unchanged, only the address is — the
+// strip could not reach a floor that lived 19 includes above it.
+//
+// User report: «رنگ ها کار نمیکنه». The colour row read as seven swatches and
+// one EMPTY SLOT, and tapping the "slot" applied a near-black that then
+// vanished on the chart. Measured from the shipped screenshot, not recalled:
+// QuickPalColor(7) = #141414 (20,20,20) painted on the card face #1A2029
+// (26,32,41) with a PNL_CLR_LINE border #222832 (34,40,50) — contrast 1.05:1
+// for the fill and 1.11:1 for the border. P-UI-68 closed exactly this trap one
+// layer down (a colour STRIP cell whose target was clrNONE painted ink-black);
+// the quick strip, the palette's own swatches and the strip cells still had it.
+//
+// ONE owner for "will this swatch be visible on its own backdrop?", used by
+// every swatch family (quick strip, preview block, palette matrix, recents,
+// strip cells, the palette's current-colour block, AND the drawing strip's own
+// colour grids). Under the threshold the swatch keeps its COLOUR — fidelity
+// matters, the user asked for black — and gains a border that contrasts, so
+// the affordance can never read as empty.
+// ══════════════════════════════════════════════════════════════════════════
+//--- The floor is MEASURED, not chosen: over the 198 colours the panel could then
+//--- paint as a swatch (the 8 quick ones + the retired 190-cell matrix), the
+//--- shipped build had ELEVEN indistinguishable from the face they sit on —
+//--- from 1.05:1 to
+//--- 1.68:1 — and the first genuinely visible tone was 1.72:1. The boundary sits
+//--- in that gap, so "add an outline" fires on exactly the swatches that read as
+//--- empty space and on nothing else (WCAG's stricter 3:1 for non-text UI is NOT
+//--- enforced: the card's own subtle border is the design language for every
+//--- visible swatch, and raising the floor would re-outline half the palette).
+#define BIO_SWATCH_MIN_CONTRAST 1.7
+
+//--- P-BUILD-10 (2026-09-29) — A COLOUR THAT CAME OUT OF STORAGE MUST BE A COLOUR.
+//--- `clrNONE` is -1 and a widened 4-byte stamp can land on any value at all; a
+//--- `color` is UNSIGNED in MQL4, so `c < 0` never fires (warning 65) and a bad
+//--- value passes every `!=` guard. MT4 then paints the object with whatever it
+//--- cannot read — a label drawn in the terminal's own text grey instead of the
+//--- ink the caller asked for (the reported «رنگ آبی TR عوض میشه»). One predicate,
+//--- so "is this paintable?" has one owner and every reader asks the same one.
+bool BioColorIsValid(const color c)
+{
+   int v = (int)c;
+   return (v >= 0 && v <= 0xFFFFFF);
+}
+
+//--- WCAG relative luminance (Rec.709 over linearised channels). MT4 packs a
+//--- colour BGR, so R is the LOW byte — the same extraction PalColorText uses.
+//--- clrNONE (-1) has no channels: reported as white, so a stray value can never
+//--- pass the threshold by accident.
+double BioLum(const color c)
+{
+   // `color` is UNSIGNED in MQL4, so `c < 0` is always false (warning 65): a
+   // stray clrNONE only shows up once the value is seen as a signed int.
+   int v=(int)c;
+   if(v < 0) return 1.0;
+   int cr=v%256, cg=(v/256)%256, cb=v/65536;
+   double r=(double)cr/255.0, g=(double)cg/255.0, b=(double)cb/255.0;
+   if(r > 0.03928) r=MathPow((r+0.055)/1.055,2.4); else r=r/12.92;
+   if(g > 0.03928) g=MathPow((g+0.055)/1.055,2.4); else g=g/12.92;
+   if(b > 0.03928) b=MathPow((b+0.055)/1.055,2.4); else b=b/12.92;
+   return 0.2126*r + 0.7152*g + 0.0722*b;
+}
+
+//--- contrast ratio between two colours (1.0 = identical, 21.0 = black|white)
+double BioContrast(const color a,const color b)
+{
+   double la=BioLum(a), lb=BioLum(b);
+   double hi=MathMax(la,lb), lo=MathMin(la,lb);
+   return (hi+0.05)/(lo+0.05);
+}
+
+//--- P-DRAW-67: THE CARDS' OWN RAMP, A DRAWABLE SURFACE'S TOO. `t` is 0 at the
+//--- surface's top and 1 at its bottom; the answer is the tone `pnl_cardN.bmp`
+//--- carries at the same fraction of ITS height, so a drawn plate and a baked card
+//--- standing side by side wear the same gradient (H-02: one setting, one look).
+color BioCardTone(const double t)
+{
+   double u = t;
+   if(u < 0.0) u = 0.0;
+   if(u > 1.0) u = 1.0;
+   color a, b;
+   double f;
+   if(u <= BIO_CARD_MID_T) { a = BIO_CLR_CARD_TOP; b = BIO_CLR_PANEL;  f = u / BIO_CARD_MID_T; }
+   else                    { a = BIO_CLR_PANEL;    b = BIO_CLR_FOOT;   f = (u - BIO_CARD_MID_T) / (1.0 - BIO_CARD_MID_T); }
+   //--- P-DRAW-71 (2026-09-29) — THE CHANNELS COME OUT FIRST, IN THEIR OWN
+   //--- STATEMENTS, AND THE INTERPOLATION IS PURE DOUBLE.
+   //---
+   //--- MEASURED, on a fresh build (`[BUILD] TH3 src=445f304f2cbdcbf7 files=398 FULL
+   //--- ... srcfile=445f304f2cbdcbf7 match=yes`, 0 errors / 0 warnings), with the
+   //--- probe that stands in EventHandlers_Init for exactly this question:
+   //---
+   //---   [BUILD] ramp t0=3089438 t26=-2147483648 t52=-2147483648
+   //---                 t76=-2147483648 t100=-2147483648 mid100=52
+   //---
+   //--- `t0=3089438` IS BIO_CLR_CARD_TOP (R30 G36 B47), so the extraction and the
+   //--- packing are right and `BIO_CARD_MID_T` is the source's own 0.52 (`mid100`).
+   //--- Every sample with `f != 0` returns 0x80000000 = INT_MIN — the value an MQL4
+   //--- float->int conversion yields for a double it cannot represent. `t0` survives
+   //--- only because `f = 0.0` makes the whole term constant and the compiler folds it
+   //--- to an integer expression at compile time: the ONE difference between the
+   //--- working sample and the five broken ones is that a `double` factor is present
+   //--- at RUN time.
+   //---
+   //--- The old line mixed the two domains in a single expression — bitwise on an
+   //--- `int` (`ia & 0xFF`) added to a `double` product — and the arithmetic shift of
+   //--- a value the caller expects to be byte-sized is what the code generator got
+   //--- wrong. Nothing here changes the DESIGN: the same stops, the same knee, the
+   //--- same `MathRound` law (half away from zero) and the same byte packing. The
+   //--- channels are simply materialised as `int`s first, each interpolated as a
+   //--- `double`, rounded, and only THEN packed — so no bitwise operator ever sits
+   //--- inside a floating-point expression.
+   //--- Cost: three extra `int` locals and six extra casts, once per painted band
+   //--- (a handful of calls per frame - the ramp is memoised by the callers' read
+   //--- guards, not here).
+   //---
+   //--- The stops and the knee are read back at init (EventHandlers_Init's probe):
+   //--- t=0 must be cardTop, t=0.52 must be panel and t=1 must be foot, byte for byte.
+   int ia = (int)a, ib = (int)b;
+   int ar = ia & 0xFF, ag = (ia >> 8) & 0xFF, ab = (ia >> 16) & 0xFF;
+   int br = ib & 0xFF, bg = (ib >> 8) & 0xFF, bb = (ib >> 16) & 0xFF;
+   int r  = (int)MathRound((double)ar + ((double)br - (double)ar) * f);
+   int g  = (int)MathRound((double)ag + ((double)bg - (double)ag) * f);
+   int bl = (int)MathRound((double)ab + ((double)bb - (double)ab) * f);
+   return (color)(r | (g << 8) | (bl << 16));
+}
+
+//--- the border a swatch of `fill` must carry on `backdrop`. The SELECTION ring
+//--- is the caller's business (it passes the accent); this is the legibility
+//--- floor that keeps every swatch visible whatever colour it holds.
+color BioSwatchBorder(const color fill,const color backdrop)
+{
+   return (BioContrast(fill,backdrop) < BIO_SWATCH_MIN_CONTRAST)
+             ? BIO_CLR_MUTED : BIO_CLR_HAIRLINE;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-131f/g — THE 3D EDGE, ONE OWNER, ANCHORED TO ITS OWN SURFACE.
+//
+// A zone's edge is ALREADY three objects (`_B_Top`/`_B_Bottom`/`_B_Left`,
+// ZoneFactory), so a bevel costs NO new object and NO extra draw call: the SAME
+// three lines wear a LIT and a SHADED tone. What v1 got wrong is the ANCHOR — a
+// fixed 0.38 toward white/black ignores what the line lies ON, so a band washed
+// toward a light chart had no room above it and its "lit" half walked into its own
+// fill (measured 1.44 against 5.05: one border read as if IT carried the
+// transparency). The tones are therefore anchored to the SURFACE, and the two
+// halves are pulled apart on whichever side that surface leaves free.
+// ══════════════════════════════════════════════════════════════════════════
+#define BIO_EDGE_CONTRAST 2.00   // the SHADOW half reads by LUMA, so it carries the floor
+#define BIO_EDGE_LIT_MIN  1.40   // the HIGHLIGHT reads by CHROMA - luma understates it
+#define BIO_EDGE_CHROMA   1.55   // the lit tone's chroma gain (free on a pale fill)
+#define BIO_EDGE_TOPUP    0.35   // one push until the two halves separate from each other
+#define BIO_EDGE_STEP_N   4
+#define BIO_EDGE_MEMO_N   16
+
+double BIO_EDGE_STEP[BIO_EDGE_STEP_N] = {0.20, 0.32, 0.46, 0.60};
+
+//--- one per-channel mix: `t` 0 = a, 1 = b. The owner of the arithmetic both bevel
+//--- tones (and any future tone) go through, in the palette's BGR packing.
+color BioMixColor(const color a,const color b,const double t)
+{
+   int k  = (int)MathRound(MathMax(0.0, MathMin(1.0, t)) * 100.0);
+   int ar = (int)a & 0xFF, ag = ((int)a >> 8) & 0xFF, ab = ((int)a >> 16) & 0xFF;
+   int br = (int)b & 0xFF, bg = ((int)b >> 8) & 0xFF, bb = ((int)b >> 16) & 0xFF;
+   int r  = (ar * (100 - k) + br * k) / 100;
+   int g  = (ag * (100 - k) + bg * k) / 100;
+   int bl = (ab * (100 - k) + bb * k) / 100;
+   return (color)(r | (g << 8) | (bl << 16));
+}
+
+//--- the same colour further from its own grey. Chroma is the one axis a pale
+//--- surface cannot take away, so the LIT tone starts here (P-UI-131g).
+color BioChroma(const color c,const double k)
+{
+   int r = (int)c & 0xFF, g = ((int)c >> 8) & 0xFF, b = ((int)c >> 16) & 0xFF;
+   double m = (r + g + b) / 3.0;
+   int rr = (int)MathRound(m + (r - m) * k);
+   int gg = (int)MathRound(m + (g - m) * k);
+   int bb = (int)MathRound(m + (b - m) * k);
+   return (color)(MathMax(0,MathMin(255,rr)) | (MathMax(0,MathMin(255,gg)) << 8) |
+                  (MathMax(0,MathMin(255,bb)) << 16));
+}
+
+//--- the tone of this edge toward `target`: the CHROMA one if it already reads, else
+//--- the WEAKEST step that does, else the strongest of the lot. Walking toward white
+//--- moves TOWARD a pale surface rather than away from it, so "first step that fails"
+//--- must never mean "keep walking": the best tone is what is kept (P-UI-131g).
+color BioEdgeTone(const color base,const color under,const color target,const double floorC)
+{
+   color c = BioChroma(base, BIO_EDGE_CHROMA);
+   color best = c;
+   double bestC = BioContrast(c, under);
+   if(bestC >= floorC) return c;
+   for(int i = 0; i < BIO_EDGE_STEP_N; i++)
+   {
+      color t = BioMixColor(c, target, BIO_EDGE_STEP[i]);
+      double ct = BioContrast(t, under);
+      if(ct >= floorC) return t;
+      if(ct > bestC) { bestC = ct; best = t; }
+   }
+   return best;
+}
+
+//--- the two tones of one zone edge: LIT for `_B_Top`/`_B_Left`, SHADED for `_B_Bottom`.
+//--- Memoised on (base, under) — the ladder runs once per colour PAIR, not once per zone
+//--- per render; a hit is one key compare. `under` is the band when there is one and the
+//--- chart's background otherwise, which is exactly what the line lies on.
+void BioZoneEdgeTones(const color base,const color under,color &lit,color &shade)
+{
+   static int   s_key[BIO_EDGE_MEMO_N];
+   static bool  s_used[BIO_EDGE_MEMO_N];
+   static color s_lit[BIO_EDGE_MEMO_N], s_shade[BIO_EDGE_MEMO_N];
+   int k = (int)base * 31 + (int)under;
+   int slot = (int)MathAbs(k % BIO_EDGE_MEMO_N);
+   for(int i = 0; i < BIO_EDGE_MEMO_N; i++)
+   {
+      int j = (slot + i) % BIO_EDGE_MEMO_N;
+      if(!s_used[j]) { slot = j; break; }
+      if(s_key[j] == k) { lit = s_lit[j]; shade = s_shade[j]; return; }
+   }
+   lit   = BioEdgeTone(base, under, clrWhite, BIO_EDGE_LIT_MIN);
+   shade = BioEdgeTone(base, under, clrBlack, BIO_EDGE_CONTRAST);
+   // The halves must also separate from EACH OTHER — that is the bevel — pushed into the
+   // side the surface leaves free: above a BRIGHT surface the shadow, below a DARK one
+   // the light, so light-from-the-top-left holds on a light chart and a dark one alike.
+   bool pushShade = (BioLum(under) >= 0.5);
+   for(int i = 0; i < BIO_EDGE_STEP_N && BioContrast(lit, shade) < BIO_SWATCH_MIN_CONTRAST; i++)
+   {
+      if(pushShade) shade = BioMixColor(shade, clrBlack, BIO_EDGE_TOPUP);
+      else          lit   = BioMixColor(lit,   clrWhite, BIO_EDGE_TOPUP);
+   }
+   s_key[slot] = k; s_used[slot] = true; s_lit[slot] = lit; s_shade[slot] = shade;
+}
 
 #endif // CONSTANTS_AND_ENUMS_MQH

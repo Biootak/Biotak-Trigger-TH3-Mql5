@@ -1,7 +1,66 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/HTFCandles.mqh
+//   regenerate : python tools/parity/resync-module.py --write HTFCandles.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
 #ifndef HTF_CANDLES_MQH
 #define HTF_CANDLES_MQH
 
 #property strict
+
+//+------------------------------------------------------------------+
+//|                                            HTFCandles.mqh        |
+//|                                                                  |
+//| THE HTF CANDLE OVERLAY. This file is the HUB: it keeps the unit's |
+//| public name — the entry (`Biotak Trigger TH3.mq4:115`) and          |
+//| `BiotakMenu_A.mqh` both include `HTFCandles.mqh`, and the tests      |
+//| and the gates resolve the same name — and nothing else. The code     |
+//| lives in three parts, BY OWNER, included in the order they were      |
+//| declared when they were one file (MQL4 has no forward declaration,   |
+//| so include order IS ownership):                                       |
+//|                                                                      |
+//|   HTFCandles_Geom.mqh       state, the TF ladder, the index map, the  |
+//|                             candle's shape (HTFCandleGeometry, the    |
+//|                             P-HTF-SLOT pitch)                         |
+//|   HTFCandles_Draw.mqh       the chart's objects: upsert, card cull,   |
+//|                             prune, look probes, the draw passes       |
+//|   HTFCandles_Life.mqh       birth (init), the 15 saved keys, cleanup  |
+//|                                                                       |
+//| P-HTF-SPLIT (2026-09-30). The single file reached 1519 lines against  |
+//| the contract's 1500 ceiling (§7: a file over it never grows, touch it |
+//| = split it by owner). The split MOVED lines: same names, same output, |
+//| no behaviour rewritten — the four gates and the compile are what say  |
+//| so, and `tools/check-regressions.js` fails if the hub stops reaching a |
+//| part or a part stops being the one writer.                             |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//|                                        HTFCandles_Geom.mqh      |
+//|                                                                  |
+//| P-HTF-SPLIT (2026-09-30): the overlay was ONE 1519-line file —    |
+//| the contract's ceiling is 1500 — and it carried four owners.      |
+//| HTFCandles.mqh is the HUB now and includes three parts, same      |
+//| public names, same output, byte-identical geometry:              |
+//|                                                                  |
+//|   HTFCandles_Geom.mqh      THIS file: state, the TF ladder, the   |
+//|                            index map and the candle's SHAPE       |
+//|   HTFCandles_Draw.mqh      the chart's objects: upsert, cull,     |
+//|                            prune, the draw passes                 |
+//|   HTFCandles_Life.mqh      birth (init), the saved keys, cleanup  |
+//|                                                                  |
+//| Include order IS ownership (MQL4 has no forward declaration), so  |
+//| the hub includes Geom -> Draw -> Life: the order these           |
+//| declarations stood in when they were one file.                    |
+//+------------------------------------------------------------------+
+#ifndef HTF_CANDLES_GEOM_MQH
+#define HTF_CANDLES_GEOM_MQH
 
 #define HTF_PREFIX_BASE "BiotakHTF_"
 static string g_HTFPrefix;
@@ -227,8 +286,9 @@ color BlendWithBackground(const color fg, const double opacity)
 //| P-HTF-01. Ties (nothing is closer) resolve DOWN, so a rung can     |
 //| never jump over its own neighbour: M30 x4 = 120 sits exactly       |
 //| between H1 and H4 → H1, one step up, not H4 (the 8x structure rung)|.
-//| Nothing above MN1 has a candidate, so MN1 itself is returned and   |
-//| the callers' `> Period()` gate does the hiding.                    |
+//| The ladder now reaches ABOVE MN1 (P-HTF-SYN below), so a W1 or MN   |
+//| chart's structure rung lands on 6M/12M instead of on the chart's    |
+//| own candles.                                                        |
 //+------------------------------------------------------------------+
 int HTFSnapTf(const int mins)
 {
@@ -241,11 +301,23 @@ int HTFSnapTf(const int mins)
    // 960-minute rung and got MN1 instead of H4, and the overlay then hid itself
    // behind the `rung > Period()` gate. Written as minutes the ladder means on
    // MT5 exactly what it has always meant on MT4.
-   static int ladder[9] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200};
+   // P-HTF-SYN (2026-09-30): TWO RUNGS ABOVE THE TALLEST TERMINAL TF. MN1 is the
+   // top series MT4 builds, but the structure rung of a W1 chart is 16 weeks and of
+   // a MONTHLY chart 16 months — and snapping those onto a ladder that ended at MN1
+   // answered MN1 for both, i.e. the overlay drew the chart's OWN candles (measured
+   // on the report: «کندل های 12 ماه رو میشه برای ساختار و شش ماه میشه پترنش» /
+   // «برای ماهانه و بری ای ویگی میشه 6 ماه ساختارش»). 6M (259200) and 12M (518400)
+   // are on the ladder now, and NO 3M entry: that is exactly what makes the
+   // unchanged nearest-snap answer the three rungs the request names —
+   //   W1 chart · Structure 16x = 161280 → 6M   (0.47 vs MN's 1.32)
+   //   MN chart · Structure 16x = 691200 → 12M  (0.29 vs 6M's 0.98)
+   //   MN chart · Pattern    4x = 172800 → 6M   (0.41 vs 12M's 1.10)
+   // Neither has a terminal series: HTFSynBarOpen/HTFSynOHLC build them from MN1.
+   static int ladder[11] = {1, 5, 15, 30, 60, 240, 1440, 10080, 43200, 259200, 518400};
    if(mins <= ladder[0]) return ladder[0];
-   int    best  = ladder[8];
+   int    best  = ladder[10];
    double bestD = 1e18;
-   for(int i = 0; i < 9; i++)
+   for(int i = 0; i < 11; i++)
    {
       double d = MathAbs(MathLog((double)mins / (double)ladder[i]));
       if(d < bestD) { bestD = d; best = ladder[i]; }   // strict < : ties go DOWN
@@ -280,15 +352,25 @@ string HTFTfModeName()
 //+------------------------------------------------------------------+
 //| Effective HTF period: a DYNAMIC rung is recomputed from the       |
 //| chart TF every call (that is what makes a TF switch move it —     |
-//| P-HTF-02), a FIXED one is the user's period, and nothing above the|
-//| chart TF exists so the overlay hides ("").                        |
+//| P-HTF-02), a FIXED one is the user's period, and a rung BELOW the |
+//| chart TF is hidden ("") because its candles ARE the terminal's    |
+//| own bars and the overlay adds nothing to them.                    |
 //+------------------------------------------------------------------+
 int ResolveHTFPeriod()
 {
    if(!HTFTfIsDynamic()) return g_HTFPeriod;
    int rung = HTFResolveRung();
-   if(rung > (int)Period()) return rung;
-   return 0;   // MN1: nothing above → HTF hidden
+   // P-HTF-TOP (2026-09-30): THE CHART'S OWN RUNG IS A RUNG TOO. The ladder tops
+   // out at MN1, so on a MONTHLY chart the structure rung snaps to the chart's own
+   // MN1 — and `rung > Period()` answered "nothing above, hide", which is why the
+   // report «کندل های مثل htf candle دیده نمیشه» on an EURUSD,Monthly chart carried
+   // no overlay at all. At the top of the ladder the structure the user asks for IS
+   // the chart's period (there is no higher calendar rung to hide behind), so the
+   // overlay draws it: real monthly OHLC, the same shape law, over the terminal's
+   // own candles. The gate below is therefore `>=`: a rung EQUAL to the chart TF
+   // draws, a rung strictly below it still hides.
+   if(rung >= (int)Period()) return rung;
+   return 0;   // a rung thinner than the chart bar: nothing to overlay
 }
 
 //+------------------------------------------------------------------+
@@ -296,13 +378,107 @@ int ResolveHTFPeriod()
 //+------------------------------------------------------------------+
 datetime HTFBarCloseTime(const datetime ot, const int tf)
 {
-   if(tf == 43200)   // R-TF-UNIT: MN1 in minutes; `tf` is a minute count
+   // P-HTF-SYN: the month-family rungs close on a CALENDAR boundary — MN1 by one
+   // month, 6M by six, 12M by twelve — so one month-arithmetic answers all three
+   // (and the synthetic buckets are contiguous, which is what lets the draw loop
+   // take a synthetic bar's close straight from here, with no `i-1` bar to read).
+   if(tf >= 43200)   // R-TF-UNIT: minutes; MN1 = 43200
    {
-      int y = TimeYear(ot), m = TimeMonth(ot) + 1;
-      if(m > 12) { m = 1; y++; }
+      int steps = tf / 43200;      // 1 month · 6 months · 12 months
+      if(steps < 1) steps = 1;
+      int y = TimeYear(ot), m = TimeMonth(ot) + steps;
+      while(m > 12) { m -= 12; y++; }
       return StringToTime(StringFormat("%04d.%02d.01 00:00", y, m));
    }
    return ot + tf * 60;   // tf is minutes
+}
+
+//+------------------------------------------------------------------+
+//| P-HTF-SYN (2026-09-30) — THE TWO RUNGS WITH NO TERMINAL SERIES.   |
+//|                                                                  |
+//| 6M and 12M are the structure/pattern rungs of a W1 or MN chart    |
+//| (see the ladder note above). MT4 builds no such series, so this    |
+//| module builds them the cheapest way there is: CALENDAR bucketing   |
+//| over the MN1 series it already has.                                 |
+//|                                                                  |
+//| A bucket is a fixed calendar block, aligned to the year — 6M =      |
+//| Jan-Jun / Jul-Dec, 12M = Jan-Dec — so a bucket's start is month     |
+//| arithmetic (NO series read) and two neighbouring buckets meet        |
+//| exactly (bucket i's close IS bucket i-1's open).                    |
+//|                                                                  |
+//| The OHLC is REAL, aggregated from the bucket's own MN1 months:       |
+//| open = the oldest month present, close = the newest, high/low = its  |
+//| extremes. COST: one iBarShift + four series reads per MONTH in the   |
+//| bucket (a 12M candle ≈ 49 reads) and nothing else — the same family  |
+//| as a real 200-bar pass (~800 reads), bounded by the drawn count the  |
+//| viewport cap already states, and zero on every other rung.           |
+//|                                                                      |
+//| The oldest PARTIAL bucket is never drawn (`HTFSynBarCount` floors),   |
+//| because a bucket whose start is older than the loaded MN1 history     |
+//| would clamp onto the oldest bar — the pile-up the slot pitch exists   |
+//| to avoid.                                                            |
+//+------------------------------------------------------------------+
+#define HTF_TF_6M  259200   // R-TF-UNIT: 6 months in minutes
+#define HTF_TF_12M 518400   // R-TF-UNIT: 12 months in minutes
+
+bool HTFTfIsSynthetic(const int tf) { return (tf == HTF_TF_6M || tf == HTF_TF_12M); }
+
+int HTFSynMonths(const int tf)
+{
+   if(tf == HTF_TF_6M)  return 6;
+   if(tf == HTF_TF_12M) return 12;
+   return 0;   // a real rung: the terminal owns its series
+}
+
+// The bucket's start, `i` buckets back from the one holding the server's now.
+// Pure calendar arithmetic — no series read, so a caller may ask before it has
+// decided to draw (the forming-candle throttle checks this first).
+int HTFSynAbsMonth(const datetime t) { return TimeYear(t) * 12 + (TimeMonth(t) - 1); }
+
+datetime HTFSynBarOpen(const int tf, const int i)
+{
+   int months = HTFSynMonths(tf);
+   if(months <= 0 || i < 0) return 0;
+   datetime now = TimeCurrent();
+   if(now <= 0) return 0;
+   int absB = (HTFSynAbsMonth(now) / months) * months - i * months;
+   if(absB < 0) return 0;
+   int y = absB / 12, m = absB % 12 + 1;
+   return StringToTime(StringFormat("%04d.%02d.01 00:00", y, m));
+}
+
+// How many FULL buckets the loaded MN1 history can supply (the partial oldest one
+// is skipped). This is also the synthetic rung's "is the data ready?" answer.
+int HTFSynBarCount(const int tf)
+{
+   int months = HTFSynMonths(tf);
+   if(months <= 0) return 0;
+   int mn = iBars(_Symbol, 43200);
+   return (mn >= months) ? (mn / months) : 0;
+}
+
+// The bucket's real OHLC, aggregated from its own MN1 months (newer months carry
+// SMALLER indices, so the sweep walks k upward from the bucket's first month).
+bool HTFSynOHLC(const int tf, const datetime ot, double &op, double &hi, double &lo, double &cl)
+{
+   op = 0.0; hi = 0.0; lo = 0.0; cl = 0.0;
+   int months = HTFSynMonths(tf);
+   if(months <= 0 || ot <= 0) return false;
+   int j0 = iBarShift(_Symbol, 43200, ot, false);
+   if(j0 < 0) return false;
+   for(int k = 0; k < months; k++)
+   {
+      int j = j0 - k;
+      if(j < 0) break;
+      double o = iOpen(_Symbol, 43200, j), h = iHigh(_Symbol, 43200, j);
+      double l = iLow(_Symbol, 43200, j),  c = iClose(_Symbol, 43200, j);
+      if(h <= 0 || l <= 0) break;
+      if(op == 0.0) op = o;     // the oldest month present opens the bucket
+      cl = c;                  // the newest present closes it
+      if(hi == 0.0 || h > hi) hi = h;
+      if(lo == 0.0 || l < lo) lo = l;
+   }
+   return (op > 0.0 && hi > 0.0 && lo > 0.0 && cl > 0.0);
 }
 
 //+------------------------------------------------------------------+
@@ -317,7 +493,7 @@ datetime HTFBarCloseTime(const datetime ot, const int tf)
 //| span therefore does not halve the DRAWN span — the calendar middle |
 //| of a W1 candle (Thursday 12:00) sits ~3.5 trading days from the    |
 //| left edge and only ~1.7 plus that one weekend slot from the right, |
-//| i.e. roughly 70% across: the shadow is off-centre and the candle    |
+//| i.e. roughly 70% across: the shadow is off-centre and the candle   |
 //| reads lopsided. Measured on an H1 24/5 series: a W1 candle's shadow |
 //| sat at 70%, the last D1 bar of the week at 97%, its H4 bar at 87% —  |
 //| and a normal H4/D1 candle at exactly 50%, which is why only the      |
@@ -500,6 +676,131 @@ void HTFRefreshPixelMetrics()
    if(!MathIsValidNumber(s_HTFPxPerBar)) s_HTFPxPerBar = 0.0;
 }
 
+//+------------------------------------------------------------------+
+//| P-HTF-SLOT (2026-09-30) — THE HIGH RUNGS ARE DRAWN AT A READABLE  |
+//| PITCH.                                                            |
+//|                                                                  |
+//| THE REPORT, in numbers. With W1 (10080) or MN1 (43200) selected   |
+//| on a chart far below them, the overlay paints no candle at all:   |
+//| one MN1 bar on an M5 chart is 43200/5 = 8640 chart bars, and a    |
+//| ~300-bar window fits 3.5% of ONE candle. Its body's two edges and |
+//| its shadow's two edges — all four sit outside the window, so the  |
+//| screen carries only the horizontal strips of a box 28.8 windows   |
+//| wide. That strip is the look the report calls "not real".         |
+//|                                                                  |
+//| THE TRICK. The VALUES stay real — iHigh/iLow/iOpen/iClose of the  |
+//| terminal-built HTF series, i.e. the real weekly/monthly OHLC —    |
+//| and the WIDTH becomes the chart's own zoom: a slot of              |
+//| `visBars / HTF_SLOT_MIN_CANDLES` chart bars, so at least four      |
+//| candles of the rung are on screen at any zoom. The grid is         |
+//| anchored at the chart's right edge (index 0 = bar 0 = now), never  |
+//| at the scheduled close: a future time is laid out in the right     |
+//| margin, so anchoring there would move the whole strip off-screen.  |
+//|                                                                  |
+//| THE SHAPE IS NOT A SECOND LAW. The slot's two edges are times like |
+//| any other — HTFCandleGeometry turns them into body/shadow/gap with |
+//| the SAME gap%, shadow% and pixel floor the real rungs use, so a    |
+//| slotted candle is the rung's own candle, only narrower.            |
+//|                                                                  |
+//| SCOPE — every rung that reads today stays byte-identical. The      |
+//| decision is the CALENDAR ratio, taken BEFORE any series read:      |
+//| `htf/chartTf <= slot` returns with the true geometry, and the true  |
+//| drawn pitch is never WIDER than the calendar ratio (a week holds    |
+//| 5 trading days, not 7), so that early return can only under-        |
+//| compress — it can never slot a rung whose candles were readable.    |
+//|                                                                  |
+//| COST. One `ChartGetInteger(CHART_VISIBLE_BARS)` per call, and one   |
+//| call per draw pass plus the 100 ms viewport probe that already owns  |
+//| the zoom numbers: zero series reads, zero writes, no new walk. On a  |
+//| slotted rung each candle's two synthetic edges cost one index round-  |
+//| trip each (they are not series times, so the memo cannot serve them), |
+//| bounded by the drawn count the viewport cap already states. A candle  |
+//| that is not drawing costs nothing.                                   |
+//|                                                                      |
+//| WHAT THE USER SEES (honest, one line): price is real and the shape is |
+//| the rung's own law; the x pitch is SCHEMATIC — equal slots, not equal  |
+//| calendar months — and the strip is anchored to the live edge, so it    |
+//| follows "now" rather than a panned-away window.                        |
+//|                                                                       |
+//| RETIRED (2026-09-30, kept per the request): until this change the      |
+//| answer for exactly these rungs was HTFGeomCalendarShadow applied per   |
+//| candle — two coordinates the terminal could not place inside the       |
+//| window, clamped to the oldest loaded bar, which is what painted the     |
+//| 28-window-wide strips. That function is no longer the answer for a      |
+//| period wider than the window; it stays as the LAST fence (a non-finite  |
+//| index, a degenerate round trip), because a fence may degrade to the     |
+//| previous look but never to nothing (Touch rule 4).                      |
+//+------------------------------------------------------------------+
+#define HTF_SLOT_MIN_CANDLES 4   // the fewest candles that read as a sequence
+static double s_HTFSlot   = 0.0;   // chart-bar index units per candle (0 = true geometry)
+static int    s_HTFVisBars = 0;    // the zoom both the pitch and its probe read
+
+// P-HTF-PROBE (2026-09-30, Touch rule 5): the pitch is the number this defect is
+// judged by, so it is on the record whenever it MOVES (a zoom, a rung switch) and
+// silent in the steady state — two compares and an int. `ratio` is the calendar
+// pitch in chart bars: the measured report was htf=43200 chart=5 (ratio 8640)
+// with vis~300, i.e. 28.8 windows per candle.
+void HTFProbeSlot(const int htf)
+{
+   static double s_lastSlot = -1.0;
+   static int    s_lastHtf  = -1;
+   static int    s_lastVis  = -1;
+   if(s_HTFSlot == s_lastSlot && htf == s_lastHtf && s_HTFVisBars == s_lastVis) return;
+   s_lastSlot = s_HTFSlot;
+   s_lastHtf  = htf;
+   s_lastVis  = s_HTFVisBars;
+   int chartTf = (int)Period();
+   Print("[P-HTF] slot htf=", htf, " chart=", chartTf, " vis=", s_HTFVisBars,
+         " ratio=", DoubleToString((chartTf > 0) ? (double)htf / (double)chartTf : 0.0, 1),
+         " slot=", DoubleToString(s_HTFSlot, 1), " drawn=", g_HTFDrawnCount);
+}
+
+// Fill s_HTFSlot for this pass. 0 = true geometry (the rung's candles already fit
+// the window at least HTF_SLOT_MIN_CANDLES times); > 0 = the slot pitch.
+void HTFRefreshSlotMetrics(const int htf)
+{
+   s_HTFSlot = 0.0;
+   int chartTf = (int)Period();
+   s_HTFVisBars = (chartTf > 0) ? (int)ChartGetInteger(0, CHART_VISIBLE_BARS, 0) : 0;
+   if(s_HTFVisBars < 2) s_HTFVisBars = 0;
+   if(chartTf > 0 && htf > chartTf && s_HTFVisBars > 0)
+   {
+      double slot = (double)s_HTFVisBars / (double)HTF_SLOT_MIN_CANDLES;
+      if(slot < 2.0) slot = 2.0;   // HTFCandleGeometry's own fence needs a two-bar span
+      if((double)htf / (double)chartTf > slot) s_HTFSlot = slot;
+   }
+   HTFProbeSlot(htf);
+}
+
+// The candle's two edges on the slot grid. Index convention is HTFChartIndexAt's:
+// 0 = bar 0, +1 per bar OLDER, so a candle's RIGHT edge is the smaller index and
+// the newest candle (i = 0) owns the last `slot` bars. Callers pass COPIES of
+// (ot, nt): the true `ot` is the candle's identity for the live-edge cache
+// (g_HTFLastFormOpen) and may not be replaced by a synthetic time.
+void HTFSlotTimes(const int i, datetime &ot, datetime &nt)
+{
+   if(s_HTFSlot <= 0.0) return;              // true geometry: untouched
+   double right = (double)i * s_HTFSlot;
+   ot = HTFChartTimeAt(right + s_HTFSlot);   // older edge (left on the chart)
+   nt = HTFChartTimeAt(right);               // newer edge (right on the chart)
+}
+
+// The shadow's calendar-share fallback, ONE owner — the LAST fence, not an answer
+// (see the RETIRED note above). Two paths need it: a span the index map cannot
+// centre on (thinner than two chart bars — beyond loaded history, a fresh TF
+// switch — or non-finite) and a degenerate index round trip. Both used to inline
+// the same six lines; a third copy is how they drift apart again.
+void HTFGeomCalendarShadow(SHTFCandleGeom &g, const datetime ot, const datetime nt,
+                           const int shPct)
+{
+   datetime halfCal = (datetime)((nt - ot) * (double)shPct / 200);
+   if(halfCal < 1) halfCal = 1;
+   g.shadowL = ot + (datetime)((nt - ot) / 2) + halfCal;
+   g.shadowR = ot + (datetime)((nt - ot) / 2) - halfCal;
+   if(g.shadowR < ot) g.shadowR = ot;
+   if(g.shadowL > nt) g.shadowL = nt;
+}
+
 SHTFCandleGeom HTFCandleGeometry(const datetime ot, const datetime nt)
 {
    SHTFCandleGeom g;
@@ -519,9 +820,30 @@ SHTFCandleGeom HTFCandleGeometry(const datetime ot, const datetime nt)
 
    double iL = HTFChartIndexAt(ot);
    double iR = HTFChartIndexAt(nt);
-   if(!MathIsValidNumber(iL) || !MathIsValidNumber(iR)) return g;   // NaN fence
+   if(!MathIsValidNumber(iL) || !MathIsValidNumber(iR))
+   {
+      // No index map at all (broken series): the calendar share still draws a
+      // real box. A zero-width rectangle is INVISIBLE — the old trend wick
+      // never was — so no fence here may leave a point.
+      HTFGeomCalendarShadow(g, ot, nt, shPct);
+      return g;
+   }
    double span = iL - iR;
-   if(span < 2.0) return g;                 // thinner than two chart bars
+   // P-HTF-TOP (2026-09-30): span 0 is the ONLY collapse — both edges clamped onto
+   // one slot by a history that does not reach them (or a broken map) — and the
+   // calendar share is the honest degrade there. A span BELOW one bar is NOT a
+   // collapse: it is the overlay standing on the chart's OWN period (a monthly
+   // overlay on a monthly chart is one slot per candle, and its still-forming
+   // candle is a fraction of one), and the shape law below answers it like every
+   // other candle — the pixel floor is what keeps the shadow visible where a share
+   // of a fraction would vanish. The old `< 2.0` fence read "thinner than two chart
+   // bars" and sent exactly that case to the calendar middle: body edge to edge, no
+   // gap, and a live candle narrower than its neighbours.
+   if(span <= 0.0)
+   {
+      HTFGeomCalendarShadow(g, ot, nt, shPct);
+      return g;
+   }
 
    double half = span / 2.0;
    double gap = span * (double)gapPct / 200.0;      // half of the gap, each side
@@ -553,17 +875,24 @@ SHTFCandleGeom HTFCandleGeometry(const datetime ot, const datetime nt)
    {
       // Degenerate round trip / the box fell outside the period: fall back to
       // the calendar share, so a shadow is always drawn.
-      datetime halfCal = (datetime)((nt - ot) * (double)shPct / 200);
-      if(halfCal < 1) halfCal = 1;
-      g.shadowL = ot + (datetime)((nt - ot) / 2) + halfCal;
-      g.shadowR = ot + (datetime)((nt - ot) / 2) - halfCal;
-      if(g.shadowR < ot) g.shadowR = ot;
-      if(g.shadowL > nt) g.shadowL = nt;
+      HTFGeomCalendarShadow(g, ot, nt, shPct);
    }
    if(g.shadowL > nt) g.shadowL = nt;
    if(g.shadowR < ot) g.shadowR = ot;
    return g;
 }
+
+#endif // HTF_CANDLES_GEOM_MQH
+//+------------------------------------------------------------------+
+//|                                        HTFCandles_Draw.mqh       |
+//|                                                                  |
+//| P-HTF-SPLIT (2026-09-30): the overlay's OBJECT owner — the chart  |
+//| rectangle upsert, the card cull, the prune, the look probe and    |
+//| the draw passes that spend them. Part 2 of 3; see                 |
+//| HTFCandles_Geom.mqh for the split's map and the include order.     |
+//+------------------------------------------------------------------+
+#ifndef HTF_CANDLES_DRAW_MQH
+#define HTF_CANDLES_DRAW_MQH
 
 //+------------------------------------------------------------------+
 //| Upsert rectangle object on chart                                 |
@@ -658,6 +987,96 @@ bool HTFAnyBoxesExist()
 }
 
 //+------------------------------------------------------------------+
+//| P-UI-98r — HTF CANDLES STAY BEHIND OPEN UI (card, palette).       |
+//|                                                                  |
+//| Reported with a screenshot: hollow HTF boxes paint OVER the open  |
+//| settings card. The Z ladder cannot fix this: MT4 keeps            |
+//| SCREEN-SPACE objects (the panel skins) in one list painted in     |
+//| ZORDER order, while CHART objects (these rectangles) paint in     |
+//| their own pass - a chart rectangle with BACK=false lands over a   |
+//| screen skin at ANY rung (the hollow mode needs BACK=false to stay |
+//| over the M5 candles, so flipping BACK would sink the whole family |
+//| behind the price it overlays). What CAN put a chart object behind |
+//| an opaque card is absence: a masked box paints nowhere, which is  |
+//| pixel-identical to "behind" under an opaque surface.              |
+//|                                                                  |
+//| So an open card/palette masks the boxes it covers, by NAME, from  |
+//| the published screen rects (PnlPublishCover - this module is      |
+//| included BEFORE BiotakPanels, so the rects cross on shared        |
+//| globals, the g_UIPanelOpen precedent). Geometry comes from the    |
+//| object cache the upsert already maintains - no terminal reads per  |
+//| box, no geometry recompute. Masked names are TRACKED, so the      |
+//| release path unmasks exactly what the cull masked (never a naive  |
+//| ALL that would resurrect a family F-hide put away: the target is  |
+//| hidden ? NO : ALL). Anything the cull cannot prove - no card,     |
+//| HTF off, nothing drawn, an unprojectable window - fails OPEN      |
+//| (hands off, old behaviour).                                       |
+//+------------------------------------------------------------------+
+static string s_htfCulled[];
+static int    s_htfCulledN = 0;
+
+bool HTFCullHas(const string name)
+{
+   for(int i = 0; i < s_htfCulledN; i++)
+      if(s_htfCulled[i] == name) return true;
+   return false;
+}
+
+void HTFCullTrack(const string name)
+{
+   if(HTFCullHas(name)) return;
+   ArrayResize(s_htfCulled, s_htfCulledN + 1);
+   s_htfCulled[s_htfCulledN] = name;
+   s_htfCulledN++;
+}
+
+void HTFCullUntrack(const string name)
+{
+   for(int i = 0; i < s_htfCulledN; i++)
+   {
+      if(s_htfCulled[i] != name) continue;
+      s_htfCulled[i] = s_htfCulled[s_htfCulledN - 1];
+      s_htfCulledN--;
+      ArrayResize(s_htfCulled, s_htfCulledN);
+      return;
+   }
+}
+
+void HTFCullForget(const string name) { HTFCullUntrack(name); }
+
+// P-HTF-PROBE (2026-09-30): the cull is the ONE place in this module that can hide
+// an already-drawn box WITHOUT deleting it (`OBJ_TIMEFRAMES = OBJ_NO_PERIODS` on the
+// names a published card rect covers), and a hidden box looks exactly like "the
+// shadow vanished". So the tracked count is on the record whenever it moves - one
+// int compare in the steady state.
+void HTFProbeCull()
+{
+   static int s_lastTracked = -1;
+   if(s_htfCulledN == s_lastTracked) return;
+   s_lastTracked = s_htfCulledN;
+   Print("[P-HTF] cull masked=", s_htfCulledN, " panelOpen=", (g_UIPanelOpen ? 1 : 0),
+         " drawn=", g_HTFDrawnCount);
+}
+
+// One published rect to a chart window. False = unusable (fail open).
+bool HTFCullRectWindow(const int rx, const int ry, const int rw, const int rh,
+                       datetime &t1, datetime &t2, double &pHi, double &pLo)
+{
+   t1 = 0; t2 = 0; pHi = 0.0; pLo = 0.0;
+   if(rx < 0 || rw <= 0 || rh <= 0) return false;
+   int swA = 0, swB = 0;
+   datetime ta = 0, tb = 0;
+   double pa = 0.0, pb = 0.0;
+   if(!ChartXYToTimePrice(0, rx, ry, swA, ta, pa)) return false;
+   if(!ChartXYToTimePrice(0, rx + rw, ry + rh, swB, tb, pb)) return false;
+   t1 = (ta < tb ? ta : tb);
+   t2 = (ta < tb ? tb : ta);
+   pHi = (pa > pb ? pa : pb);
+   pLo = (pa > pb ? pb : pa);
+   return ((t2 > t1) && (pHi > pLo));
+}
+
+//+------------------------------------------------------------------+
 //| Delete HTF objects for history indices [from,to) — used to prune |
 //| only the trailing tail after an in-place redraw shrinks, instead  |
 //| of a full delete+recreate (no flicker, no drag-freeze).          |
@@ -678,7 +1097,84 @@ void HTFDeleteIndices(const int from, const int to)
       ObjectDelete(0, g_HTFPrefix + id + "_B");
       ObjectDelete(0, g_HTFPrefix + "WU" + id);
       ObjectDelete(0, g_HTFPrefix + "WL" + id);
+      // P-UI-98r: a pruned box leaves the card-cull set with it - a tracked
+      // name that no longer exists must not linger (its release write would
+      // fail silent, and the slot is a lie the next refresh would keep).
+      HTFCullForget(g_HTFPrefix + id);
+      HTFCullForget(g_HTFPrefix + id + "_F");
+      HTFCullForget(g_HTFPrefix + id + "_B");
+      HTFCullForget(g_HTFPrefix + "WU" + id);
+      HTFCullForget(g_HTFPrefix + "WL" + id);
    }
+}
+
+// The cull pass. Reads-only while healthy: two projections per open surface,
+// cache probes per box, a terminal write only for a box that FLIPS state.
+void HTFCardCullRefresh()
+{
+   if(!g_UIPanelOpen || !g_UI.showHTF || g_HTFDrawnCount <= 0 || StringLen(g_HTFPrefix) == 0)
+   {
+      HTFCullRelease();
+      return;
+   }
+   datetime t1A = 0, t2A = 0, t1B = 0, t2B = 0;
+   double pHiA = 0.0, pLoA = 0.0, pHiB = 0.0, pLoB = 0.0;
+   bool winA = HTFCullRectWindow(g_UIPanelRX, g_UIPanelRY, g_UIPanelRW, g_UIPanelRH,
+                                 t1A, t2A, pHiA, pLoA);
+   bool winB = HTFCullRectWindow(g_UIPPalRX, g_UIPPalRY, g_UIPPalRW, g_UIPPalRH,
+                                 t1B, t2B, pHiB, pLoB);
+   if(!winA && !winB)
+   {
+      HTFCullRelease();
+      return;
+   }
+   for(int i = 0; i < g_HTFDrawnCount; i++)
+   {
+      string id = IntegerToString(i);
+      string nm[5];
+      nm[0] = g_HTFPrefix + id;
+      nm[1] = g_HTFPrefix + id + "_F";
+      nm[2] = g_HTFPrefix + id + "_B";
+      nm[3] = g_HTFPrefix + "WU" + id;
+      nm[4] = g_HTFPrefix + "WL" + id;
+      for(int k = 0; k < 5; k++)
+      {
+         SObjectCacheEntry e;
+         if(!CacheGetObject(nm[k], e) || !e.exists) { HTFCullUntrack(nm[k]); continue; }
+         datetime bt1 = (e.lastTime1 < e.lastTime2 ? e.lastTime1 : e.lastTime2);
+         datetime bt2 = (e.lastTime1 < e.lastTime2 ? e.lastTime2 : e.lastTime1);
+         double bHi = (e.lastPrice > e.lastPrice2 ? e.lastPrice : e.lastPrice2);
+         double bLo = (e.lastPrice > e.lastPrice2 ? e.lastPrice2 : e.lastPrice);
+         bool cover = false;
+         if(winA && bt1 <= t2A && bt2 >= t1A && bLo <= pHiA && bHi >= pLoA) cover = true;
+         if(!cover && winB && bt1 <= t2B && bt2 >= t1B && bLo <= pHiB && bHi >= pLoB) cover = true;
+         bool tracked = HTFCullHas(nm[k]);
+         if(cover && !tracked)
+         {
+            ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            HTFCullTrack(nm[k]);
+         }
+         else if(!cover && tracked)
+         {
+            ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES,
+                             IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS);
+            HTFCullUntrack(nm[k]);
+         }
+      }
+   }
+   HTFProbeCull();   // P-HTF-PROBE: the count AFTER this pass's masks/releases
+}
+
+// Give back exactly what the cull took (open-order callers only).
+void HTFCullRelease()
+{
+   if(s_htfCulledN <= 0) return;
+   long back = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+   for(int i = 0; i < s_htfCulledN; i++)
+      ObjectSetInteger(0, s_htfCulled[i], OBJPROP_TIMEFRAMES, back);
+   ArrayResize(s_htfCulled, 0);
+   s_htfCulledN = 0;
+   HTFProbeCull();   // P-HTF-PROBE: the mask count is back to 0
 }
 
 //+------------------------------------------------------------------+
@@ -763,13 +1259,41 @@ void DeleteHTFCandles()
 // same trap the P-PERF-14 note above records. Do not re-add a copy here.
 
 //+------------------------------------------------------------------+
+//| P-HTF-PROBE (2026-09-30, Touch rule 5)                           |
+//|                                                                  |
+//| The report is a LOOK: the shadow is drawn and then gone, and the  |
+//| body carries a border but no fill. Both are decided by THREE      |
+//| numbers - BOX (hollow/filled/both), SHOW WICKS and SHOW BODY -    |
+//| and the look can only move when one of them moves: `isTrigger`-   |
+//| style guesses are what this project refuses. So the probe names    |
+//| the resolved triple at the moments it can change (init, every     |
+//| card row write, every draw pass) and stays SILENT when it has     |
+//| not. Zero steady-state cost: three compares and one int.          |
+//+------------------------------------------------------------------+
+void HTFProbeSettings(const string why)
+{
+   static int  s_lastMode  = -1;
+   static bool s_lastWicks = false;
+   static bool s_lastBody  = false;
+   if(s_lastMode == g_HTFBoxMode && s_lastWicks == g_HTFShowWicks && s_lastBody == g_HTFShowBody)
+      return;
+   s_lastMode  = g_HTFBoxMode;
+   s_lastWicks = g_HTFShowWicks;
+   s_lastBody  = g_HTFShowBody;
+   Print("[P-HTF] ", why, " mode=", g_HTFBoxMode, " wicks=", (g_HTFShowWicks ? 1 : 0),
+         " body=", (g_HTFShowBody ? 1 : 0), " shadow%=", g_HTFShadowPct,
+         " gap%=", g_HTFGapPct, " opacity=", g_HTFOpacity, " drawn=", g_HTFDrawnCount,
+         " hidden=", (IsIndicatorHidden() ? 1 : 0));
+}
+
+//+------------------------------------------------------------------+
 //| THE SHADOW BOX (P-UI-68)                                         |
 //|                                                                  |
 //| A wick used to be an OBJ_TREND of g_HTFWickWidth px. The request  |
 //| is a BOX — the shape of the screenshot — so the shadow is now a   |
 //| FILLED RECTANGLE whose x span is owned by HTFCandleGeometry (a    |
 //| share of the candle, centred on the body) and whose look is        |
-//| re-asserted, never written once, by the same guarded upsert the    |
+//| re-asserted, never written once, by the same guarded upsert the   |
 //| body uses. Steady state = one ObjectFind per box per pass and zero |
 //| terminal writes; a look that changes (colour, fill, width) is      |
 //| re-compared and re-written (the P-UI-66 lesson: a write-once look  |
@@ -797,6 +1321,8 @@ void DrawHTFCandleCore(const int i, const datetime ot, const datetime nt,
                        const double hi, const double lo,
                        const double op, const double cl)
 {
+   // P-HTF-PROBE: name the look the very draw pass that rebuilds it is using.
+   HTFProbeSettings("draw");
    double bodyHi = g_HTFShowWicks ? MathMax(op, cl) : hi;
    double bodyLo = g_HTFShowWicks ? MathMin(op, cl) : lo;
 
@@ -805,7 +1331,14 @@ void DrawHTFCandleCore(const int i, const datetime ot, const datetime nt,
    // centred on the DRAWN middle). Nothing below recomputes an x by hand, so a
    // calendar midpoint cannot creep back into one of the three objects while
    // the others use the drawn one.
-   SHTFCandleGeom gm = HTFCandleGeometry(ot, nt);
+   //
+   // P-HTF-SLOT: on a rung wider than the window the two edges are the SLOT
+   // grid's (HTFRefreshSlotMetrics) — the shape law below is the SAME one, so a
+   // slotted candle is the rung's own candle, only narrower. Copies, not the
+   // arguments: the true `ot` is the candle's identity for the live-edge cache.
+   datetime otSlot = ot, ntSlot = nt;
+   HTFSlotTimes(i, otSlot, ntSlot);
+   SHTFCandleGeom gm = HTFCandleGeometry(otSlot, ntSlot);
 
    double opct = g_HTFOpacity / 100.0;
    color candleClr = BlendWithBackground(cl >= op ? g_HTFBullColor : g_HTFBearColor, opct);
@@ -875,9 +1408,15 @@ bool UpdateHTFFormingCandle()
 {
    if(!g_UI.showHTF || Bars < 2) return false;
    int tf = ResolveHTFPeriod();
-   if(tf <= 0 || tf <= Period()) return false;
+   // P-HTF-TOP: `>=` — a rung equal to the chart TF draws (the monthly overlay on
+   // a monthly chart IS the structure rung there); only a rung BELOW it is nothing.
+   if(tf <= 0 || tf < (int)Period()) return false;
 
-   datetime ot = iTime(_Symbol, tf, 0);
+   // P-HTF-SYN: a 6M/12M rung has no terminal series, and its bar's open is calendar
+   // arithmetic (free) — so the throttle check below still runs BEFORE any read,
+   // exactly as it does for a real rung's one iTime.
+   bool syn = HTFTfIsSynthetic(tf);
+   datetime ot = syn ? HTFSynBarOpen(tf, 0) : iTime(_Symbol, tf, 0);
    if(ot <= 0) return false;
 
    // P-PERF-02 write budget: a live candle is redrawn at most every
@@ -891,9 +1430,19 @@ bool UpdateHTFFormingCandle()
    if(!formNewBar && g_HTFFormWriteMs != 0 && (formNow - g_HTFFormWriteMs) < HTF_FORM_MS)
       return false;
 
-   double op = iOpen(_Symbol, tf, 0), cl = iClose(_Symbol, tf, 0);
-   double hi = iHigh(_Symbol, tf, 0),  lo = iLow(_Symbol, tf, 0);
-   if(hi <= 0 || lo <= 0) return false;
+   double op = 0.0, cl = 0.0, hi = 0.0, lo = 0.0;
+   if(syn)
+   {
+      // The live bucket's OHLC is the aggregate of its own MN1 months (the newest
+      // of which is the current month), so the live candle grows with the bucket.
+      if(!HTFSynOHLC(tf, ot, op, hi, lo, cl)) return false;
+   }
+   else
+   {
+      op = iOpen(_Symbol, tf, 0); cl = iClose(_Symbol, tf, 0);
+      hi = iHigh(_Symbol, tf, 0); lo = iLow(_Symbol, tf, 0);
+      if(hi <= 0 || lo <= 0) return false;
+   }
 
    if(!formNewBar &&
       op == g_HTFLastFormO && hi == g_HTFLastFormH &&
@@ -908,6 +1457,7 @@ bool UpdateHTFFormingCandle()
    HTFMidMemoReset();             // its own snapshot: a bar may have closed since the last pass
    HTFRefreshBlendBackground();   // P-PERF-08: once per draw pass, not once per colour
    HTFRefreshPixelMetrics();      // P-UI-68: the shadow's pixel floor needs the zoom once
+   HTFRefreshSlotMetrics(tf);     // P-HTF-SLOT: the SAME pitch the history pass lays out
    DrawHTFCandleCore(0, ot, HTFBarCloseTime(ot, tf), hi, lo, op, cl);
    return true;
 }
@@ -916,8 +1466,8 @@ bool UpdateHTFFormingCandle()
 //| Redraw all historical HTF candles (IN-PLACE, no flicker)         |
 //| Returns bars drawn (>=0), or -1 when HTF history is not ready yet|
 //| (weak PC / fresh TF-switch) so the caller retries later instead  |
-//| of leaving an empty chart. Same-index objects are upserted in     |
-//| place — only a shrunken tail is pruned and only a box/shape flip  |
+//| of leaving an empty chart. Same-index objects are upserted in    |
+//| place — only a shrunken tail is pruned and only a box/shape flip |
 //| wipes all (slider drags recolor without delete+recreate churn).  |
 //+------------------------------------------------------------------+
 // How many HTF bars does the CURRENT viewport actually need? Everything
@@ -927,13 +1477,20 @@ int HTFViewportBarTarget()
    int want = InpHTFMaxBars;
    int htf = ResolveHTFPeriod();
    int chartTf = (int)Period();
-   if(htf > chartTf && chartTf > 0)
+   // P-HTF-TOP: `>=` — on the chart's own rung the pitch is exactly one bar, so the
+   // viewport cap must still run (ratio 1) instead of falling back to the flat 200.
+   if(htf >= chartTf && chartTf > 0)
    {
       int firstVis = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0);
       int visBars  = (int)ChartGetInteger(0, CHART_VISIBLE_BARS, 0);
       if(firstVis < 0) firstVis = 0;
       if(visBars < 1)  visBars = 1;
-      double ratio = (double)htf / (double)chartTf;
+      // P-HTF-SLOT: a slotted rung's pitch is the SLOT, not the calendar ratio —
+      // the cap must count the bars a candle ACTUALLY occupies, or the strip
+      // would be asked for candles the window cannot even hold. The two numbers
+      // are equal on every rung that is not slotted (s_HTFSlot = 0), so nothing
+      // else moves.
+      double ratio = (s_HTFSlot > 0.0) ? s_HTFSlot : (double)htf / (double)chartTf;
       int need = (int)MathCeil((double)(firstVis + visBars) / ratio) + 2;
       if(need < HTF_CULL_MIN) need = HTF_CULL_MIN;
       if(need < want) want = need;
@@ -946,6 +1503,7 @@ int HTFViewportBarTarget()
 // ChartGetInteger calls, but a tick storm must not call HTFViewportBarTarget
 // 30 times a second (the 1 s probe and the chart-change hook are enough).
 #define HTF_RANGE_MS 100
+static double s_HTFSlotDrawn = 0.0;   // the pitch the boxes on the chart were laid out with
 bool HTFRangeStale()
 {
    if(g_HTFDrawnCount <= 0) return false;
@@ -953,6 +1511,13 @@ bool HTFRangeStale()
    uint nowMs = GetTickCount();
    if(s_rangeMs != 0 && nowMs - s_rangeMs < HTF_RANGE_MS) return false;
    s_rangeMs = nowMs;
+   // P-HTF-SLOT: the pitch is VIEWPORT-shaped, so this throttled probe is where a
+   // zoom re-pitches a slotted strip — and a moved pitch IS a stale range (the
+   // boxes still stand on the old grid). The refresh costs the one
+   // CHART_VISIBLE_BARS read the target below pays anyway, and the compare is
+   // free; both are zero on a rung that is not slotted.
+   HTFRefreshSlotMetrics(ResolveHTFPeriod());
+   if(s_HTFSlot != s_HTFSlotDrawn) return true;
    int viewTarget = HTFViewportBarTarget();
    return (viewTarget > g_HTFDrawnCount || viewTarget + HTF_CULL_HYST < g_HTFDrawnCount);
 }
@@ -962,20 +1527,20 @@ int DrawHTFCandles()
    static int s_prevCount = 0;
    if(!g_UI.showHTF || Bars < 2) { DeleteHTFCandles(); s_prevCount = 0; return 0; }
    int tf = ResolveHTFPeriod();
-   if(tf <= 0 || tf <= Period()) { DeleteHTFCandles(); s_prevCount = 0; return 0; }
+   // P-HTF-TOP: the same `>=` as the forming candle and the ensure probe — one
+   // rule, three sites, so the overlay cannot draw history while hiding the live
+   // candle (or the reverse) on the chart's own rung.
+   if(tf <= 0 || tf < (int)Period()) { DeleteHTFCandles(); s_prevCount = 0; return 0; }
    HTFMidMemoReset();             // one geometry snapshot per pass — see the memo
    HTFRefreshBlendBackground();   // P-PERF-08: one background read for the whole pass
    HTFRefreshPixelMetrics();      // P-UI-68: one zoom read for the whole pass too
-   int total = iBars(_Symbol, tf);
+   HTFRefreshSlotMetrics(tf);     // P-HTF-SLOT: the pitch both the target and the grid read
+   bool syn = HTFTfIsSynthetic(tf);   // P-HTF-SYN: 6M/12M are built from MN1
+   int total = syn ? HTFSynBarCount(tf) : iBars(_Symbol, tf);
    if(total <= 0) return -1;
-   datetime ot0 = iTime(_Symbol, tf, 0);
+   datetime ot0 = syn ? HTFSynBarOpen(tf, 0) : iTime(_Symbol, tf, 0);
    if(ot0 <= 0) return -1;
    int count = MathMin(InpHTFMaxBars, total);
-   // P-PERF-02 viewport cap (hysteresis keeps a zoom-out/zoom-in see-saw from
-   // re-creating bars it just pruned).
-   int viewTarget = HTFViewportBarTarget();
-   if(count > viewTarget) count = MathMin(count, viewTarget + HTF_CULL_HYST);
-   g_HTFDrawnCount = count;
 
    static int s_lastBoxMode = -1;
    static bool s_lastShowBodyBox = false;
@@ -986,21 +1551,61 @@ int DrawHTFCandles()
       s_lastBoxMode = g_HTFBoxMode;
       s_lastShowBodyBox = g_HTFShowBody;
    }
+
+   // P-PERF-02 viewport cap (hysteresis keeps a zoom-out/zoom-in see-saw from
+   // re-creating bars it just pruned).
+   int viewTarget = HTFViewportBarTarget();
+   if(count > viewTarget) count = MathMin(count, viewTarget + HTF_CULL_HYST);
+
+   // P-HTF-SLOT: a slotted strip can only place the candles the loaded history
+   // reaches — HTFChartTimeAt clamps an index past the oldest bar onto that bar,
+   // and that clamp is exactly the pile-up (several candles on one slot) the
+   // pitch exists to avoid. One divide, no reads: the grid is anchored at bar 0.
+   if(s_HTFSlot > 0.0)
+   {
+      int fit = (int)MathFloor((double)(Bars - 1) / s_HTFSlot);
+      if(fit < 1) fit = 1;
+      if(count > fit) count = fit;
+   }
+
+   // P-PERF-02/47: `count` is the drawer's OWN bookkeeping (the cull loops it, the
+   // prune diffs it, the viewport probe compares it, DeleteHTFCandles accounts for
+   // it), so it is set AFTER the box-mode flip — whose DeleteHTFCandles() zeroes
+   // it. Until 2026-09-30 this assignment stood above the flip, so every BOX flip
+   // left `drawn=0` with `count` boxes on the chart: the cull went blind (it
+   // returns on drawn<=0), the range probe answered "not stale" forever after, and
+   // only the next HTF bar healed it.
+   g_HTFDrawnCount = count;
+
    for(int i = 0; i < count; i++)
    {
-      datetime ot = iTime(_Symbol, tf, i);
-      datetime nt = (i == 0) ? HTFBarCloseTime(ot, tf) : iTime(_Symbol, tf, i - 1);
+      datetime ot = syn ? HTFSynBarOpen(tf, i) : iTime(_Symbol, tf, i);
+      // A synthetic bar's close IS its bucket's next boundary (the buckets are
+      // contiguous calendar blocks), so there is no `i - 1` bar to read there.
+      datetime nt = (syn || i == 0) ? HTFBarCloseTime(ot, tf) : iTime(_Symbol, tf, i - 1);
       if(ot <= 0 || nt <= ot)
       {
          if(i == 0) return -1;
          continue;
       }
-      double hi = iHigh(_Symbol, tf, i), lo = iLow(_Symbol, tf, i);
-      double op = iOpen(_Symbol, tf, i), cl = iClose(_Symbol, tf, i);
-      if(hi <= 0 || lo <= 0)
+      double hi = 0.0, lo = 0.0, op = 0.0, cl = 0.0;
+      if(syn)
       {
-         if(i == 0) return -1;
-         continue;
+         if(!HTFSynOHLC(tf, ot, op, hi, lo, cl))
+         {
+            if(i == 0) return -1;
+            continue;
+         }
+      }
+      else
+      {
+         hi = iHigh(_Symbol, tf, i); lo = iLow(_Symbol, tf, i);
+         op = iOpen(_Symbol, tf, i); cl = iClose(_Symbol, tf, i);
+         if(hi <= 0 || lo <= 0)
+         {
+            if(i == 0) return -1;
+            continue;
+         }
       }
 
       DrawHTFCandleCore(i, ot, nt, hi, lo, op, cl);
@@ -1013,6 +1618,11 @@ int DrawHTFCandles()
    }
    HTFDeleteIndices(count, s_prevCount);
    s_prevCount = count;
+   s_HTFSlotDrawn = s_HTFSlot;   // P-HTF-SLOT: the pitch these boxes stand on
+   // P-UI-98r: a draw while a card is open births boxes unmasked - cull the
+   // fresh set at once (slider drags redraw continuously; the timer net would
+   // leave a 250 ms flicker under the hand).
+   HTFCardCullRefresh();
    return count;
 }
 
@@ -1049,9 +1659,10 @@ void HTFEnsureDrawn()
    static int s_lastDrawnTf = -1; // TF of the boxes on chart (-1=none yet, 0=hidden-by-design)
    static datetime s_drawnBar0 = 0; // forming-bar open time as last fully drawn
 
-   // By design there is nothing above the chart TF (MN1 auto, or a manual
-   // TF<=chart): make sure no stale boxes linger, once.
-   if(tf <= (int)Period())   // covers tf==0 (auto on MN1) too
+   // A rung strictly below the chart TF (a manual D1 on a monthly chart, or tf==0
+   // from an empty resolve): make sure no stale boxes linger, once. tf == chart TF
+   // is a REAL rung now (P-HTF-TOP) and draws below.
+   if(tf < (int)Period())
    {
       if(s_lastDrawnTf != 0)
       {
@@ -1099,7 +1710,12 @@ void HTFEnsureDrawn()
    // Weak-PC guard: HTF history may still be loading after a TF switch.
    // Draw only when data is really ready; otherwise keep the old state so
    // a later tick/timer retries automatically — no toggle needed.
-   if(Bars < 2 || iBars(_Symbol, tf) <= 0 || iTime(_Symbol, tf, 0) <= 0)
+   // P-HTF-SYN aware: a synthetic rung is ready when the MN1 history carries at
+   // least one FULL bucket of it — asking the terminal for a 6M/12M series would
+   // always answer "not ready" and the overlay would never draw at all.
+   int readyBars = HTFTfIsSynthetic(tf) ? HTFSynBarCount(tf) : iBars(_Symbol, tf);
+   if(Bars < 2 || readyBars <= 0 ||
+      (!HTFTfIsSynthetic(tf) && iTime(_Symbol, tf, 0) <= 0))
    {
       s_lastProbe = now;
       return;
@@ -1116,12 +1732,30 @@ void HTFEnsureDrawn()
    ThrottledChartRedraw();
 }
 
+#endif // HTF_CANDLES_DRAW_MQH
+//+------------------------------------------------------------------+
+//|                                        HTFCandles_Life.mqh       |
+//|                                                                  |
+//| P-HTF-SPLIT (2026-09-30): the overlay's BIRTH + PERSISTENCE owner —|
+//| what the attach resolves, the 15 keys the teardown writes, and the |
+//| cleanup. Part 3 of 3 (last); see HTFCandles_Geom.mqh for the map.  |
+//+------------------------------------------------------------------+
+#ifndef HTF_CANDLES_LIFE_MQH
+#define HTF_CANDLES_LIFE_MQH
+
 //+------------------------------------------------------------------+
 //| Initialize HTF Candles                                           |
 //+------------------------------------------------------------------+
 void InitializeHTFCandles()
 {
    g_HTFPrefix = HTF_PREFIX_BASE + IntegerToString(ChartID()) + "_";
+   // P-DRAW-87 (2026-09-30): PUBLISH the namespace, do not re-declare it. The
+   // draw-strip's `DrawIsIndicatorObject` (DrawToolbar, included before this file)
+   // is the ONE owner of "this object is the product's, not the user's drawing",
+   // and it could not see this family: the strip's `BoxExtrasPump` then split each
+   // shadow's interior into an invisible `<name>_FL` child and cleared its FILL.
+   // The value stays `g_HTFPrefix` and this module stays its only writer.
+   g_OverlayNameRoot = g_HTFPrefix;
    g_HTFBullColor = InpHTFBullColor;
    g_HTFBearColor = InpHTFBearColor;
    g_HTFWickColor = InpHTFWickColor;
@@ -1135,7 +1769,7 @@ void InitializeHTFCandles()
    g_HTFBorderWidth = InpHTFBorderWidth;
    g_HTFBoxMode = InpHTFBoxMode;
    g_HTFShowBody = InpHTFShowBody;
-   
+
    string chartIdStr = GetCachedChartIdStr();
    string prefix = "Biotak_HTF_" + chartIdStr + "_";
 
@@ -1190,6 +1824,7 @@ void InitializeHTFCandles()
    // the first teardown would have written. Without it the 15 keys were written
    // again on every timeframe switch even when the card had never been opened.
    HTFPrimeCandleSettings();
+   HTFProbeSettings("init");   // P-HTF-PROBE: what this attach RESOLVED (inputs + GVs)
 }
 
 //+------------------------------------------------------------------+
@@ -1281,5 +1916,7 @@ void CleanupHTFCandlesGVs()
    GlobalVariableDel(prefix + "BoxMode");
    GlobalVariableDel(prefix + "ShowBody");
 }
+
+#endif // HTF_CANDLES_LIFE_MQH
 
 #endif // HTF_CANDLES_MQH

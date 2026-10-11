@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/HistoricalDataFunctions.mqh
+//   regenerate : python tools/parity/resync-module.py --write HistoricalDataFunctions.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   #ifndef HISTORICAL_DATA_FUNCTIONS_MQH
 #define HISTORICAL_DATA_FUNCTIONS_MQH
 
@@ -8,8 +20,7 @@ bool UpdateHistoricalValues() {
     if (g_initialized) return true;
 
     // OPTIMIZATION: Use dynamic arrays and ensure cleanup
-    // (closeArray feeds the P-MT5-FEED spike fence below.)
-    double highArray[], lowArray[], closeArray[];
+    double highArray[], lowArray[];
     
     // To ensure Historical High/Low remains consistent across different timeframes,
     // we use PERIOD_MN1 when PERIOD_CURRENT is selected, because PERIOD_CURRENT
@@ -63,26 +74,21 @@ bool UpdateHistoricalValues() {
     }
 
     // Resize arrays
-    if(ArrayResize(highArray, totalBars) != totalBars || ArrayResize(lowArray, totalBars) != totalBars ||
-       ArrayResize(closeArray, totalBars) != totalBars) {
+    if(ArrayResize(highArray, totalBars) != totalBars || ArrayResize(lowArray, totalBars) != totalBars) {
         Print("UpdateHistoricalValues: Failed to resize arrays. Error: ", GetLastError());
         ArrayFree(highArray);
         ArrayFree(lowArray);
-        ArrayFree(closeArray);
         return false;
     }
 
     // Use single error check for data copying
     int copiedHigh = CopyHigh(Symbol(), effectiveTimeframe, 0, totalBars, highArray);
     int copiedLow = CopyLow(Symbol(), effectiveTimeframe, 0, totalBars, lowArray);
-    int copiedClose = CopyClose(Symbol(), effectiveTimeframe, 0, totalBars, closeArray);
-
-    if(copiedHigh <= 0 || copiedLow <= 0 || copiedClose <= 0) {
-        Print("UpdateHistoricalValues: Failed to copy data. High=", copiedHigh, ", Low=", copiedLow,
-              ", Close=", copiedClose);
+    
+    if(copiedHigh <= 0 || copiedLow <= 0) {
+        Print("UpdateHistoricalValues: Failed to copy data. High=", copiedHigh, ", Low=", copiedLow);
         ArrayFree(highArray);
         ArrayFree(lowArray);
-        ArrayFree(closeArray);
         return false;
     }
 
@@ -96,86 +102,21 @@ bool UpdateHistoricalValues() {
     // lines therefore never appeared for any inpHistoricalPeriods larger than the
     // available history, and not at all in the first frames after attach.
     // Measure the copied prefix, never the padding.
-    int usable = MathMin(copiedHigh, MathMin(copiedLow, copiedClose));
-    if(ArrayResize(highArray, usable) != usable || ArrayResize(lowArray, usable) != usable ||
-       ArrayResize(closeArray, usable) != usable) {
+    int usable = MathMin(copiedHigh, copiedLow);
+    if(ArrayResize(highArray, usable) != usable || ArrayResize(lowArray, usable) != usable) {
         Print("UpdateHistoricalValues: Failed to trim arrays. Error: ", GetLastError());
         ArrayFree(highArray);
         ArrayFree(lowArray);
-        ArrayFree(closeArray);
         return false;
     }
 
-    // P-MT5-FEED: REJECT BAD-TICK SPIKES BEFORE MEASURING EXTREMES.
-    //
-    // Live proof (2026-09-17, Vittaverse EURUSD-ECN): g_lowestLow came back as
-    // 0.5365 - a print that never existed (EURUSD all-time low is ~0.82). One
-    // corrupt bar in decades of MN1 history becomes the permanent anchor: this
-    // function runs once (g_initialized gate), so the Low line, the ladder
-    // extent below and every pip distance inherit the spike forever. A clean
-    // feed never trips this fence (no real FX/metal bar moves 25% bar-to-bar),
-    // so there it is a no-op by construction.
-    //
-    // Chained fence, newest-to-oldest (the arrays below are forced to series
-    // order first, so the direction is explicit, not assumed): the seed is the
-    // live bar, which is sane by definition of a tradable feed. A bar is then
-    // measured only if its close is within 25% of the last accepted close
-    // (kills whole-bar garbage) and its own high/low are within 25% of its
-    // close (kills single-field bad ticks). Seeding from the oldest bar would
-    // cascade-reject everything when the OLDEST bar is the garbage one, so the
-    // direction is load-bearing, not cosmetic.
-    //
-    // Belt and braces: the fenced extremes must bracket the current close
-    // (full history always contains the recent bars). If they do not, the seed
-    // itself was garbage - discard the fence and fall back to the unfiltered
-    // extremes (status quo) rather than baking a cascade in.
-    ArraySetAsSeries(highArray, true);
-    ArraySetAsSeries(lowArray, true);
-    ArraySetAsSeries(closeArray, true);
-    double fenceHigh = 0.0, fenceLow = 0.0, lastGoodClose = 0.0;
-    int fencedCount = 0, spikedBars = 0;
-    for(int b = 0; b < usable; b++)
-    {
-        double bh = highArray[b], bl = lowArray[b], bc = closeArray[b];
-        if(bh <= 0 || bl <= 0 || bc <= 0 || bh < bl) { spikedBars++; continue; }
-        if(lastGoodClose > 0 &&
-           (bc < lastGoodClose * 0.75 || bc > lastGoodClose * 1.25)) { spikedBars++; continue; }
-        if(bl < bc * 0.75 || bh > bc * 1.25) { spikedBars++; continue; }
-        lastGoodClose = bc;
-        if(fencedCount == 0) { fenceHigh = bh; fenceLow = bl; }
-        else { if(bh > fenceHigh) fenceHigh = bh; if(bl < fenceLow) fenceLow = bl; }
-        fencedCount++;
-    }
-    double curClose = (usable > 0 ? closeArray[0] : 0.0);
-    bool fenceBracketsLive = (curClose > 0 && fenceLow <= curClose && curClose <= fenceHigh);
-    if(fencedCount > 0 && fenceBracketsLive)
-    {
-        g_highestHigh = fenceHigh;
-        g_lowestLow = fenceLow;
-        if(spikedBars > 0)
-        {
-            static uint s_lastSpikeWarnMs = 0;
-            uint spikeNowMs = GetTickCount();
-            if(spikeNowMs - s_lastSpikeWarnMs > 300000) {
-                Print("UpdateHistoricalValues: ignored ", spikedBars,
-                      " spike bar(s) while measuring extremes (feed has bad ticks)");
-                s_lastSpikeWarnMs = spikeNowMs;
-            }
-        }
-    }
-    else
-    {
-        // Fence unusable (nothing survived, or the seed cascade failed the
-        // live-bracket check): keep today's behaviour, loudly once.
-        g_highestHigh = highArray[ArrayMaximum(highArray)];
-        g_lowestLow = lowArray[ArrayMinimum(lowArray)];
-        Print("UpdateHistoricalValues: spike fence unusable - using unfiltered extremes");
-    }
-
+    // Optimize max/min calculation
+    g_highestHigh = highArray[ArrayMaximum(highArray)];
+    g_lowestLow = lowArray[ArrayMinimum(lowArray)];
+    
     // MEMORY CLEANUP: Free temporary arrays immediately after use
     ArrayFree(highArray);
     ArrayFree(lowArray);
-    ArrayFree(closeArray);
     
     if(g_highestHigh <= 0 || g_lowestLow <= 0) {
         Print("UpdateHistoricalValues: Invalid high/low values");

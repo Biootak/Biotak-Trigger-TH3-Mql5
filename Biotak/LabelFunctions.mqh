@@ -1,5 +1,22 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/LabelFunctions.mqh
+//   regenerate : python tools/parity/resync-module.py --write LabelFunctions.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   #ifndef LABEL_FUNCTIONS_MQH
 #define LABEL_FUNCTIONS_MQH
+
+// Labels_A.mqh - LabelFunctions.mqh split 2026-09-29: exact lines 3-1403, byte-identical, zero renames.
+#ifndef LABELS_A_MQH
+#define LABELS_A_MQH
+
 
 #property strict
 
@@ -133,6 +150,10 @@ bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName,
     string mainObjName = StringFormat("%sATR_%s", objectPrefix, timeframeName);
     string stepsObjName = StringFormat("%sATR_Steps_%s", objectPrefix, timeframeName);
     string targetsObjName = StringFormat("%sATR_Targets_%s", objectPrefix, timeframeName);
+    // P-PERF-38g: these three are this pass's output (the per-TF ATR columns).
+    LblMark(mainObjName);
+    LblMark(stepsObjName);
+    if(inpShowATRTargets) LblMark(targetsObjName);
     if(!inpShowATRTargets && ObjectFind(0, targetsObjName) >= 0) {
         ObjectDelete(0, targetsObjName);
     }
@@ -248,15 +269,115 @@ bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName,
 //+------------------------------------------------------------------+
 //| Clear all labels to prevent ghosting or overlaps                |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| P-PERF-38g (2026-09-29): ONE PRODUCED-LIST SWEEP FOR THE `LBL_`    |
+//| NAMESPACE — the fix ClearAllLabels' own comment asked for.         |
+//|                                                                    |
+//| The bulk `ObjectsDeleteAll(prefix+"LBL_")` walked the WHOLE chart  |
+//| object list on every label pass, so every label was deleted and    |
+//| re-created on every pass: the 47 ms `clear=` in the relayout       |
+//| ledger, and the blink the user sees on a timeframe switch.         |
+//|                                                                    |
+//| Shape: the pass OPENS a window at the clear site, every label      |
+//| CREATOR records the name it just wrote (`LblMark`), and the window |
+//| CLOSES after the last display call (`LblSweepEnd`). The sweep then  |
+//| deletes exactly the names it wrote LAST pass and did not write now |
+//| — the per-timeframe rows of the previous TF, and nothing else.     |
+//|                                                                    |
+//| Two fences, both deliberate:                              |
+//|  * `LblMark` outside an open window is DROPPED, so a label built   |
+//|    by a path that is not this pass (the level render's pip labels, |
+//|    `CreatePipDistanceLabel`) can never enter either registry, and  |
+//|    is therefore never deleted by this sweep. Those keep their own  |
+//|    owner: the ladder sweep treats `<line>_Label` as produced.      |
+//|  * a nested `LblSweepBegin` (a display function that clears on its |
+//|    own way out) does NOT rotate again and does NOT drop the marks  |
+//|    already made this pass.                                        |
+//+------------------------------------------------------------------+
+string s_lblProducedNow[];
+string s_lblProducedPrev[];
+int    s_lblNowN  = 0;
+int    s_lblPrevN = 0;
+bool   s_lblPassOpen = false;
+// P-PERF-38g: the FIRST pass of an instance has no `prev` to diff against, so a
+// stale per-TF label left by a previous attach (a crash, a chart whose switch
+// never ran an OnDeinit) would survive forever. That one pass keeps the old
+// bulk delete, at the SAME point in the pass it always ran (the window opener,
+// before the displays), so the first frame is byte-identical to before and
+// every later pass is the sweep.
+bool   s_lblFirstPass = true;
+
+void LblMark(const string name) {
+    if(!s_lblPassOpen || StringLen(name) <= 0) return;
+    for(int i = 0; i < s_lblNowN; i++) if(s_lblProducedNow[i] == name) return;
+    int cap = ArraySize(s_lblProducedNow);
+    if(s_lblNowN >= cap) ArrayResize(s_lblProducedNow, s_lblNowN + 16);
+    s_lblProducedNow[s_lblNowN] = name;
+    s_lblNowN++;
+}
+
+void LblSweepBegin(const string objectPrefix) {
+    if(s_lblPassOpen) return;   // nested clear inside the same pass: keep the marks
+    if(s_lblFirstPass) {
+        s_lblFirstPass = false;
+        ObjectsDeleteAll(0, objectPrefix + "LBL_");
+    }
+    s_lblPrevN = s_lblNowN;
+    if(s_lblPrevN > ArraySize(s_lblProducedPrev)) ArrayResize(s_lblProducedPrev, s_lblPrevN);
+    for(int i = 0; i < s_lblPrevN; i++) s_lblProducedPrev[i] = s_lblProducedNow[i];
+    s_lblNowN = 0;
+    s_lblPassOpen = true;
+}
+
+// Deletes the names written LAST pass that this pass did not write. A name that
+// exists on the chart but was never produced by a pass is NOT this sweep's
+// business (see the fence above), and a name this pass produced but that the
+// chart does not hold yet costs one ObjectFind.
+void LblSweepEnd(const string objectPrefix) {
+    if(!s_lblPassOpen) return;
+    s_lblPassOpen = false;
+    string labelPrefix = objectPrefix + "LBL_";
+    int deleted = 0;
+    string deletedNames = "";
+    for(int i = 0; i < s_lblPrevN; i++) {
+        string nm = s_lblProducedPrev[i];
+        if(StringFind(nm, labelPrefix) != 0) continue;
+        bool producedNow = false;
+        for(int j = 0; j < s_lblNowN; j++) {
+            if(s_lblProducedNow[j] == nm) { producedNow = true; break; }
+        }
+        if(producedNow) continue;
+        if(ObjectFind(0, nm) < 0) continue;
+        // P-UI-21: a delete fires CHARTEVENT_OBJECT_DELETE, same suppression as
+        // the clear it replaces, so a label sweep never flags a level redraw.
+        g_suppressDeleteEvents = true;
+        if(ObjectDelete(0, nm)) {
+            deleted++;
+            if(deleted <= 4) deletedNames = deletedNames + " " + nm;
+        }
+        g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+        g_suppressDeleteEvents = false;
+    }
+    s_lblPrevN = 0;
+    if(deleted > 0) Print("[W][PERF] labels sweep: produced=", s_lblNowN, " deleted=", deleted, " of", deletedNames);
+}
+
 void ClearAllLabels(const string objectPrefix) {
     // P-UI-21: suppress window — every bulk below deletes inpObjectPrefix*
     // names, and unsuppressed each fires CHARTEVENT_OBJECT_DELETE ->
     // CacheRemoveObject + g_redrawTHLevelsNeeded (a label clear must never
     // flag a full level redraw).
     g_suppressDeleteEvents = true;
-    // 1. Delete all labels with the standard LBL_ prefix via native bulk delete
-    string labelPrefix = objectPrefix + "LBL_";
-    ObjectsDeleteAll(0, labelPrefix);
+    // 1. P-PERF-38g: ARM THE SWEEP, DO NOT BULK DELETE.
+    //
+    // Was: `ObjectsDeleteAll(0, objectPrefix + "LBL_")` — a kernel walk of the
+    // whole chart object list on EVERY label pass, which is why every label
+    // blinked (deleted here, re-created by the displays below). The sweep that
+    // replaces it deletes only what the LAST pass produced and THIS pass did
+    // not, so a steady-state pass deletes nothing and a timeframe switch still
+    // loses the previous TF's rows — the exact behaviour the bulk delete was
+    // there for.
+    LblSweepBegin(objectPrefix);
 
     // P-PERF-38f: THE LEGACY NAMESPACES ARE THE MIGRATION'S JOB, AND ITS ALONE.
     //
@@ -308,6 +429,7 @@ void ClearAllLabels(const string objectPrefix) {
 // painted at another (the P-UI-30 trap, inside the card).
 bool CreateATRTradePiece(const string name, const string text, const color textColor,
                          const int fontSize, const int xPos, const int yPos) {
+    LblMark(name);   // P-PERF-38g: produced by this pass, even if every write below is skipped
     if(ObjectFind(0, name) < 0) {
         if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
     }
@@ -362,12 +484,17 @@ bool LiveCountdownEnabled()
 {
    return (inpShowLiveCountdown && !IsIndicatorHidden());
 }
+// P-PERF-51: per-call dirtiness of the countdown tag. CreateLivePriceCountdown
+// sets it: true when it wrote (or removed) anything, false when a still second
+// compared equal and cost reads only. The 1 Hz caller repaints only on true.
+static bool s_cdDirty = false;
 
 // Paints the tag when its own switch is on, removes it (plus the retired
 // "...ATR_Trade_Current_CloseIn" of older builds) when it is off.
 void RefreshLiveCountdown()
 {
    string nm = LiveCountdownObjName();
+   s_cdDirty = true;   // deletes below are changes; CreateLive clears it when clean
    if(!LiveCountdownEnabled())
    {
       ObjectDelete(0, nm);
@@ -401,6 +528,8 @@ bool LiveCountdownPointInside(const int mx, const int my)
 //+------------------------------------------------------------------+
 bool CreateLivePriceCountdown(const string name)
 {
+   LblMark(name);   // P-PERF-38g: produced by this pass, even on the hidden/clean exits below
+   s_cdDirty = true;   // the clean-skip below is the only path that clears it
    // Own switch only — never the ATR block's flags (that is the whole point).
    if(!LiveCountdownEnabled())
    {
@@ -410,9 +539,9 @@ bool CreateLivePriceCountdown(const string name)
    }
 
    double point = GetCachedPoint();
-   if(IsZero(point, EPSILON_PRICE)) return false;
+   if(IsZero(point, EPSILON_PRICE)) { s_cdDirty = false; return false; }
    datetime bt = iTime(Symbol(), Period(), 0);
-   if(bt <= 0) return false;
+   if(bt <= 0) { s_cdDirty = false; return false; }
 
    // The quote the tag rides: the bid/ask mid, so it sits exactly on the level
    // the terminal's own price lines are drawn at. Bar close covers the very
@@ -423,7 +552,7 @@ bool CreateLivePriceCountdown(const string name)
    if(bid > 0.0 && ask > 0.0) price = (bid + ask) / 2.0;
    else if(bid > 0.0)         price = bid;
    else                       price = iClose(Symbol(), Period(), 0);
-   if(price <= 0.0) return false;
+   if(price <= 0.0) { s_cdDirty = false; return false; }
 
    // Bar-0 pixel X (its LEFT edge) + the quote's pixel Y. A chart scrolled
    // away from the live bar has no candle to sit next to, so park the tag
@@ -475,7 +604,7 @@ bool CreateLivePriceCountdown(const string name)
       ObjectDelete(0, name);
    if(ObjectFind(0, name) < 0)
    {
-      if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
+      if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) { s_cdDirty = false; return false; }
       ObjectSetString(0, name, OBJPROP_TEXT, "");   // no default "Label" text
    }
 
@@ -486,6 +615,26 @@ bool CreateLivePriceCountdown(const string name)
    if(chTag <= 0) chTag = 1080;
    int xLeft = MathMax(4, x);
    int yTop = MathMax(2, MathMin(priceY - fsz / 2, chTag - (fsz + 2) - 20));
+
+   // P-PERF-51: compare first. A still second (same quote, same seats, same
+   // ink) costs ~12 reads and zero writes; the caller repaints only on dirty.
+   if(g_cdTagValid && ObjectFind(0, name) >= 0
+      && ObjectGetString(0, name, OBJPROP_FONT) == inpFontName
+      && ObjectGetInteger(0, name, OBJPROP_FONTSIZE) == fsz
+      && ObjectGetInteger(0, name, OBJPROP_CORNER) == CORNER_LEFT_UPPER
+      && ObjectGetInteger(0, name, OBJPROP_ANCHOR) == ANCHOR_LEFT_UPPER
+      && ObjectGetInteger(0, name, OBJPROP_SELECTABLE) == false
+      && ObjectGetInteger(0, name, OBJPROP_HIDDEN) == false
+      && ObjectGetInteger(0, name, OBJPROP_ZORDER) == Z_CHART_LABEL
+      && ObjectGetString(0, name, OBJPROP_TEXT) == text
+      && ObjectGetInteger(0, name, OBJPROP_COLOR) == inpCountdownColor
+      && ObjectGetInteger(0, name, OBJPROP_XDISTANCE) == xLeft
+      && ObjectGetInteger(0, name, OBJPROP_YDISTANCE) == yTop
+      && ObjectGetInteger(0, name, OBJPROP_TIMEFRAMES) == OBJ_ALL_PERIODS)
+   {
+      s_cdDirty = false;
+      return true;
+   }
 
    SetLabelFont(name);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fsz);   // own size over the shared one
@@ -747,6 +896,7 @@ bool DisplayTradePlanTopRows(const string labelPrefix, const STradePlan &plan,
 bool CreateTRexPiece(const string name, const string text, const color textColor,
                      const int fontSize, const int xPos, const int yPos,
                      const string fontName = "") {
+    LblMark(name);   // P-PERF-38g: produced by this pass
     if(ObjectFind(0, name) < 0) {
         if(!ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0)) return false;
     }
@@ -771,11 +921,34 @@ bool CreateTRexPiece(const string name, const string text, const color textColor
     return true;
 }
 
+// P-PERF-53: last painted title-block state. DisplayTRexTitleBlock compares
+// first: a still 2 s pass (same spread, same inks, same seats) costs reads
+// only instead of 27 same-value writes.
+static string s_trxPrefix = "";
+static string s_trxSpText = "";
+static color s_trxTR = clrNONE, s_trxEX = clrNONE, s_trxSP = clrNONE;
+static int s_trxFS = -1, s_trxBS = -1;
+static int s_trxXSp = 0, s_trxYSp = 0, s_trxXTR = 0, s_trxXEx = 0, s_trxYBrand = 0;
+static bool s_trxInit = false;
 bool DisplayTRexTitleBlock(const string labelPrefix, const STrexCardLayout &L) {
     string spName  = labelPrefix + "TREX_Spread";
     string capName = labelPrefix + "TREX_Caption";   // RETIRED (P-LBL-06) - purge only
     string trName  = labelPrefix + "TREX_TR";
     string exName  = labelPrefix + "TREX_EX";
+    // P-PERF-38g: MARKED BEFORE THE P-PERF-53 CLEAN-SKIP BELOW, on purpose.
+    //
+    // The skip is the whole point of P-PERF-53 (a still 2 s pass costs reads),
+    // so it returns TRUE without calling a single CreateTRexPiece — and a mark
+    // placed at the create call would then count those three names as "not
+    // produced this pass" and the sweep would DELETE them, recreate them next
+    // pass, and delete them again: a permanent 3-object flicker at the exact
+    // triple this card owns (measured live: `labels sweep: produced=3
+    // deleted=3` once a second). A clean-skip PASS IS A PASS THAT OWNS THE
+    // NAMES — it decided the objects are already correct. That decision is
+    // where ownership is recorded, never the write.
+    LblMark(spName);
+    LblMark(trName);
+    LblMark(exName);
 
     // P-LBL-06 (2026-09-14, user request: "that Persian text should go"): the
     // green Persian caption row is RETIRED from the chart. The name is still
@@ -809,6 +982,19 @@ bool DisplayTRexTitleBlock(const string labelPrefix, const STrexCardLayout &L) {
     // by the caller): it knows the row pitch, the centring axis and the MEASURED
     // width of `ex` - the piece order here (`sp`, `TR`, `ex`) is the only thing
     // this function still decides.
+    if(s_trxInit && s_trxPrefix == labelPrefix
+       && s_trxSpText == spText
+       && s_trxTR == inpATRTradeTRColor && s_trxEX == inpATRTradeExColor && s_trxSP == inpATRTradeSpreadColor
+       && s_trxFS == L.fontSize && s_trxBS == L.brandSize
+       && s_trxXSp == L.xSp && s_trxYSp == L.ySp
+       && s_trxXTR == L.xTR && s_trxXEx == L.xEx && s_trxYBrand == L.yBrand
+       && ObjectFind(0, spName) >= 0 && ObjectFind(0, trName) >= 0 && ObjectFind(0, exName) >= 0)
+       return true;
+    s_trxInit = true;
+    s_trxPrefix = labelPrefix; s_trxSpText = spText;
+    s_trxTR = inpATRTradeTRColor; s_trxEX = inpATRTradeExColor; s_trxSP = inpATRTradeSpreadColor;
+    s_trxFS = L.fontSize; s_trxBS = L.brandSize;
+    s_trxXSp = L.xSp; s_trxYSp = L.ySp; s_trxXTR = L.xTR; s_trxXEx = L.xEx; s_trxYBrand = L.yBrand;
     // P-UI-70d: every colour of this card is a setting now (the ATR card's CARD
     // COLORS row / the group-13 inputs), so the five literals that used to live
     // here are gone: they are the ONE reason "personalise the TRex SL/TP" was
@@ -845,19 +1031,8 @@ void DisplayATRLabels(const string objectPrefix) {
     // separate rendering of the same composite and only cluttered the row.
     // Stale M30 pieces are purged by ClearAllLabels() before every redraw.
     string timeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
+    // Column colors are the shared STANDARD_COLORS owner (same TF order).
     int tfMinutes[] = {1, 5, 15, 60, 240, 1440, 10080, 43200};
-
-    // Use TH colors for ATR
-    color colors[] = {
-        clrBlack,        // M1
-        clrBlack,        // M5
-        clrBlack,        // M15
-        clrBlue,         // H1
-        clrRed,          // H4
-        clrGreen,        // D1
-        clrBlack,        // W1
-        clrBlack         // MN1
-    };
     
     bool isVerticalLayout = (inpLabelArrangement == LABEL_ARRANGEMENT_VERTICAL);
     int rowSpacing = inpLabelRowGap;
@@ -880,6 +1055,7 @@ void DisplayATRLabels(const string objectPrefix) {
     int sectionGap = inpSectionGap;
     
     string titleObjName = labelPrefix + "ATR_Title";
+    LblMark(titleObjName);   // P-PERF-38g
     if(ObjectFind(0, titleObjName) < 0) {
         ObjectCreate(0, titleObjName, OBJ_LABEL, 0, 0, 0);
         ObjectSetString(0, titleObjName, OBJPROP_TEXT, ""); // Clear default "Label" text
@@ -911,7 +1087,7 @@ void DisplayATRLabels(const string objectPrefix) {
         
         double atrPoints = atrValue / point;
         double atrPips = NormalizeDouble(atrValue / pipSize, 1);
-        color labelColor = colors[i];
+        color labelColor = STANDARD_COLORS[i];
     
         string mainText = inpShowTimeframeInLabels ?
             StringFormat("%s: %.1f", timeframes[i], atrPips) :
@@ -1316,22 +1492,24 @@ void TradePlanLiveTick()
     // the countdown away. One pixel-Y read + a text-set is the cheapest
     // refresh there is, so this does not wake the 2 s trade-block pump
     // (P-PERF-01).
-    if(nowMs - s_lastCdMs >= 1000)
-    {
-        s_lastCdMs = nowMs;
-        RefreshLiveCountdown();
-        ThrottledChartRedraw();
-    }
+   if(nowMs - s_lastCdMs >= 1000)
+   {
+      s_lastCdMs = nowMs;
+      RefreshLiveCountdown();
+      if(s_cdDirty) ThrottledChartRedraw();
+   }
 
     // P-UI-84: the card's OWN master, never the ATR overview (see
     // DisplayATRTradeLabels). `IsIndicatorHidden()` stays — the F-hide must
     // still park this pump with the rest of the chart.
     if(!inpShowATRTradeLabels || IsIndicatorHidden()) return;
     static uint s_lastMs = 0;
-    string labelPrefix = GetLevelObjectPrefix() + "LBL_";
-
     if(nowMs - s_lastMs < 2000) return;
     s_lastMs = nowMs;
+    // P-PERF-50: the prefix string was built on EVERY tick+timer call and then
+    // thrown away by the 2 s gate above — same "string before the gate" waste
+    // as the per-event ledger. Built here, it runs once per 2 s pass.
+    string labelPrefix = GetLevelObjectPrefix() + "LBL_";
     STradePlan plan;
     if(!TradePlanComputeLive(Period(), plan)) return;
     // ONE card layout for BOTH branches below (P-LBL-09): the drawn-row set and
@@ -1410,6 +1588,11 @@ void TradePlanLiveTick()
     ThrottledChartRedraw();
 }
 
+#endif // LABELS_A_MQH
+// Labels_B.mqh - LabelFunctions.mqh split 2026-09-29: exact lines 1404-2072, byte-identical, zero renames.
+#ifndef LABELS_B_MQH
+#define LABELS_B_MQH
+
 void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
     string uniquePrefix = objectPrefix + "LBL_";
     string allTimeframes[] = {"M1", "M5", "M15", "H1", "H4", "D1", "W1", "MN1"};
@@ -1478,37 +1661,81 @@ void SetATRLabelsVisibility(const string objectPrefix, const bool visible) {
     CacheForgetTfMasks(uniquePrefix);
 }
 
+// P-TH-02 (2026-09-30) — THE NAME IS THE WRITE.
+//
+// This function masked `<prefix>TH_*`, but every TH object is BORN as
+// `<prefix>LBL_TH_*`: DisplayFractalTHs/DisplayStandardTHs build
+// `labelPrefix = objectPrefix + "LBL_"` and hand THAT to CreateTHLabel, which
+// names the three objects `labelPrefix + "TH_"`, and the title is
+// `labelPrefix + "TH_Title"`. So all ~50 ObjectSetInteger calls below addressed
+// names the chart does not carry, MT4 ignored each one in silence (no error, no
+// log), and the toggle could only ever work through the label sweep — the
+// reported «لیبل های th خاموش و روشن درست کار نمیکنه».
+//
+// The ATR sibling above has always built `objectPrefix + "LBL_"`; this is the
+// same construction. The `applied=` number on the probe line below is the proof:
+// it counts the writes the terminal ACCEPTED (ObjectSetInteger returns false for
+// a name it does not hold), so it read 0 on every press before this fix.
+//
+// ONE OWNER: this function is the authority for the whole TH mask (all three
+// modes, both families, the title and the targets). CreateTHLabel writes the mask
+// for the family whose display is ALREADY gated on `g_thLabelsMode == N`, so the
+// two writers agree by construction in every mode - they must never be given
+// separate arithmetic (Touch rule 7: a second grid is the bug).
 void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
+    string uniquePrefix = objectPrefix + "LBL_";
     bool shouldShow = ((mode != 0) && !IsIndicatorHidden());
     long tf = shouldShow ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
 
-    ObjectSetInteger(0, objectPrefix + "TH_Title", OBJPROP_TIMEFRAMES, tf);
+    int applied = 0;
+    int aimed = 0;
+    string nm = uniquePrefix + "TH_Title";
+    aimed++;
+    if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, tf)) applied++;
 
-    bool showFractal = (mode == 1 || mode == 3);
-    bool showStandard = (mode == 2 || mode == 3);
+    bool showFractal = (mode == 1);
+    bool showStandard = (mode == 2);
 
     long fractalTF = (shouldShow && showFractal) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     long fractalTargetsTF = (shouldShow && showFractal && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     int _nFractal = ArraySize(FRACTAL_TIMEFRAMES);
     for(int i = 0; i < _nFractal; i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
-        ObjectSetInteger(0, StringFormat("%sTH_%s", objectPrefix, timeframeName), OBJPROP_TIMEFRAMES, fractalTF);
-        ObjectSetInteger(0, StringFormat("%sTH_Steps_%s", objectPrefix, timeframeName), OBJPROP_TIMEFRAMES, fractalTF);
-        ObjectSetInteger(0, StringFormat("%sTH_Targets_%s", objectPrefix, timeframeName), OBJPROP_TIMEFRAMES, fractalTargetsTF);
+        nm = StringFormat("%sTH_%s", uniquePrefix, timeframeName);
+        aimed++;
+        if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, fractalTF)) applied++;
+        nm = StringFormat("%sTH_Steps_%s", uniquePrefix, timeframeName);
+        aimed++;
+        if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, fractalTF)) applied++;
+        nm = StringFormat("%sTH_Targets_%s", uniquePrefix, timeframeName);
+        aimed++;
+        if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, fractalTargetsTF)) applied++;
     }
     long standardTF = (shouldShow && showStandard) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     long standardTargetsTF = (shouldShow && showStandard && inpShowTHTargets) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     int _nStandard = ArraySize(STANDARD_TIMEFRAMES);
     for(int i = 0; i < _nStandard; i++) {
         string timeframeName = STANDARD_TIMEFRAMES[i];
-        ObjectSetInteger(0, StringFormat("%sTH_%s", objectPrefix, timeframeName), OBJPROP_TIMEFRAMES, standardTF);
-        ObjectSetInteger(0, StringFormat("%sTH_Steps_%s", objectPrefix, timeframeName), OBJPROP_TIMEFRAMES, standardTF);
-        ObjectSetInteger(0, StringFormat("%sTH_Targets_%s", objectPrefix, timeframeName), OBJPROP_TIMEFRAMES, standardTargetsTF);
+        nm = StringFormat("%sTH_%s", uniquePrefix, timeframeName);
+        aimed++;
+        if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, standardTF)) applied++;
+        nm = StringFormat("%sTH_Steps_%s", uniquePrefix, timeframeName);
+        aimed++;
+        if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, standardTF)) applied++;
+        nm = StringFormat("%sTH_Targets_%s", uniquePrefix, timeframeName);
+        aimed++;
+        if(ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, standardTargetsTF)) applied++;
     }
 
     // P-PERF-02: masks written outside the guard → drop the stored memory
     // (see SetATRLabelsVisibility).
-    CacheForgetTfMasks(objectPrefix + "TH_");
+    CacheForgetTfMasks(uniquePrefix + "TH_");
+
+    // P-TH-02 probe: one line per toggle, and the two numbers this fix is about —
+    // how many mask writes the terminal accepted, out of how many were aimed.
+    // A toggle with everything already drawn reads applied=aimed (all names
+    // exist); `applied=0` is the pre-fix signature and must never come back.
+    Print("[P-LBL] TH mask mode=", mode, " applied=", applied, " of ", aimed);
 }
 
 //+------------------------------------------------------------------+
@@ -1530,6 +1757,13 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
     string mainObjName = objectPrefix + "TH_" + timeframeName;
     string stepsObjName = objectPrefix + "TH_Steps_" + timeframeName;
     string targetsObjName = objectPrefix + "TH_Targets_" + timeframeName;
+    // P-PERF-38g: the TH columns are PER-TIMEFRAME (ladder = GetTimeframeTH()),
+    // so their name set is not stable across a switch — they are the family the
+    // sweep exists for. Marked here, where the names are built, so the mark
+    // survives the guarded writes below.
+    LblMark(mainObjName);
+    LblMark(stepsObjName);
+    LblMark(targetsObjName);
     
     bool mainCreated = false;
     bool stepsCreated = false;
@@ -1662,12 +1896,9 @@ bool CreateTHLabel(const string objectPrefix, const string timeframeName, const 
 }
 
 void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-    if(!g_thLabelsVisible || (g_thLabelsMode != 1 && g_thLabelsMode != 3)) return;
-    // P-UI-43: same rule on the bottom side - the fractal block is the FIRST
-    // bottom-side section whenever it is shown (modes 1 and 3), so it opens the
-    // side and owns `inpTHLabelsMarginBottom` instead of inheriting a stack offset
-    // from an earlier pass (which left the whole block one 108px slot off the
-    // floor). The standard block, when shown too, still stacks one slot above it.
+    if(!g_thLabelsVisible || g_thLabelsMode != 1) return;
+    // P-UI-43: the shown section opens the bottom side and owns the margin.
+    // Modes are exclusive now, so each block resets the stack when it paints.
     g_currentLabelYOffsetBottom = 0;
     
     double point = GetCachedPoint();
@@ -1686,6 +1917,7 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     int sectionGap = inpSectionGap;
 
     string thTitleObjName = labelPrefix + "TH_Title";
+    LblMark(thTitleObjName);   // P-PERF-38g
     if(ObjectFind(0, thTitleObjName) < 0) {
         ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
         ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, ""); // Clear default "Label" text
@@ -1714,7 +1946,11 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
     int painted = 0;   // P-UI-43: columns this section really painted (slot booking)
     for(int i = 0; i < _nFrac; i++) {
         string timeframeName = FRACTAL_TIMEFRAMES[i];
-        double percentage = MODIFIED_FRACTAL_PERCENTAGES[i];
+        // P-TH-01: SCALED — the strip is the DISPLAY of the ladder that gets
+        // drawn, so it must show the knob's numbers, never the raw table's.
+        // A strip that disagreed with the lines would be the one way the user
+        // could not tell whether the knob did anything.
+        double percentage = FractalPercentScaled(i);
         double thPoints = CalculateTHPoints(dailyPriceForTH, digits, percentage);
         // P-UI-52: pips through the ONE owner (`GetCachedPipSize()`), never the
         // hard-coded `point * 10`: on a 2-digit index/crypto symbol a pip is one
@@ -1770,10 +2006,9 @@ void DisplayFractalTHs(const string objectPrefix, const double dailyPriceForTH, 
 }
 
 void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH, const datetime currentTime) {
-    if(!g_thLabelsVisible || (g_thLabelsMode != 2 && g_thLabelsMode != 3)) return;
-    // P-UI-43: this block opens the bottom side only in standard-only mode; in
-    // "both" mode the fractal block below it owns the margin (see DisplayFractalTHs).
-    if(g_thLabelsMode == 2) g_currentLabelYOffsetBottom = 0;
+    if(!g_thLabelsVisible || g_thLabelsMode != 2) return;
+    // Exclusive mode: the shown block owns the bottom margin, no stacking.
+    g_currentLabelYOffsetBottom = 0;
 
     double point = GetCachedPoint();
     int digits = GetCachedDigits();
@@ -1791,11 +2026,12 @@ void DisplayStandardTHs(const string objectPrefix, const double dailyPriceForTH,
     int sectionGap = inpSectionGap;
 
     string thTitleObjName = labelPrefix + "TH_Title";
+    LblMark(thTitleObjName);   // P-PERF-38g
     if(ObjectFind(0, thTitleObjName) < 0) {
         ObjectCreate(0, thTitleObjName, OBJ_LABEL, 0, 0, 0);
         ObjectSetString(0, thTitleObjName, OBJPROP_TEXT, ""); // Clear default "Label" text
     }
-    // Title already set in DisplayFractalTHs if BOTH mode, but we update Y position here
+    // Exclusive mode: only one block paints, the title Y is set here.
     ObjectSetInteger(0, thTitleObjName, OBJPROP_YDISTANCE, titleYPos + (inpShowTHTargets ? singleLineHeight * 2 : singleLineHeight));
 
     int titleWidth = (int)CalculateTextWidth("TH:");
@@ -1875,11 +2111,6 @@ void StoreLabelPosition(const string name, const int xPos, const int yPos) {
     } else {
         Print("StoreLabelPosition: Failed to resize array");
     }
-}
-
-int GetStoredXPosition(const string name) {
-    for(int i=0; i<ArraySize(g_labelPositions); i++) if(g_labelPositions[i].name==name) return g_labelPositions[i].xPos;
-    return inpInitialX;
 }
 
 //+------------------------------------------------------------------+
@@ -2016,18 +2247,6 @@ int LabelRowMaxWidth(const int startXPos) {
     return (usable > 0) ? usable : 0;    // a known-but-tiny chart still wraps
 }
 
-int GetBottomTitleYOffset(const bool showTargets, const int rowSpacing) {
-    int singleLineHeight = inpFontSize + rowSpacing;
-    return showTargets ? singleLineHeight * 2 : singleLineHeight;
-}
-
-string StringRepeat(string str, int count) {
-    string result = "";
-    for(int i=0; i<count; i++) {
-        result = result + str;
-    }
-    return result;
-}
 
 
 //+------------------------------------------------------------------+
@@ -2079,27 +2298,23 @@ void UpdateLockStatusLabel(bool updateTimestamp = true)
 //+------------------------------------------------------------------+
 string PeriodToString(int period)
 {
-    // R-TF-UNIT: callers pass MINUTES (plan.chartMin, g_lockedPeriod). Normalise
-    // through CompatMinutes (identity on MT4, enum->minutes on MT5) and switch on
-    // minute literals: on MT4 this matches exactly the cases the PERIOD_* labels
-    // matched, on MT5 it stops "H1" degrading to "TF60" in object names/lock text.
-    // The "MN" spelling is legacy and load-bearing (see MigrateTimeframeNamedObjects).
-    int mins = CompatMinutes(period);
-    switch(mins)
+    switch(period)
     {
-        case 1:     return "M1";
-        case 5:     return "M5";
-        case 15:    return "M15";
-        case 30:    return "M30";
-        case 60:    return "H1";
-        case 240:   return "H4";
-        case 1440:  return "D1";
-        case 10080: return "W1";
-        case 43200: return "MN";
-        default:    return "TF" + IntegerToString(mins);
+        case PERIOD_M1:  return "M1";
+        case PERIOD_M5:  return "M5";
+        case PERIOD_M15: return "M15";
+        case PERIOD_M30: return "M30";
+        case PERIOD_H1:  return "H1";
+        case PERIOD_H4:  return "H4";
+        case PERIOD_D1:  return "D1";
+        case PERIOD_W1:  return "W1";
+        case PERIOD_MN1: return "MN";
+        default:         return "TF" + IntegerToString(period);
     }
 }
 
 
+
+#endif // LABELS_B_MQH
 
 #endif // LABEL_FUNCTIONS_MQH

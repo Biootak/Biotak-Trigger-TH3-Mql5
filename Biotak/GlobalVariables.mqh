@@ -1,15 +1,54 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/GlobalVariables.mqh
+//   regenerate : python tools/parity/resync-module.py --write GlobalVariables.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   #ifndef GLOBAL_VARIABLES_MQH
 #define GLOBAL_VARIABLES_MQH
 
 // Core State
 static double g_highestHigh = EMPTY_VALUE;
 static double g_lowestLow = EMPTY_VALUE;
+// P-TH3-DEL2 (2026-09-22) -- OUR OWN deletes announce themselves by TIME.
+// Redraws drop and remake family members (mother overlay with no match,
+// proof with no vote, zone style switches); each drop queues an
+// OBJECT_DELETE behind the draw. The delete cascade (OnABCDMouseEvent)
+// heals those while this second is fresh and only wipes a family whose
+// anchors are actually gone. Plain transient: never persisted, never read
+// on the steady path.
+// P-TH3-DEL3: WALL clock, not the tick clock. TimeCurrent only moves when the
+// server sends a tick, so a drop queued behind our own multi-second redraw
+// read the tick-time window as already closed on a live chart — and a frozen
+// clock (no-tick chart) held it open forever. GetTickCount answers both.
+static uint g_th3OwnDeleteMs = 0;
 static double g_currentPrice = 0.0;
 static datetime g_lastCalculation = 0;
 static datetime g_lastHistoricalUpdate = 0;
 static bool g_initialized = false;
 static bool g_calculatedOnce = false;
 static bool g_labelsRelayoutNeeded = false;
+
+// P-KEY-PROBE (2026-09-30, Touch rule 5) — THE TRIGGER PRESS, TIMESTAMPED.
+// «سطوح تریگر دیر خاموش و روشن میشه» is a latency complaint and latency has to be a
+// number in the log or the next edit is a guess. P-PERF-32b made the toggle paint in
+// its own event, so the pair is two lines now: the OWNER prints press→painted
+// (`[P-KEY] T applied … ms=` bands=/masks=) and the frame that RECONCILES the family
+// prints press→frame-end (`[P-KEY] T settled … ms=` hidden=/reached=). The fields
+// below feed the second line only: the render counts the trigger bands whose mask it
+// asserted for the press (hidden) and the bands it reached (reached).
+// Cost: four int writes on a key press, one int read per trigger band while a press
+// is outstanding, one compare at the end of every frame.
+static uint g_triggerPressMs     = 0;   // 0 = no trigger toggle waiting for the frame
+static int  g_triggerPressOn     = 0;
+static int  g_triggerPressHidden = 0;   // bands this render masked OFF for the press
+static int  g_triggerPressReached= 0;   // trigger bands this render reached for it
 static double g_dailyClosePriceForTH = EMPTY_VALUE;
 bool g_redrawTHLevelsNeeded = true;
 bool g_forceClearOnNextDraw = false;
@@ -108,6 +147,125 @@ bool UIPointerOverSurface(const int mx,const int my)
 // Custom Price Selection
 static bool g_waitingForCustomPriceClick = false;
 static string g_customPriceHorizontalLineName = "CustomPriceHorizontalLine";
+// P-UI-98d: the line's ONE small marker — a green dot at the chart's right edge
+// (time 0, the same anchoring the pip labels use) that shows the line is ARMED.
+static string g_cpMarkerName = "CustomPriceHorizontalLine_Mark";
+// P-UI-98: the step-1 handles' markers — red, one per armed rung-1 line. The
+// names carry "_Above_"/"_Below_" so the L-switch visibility walk covers them
+// with the line family, and no mode name, so a mode switch orphans none.
+string S1MarkName(const int direction)
+{
+   return inpObjectPrefix + "_Mark_" + (direction > 0 ? "Above_1" : "Below_1");
+}
+// P-UI-98d v2 — THE MARKERS ARE BAKED DRAG HANDLES (user order: «نشانه ها
+// هندلر وسط خط باشه و به صورت ایکون درگ و به صورت دایره باشه از هر طرف وسط»).
+// The leg meter's own P-LM-14 language: OBJ_BITMAP_LABEL rasters, centred ON
+// the line, in SCREEN pixels. The X is the chart's horizontal middle (the line
+// spans the whole chart, so its middle IS the screen's middle) and the Y is the
+// line's price projected through the price scale — the same three reads the
+// pipeline's own pixel math uses. The step-1 projections are stashed here by
+// the render's face owner so the ride channels re-project without re-rendering.
+#resource "\\Files\\Icons\\cp_handle.bmp"
+#resource "\\Files\\Icons\\s1_handle.bmp"
+#define CP_HANDLE_RES  "::Files\\Icons\\cp_handle.bmp"
+#define S1_HANDLE_RES  "::Files\\Icons\\s1_handle.bmp"
+#define HANDSET_HANDLE_HALF  7       // the 15 px icon's half, for the centring
+#define CP_HANDLE_HALF       9       // P-UI-98q: the green raster reads one size up (19 px)
+#define HANDSET_HANDLE_PARK  (-100)  // anchor off-window: park the icon outside it
+static double g_s1MarkAbovePrice = 0.0;  // the render's own projection answers
+static double g_s1MarkBelowPrice = 0.0;
+// P-UI-98e: the armed handles' own OBJECT NAMES, stashed by the same face owner.
+// The grab hit test must name the line it claims without walking the chart, and
+// the carry must know which object to move — the render has both in hand.
+static string g_s1MarkAboveName = "";
+static string g_s1MarkBelowName = "";
+// P-UI-98e: the step-1 handle's OWN carry — the custom-price line's channel
+// (P-UI-49c/P-UI-99), worn by the second hand-set line, because MT4's native
+// per-object drag never engaged on the user's build («الان step اول در هر تایم
+// که درش هستیم قابل درگ کردن نیستش»). Declared HERE, beside the gesture flags
+// they heal and settle beside, so every reader in the translation unit sees them
+// regardless of include position (the same rule g_s1DragLive follows).
+static int    g_s1OwnGrabY = 0;                  // cursor pixel row at the grab
+static double g_s1OwnGrabCursorPrice = 0.0;      // price under that pixel at the grab
+static double g_s1OwnGrabPrice = 0.0;            // the handle's own price at the grab
+static double g_s1OwnLastWrite = 0.0;            // the last price WE wrote (0 = none)
+static bool   g_s1OwnActive = false;             // THIS gesture is ours (our press claimed it)
+// P-UI-98e: the draggable flag is BORROWED for the length of our own carry
+// (P-LM-21's rule): MT4 re-arms its own per-object drag on every paint for as
+// long as SELECTABLE sits on the object, and the line then fights the hand -
+// «سریع قطع میشه». Cleared (and the flag returned) at the settle and by the heal.
+static bool   g_s1OwnBorrowed = false;
+// P-UI-98e: the CHART PERIOD the stash below belongs to. «فقط هر step اول در تایم
+// خودش فعال باشه»: a stash left by the previous timeframe must not answer a
+// press on the new one (the render re-stashes on the TF switch's own frame).
+static int    g_s1MarkPeriod = 0;
+// P-UI-98e: THE CLICK CONTRACT's state. Declared here (not beside the functions
+// that use it) because the stale-drag HEAL - a hundred lines above them, and the
+// one path that must consume a lost press - has to see every one of them.
+static string g_s1ClickRow = "";        // the rung-1 line the current press landed on
+static int    g_s1ClickRowY = 0;        // its pixel row at the press (the travel test)
+static uint   g_s1ClickLastMs = 0;      // the contract's own double-click stamp
+static uint   g_s1ClickHandledMs = 0;   // the twin-event dedupe (two transports, one click)
+
+void HandsetHandleAtXY(const string hn, const int cx, const int cy, const int half, const string bmp)
+{
+   if(ObjectFind(0, hn) < 0)
+   {
+      if(!ObjectCreate(0, hn, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+      ObjectSetInteger(0, hn, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, hn, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, hn, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, hn, OBJPROP_BACK, false);
+      ObjectSetInteger(0, hn, OBJPROP_ZORDER, Z_CHART_LABEL);
+   }
+   // The rung is re-asserted on every pass, UNGUARDED: a handle a pre-rung build
+   // drew keeps ObjectCreate's default 0 until something lifts it. It is not
+   // read back — the zorder audit bans OBJPROP_ZORDER reads in product code
+   // (a diagnostic, not a product question, P-UI-31's rule).
+   ObjectSetInteger(0, hn, OBJPROP_ZORDER, Z_CHART_LABEL);
+   // the BMPFILE re-push forces MT4 to re-decode — change-guarded (P-LM-15)
+   if((string)ObjectGetString(0, hn, OBJPROP_BMPFILE, 0) != bmp)
+   {
+      ObjectSetString(0, hn, OBJPROP_BMPFILE, 0, bmp);
+      ObjectSetString(0, hn, OBJPROP_BMPFILE, 1, bmp);
+   }
+   if(cx <= 0)
+   {
+      // unprojectable: park, never guess a screen position (the leg meter's rule)
+      if((int)ObjectGetInteger(0, hn, OBJPROP_XDISTANCE) != HANDSET_HANDLE_PARK)
+         ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, HANDSET_HANDLE_PARK);
+      return;
+   }
+   int nx = cx - half, ny = cy - half;   // the icon's CENTRE sits on the anchor
+   if((int)ObjectGetInteger(0, hn, OBJPROP_XDISTANCE) != nx)
+      ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, nx);
+   if((int)ObjectGetInteger(0, hn, OBJPROP_YDISTANCE) != ny)
+      ObjectSetInteger(0, hn, OBJPROP_YDISTANCE, ny);
+}
+
+void HandsetHandlePark(const string hn, const string bmp)
+{
+   HandsetHandleAtXY(hn, HANDSET_HANDLE_PARK, HANDSET_HANDLE_PARK, HANDSET_HANDLE_HALF, bmp);
+}
+
+// The projection: X = the chart's horizontal middle, Y = the price's pixel row.
+void HandsetHandleAt(const string hn, const double price, const string bmp)
+{
+   int w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   double pmax = ChartGetDouble(0, CHART_PRICE_MAX);
+   double pmin = ChartGetDouble(0, CHART_PRICE_MIN);
+   if(w <= 0 || h <= 0 || !(pmax > pmin) || !(price > 0.0) || !MathIsValidNumber(price))
+   {
+      HandsetHandleAtXY(hn, HANDSET_HANDLE_PARK, HANDSET_HANDLE_PARK, HANDSET_HANDLE_HALF, bmp);
+      return;
+   }
+   int y = (int)(((pmax - price) / (pmax - pmin)) * (double)h);
+   // P-UI-98q: centre with the raster's own half - the green circle is 19 px,
+   // the reds 15 px.
+   int half = (bmp == CP_HANDLE_RES) ? CP_HANDLE_HALF : HANDSET_HANDLE_HALF;
+   HandsetHandleAtXY(hn, w / 2, y, half, bmp);
+}
 static bool g_customPriceLineCreated = false;
 static double g_customTHStartPrice = 0.0;
 static ENUM_TH_START_POINT_TYPE g_thStartPointType = TH_START_POINT_PREVIOUS_CLOSE;
@@ -138,6 +296,120 @@ static bool g_customPriceNativeDrag = false;
 static bool g_customPriceDragOwn = false;
 static double g_lastCustomPriceLinePos = 0.0;
 static bool g_customPriceKeyboardOverride = false;
+//
+// P-UI-98 (2026-09-21) — THE FIRST STEP IS DRAGGABLE (custom-price step override).
+//
+// In custom-price start-point mode the trigger line ONE STEP from the custom
+// price line on each side is the user's step handle (P-UI-98f: picked by
+// geometry, `_Above_1` above and `_Below_2` below — the below side's own rung-1
+// line is drawn exactly ON the custom price line, so it can never carry the
+// handle): dragging one sets the ladder's step to the distance the user dropped
+// it at. The setting is ONE MULTIPLIER of the
+// mode's own natural first step, stored chart-scoped so a timeframe switch
+// carries it over and re-scales THAT timeframe's natural steps by the same
+// factor — the relative ratios between timeframes (and between the SS/LS
+// short/long pair, and the Factor harmonic pair) stay exactly as the course
+// defines them. F = 1.0 (or the key absent) is "no override".
+//
+// The stash below is the F-FREE first interval of the mode that was last
+// rendered (DrawLevelsBasedOnMode notes it straight off the mode factory's own
+// stepSizes, so there is no second copy of the per-mode first-step logic to
+// drift). The drag math is newFirst / NaturalFirstStep().
+static double g_stepOverrideFactor = 1.0;      // runtime mirror of the chart key
+static double g_naturalFirstStep = 0.0;        // F-free first interval, price units
+// The step-1 drag gesture's own flags (P-UI-98). Declared here, beside the
+// custom-price gesture flags they heal and settle beside, so every reader in
+// the translation unit sees them regardless of include position.
+static bool   g_s1DragLive = false;            // a step-1 handle gesture is in flight
+static string g_s1DragName = "";               // the handle being dragged (its writes are skipped)
+string StepOverrideFactorName() { return "Biotak_StepFactor_" + GetCachedChartIdStr(); }
+
+void NaturalFirstStepNote(const double step)
+{
+   if(step > 0.0 && MathIsValidNumber(step)) g_naturalFirstStep = step;
+}
+double NaturalFirstStep() { return g_naturalFirstStep; }
+
+// The ONE reader. Reads the key through the mirror; a missing key is the
+// natural ladder (1.0), not an error.
+double StepOverrideFactor()
+{
+   if(GlobalVariableCheck(StepOverrideFactorName()))
+   {
+      double v = GlobalVariableGet(StepOverrideFactorName());
+      if(v > 0.0 && MathIsValidNumber(v)) g_stepOverrideFactor = v;
+   }
+   if(!(g_stepOverrideFactor > 0.0) || !MathIsValidNumber(g_stepOverrideFactor))
+      g_stepOverrideFactor = 1.0;
+   return g_stepOverrideFactor;
+}
+
+// The ONE writer. `factor` is the ratio the user's drag produced; sane bounds
+// keep a stray drop from flattening the ladder to nothing or blowing it out.
+void StepOverrideFactorSet(const double factor)
+{
+   if(!MathIsValidNumber(factor) || factor <= 0.0) return;
+   double clamped = MathMax(0.05, MathMin(20.0, factor));
+   g_stepOverrideFactor = clamped;
+   GlobalVariableSet(StepOverrideFactorName(), clamped);
+}
+
+// The ONE clearer: custom-price mode OFF and the R reset land here.
+void StepOverrideFactorReset()
+{
+   g_stepOverrideFactor = 1.0;
+   GlobalVariableDel(StepOverrideFactorName());
+}
+
+// P-UI-98d (2026-09-21) — THE ARMED/SET STATE OF THE TWO HAND-SET LINES.
+// User order: «خط کاستوم پرایس و خط step اول وقتی بعد جابجایی روش کلیک شد ست
+// نهایی بشه و با دبل کلیک فعال بشه؛ تا زمانی که ست نهایی نشده آزادنه درگ بشه».
+// ARMED = draggable (the line's native drag answers), SET = inert (nothing can
+// grab it — a drag of any other object can never steal it, which is the other
+// half of the same order). A single click sets, a double-click re-arms; the
+// single click waits out the double-click window in the pending slots below
+// (the sweep commits it) so the second click of a double can never land on an
+// already-set line.
+static bool   g_cpLineArmed  = true;       // custom price line: armed = draggable
+static bool   g_s1LinesArmed = true;       // the two step-1 handles: armed = draggable
+// P-UI-98g (2026-09-22) — THE CIRCLES COME WHEN YOU CLICK. User order: «فقط
+// وقتی روش کلیک کردیم دایره ها بیاد برای درگ کردن». ARMED and SHOWN are two
+// different questions: armed means the line can be grabbed, shown means its
+// circular drag handle is PAINTED. The circles were painted whenever the pair
+// was armed, so they sat on the chart the whole time («خیلی مزاحم»), and the
+// user asked for the leg meter's own reading of "a marker you ask for": click
+// the line, the circle comes, drag it. The latch lives per line (the green one
+// for the custom price line, one for the step-1 pair), it is cleared by a SET
+// (a set line cannot be grabbed, so nothing points at it), by the placement's
+// own teardown and by `HandsetPlacementArm` (a fresh placement is born
+// ARMED-but-HIDDEN), and OUR OWN drag reveals it too - a hand on the line is
+// the loudest way of asking for its handle.
+// P-UI-149/P-UI-151 (2026-10-02): AND BOTH ARE NOW THE LOOK-AWAY'S — user order:
+// «با کلیک دیده بشن و جای دیگه کلیک شد خودکار پنهان بشن» and, for the green one
+// that P-UI-149 had exempted, «این دایریه سبز اینطوری میمونه بد ... وقتی کلیک شد
+// جای دیگه پنهان بشه و وقتی روش کلیک شد دیده بشه». ONE owner answers both
+// latches from the click edge: `HandsetMarkerRevealAt` shows the marker the
+// click landed on (each with its own hit test), and
+// `HandsetRevealDropOnForeignClick` clears BOTH when it landed on neither
+// (EventHandlers_Init). So a click on a marker is its show, and a click on
+// anything else is every marker's hide - one rule, three circles.
+static bool   g_cpHandleShown = false;     // the green circle: painted on request
+static bool   g_s1HandleShown = false;     // the red circles: painted on request
+static string g_cpSetPending = "";         // a single click waiting out the window
+static uint   g_cpSetPendingMs = 0;
+static string g_s1SetPending = "";
+static uint   g_s1SetPendingMs = 0;
+static uint   g_cpJustDraggedMs = 0;       // a drag release that MOVED the line:
+static uint   g_s1JustDraggedMs = 0;       //   its click echo must not set anything
+// P-UI-98m: the re-arm candidate for a SET (masked) custom price line. A masked
+// line fires no OBJECT_CLICK, so the press edge records the row off the line's
+// own grab test and the button-up / CHARTEVENT_CLICK edges ask it - exactly
+// the step-1 click shape, except a single click here is a no-op (already set)
+// and only a double re-arms, so no sweep slot is needed.
+static bool   g_cpClickArmed = false;      // press landed on the SET line's row
+static int    g_cpClickY = 0;              // its pixel row (the travel test)
+static uint   g_cpClickLastMs = 0;         // double-click window
+static uint   g_cpClickHandledMs = 0;      // twin-transport dedupe
 // TV-parity 2026-09-07: the Base Box TEXT edit field (card 12, OBJ_EDIT) owns
 // the keyboard while focused — letter hotkeys must stay silent or typing box
 // text would toggle indicator state (same pattern as the palette hex field).
@@ -147,6 +419,35 @@ static bool g_BkTextFocus = false;
 // Lives here (not Panels) so BiotakMenu — included BEFORE BiotakPanels — can
 // read it without breaking the bottom-up include order.
 static bool g_UIPanelOpen = false;
+// P-UI-98r: the open surfaces' screen rects, published by the panels module
+// (PnlPublishCover) for readers that cannot see it (HTFCandles is included
+// BEFORE BiotakPanels, so the layer rule forbids the call). Margin included
+// by the publisher; -1 = no surface. Lets chart-anchored art stay out from
+// under opaque UI without asking the UI layer per box.
+static int g_UIPanelRX = -1, g_UIPanelRY = -1, g_UIPanelRW = 0, g_UIPanelRH = 0;
+static int g_UIPPalRX = -1, g_UIPPalRY = -1, g_UIPPalRW = 0, g_UIPPalRH = 0;
+// P-DRAW-31 (2026-09-24): and the DRAW-STRIP's own plate, published the same way
+// by `DrawStripPublishRect()` for the ONE reader that cannot see it —
+// `PnlComputePosition` sizes a card with BiotakPanels' own arithmetic, and
+// BiotakPanels is included AFTER DrawStrip (MQL4 is define-before-use), so a card
+// must be TOLD where the strip is instead of re-deriving its geometry. Two panels
+// on one pixel is the user's own complaint («جایی که روی هم نیافتن»); margin
+// included by the publisher; -1 = no strip on the chart.
+static int g_UIStripRX = -1, g_UIStripRY = -1, g_UIStripRW = 0, g_UIStripRH = 0;
+// P-DRAW-87 (2026-09-30): and the OVERLAY's name root, published the same way by the
+// HTF module for the one reader that cannot see it. `DrawIsIndicatorObject`
+// (DrawToolbar, included BEFORE HTFCandles) answers "is this the product's object or
+// the user's drawing?" and the whole draw-strip hangs off it — the press hit test,
+// the interior split, the APPLY-ALL walk, the delete router. The HTF family is born
+// `BiotakHTF_<chartid>_*`, which `inpObjectPrefix` ("THLevels") does not cover, so
+// every one of those paths read it as a USER drawing. Measured 2026-09-30: the 2 s
+// `BoxExtrasPump` moved each shadow's interior into an `<name>_FL` child painted in
+// the chart BACKGROUND and cleared the master's own FILL, which is the report
+// «شادو رسم میشه بعد چند ثانیه نیست» (the pixel was byte-identical to the background).
+// The name itself stays HTFCandles' own (P-UI-68: ONE writer of an HTF name); this
+// variable only PUBLISHES it, exactly like the rects above. "" = no overlay on this
+// chart yet, and then the predicate answers what it answered before this line existed.
+static string g_OverlayNameRoot = "";
 
 // Toggle States (hotkey-controlled)
 // NOTE: g_triggerLevelsEnabled moved to RuntimeSettings.mqh — it is the runtime
@@ -159,7 +460,8 @@ static bool g_atrLabelsVisible = true;
 static int  g_cdTagX = 0, g_cdTagY = 0, g_cdTagW = 0, g_cdTagH = 0;
 static bool g_cdTagValid = false;
 static bool g_thLabelsVisible = true;
-static int  g_thLabelsMode = 0; // 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH
+static int  g_thLabelsMode = 0; // 0=OFF, 1=FRACTAL, 2=STANDARD (exclusive, never both)
+static int  g_thLastOnMode = 2; // remembered ON mode for the A toggle, default STANDARD
 
 //--- TH labels single source of truth: g_thLabelsMode drives the drawing and
 //    the hotkey cycle; the flag mirrors (g_showTHLabels / g_showFractalTHs /
@@ -168,18 +470,19 @@ static int  g_thLabelsMode = 0; // 0=OFF, 1=FRACTAL, 2=STANDARD, 3=BOTH
 //    after ANY change to g_thLabelsMode.
 int THModeFromFlags()
 {
-   if(g_showFractalTHs && g_showStandardTHs) return 3;
-   if(g_showFractalTHs)                      return 1;
-   if(g_showStandardTHs)                     return 2;
+   if(g_showStandardTHs) return 2;
+   if(g_showFractalTHs)  return 1;
    return 0;
 }
 
 void SyncTHFlagsFromMode()
 {
+   if(g_thLabelsMode == 3) g_thLabelsMode = 2; // legacy BOTH migrates to STANDARD
+   if(g_thLabelsMode == 1 || g_thLabelsMode == 2) g_thLastOnMode = g_thLabelsMode;
    g_thLabelsVisible    = (g_thLabelsMode != 0);
    g_showTHLabels       = (g_thLabelsMode != 0);
-   g_showFractalTHs     = (g_thLabelsMode == 1 || g_thLabelsMode == 3);
-   g_showStandardTHs    = (g_thLabelsMode == 2 || g_thLabelsMode == 3);
+   g_showFractalTHs     = (g_thLabelsMode == 1);
+   g_showStandardTHs    = (g_thLabelsMode == 2);
 }
 // STEPOVERRIDE-OFF (2026-09-05, user decision): single Step Mode — the override
 // layer is retired. E / Tools-ring / panel all write g_stepCalculationMode now.
@@ -380,6 +683,140 @@ bool TickDeadlinePending(const uint deadlineMs)
    return (int)(GetTickCount() - deadlineMs) <= 0;    // wrap-safe
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-142 (2026-10-02) — THE GESTURE ARBITER: WHO OWNS THIS HAND.
+// ══════════════════════════════════════════════════════════════════════════
+//
+// THE FACT, from MetaQuotes' own chart-event list: there are eleven
+// CHARTEVENT_* kinds and NONE of them answers "is a native drawing tool armed".
+// MT4 itself never has to ask — the terminal owns its tools, so its own tools
+// always win and an indicator is simply a guest. A GUEST that implements its own
+// drag (Path, the ray, Base/Knot, TH3, the leg measure) can therefore not tell,
+// at the press, whether it is taking a drawing or WATCHING the start of one —
+// which is the report «از همون نقطه که ترندلاین میکشم، اون یکی هم میاد».
+//
+// THE ONLY VOICE: `CHARTEVENT_OBJECT_DRAG` on an object that is not ours. That is
+// P-UI-130 law 3 (the hold's own rule, «a gesture IN MOTION is never ours») with
+// the scope widened from the hold to EVERY custom drag in the product.
+//
+// THE ARBITER, therefore, is one writer and one question:
+//   `GestureForeignMotion(name)` — the ONE place that sees the terminal's drag.
+//   `GestureGrabBlocked()`       — the ONE question every tool asks before it
+//                                  takes a press, and the answer is "not while
+//                                  the hand is busy with the terminal".
+// A tool that is mid-carry asks it too and, on a foreign motion, puts its own
+// snapshot back: the geometry belongs to the tool, the DECISION is shared.
+//
+// The window is the terminal's own drag HEARTBEAT — MT4 re-reports a native drag
+// about every 400 ms (P-UI-130's measurement), so that is the honest length for
+// "the hand is still busy". Our own objects never emit the event (they are born
+// non-selectable), so a path can never forbid itself.
+//
+// Cost: ONE compare per drag event and ONE subtraction per press. Nothing on a
+// tick, nothing per frame, and no second copy of this rule anywhere in the tree —
+// a tool that re-derives it is a tool that will drift from it.
+//+------------------------------------------------------------------+
+#define GESTURE_HEARTBEAT_MS 400
+static uint g_gestureForeignUntilMs = 0;
+static string g_gestureForeignName = "";
+static uint g_gesturePressMs = 0;
+//--- P-UI-145 (2026-10-02, user: «یک راهکار قطعی که درست کار بکنه، معماری»): THE WHOLE
+//--- ARCHITECTURE IS ONE STAMP AND NOTHING ELSE. MEASURED 21:06, the log named the wall:
+//--- four `press refused: the terminal is still dragging one of ours, why=release` — the lock
+//--- was CLOSED by the terminal's own drag and OPENED by nobody, so after the first native
+//--- stroke every press of ours stayed dead for the session. A sticky bool with no opener IS
+//--- the incomplete architecture, and it is gone: no state is left that can get stuck.
+//--- A foreign drag stamps `now + 400 ms` (the terminal's own drag rate, P-UI-130) and the
+//--- deadline answers for itself until it passes — «خودش باز میشه», no timer, no polling,
+//--- nothing per frame, one subtraction per press. The detection road stays closed on
+//--- purpose (MEASURED: a native stroke reports button=0 on all ~40 of its moves and speaks
+//--- once at its end), and the structural half carries the work: a path's BODY selects and
+//--- never carries, so a line press can start nothing; its DOTS are the only carry, and they
+//--- are painted only for the selected path (PathTool.mqh).
+void GestureForeignMotion(const string name)
+{
+   g_gestureForeignName = name;
+   g_gestureForeignUntilMs = GetTickCount() + GESTURE_HEARTBEAT_MS;
+}
+bool GestureGrabBlocked()
+{
+   return TickDeadlinePending(g_gestureForeignUntilMs);
+}
+string GestureForeignName() { return g_gestureForeignName; }
+//--- P-UI-145 (2026-10-02): THE SCREEN LOCK IS RETIRED, and the log says why. It was to
+//--- close for as long as the terminal's own hand was busy — MEASURED 20:35, a native stroke
+//--- reports button=0 on ALL ~40 of its moves (the census line's `nm` is the button state,
+//--- not a name), so the signal the lock waited for does not exist during the very gesture it
+//--- was built for: four `drag start … why=carry: it was taken` landed back to back and the
+//--- path still walked away (`moved=yes`). The answer is structural, not detectable — a path's
+//--- BODY selects and never carries, so no press can start a carry on a line (PathTool.mqh),
+//--- and its VERTICES answer only while it is selected, so the hand is on a dot. Nothing is
+//--- left for a foreign press to steal. The foreign-drag lock below stays: it is measured, it
+//--- is the terminal's own voice, and it is the backstop for any carry that is live.
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-144 — "WE DECIDE", AS ONE QUESTION.
+// ══════════════════════════════════════════════════════════════════════════
+// Three measurements closed the detection road (no armed-tool flag; the terminal is
+// silent for a whole native stroke and speaks once at its end; its button bit flaps
+// mid-press), so the owner of the hand is DECIDED here instead of guessed at:
+//
+//   A DRAWING THAT IS NOT ALREADY TAKEN CANNOT BE TAKEN. The first press on it
+//   selects it and writes no anchor at all; the second carries it.
+//
+// That is TradingView's own model — a drawing tool is a MODE, and inside a mode the
+// hand belongs to the new drawing — and it needs nothing from MT4, so it holds even
+// on a terminal that says nothing at all. One state, one question, and every custom
+// drag in the product asks it (the path and the ray today; Base/Knot, TH3 and the
+// leg measure join when their press paths are read).
+//
+// Cost per press: one string compare. Nothing per tick, nothing per frame.
+//+------------------------------------------------------------------+
+static string g_gestureTaken = "";
+static string g_gestureTakeWhy = "";
+void GestureTakeNote(const string name) { g_gestureTaken = name; g_gestureTakeWhy = "note:" + name; }
+void GestureTakeRelease()             { g_gestureTaken = "";  g_gestureTakeWhy = "release"; }
+bool GestureTakeAllowed(const string name)
+{
+   if(name == "")                    { g_gestureTakeWhy = "refuse: no name"; return false; }
+   if(GestureGrabBlocked())          { g_gestureTakeWhy = "refuse: terminal is dragging one of ours"; return false; }
+   if(g_gestureTaken == name)        { g_gestureTakeWhy = "carry: it was taken"; return true; }
+   g_gestureTakeWhy = "refuse: taken=\"" + g_gestureTaken + "\" asked=\"" + name + "\"";
+   return false;
+}
+//--- WHY a press was refused, in the caller's own words. MEASURED 2026-10-02 19:20: the
+//--- live journal carried EIGHT consecutive `[Path] press selects … (no carry on the first
+//--- gesture)` on one path id over forty seconds — the take never became effective, so the
+//--- user's own drag could not start, and no line said WHICH refusal it was. The arbiter
+//--- answers that in its own words now, and the caller prints it beside its own witness:
+//--- one string, written on the press edge only (nothing on a tick, nothing per frame).
+string GestureTakeWhy() { return g_gestureTakeWhy; }
+//--- THE CENSUS, beside the arbiter it measures (P-UI-142). «It did not work» is not a
+//--- verdict; the ORDER the terminal speaks is. This answers, for one reproduction, the
+//--- only question no amount of reading can: does a native draw started ON our own
+//--- drawing speak at all, and does it arrive BEFORE or AFTER our first write? It also
+//--- keeps the writer honest — a tool can only be refused by a signal that exists.
+//--- Returns TRUE when the caller should print one line (the caller owns the flushed
+//--- channel: the arbiter is compiled before it). Bounded by design: a press, a move
+//--- while the button is down or the heartbeat is live, a foreign drag, a foreign create.
+bool GestureCensusWanted(const int id, const string sparam)
+{
+   int st = (int)StringToInteger(sparam);
+   bool down = ((st & 1) != 0);
+   //--- Every event passes through here, so the press is stamped HERE (the caller stays
+   //--- flat, and a stamp is state this arbiter already owns).
+   if(down && id == CHARTEVENT_MOUSE_MOVE) g_gesturePressMs = GetTickCount();
+   if(id == CHARTEVENT_OBJECT_DRAG || id == CHARTEVENT_OBJECT_CREATE) return true;
+   if(id != CHARTEVENT_MOUSE_MOVE) return false;
+   //--- P-UI-143: a move that arrives with NO button down is the only shape a native
+   //--- stroke has while the terminal draws it (it does not claim the button), and that
+   //--- asymmetry is the whole basis of the free discriminator — so it is printed too,
+   //--- for as long as a press could still belong to it (three seconds: the longest
+   //--- deliberate stroke a hand makes before the terminal reports anything).
+   return (down || GestureGrabBlocked()
+           || (st == 0 && g_gesturePressMs != 0 && TickDeadlinePending(g_gesturePressMs + 3000)));
+}
+
 #ifndef BUILD_LITE
 // AB=CD drawing state now lives in TH3DrawingSession (TH3Controller.mqh)
 static string g_activeABCDPattern = "";
@@ -428,6 +865,40 @@ bool IsIndicatorHidden() {
     if(now - g_isHiddenCacheTime > HIDDEN_CACHE_TTL_MS)
         RefreshIsHiddenCache();
     return g_isHiddenCached;
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-93 — THE WRITE OWNER FOR THE F MUTE, beside the read owner.  |
+//|                                                                   |
+//| Reported: «این روشن و خاموش کردن سطوح روی بقیه لیبلها چرا تاثیر    |
+//| میزاره ... این دکمه های با پنل هماهنگ نیستش همه رو هماهنگ کن».     |
+//|                                                                   |
+//| The mute is the ONE term the whole ENGINE already shares:          |
+//| IsIndicatorHidden() gates the labels, the zones, the level writer  |
+//| and the mode labels (30-odd sites across LabelFunctions,           |
+//| LevelPipeline, ObjectFunctions, UtilityFunctions, VisibilityManager|
+//| and ExtendedDrawingFunctions), and the countdown's own owner spells |
+//| its switch `inpShowLiveCountdown && !IsIndicatorHidden()`. So the   |
+//| engine never needed this fix.                                      |
+//|                                                                   |
+//| The PANEL did: its family rows answered the STORED switch alone, so |
+//| after an F press every row still claimed its family was painted     |
+//| while the chart was blank - the two controls answering different    |
+//| questions, the same disagreement P-PERF-41 fixed for the zone walk.|
+//|                                                                   |
+//| TWO callers only - the F transition and the panel row that releases |
+//| the mute - and both come through here, so the GlobalVariable and the |
+//| TTL cache can never disagree with each other.                       |
+//+------------------------------------------------------------------+
+void SetIndicatorHiddenState(const bool hidden)
+{
+    string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
+    if(!GlobalVariableSet(gvar_name, hidden ? 1.0 : 0.0))
+        LOG_W(LOG_CAT_KEYS, "hidden state: Failed to set GlobalVariable, Error: " + IntegerToString(GetLastError()));
+    // Same-line refresh: the reader is TTL-cached, and the panel reads it in
+    // the SAME event as the press - a stale cache would repaint the row with
+    // the old answer and the desync would survive one more frame.
+    RefreshIsHiddenCache();
 }
 
 //+------------------------------------------------------------------+
@@ -587,7 +1058,7 @@ void ViewAnchorLineEnsure()
         if(!ObjectCreate(0, g_viewAnchorLineName, OBJ_VLINE, 0, g_viewAnchorTime, 0)) return;
     }
     ObjectSetInteger(0, g_viewAnchorLineName, OBJPROP_TIME, 0, (long)g_viewAnchorTime);
-    ObjectSetInteger(0, g_viewAnchorLineName, OBJPROP_COLOR, C'255,171,0');
+    ObjectSetInteger(0, g_viewAnchorLineName, OBJPROP_COLOR, BIO_CLR_BRAND);   // P-UI-117
     ObjectSetInteger(0, g_viewAnchorLineName, OBJPROP_STYLE, STYLE_DOT);
     ObjectSetInteger(0, g_viewAnchorLineName, OBJPROP_WIDTH, 1);
     ObjectSetInteger(0, g_viewAnchorLineName, OBJPROP_SELECTABLE, true);
@@ -647,42 +1118,18 @@ void UISyncConsume() { g_uiSyncRequested = false; }
 //+------------------------------------------------------------------+
 // Reported (recurring, and it OUTLIVES the indicator): «وقتی اندیکاتور رو
 // روی چارت می‌ندازم اسکرول چارت قفل میشه … و وقتی حذفش می‌کنم هم همچنان
-// قفل می‌مونه». Four independent writers owned the same two chart
-// properties - the ring/panels (`CircLockChart`), the Base/Knot tool
-// (`BaseKnotLockChart`), the custom-price line drag (`CustomPriceDragLockOn`)
-// and the watchdog (`ChartScrollReconcile`, `CustomPriceDragHealStale`) - and
-// each one SAVED "what the user had" and wrote it back ITSELF:
-//
-//   * the saved pair was READ while another owner already held the lock, so
-//     OUR OWN `false` was recorded as the user's preference;
-//   * whoever released LAST then restored that recorded `false`.
-//
-// That is a one-way ratchet. Once one owner's release wrote the poisoned
-// value, every later capture read `false` again - so the chart stayed locked
-// for the life of the terminal, INCLUDING after Remove, because
-// `CHART_MOUSE_SCROLL` belongs to the CHART and survives the indicator. No
-// watchdog could help: they all restored the same poisoned value.
-//
-// So there is ONE owner now. The rules ARE the fix:
-//   * CAPTURE only on the 0 -> 1 step of ONE shared refcount. At that instant
-//     no other owner is holding the lock, so the live props are the user's -
-//     the only moment that is true;
-//   * RESTORE only on the 1 -> 0 step (or a force-release), always from the
-//     one captured pair;
-//   * the pair is persisted per chart, so a re-attach / timeframe switch
-//     adopts the user's preference instead of guessing at it;
-//   * `ChartViewLockForceRelease()` is the net every teardown (every reason)
-//     and every watchdog calls, so no leaked counter can outlive a gesture;
-//   * the props are restored only ON DRIFT, so steady state costs two reads
-//     and not one terminal write.
-//
-// THE ONE-TIME HEAL: a chart locked by an older build (or a template saved
-// mid-gesture) reads BOTH properties false with no owner live. That pair is
-// the exact signature our own lock writes - a user's own preference is never
-// the pair, because no consumer ever leaves exactly one of the two alone
-// under a lock - so `ChartViewLockInit()` hands such a chart back and says so
-// once. Deliberately narrow: a chart whose user turned ONE of the two off
-// does not match and is left exactly as it is.
+// قفل می‌مونه». Four writers owned the same two chart properties (the ring/panels,
+// the Base/Knot tool, the custom-price line drag and the watchdog) and each one SAVED
+// "what the user had" and wrote it back ITSELF — so the pair was READ while another
+// owner already held the lock (OUR OWN `false` recorded as the user's preference) and
+// whoever released LAST restored it. A one-way ratchet, and it survives Remove because
+// the properties belong to the CHART and not to the indicator.
+// ONE owner now: CAPTURE on the 0 -> 1 step of ONE shared refcount (the only instant
+// nobody else holds the lock), RESTORE on the 1 -> 0 step or a force-release from that
+// one pair, persisted per chart, and written only ON DRIFT (steady state: two reads).
+// `ChartViewLockForceRelease()` is the net every teardown and watchdog calls; the
+// one-time heal hands back a chart whose BOTH props read false with no owner live — the
+// exact signature our own lock writes (a user's pair is never that).
 //+------------------------------------------------------------------+
 static int  s_viewLockCount     = 0;      // live owners (ring/panels + tool + line)
 static bool s_viewScrollUser    = true;   // the USER's pair - captured at 0 -> 1 ONLY
@@ -693,7 +1140,6 @@ static bool s_viewPersistCtx    = true;
 static bool s_viewInitDone      = false;
 
 bool ChartViewLockHeld()  { return (s_viewLockCount > 0); }
-int  ChartViewLockCount() { return s_viewLockCount; }
 
 // ONE accessor per family: the literal keeps a single owner, and the
 // REASON_REMOVE purge reaches it by NAME (see CleanupAllGlobalVariables and the
@@ -716,14 +1162,20 @@ void ChartViewPersistUser()
     s_viewPersistKnown  = true;
 }
 
-// The lock's own state: both props off. Read-guarded on every write.
+// The lock's own state. Read-guarded on every write.
+// CTXMENU-OFF (P-UI-100d, 2026-09-23): the menu half is RETIRED BY MEASUREMENT.
+// `CHART_CONTEXT_MENU` is a STUB on MT4 - `ChartSetInteger(0, ..., true)` returns
+// FALSE (refused) and `ChartGetInteger` answers 0 forever, while the control
+// property `CHART_MOUSE_SCROLL` reads back its own real value (the terminal's own
+// log: `[ctxmenu] impl-probe: mouseScroll=1 write(true)=refused readback=0 =>
+// STUB`). Writing it locked nothing, so the lock now holds the ONE property that
+// exists. Only `CHART_MOUSE_SCROLL` is locked.
 void ChartViewForceLocked()
 {
     if((bool)ChartGetInteger(0, CHART_MOUSE_SCROLL))
         ChartSetInteger(0, CHART_MOUSE_SCROLL, false);
-    if((bool)ChartGetInteger(0, CHART_CONTEXT_MENU))
-        ChartSetInteger(0, CHART_CONTEXT_MENU, false);
 }
+
 
 // Hand the view back to the captured pair - and ONLY the props that actually
 // drifted, so a user who disables scroll between gestures is never overridden
@@ -732,17 +1184,18 @@ void ChartViewRestoreUser()
 {
     if(((bool)ChartGetInteger(0, CHART_MOUSE_SCROLL)) != s_viewScrollUser)
         ChartSetInteger(0, CHART_MOUSE_SCROLL, s_viewScrollUser);
-    if(((bool)ChartGetInteger(0, CHART_CONTEXT_MENU)) != s_viewCtxUser)
-        ChartSetInteger(0, CHART_CONTEXT_MENU, s_viewCtxUser);
+    // P-UI-114: menu half never restored - stub, unwritable (CTXMENU-OFF).
 }
+
+
 
 // THE taker. Every caller pairs it with exactly one Release.
 void ChartViewLockAcquire()
 {
     if(s_viewLockCount == 0)
     {
-        s_viewScrollUser = (ChartGetInteger(0, CHART_MOUSE_SCROLL) != 0);   // 0 -> 1: the user's
-        s_viewCtxUser    = (ChartGetInteger(0, CHART_CONTEXT_MENU) != 0);
+        // P-UI-114: no suppression exists - live value IS the user.
+        s_viewCtxUser = (ChartGetInteger(0, CHART_CONTEXT_MENU) != 0);
         ChartViewPersistUser();
     }
     s_viewLockCount++;
@@ -836,7 +1289,7 @@ void CleanupAllGlobalVariables() {
     string rawSymbolName = GetCachedSymbol();
     string sanitizedSymbolName = SanitizeSymbolName(rawSymbolName);
     string gvars[];
-    ArrayResize(gvars, 29);
+    ArrayResize(gvars, 30);
     gvars[24] = "Biotak_CustomPrice_" + chartIdStr;             // P-UI-56: the live (chart-scoped) pair
     gvars[25] = "Biotak_CustomPriceOverride_" + chartIdStr;     //   must not outlive the indicator
     gvars[0]  = "Biotak_isHidden_" + chartIdStr;
@@ -870,11 +1323,15 @@ void CleanupAllGlobalVariables() {
     gvars[26] = "Biotak_ViewScroll_" + chartIdStr;
     gvars[27] = "Biotak_ViewCtx_" + chartIdStr;
     gvars[28] = "Biotak_ViewKnown_" + chartIdStr;
+    gvars[29] = "Biotak_StepFactor_" + chartIdStr;              // P-UI-98: the step override dies with the chart
     for(int i = 0; i < ArraySize(gvars); i++) {
         if(GlobalVariableCheck(gvars[i])) GlobalVariableDel(gvars[i]);
     }
     // Base/Knot tool direction keys are dynamic (one per box id) — sweep by
     // prefix so a removed indicator never leaves stale direction state.
+    // (P-DRAW-05 retired: the drawing toolbar's templates live in a FILE now —
+    //  P-DRAW-07 — because a slot's NAME does not fit in a double. Nothing of
+    //  ours is left in the GV table, so this sweep stays the box's own.)
     for(int k = GlobalVariablesTotal() - 1; k >= 0; k--)
     {
         string bkn = GlobalVariableName(k);

@@ -1,4 +1,16 @@
-﻿  #ifndef VISIBILITY_MANAGER_MQH
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/VisibilityManager.mqh
+//   regenerate : python tools/parity/resync-module.py --write VisibilityManager.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  #ifndef VISIBILITY_MANAGER_MQH
 #define VISIBILITY_MANAGER_MQH
 
 #property strict
@@ -33,33 +45,11 @@ void InvalidateAllVisibilityCaches()
     InvalidateLinesVisibleCache();
 }
 
-void SetObjectVisibility(const string name, const bool visible)
-{
-    ApplyTfMaskGuarded(name, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
-}
-
-void SetAllTHObjectsVisibility(const bool visible)
-{
-    static bool s_lastAllTHVisible = true;
-    static bool s_allTHInit = false;
-    if(s_allTHInit && s_lastAllTHVisible == visible) return;
-    s_allTHInit = true;
-    s_lastAllTHVisible = visible;
-
-    long timeframes = visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    // PERF FIX: Early-exit loop based on occupied count — avoids scanning
-    // all 32768 buckets when only a small number of objects are cached.
-    int visited = 0;
-    for(int i = 0; i < CACHE_HASH_BUCKETS && visited < g_objectCacheSize; i++) {
-        if(g_objectCacheHash[i].occupied) {
-            visited++;
-            if(!CacheSlotIsLive(i)) continue;   // P-UI-62: nothing under this name
-            ObjectSetInteger(0, g_objectCacheHash[i].name, OBJPROP_TIMEFRAMES, timeframes);
-        }
-    }
-    // P-PERF-02: written OUTSIDE the guard → every stored mask is now stale.
-    BumpTfEpoch();
-}
+//--- P-UI-132: `SetObjectVisibility` and `SetAllTHObjectsVisibility` stood here as a SECOND
+//--- owner of "hide/show the family" — the same static dedup (`s_lastAllTHVisible`) that
+//--- `HideAllTHObjectsPass` already owns as `g_hideAllApplied`, and no caller in any commit.
+//--- Two owners of one state is how the F key and a panel row start fighting; the LIVE pair is
+//--- `VisibilityHideAllCached` / `VisibilityShowAllCached` (see EventHandlers).
 
 //+------------------------------------------------------------------+
 //| P-PERF-31: NAME-BASED LINE TEST + CACHE-WALK HIDE/SHOW (weak PCs)|
@@ -216,6 +206,21 @@ void VisibilityShowAllLegacyScan(const bool atrShouldShow, const bool showAtrTar
                 }
                 continue;
             }
+            // P-TH-02 (2026-09-30): THE TH LABEL FAMILY IS NOT THIS WALK'S TO UNMASK.
+            //
+            // Every TH object carries a mask that the TH MODE owns: mode 0 = all
+            // three families off, 1 = fractal only, 2 = standard only (see
+            // SetTHLabelsVisibility). Without this line the branches below reach
+            // their blanket `ALL_PERIODS` and re-show a family the user had just
+            // switched off — a second writer of the property the toggle owns
+            // (Touch rule 6), which is half of «لیبل های th خاموش و روشن درست کار
+            // نمیکنه». The ATR family is recognised by the `ATR_` test two lines
+            // down for exactly this reason; the TH family had no such owner test.
+            //
+            // The F path CALLS that owner itself (EventHandlers_Objects,
+            // `SetTHLabelsVisibility(objectPrefix, inpShowTHLabels ? g_thLabelsMode : 0)`),
+            // so skipping here loses nothing and cannot leave a label unmasked.
+            if(StringFind(objName, "LBL_TH_") >= 0) continue;
             bool isTriggerObject = (StringFind(objName, "TriggerTH_Up_") >= 0 ||
                                     StringFind(objName, "TriggerTH_Down_") >= 0);
             if(isTriggerObject && !triggersEnabled)
@@ -319,6 +324,10 @@ int VisibilityShowAllCached(const bool atrShouldShow, const bool showAtrTargets,
             touched++;
             continue;
         }
+        // P-TH-02: the TH label family answers to ITS OWN owner (see the same skip
+        // in VisibilityShowAllLegacyScan above) — this walk's blanket ALL_PERIODS is
+        // what re-showed a family whose mode said OFF.
+        if(StringFind(nm, "LBL_TH_") >= 0) continue;
         bool isTriggerObject = (StringFind(nm, "TriggerTH_Up_") >= 0 ||
                                 StringFind(nm, "TriggerTH_Down_") >= 0);
         if(isTriggerObject && !triggersEnabled)

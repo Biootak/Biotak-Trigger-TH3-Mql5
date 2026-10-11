@@ -32,7 +32,7 @@ for i, ln in enumerate(lines):
     if ln.strip() == "#property indicator_chart_window":
         out.append("#property indicator_plots 0")
     if ln.strip() == '#include "Biotak\\Logger.mqh"':
-        out.append('#include "Biotak\\MQL5Compat.mqh"')
+        out.append('#include "MT5Compat\\MQL5Compat.mqh"')
 
     if ln.strip() == "void OnTimer()":
         awaiting_timer_brace = True

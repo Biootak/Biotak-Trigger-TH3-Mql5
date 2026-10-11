@@ -1,4 +1,16 @@
-﻿  //+------------------------------------------------------------------+
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/BasePriceManager.mqh
+//   regenerate : python tools/parity/resync-module.py --write BasePriceManager.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  //+------------------------------------------------------------------+
 //| BasePriceManager.mqh                                              |
 //| Base Price Management with 30-minute block updates                |
 //| Matches MotiveWave/Java implementation exactly                    |
@@ -6,6 +18,11 @@
 
 #ifndef BASE_PRICE_MANAGER_MQH
 #define BASE_PRICE_MANAGER_MQH
+
+// BasePrice_A.mqh - BasePriceManager.mqh split 2026-09-29: exact lines 9-1227, byte-identical, zero renames.
+#ifndef BASE_PRICE_A_MQH
+#define BASE_PRICE_A_MQH
+
 #property strict
 
 #include "BasePriceHistoryManager.mqh"
@@ -1225,6 +1242,11 @@ void AddBasePriceHistoryEntry(const datetime blockTime, const double thirtyMinPr
     }
 }
 
+#endif // BASE_PRICE_A_MQH
+// BasePrice_B.mqh - BasePriceManager.mqh split 2026-09-29: exact lines 1228-2113, byte-identical, zero renames.
+#ifndef BASE_PRICE_B_MQH
+#define BASE_PRICE_B_MQH
+
 //+------------------------------------------------------------------+
 //| Update base price every 30 minutes                               |
 //| Returns true if base price was updated, false otherwise          |
@@ -2110,5 +2132,7 @@ void CleanupBasePriceManager()
     
     DEBUG_PRINT("[BasePriceManager] CleanupBasePriceManager() - Cleanup complete (memory leak fixed)");
 }
+
+#endif // BASE_PRICE_B_MQH
 
 #endif // BASE_PRICE_MANAGER_MQH

@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/BiotakMenu.mqh
+//   regenerate : python tools/parity/resync-module.py --write BiotakMenu.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
 //+------------------------------------------------------------------+
 //|                                                   BiotakMenu.mqh |
 //|                 ماژول رابط کاربری — منوی دایره‌ای (Circular Menu) |
@@ -5,6 +17,11 @@
 //+------------------------------------------------------------------+
 #ifndef BIOTAK_MENU_MQH
 #define BIOTAK_MENU_MQH
+
+// BiotakMenu_A.mqh - BiotakMenu.mqh split 2026-09-29: exact lines 8-1420, byte-identical, zero renames.
+#ifndef BIOTAK_MENU_A_MQH
+#define BIOTAK_MENU_A_MQH
+
 
 #property strict
 
@@ -27,20 +44,40 @@
 #resource "\\Files\\Icons\\ruler_on.bmp"
 #resource "\\Files\\Icons\\htf_off.bmp"
 #resource "\\Files\\Icons\\htf_on.bmp"
-// TH3TOOL-OFF: custom_* icons retired with the tool:
-// #resource "\\Files\\Icons\\custom_off.bmp"
-// #resource "\\Files\\Icons\\custom_on.bmp"
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#resource "\\Files\\Icons\\custom_off.bmp"
+#resource "\\Files\\Icons\\custom_on.bmp"
+#resource "\\Files\\Icons\\leg_off.bmp"
+#resource "\\Files\\Icons\\leg_on.bmp"
 #resource "\\Files\\Icons\\pin_off.bmp"
 #resource "\\Files\\Icons\\pin_on.bmp"
 #resource "\\Files\\Icons\\tools_off.bmp"
 #resource "\\Files\\Icons\\tools_on.bmp"
+// P-UI-131: the GENERAL cell's face. Same gear art the strip's "..." cell wears
+// (ART.gear == BK_GEAR in tools/gen-th3-icons.js), baked by that one generator.
+#resource "\\Files\\Icons\\gear_off.bmp"
+#resource "\\Files\\Icons\\gear_on.bmp"
+// P-HR-01: the Horizontal Ray cell's face (ART.hray, baked by the generator).
+#resource "\\Files\\Icons\\hray_off.bmp"
+#resource "\\Files\\Icons\\hray_on.bmp"
+#resource "\\Files\\Icons\\path_off.bmp"
+#resource "\\Files\\Icons\\path_on.bmp"
 #resource "\\Files\\Icons\\orb_bg.bmp"
 //--- ORBWORD-OFF (2026-09-12, user decision — no wordmark on the orb, ever:
 //--- the "TRex" text over the bow read as mud on the chart). The open-state
 //--- skin + its builder stay in place for a one-line restore (uncomment the
-//--- word branch in CircOrbRes below): tools/make-orb-word.ps1 (master),
+//--- word branch in CircOrbRes below): tools/orb/make-orb-word.ps1 (master),
 //--- tools/gen-th3-icons.js (embed), Files/Icons/orb_word.bmp (skin).
-#resource "\\Files\\Icons\\orb_word.bmp"
+// ICON-DIET 2026-09-27: the orb_word.bmp #resource itself is gone. ORBWORD-OFF
+// commented out the only call site on 2026-09-12, so 20 KB rode along unused.
+// CircOrbRes now returns orb_bg.bmp unconditionally (see below).
+// P-UI-120: the hover chip's FACE (rounded plate + gold frame + tilted title, the
+// orb's chip only). Baked by tools/orb/make-tip-face.ps1 from the measured palette
+// of the user's own plate into tools/orb/tip-face-master.bgra; the generator embeds
+// it here and lists it in the manifest.
+#resource "\\Files\\Icons\\tip_face.bmp"
+// P-UI-123: the same master's three other sides, derived by the generator (mirror V,
+// 90 CW, 90 CCW) - the arc's opening must face the orb on every side it can open on.
 #resource "\\Files\\Icons\\circ_off.bmp"
 #resource "\\Files\\Icons\\circ_on.bmp"
 // R-SUBLADDER (2026-09-11): Tools grid panel + its cells. cell_*.bmp is the
@@ -76,14 +113,22 @@
 #define CIRC_BADGE_SIZE  16
 #define CIRC_BADGE_FLOAT 12   // badge float gap outside the item skin edge
 #define CIRC_ITEM_REACH  (CIRC_BTN_SIZE / 2 + CIRC_BADGE_FLOAT + CIRC_BADGE_SIZE / 2)  // outermost badge pixel from item center
-#define CIRC_RADIUS      64
+// Nine main-ring items need r >= (44+6)/2 / sin(π/9) = 73.1 px. Raised from 64
+// when RING_LEG was appended (was 64 with 8 items, 6.4 px spare; now 80 gives 6.9 px).
+#define CIRC_RADIUS      80
 #define CIRC_GAP         6
 #define CIRC_RAIL        90
 #define CIRC_PAD         10
 #define CIRC_HIDE_POS   -500
 #define CIRC_EDGE_TRIGGER 90
 #define CIRC_MIN_RADIUS  40
-#define ORB_DRAG_THRESHOLD 3  // px of movement before a press counts as a drag
+//--- P-UI-147 (2026-10-02): 1 px, not 3. This gate used to answer TWO questions — «did the
+//--- hand really drag?» and «has the orb moved far enough to be worth saving?» — so a short
+//--- but deliberate drag moved nothing and stored nothing, and the next repaint put the orb
+//--- back exactly where it was («بعضی وقتا بریمیگرده سرجای قبلیش»). One pixel IS a move; the
+//--- gate that actually protects a plain click is the press/release pair in BiotakMenu_C.mqh
+//--- (a click fires no move at all), and the click-eater has its own flag.
+#define ORB_DRAG_THRESHOLD 1  // px of movement before a press counts as a drag
 
 //--- feature indices (panel + state keys — stable, never reorder)
 //    Slot 0/1 = ZONES & LEVELS — the PRIMARY feature of this indicator.
@@ -95,10 +140,11 @@
 #define CIR_TH              3   // TH Labels (g_thLabelsVisible)
 // VIEWLOCK-OFF: CIR_VLOCK slot retired (was 4, View Lock) — ring is now 6 items.
 // #define CIR_VLOCK           4   // View Lock (g_viewLockEnabled; old TF-lock is keyboard-only now)
-// TH3TOOL-OFF: CIR_TH3 slot retired (was 5, TH3 Tool / Freq)
-// #define CIR_TH3             5   // TH3 Tool / Freq
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF (slot 5 was vacant).
+#define CIR_TH3             5   // TH3 Tool / movement step
 #define CIR_HTF             6   // HTF Candles
 #define CIR_TOOLS           7   // Tools sub-menu
+#define CIR_LEG             11  // Leg Measure tool (trendline 2-click, pips/ATR/TF info)
 
 // Tools half-circle
 #define CIR_PIN             8   // Custom Price Pin
@@ -106,8 +152,15 @@
 // FACTORBTN-OFF: #define CIR_FACTOR_OVERRIDE 10  // Factor Override button retired (settings live in the Step card now)
 #define CIR_BASEKNOT        10  // Base / Knot Measurement Tool (drag-draw or 2-click box + Entry/SL/TP).
                                 // P-UI-95: a MAIN-RING item now — never behind the Tools ladder
-//--- ring layout (main circle — 7 items; Zones first = the main feature)
-// TH3TOOL-OFF: RING_TH3 slot retired (was 5) — HTF/TOOLS shifted down.
+#define CIR_GENERAL         14  // P-UI-131 — General Settings card. Its code IS its panel
+                                // index (FeaturePanel's identity fallback), and 13 is the mini
+                                // STRIP (no rows), so 14 is the first free slot that can own one
+#define CIR_HRAY            15  // P-HR-01 — Horizontal Ray (Tools cell: arm → 1 click places)
+#define CIR_PATH            16  // Path tool (Tools cell: arm → click per vertex, dbl-click commits)
+//--- ring layout (main circle — 8 items; Zones first = the main feature)
+// TH3TOOL-ON (2026-09-19): RING_TH3 comes back APPENDED (slot 7), never in the
+// middle — HTF/TOOLS/BASEKNOT keep the numbers they were renumbered to when
+// TH3TOOL-OFF removed it, and every persisted state key keeps its meaning.
 // VIEWLOCK-OFF: RING_VLOCK slot retired (was 4) — HTF/TOOLS shifted down again.
 // P-UI-95 (2026-09-16, user: «ایتم اندازه گیری بیس رو بیار توی منوی اصلی»): THE
 // MEASURING TOOL IS A MAIN-RING ITEM. It was TOOL_BASEKNOT — the third cell of the
@@ -121,7 +174,9 @@
 // Seven items need r >= (44 + 6) / 2 / sin(180/7) = 57.6 px to keep their pitch; the
 // shipped CIRC_RADIUS is 64, so the default look clears it with 6.4 px to spare — and
 // a menu dragged near an edge collapses to the rail at CIRC_EDGE_TRIGGER anyway.
-#define RING_COUNT 7
+// RING_LEG appended as slot 8 — no existing slot moves.
+// Nine items: min-r = (44+6)/2 / sin(π/9) = 73.1 px → CIRC_RADIUS raised to 80.
+#define RING_COUNT 9
 #define CIRC_ITEM_COUNT RING_COUNT  // alias for legacy code
 #define RING_ZONES    0
 #define RING_TRIGGER  1
@@ -131,6 +186,8 @@
 #define RING_HTF      4
 #define RING_TOOLS    5
 #define RING_BASEKNOT 6   // P-UI-95: the MEASURING tool — click arms, hold = Base Box card
+#define RING_TH3      7   // TH3TOOL-ON (2026-09-19): the TH3 tool / frequency — APPENDED, so no slot moves
+#define RING_LEG      8   // Leg Measure — APPENDED, so no existing slot moves
 
 //--- Tools sub-menu (sub-menu under Tools) — SCALABLE LADDER
 // FACTORBTN-OFF: Factor button retired (was 2) — its settings live inline in
@@ -143,9 +200,12 @@
 // TOOL_COUNT is the only number it reads.
 // Add new tools here AND to ToolFeature()/ToolPanel()/CircIconRes(); TOOL_COUNT
 // is the only number the layout reads — it picks its own geometry from it.
-#define TOOL_COUNT 2
+#define TOOL_COUNT 5
 #define TOOL_PIN              0
 #define TOOL_STEP_OVERRIDE    1
+#define TOOL_GENERAL          2   // P-UI-131 — the cross-card settings door (a gear)
+#define TOOL_HRAY             3   // P-HR-01 — Horizontal Ray (arm → 1 click places, APPENDED so no slot moves)
+#define TOOL_PATH             4   // Path tool (arm → vertex clicks, double-click commits, APPENDED)
 // UIBK-OFF: #define TOOL_BASEKNOT         2
 // FACTORBTN-OFF: #define TOOL_FACTOR_OVERRIDE  2
 
@@ -217,8 +277,21 @@ enum ENUM_SUB_MODE
 #define CLR_CIRC_ORB_BG     clrNONE
 #define CLR_CIRC_ORB_BORDER clrNONE
 #define CLR_CIRC_ORB_TXT    C'255,200,60'
-#define CLR_CIRC_BADGE_BG   C'255,171,0'
-#define CLR_CIRC_BADGE_TXT  C'18,22,33'
+// P-UI-69c: the ink BEHIND the orb's baked skin (`orb_bg.bmp`). It was a bare
+// `C'30,22,10'` at the OBJPROP_BGCOLOR call site — a literal at a call site is
+// what the owner law forbids: invisible to every reader and to every audit.
+// Deliberately NOT `CLR_CIRC_ORB_BG` above (that one is the BUTTON's face,
+// clrNONE, because the skin carries the look): two roles, two names. The first
+// cut of this fix reused the name and the compiler answered `warning 30: macro
+// redefinition` — the ladder's own measurement that the name was taken.
+#define CLR_CIRC_ORB_SKIN   C'30,22,10'
+// P-UI-69c: this IS the brand amber — the palette's own cell 0 (#FFAB00). The
+// menu had pasted the value; it now points at the one owner (BIO_CLR_BRAND, the
+// same literal BioPal(0) returns), so a palette change can never leave the
+// badge behind.
+#define CLR_CIRC_BADGE_BG   BIO_CLR_BRAND
+#define CLR_CIRC_BADGE_TXT  BIO_CLR_DEEP   // P-UI-117: the shared deep navy, not a
+                                            // second literal of the same value
 
 // Refresh flags are owned by BiotakKit.mqh (REFRESH_NONE..REFRESH_ALL).
 
@@ -257,10 +330,11 @@ int RingFeature(const int ringIdx)
       case RING_ATR:     return CIR_ATR;
       case RING_TH:      return CIR_TH;
        // VIEWLOCK-OFF: case RING_VLOCK: return CIR_VLOCK;
-       // TH3TOOL-OFF: case RING_TH3: return CIR_TH3;
+       case RING_TH3: return CIR_TH3;   // TH3TOOL-ON (2026-09-19)
        case RING_HTF:     return CIR_HTF;
       case RING_TOOLS:   return CIR_TOOLS;
       case RING_BASEKNOT: return CIR_BASEKNOT;   // P-UI-95: the measure tool's own ring slot
+      case RING_LEG:      return CIR_LEG;         // Leg Measure — APPENDED
    }
    return -1;
 }
@@ -269,6 +343,9 @@ int ToolFeature(const int toolIdx)
 {
    if(toolIdx == TOOL_PIN)             return CIR_PIN;
    if(toolIdx == TOOL_STEP_OVERRIDE)   return CIR_STEP_OVERRIDE;
+   if(toolIdx == TOOL_GENERAL)         return CIR_GENERAL;   // P-UI-131
+   if(toolIdx == TOOL_HRAY)            return CIR_HRAY;      // P-HR-01
+   if(toolIdx == TOOL_PATH)            return CIR_PATH;      // Path tool
    // UIBK-OFF (P-UI-95): if(toolIdx == TOOL_BASEKNOT) return CIR_BASEKNOT;
    // FACTORBTN-OFF: if(toolIdx == TOOL_FACTOR_OVERRIDE) return CIR_FACTOR_OVERRIDE;
    return -1;
@@ -280,6 +357,7 @@ static bool g_ToolsOpen = false;
 //--- real-time orb drag state (CHARTEVENT_MOUSE_MOVE engine)
 static bool g_OrbDragging   = false;
 static bool g_OrbWasDragged = false;   // suppresses the click that fires after a drag
+static bool g_OrbMoved      = false;   // P-UI-147: the hand REALLY moved the orb (release's own fact)
 static bool g_OrbMovedThisEvent = false;
 static int  g_OrbGrabDX = 0, g_OrbGrabDY = 0;
 static int  g_OrbPressX = 0, g_OrbPressY = 0;
@@ -583,16 +661,50 @@ int CircItemAt(const int mx, const int my)
 }
 
 //+------------------------------------------------------------------+
-//| Point over ANY menu control (orb or ring item)?                   |
+//| P-UI-116 — THE MENU'S OWN PIXELS, ONE TEST.                       |
+//|                                                                  |
+//| This is the WHERE half of P-UI-92 for the ring: which pixels does |
+//| the menu OWN? `UIPointerOverSurface` composes it (BiotakPanels)   |
+//| so the domain half reads the menu's own disc as UI and never as a  |
+//| chart point — the custom-price pick, the box tool's                |
+//| deselect-on-chart-click and the strip's hold latch all ask that    |
+//| one function.                                                     |
+//|                                                                  |
+//| It was written for exactly this question and — measured with       |
+//| `git log -S CircPointOnMenu` — had ZERO callers in every commit   |
+//| since the day it was born (`UIPointerOverSurface`'s own header     |
+//| promised the ring's pixels while its body tested everything but    |
+//| them). So the sentence and the code disagreed for as long as the   |
+//| claim has existed: a menu the user sees as solid UI was, to the    |
+//| domain, free chart.                                               |
+//|                                                                  |
+//| WHAT IS *NOT* CLAIMED, deliberately: the transparent gaps between  |
+//| items and the hole between the orb and the ring. Those pixels are  |
+//| not drawn — a click that hits no control IS a chart click, and      |
+//| claiming the ring's bounding box would steal a 240px patch of      |
+//| chart from the tool (the reason P-BK-02 gates the whole test on     |
+//| `g_UI.menuVisible`).                                              |
 //+------------------------------------------------------------------+
 bool CircPointOnMenu(const int mx, const int my)
 {
    int ox = g_UI.menuX - CIRC_ORB_SIZE/2 - CIRC_ORB_BG_MARGIN;
    int oy = g_UI.menuY - CIRC_ORB_SIZE/2 - CIRC_ORB_BG_MARGIN;
    int os = CIRC_ORB_SIZE + 2*CIRC_ORB_BG_MARGIN;
-   if(mx >= ox && mx <= ox + os && my >= oy && my <= oy + os) return true;
-   if(CircItemAt(mx, my) >= 0) return true;
-   if(ToolsItemAt(mx, my) >= 0) return true;
+   if(mx >= ox && mx <= ox + os && my >= oy && my <= oy + os) return true;   // the orb (with its glow)
+   if(CircItemAt(mx, my) >= 0) return true;                       // every ring item's own box
+   if(ToolsItemAt(mx, my) >= 0) return true;                      // fan / rail / grid tiles
+   // P-UI-116: the grid panel's PLATE — header strip, padding and the pager
+   // arrows ride it (`SubPagerGeom` places them inside this rect). The card is
+   // the precedent: a plate is a surface, so its whole rect is claimed, not only
+   // the controls sitting on it. The pager's clicks are routed BY OBJECT NAME in
+   // the click handler, but a click that lands on the plate must still never
+   // reach the chart.
+   if(g_ToolsOpen && SubIsPanelMode())
+   {
+      int px = 0, py = 0, pw = 0, ph = 0;
+      SubPanelRect(px, py, pw, ph);
+      if(mx >= px && mx <= px + pw && my >= py && my <= py + ph) return true;
+   }
    return false;
 }
 
@@ -602,12 +714,12 @@ bool CircPointOnMenu(const int mx, const int my)
 string CircOrbBg()        { return g_UI.btnPrefix + "CircOrbBg"; }
 // ORBSTATE: the orb is the menu's own button, so it reports the menu's state —
 // ORBWORD-OFF (2026-09-12, user decision): open keeps the bow medallion too,
-// the "TRex" wordmark swap is retired (text over the bow read as mud). To
-// restore: uncomment the word branch below (preview .orb / .orbtext).
+// the "TRex" wordmark swap is retired (text over the bow read as mud).
+// ICON-DIET 2026-09-27: the word branch is deleted rather than commented —
+// keeping a dead #resource for it cost 20 KB in every .ex4. Restoring the
+// wordmark is a re-add: make-orb-word.ps1 → the generator → the #resource.
 string CircOrbRes()
 {
-   //return g_UI.menuVisible ? "::Files\\Icons\\orb_word.bmp"
-   //                        : "::Files\\Icons\\orb_bg.bmp";
    return "::Files\\Icons\\orb_bg.bmp";
 }
 // Re-point the orb's bitmap. Called from CreateMenu() so EVERY open/close path
@@ -615,11 +727,16 @@ string CircOrbRes()
 // skin without each caller having to remember. Setting OBJPROP_BMPFILE forces a
 // decode (P-PERF-01), which is why this sits on the state change and not in
 // OnCalculate.
+// P-PERF-51 (2026-09-25): and the write is now CHANGE-GUARDED. ORBSTATE is
+// retired (one skin), so a toggle wrote the same resource twice and paid a
+// decode for a picture that did not change — read back, compare, write only on
+// a real swap. One owner, so every caller gets the guard.
 void CircRefreshOrbSkin()
 {
    string orbBg = CircOrbBg();
    if(ObjectFind(0, orbBg) < 0) return;
    string res = CircOrbRes();
+   if(ObjectGetString(0, orbBg, OBJPROP_BMPFILE, 0) == res) return;
    ObjectSetString(0, orbBg, OBJPROP_BMPFILE, 0, res);
    ObjectSetString(0, orbBg, OBJPROP_BMPFILE, 1, res);
 }
@@ -630,27 +747,140 @@ string CircBg(const int i)        { return g_UI.btnPrefix + "CircBg" + IntegerTo
 string CircBadgeBg(const int i)  { return g_UI.btnPrefix + "CircBadge" + IntegerToString(i); }
 string CircBadgeTxt(const int i) { return g_UI.btnPrefix + "CircBadgeTxt" + IntegerToString(i); }
 
-#define UI_STATE_VERSION 11
+#define UI_STATE_VERSION 12   // P-UI-118 (2026-09-25): 11 -> 12 — the orb's default home is
+                              // the chart's CENTRE now, and this is the project's own way to
+                              // apply a new UI default: a version mismatch clears the saved
+                              // BIOMENU_* block once and re-seeds from CircDefaultMenuPos.
+
+//+------------------------------------------------------------------+
+//| P-UI-118 — THE ORB'S DEFAULT HOME IS THE CHART'S CENTRE, ONE OWNER.|
+//|                                                                  |
+//| User order 2026-09-25: «منو وسط باز بشه از هر طرف» — the menu must |
+//| open as a RING, fanning from every side. `CircLayout` leaves the   |
+//| arc the moment the orb is within `CIRC_EDGE_TRIGGER` (90 px) of    |
+//| any edge and collapses the ring into a train along it — which is   |
+//| exactly what a corner-parked orb does, and what the Tools          |
+//| sub-menu escalates away from (fan -> rail -> grid). The centre is  |
+//| the ONLY position where every layout family is reachable as         |
+//| designed, so it is the default.                                    |
+//|                                                                  |
+//| BOTH readers ask here — the first-attach default and the fallback  |
+//| when a saved position is missing — so the two can never disagree    |
+//| about where "default" is. A SAVED position still wins: the user's   |
+//| drag is the truth, and only a chart with no stored pair lands here. |
+//| The value is clamped like every other orb write on the next pass.   |
+//+------------------------------------------------------------------+
+void CircDefaultMenuPos(int &x, int &y)
+{
+   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   if(cw <= 0) cw = 1920;
+   if(ch <= 0) ch = 1080;
+   x = cw / 2;
+   y = ch / 2;
+}
+
+//--- P-UI-131e — A HOME THAT OUTLIVES THE CHART AND THE SYMBOL. User order: «در هر چارت
+//--- در هر شرایط همون جا باشه، بدون هزینه». A placed surface is the HAND's preference,
+//--- not a fact of one window: the keys still carried ChartID(), and a CLAMP was saved
+//--- back into the live pair (so one narrow chart ratcheted the place for good). A home
+//--- lives under a key with no chart and no symbol in it; the value that paints is never
+//--- the value stored; cost is one read at load and one write when the hand really moves.
+string GVHomeName(const string id,const bool y) { return "BIOMENU_HOME_" + id + (y ? "Y" : "X"); }
+
+//--- one home, three readers (the orb, the strip, the chip): the chart-free pair first,
+//--- then the pre-131e per-chart pair it replaced, so the upgrade keeps the place the
+//--- hand already chose instead of re-seeding the default. Absent both = no home.
+bool GVHomeLoad(const string id,const string legacyInfix,int &x,int &y)
+{
+   string nx = GVHomeName(id,false), ny = GVHomeName(id,true);
+   if(GlobalVariableCheck(nx) && GlobalVariableCheck(ny))
+   {
+      x = (int)GlobalVariableGet(nx); y = (int)GlobalVariableGet(ny);
+      if(x >= 0 && y >= 0) return true;
+   }
+   string lx = GetGVName(legacyInfix + "X"), ly = GetGVName(legacyInfix + "Y");
+   if(GlobalVariableCheck(lx) && GlobalVariableCheck(ly))
+   {
+      x = (int)GlobalVariableGet(lx); y = (int)GlobalVariableGet(ly);
+      if(x >= 0 && y >= 0) return true;
+   }
+   x = -1; y = -1;
+   return false;
+}
+
+//--- the orb's own home. -1 = the hand has never placed it: CircDefaultMenuPos answers.
+static int s_OrbHomeX = -1, s_OrbHomeY = -1;
+bool CircOrbHomeGet(int &x,int &y)
+{
+   x = s_OrbHomeX; y = s_OrbHomeY;
+   return (s_OrbHomeX >= 0 && s_OrbHomeY >= 0);
+}
+void CircOrbHomeSet(const int x,const int y) { s_OrbHomeX = x; s_OrbHomeY = y; }
+
+//--- P-UI-126: THE CHIP'S OWN PLACE — P-DRAW-41's home, one surface over, and owned
+//--- here because the UI-state block below is its only reader and writer. (-1,-1) =
+//--- the hand has never placed it: the chart's middle then answers, measured LIVE so a
+//--- resized chart is never stuck with a stale centre. Stored as the BOX's centre.
+static int s_TipHomeX = -1, s_TipHomeY = -1;
+bool CircTipHomeGet(int &x, int &y)
+{
+   x = s_TipHomeX; y = s_TipHomeY;
+   return (s_TipHomeX >= 0 && s_TipHomeY >= 0);
+}
+void CircTipHomeSet(const int x, const int y) { s_TipHomeX = x; s_TipHomeY = y; }
 
 void ResetUIToDefaults()
 {
+   // P-UI-131e: FLAGS ONLY. The placements have their own owner now (`LoadUIPlaces`) and a
+   // home is chart-free, so this reset — which fires per symbol — must never move a surface
+   // on every chart, and the orb's live pair must not be re-derived behind the loader's back.
    g_UI.menuVisible = true;
-   g_UI.menuX = 100;
-   g_UI.menuY = 200;
    g_UI.showHTF = false;
+   g_UI.tipPin = false;   // P-UI-126: the chip's default MODE is hover; its place is not this
+}
+
+//--- P-UI-131e — WHERE THE THREE PLACEABLE SURFACES STAND, one owner for both init paths.
+//--- Called BEFORE the version branch: a version reset is about the saved FORMAT, and it
+//--- must not silently re-home a surface (it used to, and it also saved the wipe back).
+void LoadUIPlaces()
+{
+   //--- the orb: its chart-free home, else the chart's centre. A migrated legacy value that
+   //--- is STILL this chart's centre means the hand never moved it (every chart's first
+   //--- init wrote that pair) — adopting it as an absolute home would off-centre the orb
+   //--- on a chart of another size.
+   int defX = 0, defY = 0;
+   CircDefaultMenuPos(defX, defY);               // P-UI-118: the ONE answer to "default"
+   int ohx = -1, ohy = -1;
+   bool haveOrbHome = GVHomeLoad("ORB", "MENU", ohx, ohy);
+   if(haveOrbHome && ohx == defX && ohy == defY) haveOrbHome = false;
+   if(haveOrbHome) CircOrbHomeSet(ohx, ohy);     // the home outlives the SESSION, not the reset
+   g_UI.menuX = haveOrbHome ? ohx : defX;
+   g_UI.menuY = haveOrbHome ? ohy : defY;
+   //--- P-DRAW-41: THE STRIP'S HOME — the plate comes back where it was left, instead of
+   //--- being re-placed beside the drawing on every attach (the placement that put it on
+   //--- the user's own work). Absent key = no home: the first open measures one.
+   int hx = -1, hy = -1;
+   GVHomeLoad("STRIP", "HOME", hx, hy);
+   DrawStripHomeSet(hx, hy);
+   //--- P-UI-126: the chip's own place. An absent pair means the hand has never placed it —
+   //--- a state, not a reset: a fresh chart starts in hover mode with no place of its own.
+   int tx = -1, ty = -1;
+   if(GVHomeLoad("CHIP", "TIP", tx, ty)) CircTipHomeSet(tx, ty);
 }
 
 void LoadUIState()
 {
    string gvMen   = GetGVName("MEN");
-   string gvMenuX = GetGVName("MENUX");
-   string gvMenuY = GetGVName("MENUY");
    string gvHtf   = GetGVName("HTF_EN");
 
    g_UI.menuVisible = GlobalVariableCheck(gvMen)   ? (GlobalVariableGet(gvMen)   > 0.5) : true;
-   g_UI.menuX       = GlobalVariableCheck(gvMenuX) ? (int)GlobalVariableGet(gvMenuX)     : 100;
-   g_UI.menuY       = GlobalVariableCheck(gvMenuY) ? (int)GlobalVariableGet(gvMenuY)     : 200;
    g_UI.showHTF     = GlobalVariableCheck(gvHtf)   ? (GlobalVariableGet(gvHtf)   > 0.5) : false;
+   if(GlobalVariableCheck(GetGVName("TIPPIN")))
+      g_UI.tipPin = (GlobalVariableGet(GetGVName("TIPPIN")) > 0.5);
+   // P-DRAW-89: the plate's transparency setting is retired. Its GV is swept on
+   // attach below so a chart that carried the old key cannot resurrect the look.
+   GlobalVariableDel(GetGVName("PLATE"));
 }
 
 void DeleteLegacyMenuObjects()
@@ -674,12 +904,61 @@ void DeleteLegacyMenuObjects()
    ObjectDelete(0, legacy + "CircOrbIcon");
 }
 
+//--- P-UI-131e — THE ONE LEGACY READ. A pre-131e build keyed this block by _Symbol AND
+//--- ChartID(); without this, the upgrade itself looks like the bug it fixes (nothing
+//--- found -> defaults -> the trigger moves once, and the card overrides it could not see
+//--- would re-seed from the dialog inputs). It copies EVERY slot of the legacy block,
+//--- not a list of names, so the `OV_`/`PNLP` families survive the prefix change too.
+//--- One walk of the terminal's table, only while the new block is absent, never per
+//--- tick. The legacy keys stay where they are: a rollback still finds its own place.
+void MigrateLegacyUIState()
+{
+   if(GlobalVariableCheck(GetGVName("VER"))) return;         // the new block is here
+   const string head = "BIOMENU_" + _Symbol + "_";
+   const int    hl = StringLen(head);
+   string legacy = "";
+   for(int i = GlobalVariablesTotal() - 1; i >= 0 && legacy == ""; i--)
+   {
+      string n = GlobalVariableName(i);
+      if(StringLen(n) < hl + 5 || StringSubstr(n, 0, hl) != head) continue;
+      int k = hl, digits = 0;
+      while(k < StringLen(n)
+            && StringGetCharacter(n, k) >= '0' && StringGetCharacter(n, k) <= '9')
+         { k++; digits++; }
+      if(digits <= 0 || digits > 10) continue;
+      if(k >= StringLen(n) || StringGetCharacter(n, k) != '_') continue;
+      legacy = StringSubstr(n, 0, k + 1);                    // "BIOMENU_XAUUSD_131074_"
+   }
+   if(legacy == "") return;
+   // collect FIRST: GlobalVariableSet re-shapes the table this walk is reading
+   string slots[64];
+   int n = 0, ll = StringLen(legacy);
+   for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
+   {
+      string nm = GlobalVariableName(i);
+      if(StringLen(nm) <= ll || StringSubstr(nm, 0, ll) != legacy) continue;
+      if(n >= 64) break;                                     // a block is tens of keys
+      slots[n++] = StringSubstr(nm, ll);
+   }
+   for(int s = 0; s < n; s++)
+   {
+      string nk = GetGVName(slots[s]);
+      if(!GlobalVariableCheck(nk)) GlobalVariableSet(nk, GlobalVariableGet(legacy + slots[s]));
+   }
+}
+
 void InitializeUIStates()
 {
    DeleteLegacyMenuObjects();
    g_UI.btnPrefix = "BiotakMenuV2_" + IntegerToString(ChartID()) + "_";
-   g_UI.gvPrefix = "BIOMENU_" + _Symbol + "_" + IntegerToString(ChartID()) + "_";
+   // P-UI-131e: the KEY carries the SYMBOL, never the chart id. A chart id is handed out
+   // per session and per window, so after a terminal restart (or in a freshly opened
+   // chart) every key was absent: the version check failed, the whole block was wiped
+   // and re-seeded from the defaults — the user's «اندیکاتور خاموش و روشن میکنی …
+   // جاش عوض میشه». Per symbol: durable across restarts, shared by that symbol's windows.
+   g_UI.gvPrefix = "BIOMENU_" + _Symbol + "_";
    RuntimeSettingsSetPersistPrefix(g_UI.gvPrefix);   // OV_ overrides saved under this prefix
+   MigrateLegacyUIState();   // P-UI-131e: adopt a pre-131e per-chart block, once
 
    // Orphan purge: panel/palette objects survive a TF-switch (chart objects
    // are NOT deleted on REASON_CHARTCHANGE) while our open-state statics
@@ -700,6 +979,7 @@ void InitializeUIStates()
       versionOk = ((int)ver == UI_STATE_VERSION);
    }
 
+   LoadUIPlaces();   // P-UI-131e: the homes first — the reset branch below must not lose them
    if(versionOk && GlobalVariableCheck(GetGVName("INIT")))
    {
       LoadUIState();
@@ -733,12 +1013,12 @@ void ClearAllGVs()
 
 void SaveUIStates(const bool flushNow = false)
 {
-   // P-PERF-27c: these six keys only change when the menu is shown, moved or
-   // the HTF toggle flips — yet a timeframe switch flushed the terminal's WHOLE
-   // global-variable table for them every time. Guard them the same way the
-   // override pass is guarded: unchanged values cost zero writes and zero flush.
-   static double s_uiShadow[8];
-   static bool   s_uiKnown[8];
+   // P-PERF-27c: these keys only change when the menu is shown, moved, the HTF
+   // toggle flips or the strip's home moves — yet a timeframe switch flushed the
+   // terminal's WHOLE global-variable table for them every time. Guard them the same
+   // way the override pass is guarded: unchanged values cost zero writes, no flush.
+   static double s_uiShadow[13];
+   static bool   s_uiKnown[13];
    static int    s_uiEpoch = -1;
    int uiChanged = 0;
    // P-PERF-44: PER KEY. The old pass wrote all six keys whenever ONE of them
@@ -750,15 +1030,42 @@ void SaveUIStates(const bool flushNow = false)
       { GlobalVariableSet(GetGVName("INIT"), 1.0); uiChanged++; }
    if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 2, g_UI.menuVisible ? 1.0 : 0.0))
       { GlobalVariableSet(GetGVName("MEN"), g_UI.menuVisible ? 1.0 : 0.0); uiChanged++; }
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 3, g_UI.menuX))
-      { GlobalVariableSet(GetGVName("MENUX"), g_UI.menuX); uiChanged++; }
-   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 4, g_UI.menuY))
-      { GlobalVariableSet(GetGVName("MENUY"), g_UI.menuY); uiChanged++; }
+   // P-UI-131e: the orb's HOME is what is written, not `g_UI.menuX/menuY`. Those are the
+   // live pair and every create/update CLAMPS them (a smaller chart, a tighter band), so
+   // saving them ratcheted the place inward for good. The key is chart-free too.
+   int ohx = 0, ohy = 0;
+   const bool haveOrbHome = CircOrbHomeGet(ohx, ohy);
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 3, haveOrbHome ? (double)ohx : -1.0))
+      { GlobalVariableSet(GVHomeName("ORB",false), haveOrbHome ? (double)ohx : -1.0); uiChanged++; }
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 4, haveOrbHome ? (double)ohy : -1.0))
+      { GlobalVariableSet(GVHomeName("ORB",true), haveOrbHome ? (double)ohy : -1.0); uiChanged++; }
    if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 5, g_UI.showHTF ? 1.0 : 0.0))
       { GlobalVariableSet(GetGVName("HTF_EN"), g_UI.showHTF ? 1.0 : 0.0); uiChanged++; }
+   // P-DRAW-41 (2026-09-25): the strip's home is a user position like the menu
+   // orb's, so it is stored with the same keys and under the same guards — one pair,
+   // written only when the hand really moved it. No version bump: a chart whose
+   // keys are missing simply has no home yet and its first open measures one.
+   int hx = 0, hy = 0;
+   const bool haveHome = DrawStripHomeGet(hx, hy);
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 6, haveHome ? (double)hx : -1.0))
+      { GlobalVariableSet(GVHomeName("STRIP",false), haveHome ? (double)hx : -1.0); uiChanged++; }
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 7, haveHome ? (double)hy : -1.0))
+      { GlobalVariableSet(GVHomeName("STRIP",true), haveHome ? (double)hy : -1.0); uiChanged++; }
+   // P-DRAW-89: the plate's transparency writer is gone with the setting; slot 8
+   // of the shadow set is free again.
+   // P-UI-126: the chip's own place and mode — the hand's answers, written only when
+   // they really moved (the drag's release and the card's switch are the whole set).
+   int thx = 0, thy = 0;
+   const bool haveTipHome = CircTipHomeGet(thx, thy);
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 9, haveTipHome ? (double)thx : -1.0))
+      { GlobalVariableSet(GVHomeName("CHIP",false), haveTipHome ? (double)thx : -1.0); uiChanged++; }
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 10, haveTipHome ? (double)thy : -1.0))
+      { GlobalVariableSet(GVHomeName("CHIP",true), haveTipHome ? (double)thy : -1.0); uiChanged++; }
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 11, g_UI.tipPin ? 1.0 : 0.0))
+      { GlobalVariableSet(GetGVName("TIPPIN"), g_UI.tipPin ? 1.0 : 0.0); uiChanged++; }
    // P-PERF-44 (3): report BEFORE the early return. A skip count that survives a
    // no-op pass would describe a teardown that already happened.
-   GVLedgerReport(GV_BLOCK_UI, uiChanged, 6);
+   GVLedgerReport(GV_BLOCK_UI, uiChanged, 12);
    // Nothing changed: no writes. No flush either - there is nothing new to make
    // durable, and the keys themselves stay in the terminal's table regardless
    // (GlobalVariablesFlush only forces the DISK copy, which the terminal also
@@ -800,6 +1107,23 @@ void PrimeUIStatesShadow()
 // read/write this one flag, so they can never disagree about it.
 //+------------------------------------------------------------------+
 
+// P-UI-93 — THE LIGHT ANSWERS THE SAME QUESTION THE CHART DOES.
+//
+// `CircFeatureOn` below answers the SWITCH's own question: it is the value the
+// item owns, and the press inverts it. It must stay that way — the family
+// isolation this file is built on (one item, one switch, no cross-effects) is
+// only meaningful while the switch owner speaks about one switch.
+//
+// The F mute is NOT a switch. It is the whole-indicator master that every
+// family's writer already shares (`... && !IsIndicatorHidden()`), so a light
+// that read the switch alone stayed LIT on a blank chart — the ring and the
+// chart disagreeing, which is the report «این دکمه های با پنل هماهنگ نیستش».
+//
+// So the mute is folded in `CircFeatureLit` below, in the question the LIGHT
+// asks, and the four family lights are exactly the four families the F key
+// hides. Everything the ring DRAWS goes through it (light, icon, badge, and the
+// state fingerprint that decides when to repaint); everything the ring DECIDES
+// stays on `CircFeatureOn`, so a press is still an inversion of its own switch.
 bool CircFeatureOn(const int i)
 {
    if(i == CIR_ZONES)           return g_showMidZones;
@@ -807,17 +1131,47 @@ bool CircFeatureOn(const int i)
    if(i == CIR_ATR)             return g_atrLabelsVisible;
    if(i == CIR_TH)              return g_thLabelsVisible;
    // VIEWLOCK-OFF: if(i == CIR_VLOCK) return g_viewLockEnabled;
-   // TH3TOOL-OFF: if(i == CIR_TH3) return g_enableTH3Tool;
+   // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+   // P-UI-96 (2026-09-19) — MOMENTARY, like the measuring tool one line below:
+   // the light is the ARMED AB=CD DRAW, not the ENABLED switch. It used to read
+   // `g_enableTH3Tool`, which is what made the item look armed while no session
+   // existed anywhere (the user: pressing the tool leaves nothing to draw with).
+   // The switch keeps the card's row 0 (PnlGetSetting/SetSetting case 5 row 0)
+   // and is NAMED in the tooltip, so nothing became unreachable.
+#ifndef BUILD_LITE
+   if(i == CIR_TH3)             return TH3SessionActive();
+#else
+   if(i == CIR_TH3)             return g_enableTH3Tool;   // Lite ships no draw engine
+#endif
+#ifndef BUILD_LITE
+   if(i == CIR_LEG)             return LegMeasureSessionActive();
+#else
+   if(i == CIR_LEG)             return false;
+#endif
    if(i == CIR_HTF)             return g_UI.showHTF;
    if(i == CIR_PIN)             return g_customPriceLineCreated;
    // CIR_BASEKNOT is momentary: lit while the draw session is armed.
    if(i == CIR_BASEKNOT)        return BaseKnotSessionActive();
+   // P-HR-01 is momentary too: lit while the ray session is armed.
+   if(i == CIR_HRAY)            return HRaySessionActive();
+   if(i == CIR_PATH)            return PathSessionActive();
    // STEPOVERRIDE-OFF: single Step Mode — the Tools step button is a plain
    // cycle button (no on/off state); the mode itself is shown by the chart label.
    //if(i == CIR_STEP_OVERRIDE)   return (g_stepModeOverride != -1);
    // FACTORBTN-OFF: if(i == CIR_FACTOR_OVERRIDE) return (g_factorValueOverride > 0.0);
    if(i == CIR_TOOLS)           return g_ToolsOpen;
    return false;
+}
+
+// P-UI-93: the switch AND the whole-indicator mute. The other items (HTF, pin,
+// tools) have their own masks and are not part of the hide-all walk, so the mute
+// is not one of their terms.
+bool CircFeatureLit(const int i)
+{
+   if(!CircFeatureOn(i)) return false;
+   if(i == CIR_ZONES || i == CIR_TRIGGER || i == CIR_ATR || i == CIR_TH)
+      return !IsIndicatorHidden();
+   return true;
 }
 
 bool CircHasBadge(const int i)
@@ -841,7 +1195,7 @@ void CircConfigureIcon(const string name, const int i, const bool on, const int 
    string res = CircIconRes(i, on);
    ObjectSetString(0, name, OBJPROP_BMPFILE, 0, res);
    ObjectSetString(0, name, OBJPROP_BMPFILE, 1, res);
-   ObjectSetString(0, name, OBJPROP_TOOLTIP, CircItemTooltip(i));
+   ObjectSetString(0, name, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
@@ -857,15 +1211,19 @@ string CircIconRes(const int i, const bool on)
    else if(i == CIR_TH)         base = "dots";    // TH dotted-level icon
    // VIEWLOCK-OFF: else if(i == CIR_VLOCK) base = "box";   // View lock — `box` was a
    //   PADLOCK (ART.box in tools/gen-th3-icons.js), never a rectangle; retired 2026-09-14.
-   // TH3TOOL-OFF: else if(i == CIR_TH3) base = "custom";  // TH3 tool/gauge icon
+   else if(i == CIR_TH3)        base = "custom";  // TH3 tool/gauge icon   // TH3TOOL-ON (2026-09-19)
    else if(i == CIR_HTF)        base = "htf";     // HTF candle icon
    else if(i == CIR_PIN)        base = "pin";     // Pin icon
     else if(i == CIR_STEP_OVERRIDE)   base = "step";    // Step mode override icon
     // FACTORBTN-OFF: else if(i == CIR_FACTOR_OVERRIDE) base = "factor";  // Factor slider icon
     else if(i == CIR_BASEKNOT)   base = "ruler";   // Base / Knot MEASURE = a scale bar with ticks
-                                                   // (the old `box` slot shipped a padlock — the
-                                                   // glyph was never the rectangle this line claimed)
+    else if(i == CIR_HRAY)       base = "hray";    // P-HR-01 — Horizontal Ray cell
+    else if(i == CIR_PATH)       base = "path";    // Path tool cell
+    else if(i == CIR_LEG)        base = "leg";     // Leg Measure — trendline + bracket
     else if(i == CIR_TOOLS)      base = "tools";
+    // P-UI-131: the gear — a settings DOOR, so it wears the same art the strip's
+    // "..." cell uses (one gear in the product, not two).
+    else if(i == CIR_GENERAL)    base = "gear";
    else                         base = "htf";
    return "::Files\\Icons\\" + base + (on ? "_on.bmp" : "_off.bmp");
 }
@@ -887,7 +1245,7 @@ string CircCardIcon(const int item, const bool on)
    else if(item == 2)     base = "atr";     // ATR labels (range bracket)
    else if(item == 3)     base = "dots";    // TH labels
    // VIEWLOCK-OFF: else if(item == 4) base = "box";   // View lock
-   // TH3TOOL-OFF: else if(item == 5) base = "custom";  // TH3 tool
+   else if(item == 5)     base = "custom";  // TH3 tool   // TH3TOOL-ON (2026-09-19)
    else if(item == 6)     base = "htf";     // HTF candles
    else if(item == 7)     base = "tl";      // Lines — DEAD ART: `tl` sits in DEAD_ART
                                              // (no tl_*.bmp is emitted), so this header
@@ -903,23 +1261,6 @@ string CircCardIcon(const int item, const bool on)
    return "::Files\\Icons\\" + base + (on ? "_on.bmp" : "_off.bmp");
 }
 
-string CircTimeframeLabel(const ENUM_TIMEFRAMES tf)
-{
-   switch(tf)
-   {
-      case PERIOD_M1:  return "M1";
-      case PERIOD_M5:  return "M5";
-      case PERIOD_M15: return "M15";
-      case PERIOD_M30: return "M30";
-      case PERIOD_H1:  return "H1";
-      case PERIOD_H4:  return "H4";
-      case PERIOD_D1:  return "D1";
-      case PERIOD_W1:  return "W1";
-      case PERIOD_MN1: return "MN1";
-   }
-   return "";
-}
-
 string CircBadgeText(const int i)
 {
    if(i == CIR_ZONES)           return g_showMidZones ? "On" : "";
@@ -927,10 +1268,9 @@ string CircBadgeText(const int i)
    if(i == CIR_ATR)             return g_atrLabelsVisible ? "On" : "";
    if(i == CIR_TH)
    {
-      if(g_thLabelsMode == 1) return "Fr";
-      if(g_thLabelsMode == 2) return "St";
-      if(g_thLabelsMode == 3) return "Bt";
-      return "";
+       if(g_thLabelsMode == 1) return "Fr";
+       if(g_thLabelsMode == 2) return "St";
+       return "";
    }
    // VIEWLOCK-OFF:
    //if(i == CIR_VLOCK)
@@ -938,12 +1278,12 @@ string CircBadgeText(const int i)
    //   if(g_viewLockEnabled) return "On";
    //   return "";
    //}
-   // TH3TOOL-OFF:
-   //if(i == CIR_TH3)
-   //{
-   //   if(g_th3FreqOverride > 0) return DoubleToString(g_th3FreqOverride, 1) + "x";
-   //   return "Aut";
-   //}
+   // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+   if(i == CIR_TH3)
+   {
+      if(g_th3FreqOverride > 0) return DoubleToString(g_th3FreqOverride, 1) + "x";
+      return "Aut";
+   }
    if(i == CIR_HTF)     return CircHtfBadgeLabel(g_HTFPeriod);
    if(i == CIR_PIN)
    {
@@ -978,6 +1318,13 @@ string CircBadgeText(const int i)
 string CircHtfBadgeLabel(const int periodMinutes)
 {
    if(periodMinutes <= 0) return "";
+   // P-HTF-SYN: the two synthetic top rungs (6M/12M, HTFCandles_Geom.mqh) read as
+   // MONTHS. This is the overlay's only human-facing TF label — the ring tooltip
+   // and the badge both come through here — and "360D" is not what the rung is.
+   // MN1's own "30D" is deliberately untouched: this names the rungs the synthetic
+   // ladder added, not the whole ladder.
+   if(periodMinutes >= 259200 && (periodMinutes % 43200) == 0)
+      return IntegerToString(periodMinutes / 43200) + "M";
    if(periodMinutes >= 1440) return IntegerToString(periodMinutes / 1440) + "D";
    if(periodMinutes >= 60)   return IntegerToString(periodMinutes / 60) + "H";
    return IntegerToString(periodMinutes) + "M";
@@ -996,15 +1343,29 @@ string CircTooltipStatus(const int i)
    if(i == CIR_ATR)               return g_atrLabelsVisible ? "ON" : "OFF";
    if(i == CIR_TH)
    {
-      if(g_thLabelsMode == 1) return "Fractal";
-      if(g_thLabelsMode == 2) return "Standard";
-      if(g_thLabelsMode == 3) return "Fractal + Standard";
-      return "Off";
+       if(g_thLabelsMode == 1) return "Fractal";
+       if(g_thLabelsMode == 2) return "Standard";
+       return "Off";
    }
    // VIEWLOCK-OFF:
    //if(i == CIR_VLOCK)             return g_viewLockEnabled ? "ON" : "OFF";
-   // TH3TOOL-OFF:
-   //if(i == CIR_TH3)               return "Off";
+   // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+   // P-UI-96: the status is a STATE, not a sentence — the audit substitutes the
+   // longest literal here into EVERY tooltip title (`ui-text-audit`
+   // `tooltip_texts`), so a longer phrase does not just widen this one tip, it
+   // pushes all ten past CIRC_TIP_INNER at every DPI (measured: 328px for 270px
+   // of room). "Ready"/"Drawing"/"Disabled" are the same three words the
+   // measuring tool next door uses, and they are what the NEXT press does.
+   if(i == CIR_TH3)
+   {
+#ifndef BUILD_LITE
+      if(TH3SessionActive())   return "Drawing";
+      if(!g_enableTH3Tool)     return "Disabled";
+      return "Ready";
+#else
+      return g_enableTH3Tool ? "Enabled" : "Disabled";
+#endif
+   }
    if(i == CIR_HTF)
    {
       string st = g_UI.showHTF ? "ON" : "OFF";
@@ -1042,6 +1403,23 @@ string CircTooltipStatus(const int i)
       int n = BaseKnotCount();
       return (n > 0 ? IntegerToString(n) + " set" : "Ready");
    }
+    if(i == CIR_HRAY)   // P-HR-01: the next press arms/cancels, like the measure tool
+    {
+       if(HRaySessionActive()) return "Drawing";
+       return "Ready";
+    }
+    if(i == CIR_PATH)
+    {
+       if(PathSessionActive()) return "Drawing";
+       return "Ready";
+    }
+#ifndef BUILD_LITE
+   if(i == CIR_LEG)
+   {
+      if(LegMeasureSessionActive()) return "Drawing";
+      return "Ready";
+   }
+#endif
    if(i == CIR_TOOLS)             return g_ToolsOpen ? "Open" : "Closed";
    return "";
 }
@@ -1050,60 +1428,151 @@ string CircItemTooltip(const int i)
 {
    switch(i)
    {
-      case CIR_ZONES:           return "Zones & Levels · " + CircTooltipStatus(i) + "\nClick: toggle zones · Hold: settings";
-      case CIR_TRIGGER:         return "Trigger Zones · " + CircTooltipStatus(i) + "\nClick: toggle · Hold: settings";
-      case CIR_ATR:             return "ATR Labels · " + CircTooltipStatus(i) + "\nClick: toggle ATR labels · Hold: settings";
-      case CIR_TH:              return "TH Labels · " + CircTooltipStatus(i) + "\nClick: cycle mode · Hold: settings";
-       // VIEWLOCK-OFF: case CIR_VLOCK: return "View Lock\nClick: keep this view across timeframes · Hold: settings";
-       // TH3TOOL-OFF: case CIR_TH3: return "TH3 Pattern Frequency\nClick: toggle TH3 · Hold: settings";
-      case CIR_HTF:             return "HTF Candles · " + CircTooltipStatus(i) + "\nClick: toggle · Hold: settings";
-      case CIR_PIN:             return "Custom Price Pin · " + CircTooltipStatus(i) + "\nClick: place pin · Drag: adjust · ESC: clear";
-       case CIR_STEP_OVERRIDE:   return "Step Mode · " + CircTooltipStatus(i) + "\nClick: cycle step mode · Hold: settings";
+      // P-UI-120: ONE line per item now — the state fragment IS the second sentence
+      // that used to sit under the title, so the chip says what the NEXT press does
+      // without a second caption nobody's eye reached. The old "Click: … · Hold: …"
+      // tails are in git history (this is a one-string restore, not a lost rule).
+      case CIR_ZONES:           return "Zones & Levels · " + CircTooltipStatus(i);
+      case CIR_TRIGGER:         return "Trigger Zones · " + CircTooltipStatus(i);
+      case CIR_ATR:             return "ATR Labels · " + CircTooltipStatus(i);
+      case CIR_TH:              return "TH Labels · " + CircTooltipStatus(i);
+       // VIEWLOCK-OFF: case CIR_VLOCK: return "View Lock";
+      // "Movement step", not "frequency": the badge/label number is how far one
+      // step of the move is (AB cut into 100/step pieces), not a frequency.
+      // P-UI-96: the press ARMS the AB=CD draw (X, A, B, C) — the tool's own
+      // momentary path, the same shape BASEKNOT uses. It used to toggle the
+      // ENABLED flag, which is why "Click: toggle TH3" produced no drawing: the
+      // AB=CD session was reachable only from the V key. The status fragment is
+      // the item's own state, so the tip says what the NEXT press does instead
+      // of what one flag is set to.
+      case CIR_TH3:             return "TH3 Movement Step · " + CircTooltipStatus(i);   // TH3TOOL-ON (2026-09-19)
+      case CIR_HTF:             return "HTF Candles · " + CircTooltipStatus(i);
+      case CIR_PIN:             return "Custom Price Pin · " + CircTooltipStatus(i);
+       case CIR_STEP_OVERRIDE:   return "Step Mode · " + CircTooltipStatus(i);
       // FACTORBTN-OFF: case CIR_FACTOR_OVERRIDE: return "Factor Override · ...";
-      case CIR_BASEKNOT:        return "Base / Knot Measure · " + CircTooltipStatus(i) + "\nDrag: draw box · Hold box: style · ESC: done";
-      case CIR_TOOLS:           return "Biotak Tools · " + CircTooltipStatus(i) + "\nClick: open tools menu";
+      case CIR_BASEKNOT:        return "Base / Knot Measure · " + CircTooltipStatus(i);
+      case CIR_HRAY:            return "Horizontal Ray · " + CircTooltipStatus(i);   // P-HR-01
+      case CIR_PATH:            return "Path · " + CircTooltipStatus(i);
+      case CIR_LEG:             return "Leg Measure · " + CircTooltipStatus(i);
+      case CIR_TOOLS:           return "Biotak Tools · " + CircTooltipStatus(i);
+      // P-UI-131: a DOOR has no state to report, so the tip names the card instead
+      // of appending an empty status fragment (" · " with nothing after it).
+      case CIR_GENERAL:         return "General Settings · engine, grid, interface";
    }
    return "";
 }
 
+#endif // BIOTAK_MENU_A_MQH
+// BiotakMenu_B.mqh - BiotakMenu.mqh split 2026-09-29: exact lines 1421-2841, byte-identical, zero renames.
+#ifndef BIOTAK_MENU_B_MQH
+#define BIOTAK_MENU_B_MQH
+
 //+------------------------------------------------------------------+
-//| CUSTOM HOVER TOOLTIP — the same live text as OBJPROP_TOOLTIP, but |
-//| drawn by the menu itself (dark chip + amber title), because native |
-//| hover tooltips do not display in this environment. Anchored above  |
-//| the hovered item (orb / ring / tools). P-UI-31: the tip sits on the  |
-//| MENU rung of the Z ladder (Z_MENU_TIP), i.e. UNDER the settings card |
-//| — and CircTipOnMove(Disarm) hides it the moment a card opens anyway.|
+//| CUSTOM HOVER TOOLTIP — the menu draws its own box (dark chip + amber|
+//| title) instead of leaving hover text to the terminal. P-UI-119       |
+//| (2026-09-25): the native channel is RETIRED on the menu's own objects|
+//| — the user's screenshot showed BOTH boxes at once (the drawn chip and |
+//| the OS grey tooltip), so the earlier "native tooltips do not display  |
+//| here" is measurably false in this build. One text owner, one box.    |
+//| Anchored above the hovered item (orb / ring / tools). P-UI-31: the   |
+//| tip sits on the MENU rung of the Z ladder (Z_MENU_TIP), i.e. UNDER   |
+//| the settings card — and CircTipOnMove(Disarm) hides it the moment a  |
+//| card opens anyway.                                                   |
 //| Non-intrusive by design:
 //| CircTipOnMove only ARMS the tip; CircTipTick (per-tick) shows it   |
 //| after CIRC_TIP_DELAY_MS of stationary hover, and any move/press    |
 //| hides it instantly. CircTipRefresh keeps visible text fresh.       |
 //+------------------------------------------------------------------+
-#define CIRC_TIP_W   290
-#define CIRC_TIP_H   56
 #define CIRC_TIP_BG  C'13,20,32'
-#define CIRC_TIP_BD  C'255,171,0'
-#define CIRC_TIP_TX  C'235,240,248'
+#define CIRC_TIP_BD  BIO_CLR_BRAND   // P-UI-117: the palette's own cell 0; the tip's
+                                     // border follows the brand, not a copy of it
 // Dwell before the tip appears: stationary hover only, so normal navigation
 // never flashes it (native-OS-tooltip behavior, tuned long per UX request).
 #define CIRC_TIP_DELAY_MS 1500
-// P-UI-34: the tip is a FIXED box, so its captions are NOMINAL pt routed through
-// PnlPt and CLIPPED through PnlFit. Measured: at 125% DPI the raw 9/8pt hints line
-// ("Drag: draw box · Hold box: style · ESC: done") drew 284px inside a 270px
-// inner width - 5% past the border there, 26% on a 150% display. The second line's y
-// comes from the title's own line box (PnlLineH), not a magic 26 (which collided at
-// 200%).
-#define CIRC_TIP_PAD_X  10    // text inset from the box' left edge
-#define CIRC_TIP_PAD_Y  5     // title's top inset
-#define CIRC_TIP_GAP    3     // title -> hints
-#define CIRC_TIP_PT_T   9     // title nominal pt (Arial Bold)
-#define CIRC_TIP_PT_H   8     // hints nominal pt (Arial; measured with the Bold table,
-                              // i.e. a deliberately safe over-estimate)
-#define CIRC_TIP_INNER  (CIRC_TIP_W - 2 * CIRC_TIP_PAD_X)
+// P-UI-120 (2026-09-25): THE CHIP IS ONE LINE. User order: «چیپ زنده: یک خط، وسط‌چین،
+// Tahoma 11pt، خط دوم حذف، قاب نازک (هیرلاین) + آلفای ملایم، زاویه ۳− درجه». The box is
+// therefore MEASURED from that one line (PnlTextW / PnlLineH — the one metrics owner)
+// and laid CENTERED on the anchor, instead of a fixed 290x56 rect holding two
+// captions. MT4 labels carry no alpha channel, so "gentle" is a tone blend toward the
+// chart's own background (P-DRAW-43's language).
+#define CIRC_TIP_PT      11
+#define CIRC_TIP_FONT    "Tahoma"
+#define CIRC_TIP_PAD_X   14    // B-01: the scale's base step — text inset, both sides
+#define CIRC_TIP_PAD_Y   6     // B-01: tight
+#define CIRC_TIP_TINT    15    // % blended toward the chart bg — MT4's honest "alpha"
+#define CIRC_TIP_W_MAX   620   // the box never gets wider than this, whoever hovers
+// P-UI-120: THE ORB'S CHIP IS ART — the whole face, not just its title. A live label
+// cannot carry the −3° the order asked for (error 230), and a rectangle label cannot
+// be translucent or rounded either; one baked face gives all three at once, and the
+// user's own calligraphy banner is the art (tools/orb/make-tip-face.ps1 ingests it,
+// keys its painted checkerboard into real alpha and bakes it at this size - MT4
+// crops a bitmap label instead of scaling it). The two numbers are the master's own
+// size: gen-th3-icons.js refuses to embed a .bgra that disagrees with them, and MT4
+// has no way to ask a bitmap how big it is, so they are the contract.
+#define CIRC_TIP_FACE    "::Files\\Icons\\tip_face.bmp"     // 200x76, the master itself
+#define CIRC_TIP_FACE_W  200
+#define CIRC_TIP_FACE_H  76
+// P-UI-122: THE FACE IS PLACED BY ITS INK, NOT BY ITS BOX. Measured on the baked
+// master (alpha profile of `tools/orb/tip-face-master.bgra`, 2026-09-25): the 200x76
+// box is NOT tight at the bottom — the calligraphy band's own lowest line is row 57
+// while the side ornaments hang on to row 75. Placing the BOX 12 px off the orb
+// therefore left a real gap of 12 + 19 = 31 px, the reported «تریگر پرایس
+// اكشن از دایره اصلی خیلی دور شده». Row 57 is the hug line — the same line the two
+// end tips ride (rows 55..58) — and P-UI-123's four variants all keep it the SAME
+// distance off their own near edge, so ONE number places every side.
+#define CIRC_TIP_FACE_HUG   57
+#define CIRC_TIP_FACE_INSET (CIRC_TIP_FACE_H - 1 - CIRC_TIP_FACE_HUG)   // 18 px
+// P-UI-126 (2026-09-25) — THE CHIP STOPS TURNING; IT GETS A PLACE OF ITS OWN.
+// A 90 deg face carries the Persian calligraphy SIDEWAYS («این حالت‌ها گوشه هم باید
+// درست بشه») and MT4 turns no bitmap back (a label takes no angle — error 230 — and a
+// bitmap label is cropped, never scaled), so the side faces WERE the defect. The order
+// that replaced them names both answers and no third: «اگر فضا داشته که همون بالا باز
+// بشه، اگر فضا نداشت وسط صفحه» — ABOVE the orb while the whole box fits, otherwise the
+// chip's OWN PLACE (the hand's, else the chart's middle). ONE up-face, every case.
+// The MODE (g_UI.tipPin, the chip card's own switch) is the other half: OFF = «با موس»,
+// the hover tip this always was and the shipped default («ولی با موس کلا بهتر باشه»);
+// ON = «همیشه فعال», the banner kept up at its place with or without a hover.
+// The chip's two clearances — the face's table below needs them, so they live with it
+// (a macro must be defined before the line that reads it, not before its own comment).
+#define CIRC_TIP_GAP   12   // px clear of the described surface's own edge
+#define CIRC_TIP_EDGE   4   // px of the window the chip never crosses
+bool CircTipIsFace(const int feat) { return (feat == -1); }   // the orb's chip only
+
+//--- P-UI-126: the chip's own place lives with the UI-state block that persists it
+//--- (`CircTipHomeGet`/`CircTipHomeSet`, above ResetUIToDefaults).
+//--- The box the chip is WEARING right now — what a grab hit-tests and what
+//--- a drag moves. Written by the one show path (and by the drag's own two writes),
+//--- so nothing can disagree with what is on screen.
+static int s_TipBoxX = 0, s_TipBoxY = 0, s_TipBoxW = 0, s_TipBoxH = 0;
+
+//--- P-UI-122, kept: the face is placed by its INK, not by its box. Row 57 of the
+//--- 200x76 master is the calligraphy band's OWN lowest line (the side ornaments hang
+//--- on to row 75), so the box rides INSET px past the gap and the band's line — not
+//--- the empty margin — lands CIRC_TIP_GAP off the orb.
+void CircTipFaceAbove(const int ax, const int ay, int &x, int &y, int &w, int &h)
+{
+   w = CIRC_TIP_FACE_W; h = CIRC_TIP_FACE_H;
+   x = ax - w / 2;
+   y = ay - (CIRC_ORB_RADIUS + CIRC_TIP_GAP) - h + CIRC_TIP_FACE_INSET;
+}
+
+//--- P-UI-126: the fallback box — the hand's place, else the chart's middle, centred
+//--- on that point and clamped inside the window. ONE owner for both answers, so a
+//--- drag and a never-placed chip cannot disagree about what "its place" means.
+void CircTipHomeBox(const int cw, const int ch, int &x, int &y, int &w, int &h)
+{
+   w = CIRC_TIP_FACE_W; h = CIRC_TIP_FACE_H;
+   int hx = 0, hy = 0;
+   if(!CircTipHomeGet(hx, hy)) { hx = cw / 2; hy = ch / 2; }   // the order's own default
+   x = ClampInt(hx - w / 2, CIRC_TIP_EDGE, MathMax(CIRC_TIP_EDGE, cw - w - CIRC_TIP_EDGE));
+   y = ClampInt(hy - h / 2, CIRC_TIP_EDGE, MathMax(CIRC_TIP_EDGE, ch - h - CIRC_TIP_EDGE));
+}
 #define CIRC_PT_BADGE   7     // retired ring badges (one-line restorable)
 
 string CircTipBg() { return g_UI.btnPrefix + "CircTipBg"; }
 string CircTipTxT() { return g_UI.btnPrefix + "CircTipTxT"; }
 string CircTipTxH() { return g_UI.btnPrefix + "CircTipTxH"; }
+string CircTipArt() { return g_UI.btnPrefix + "CircTipArt"; }
 // -2 = hidden, -1 = orb, else a CIR_* feature code (unique across ring+tools)
 static int s_CircTipFeat = -2;
 // Armed (pending) tip: shown by CircTipTick after the dwell elapses.
@@ -1111,20 +1580,36 @@ static int s_TipPendFeat = -2;
 static uint s_TipPendSince = 0;
 static int s_TipMX = -1, s_TipMY = -1;
 
-string CircTipText(const int feat)
+// P-UI-120: the caption owner is `CircItemTooltip` and nothing else — the orb's
+// title left the TEXT channel entirely when it became art, so there is no longer a
+// second spelling of it anywhere in MQL (the bake script draws the only copy).
+// P-UI-120: ONE owner for the chip's caption AND its box. CircTipShow and
+// CircTipRefresh both come through here, so a state change can never re-measure the
+// text in one path and leave the other one's box stale. The width table is the
+// Arial Bold one (PnlTextW), i.e. a deliberately safe OVER-estimate for Tahoma.
+string CircTipLine(const int feat, int &tw, int &w, int &h)
 {
-   if(feat == -1) return "Biotak Terminal Menu\nClick: open/close · Drag: move";
-   return CircItemTooltip(feat);
+   if(CircTipIsFace(feat))      // the orb: the face IS the box — it carries its own plate,
+   {                            // its own padding and its own title, all in pixels
+      tw = CIRC_TIP_FACE_W;
+      w  = CIRC_TIP_FACE_W;
+      h  = CIRC_TIP_FACE_H;
+      return "";
+   }
+   int cw, ch;
+   CircUIMetrics(cw, ch);
+   int room = MathMin(CIRC_TIP_W_MAX, cw - 16) - 2 * CIRC_TIP_PAD_X;
+   string line = PnlFit(CircItemTooltip(feat), CIRC_TIP_PT, room);
+   tw = PnlTextW(line, CIRC_TIP_PT);
+   w  = tw + 2 * CIRC_TIP_PAD_X;
+   h = PnlLineH(CIRC_TIP_PT) + 2 * CIRC_TIP_PAD_Y;
+   return line;
 }
-// P-UI-34: ONE owner for the tip's two captions - split AND clip. CircTipShow draws
-// them and CircTipRefresh rewrites them whenever a status changes, so a clip living in
-// only one of the two would drift (the refresh path re-set the RAW text before).
-void CircTipSplit(const string full, string &title, string &hints)
-{
-   int nl = StringFind(full, "\n");
-   title = PnlFit(nl >= 0 ? StringSubstr(full, 0, nl) : full, CIRC_TIP_PT_T, CIRC_TIP_INNER);
-   hints = PnlFit(nl >= 0 ? StringSubstr(full, nl + 1) : "", CIRC_TIP_PT_H, CIRC_TIP_INNER);
-}
+// P-UI-120: the −3° tilt cannot be an MT4 OBJECT — a label takes no angle
+// ("'OBJPROP_ANGLE' - improper enumerator cannot be used", error 230, measured
+// 2026-09-25) and a bitmap label cannot be rotated either. So the one caption whose
+// text never changes (the orb's) is BAKED — plate, frame, tilt, all in pixels — and
+// every caption that carries live state ("· ON", "144.0") stays live text, upright.
 
 //+------------------------------------------------------------------+
 //| P-PERF-17: THE TIP IS PARKED, NOT DELETED                        |
@@ -1147,7 +1632,14 @@ void CircTipPark()
    if(ObjectFind(0, bg) < 0) return;   // never shown yet - nothing to park
    ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, CIRC_HIDE_POS);
    ObjectSetInteger(0, CircTipTxT(), OBJPROP_XDISTANCE, CIRC_HIDE_POS);
-   ObjectSetInteger(0, CircTipTxH(), OBJPROP_XDISTANCE, CIRC_HIDE_POS);
+   ObjectSetInteger(0, CircTipArt(), OBJPROP_XDISTANCE, CIRC_HIDE_POS);
+}
+// P-UI-120: the second (hints) line is gone, so a hint label left on the chart by
+// an earlier build is a ghost the user would keep seeing. One probe per show — a rare
+// event, never the move stream — clears it; the name stays, so the ghost is findable.
+void CircTipDropLegacy()
+{
+   if(ObjectFind(0, CircTipTxH()) >= 0) ObjectDelete(0, CircTipTxH());
 }
 
 void CircTipHide()
@@ -1158,31 +1650,229 @@ void CircTipHide()
 }
 // Full disarm (hide + drop a pending arm): called when a settings card opens
 // so no tip survives above it or fires while it is open (phantom tip).
+// P-UI-126: a PINNED chip is not a tip that can be disarmed — it is the nameplate the
+// user asked to keep («برای همیشه فعال باشه»), so only its pending arm dies here.
+// The card still sits over it: the chip rides Z_MENU_TIP, under the card's plate.
 void CircTipDisarm()
 {
    s_TipPendFeat = -2;
+   if(g_UI.tipPin) return;
    CircTipHide();
 }
 
-void CircTipShow(const int feat, const int ax, const int ay)
+//+------------------------------------------------------------------+
+//| P-UI-121: THE CHIP NEVER SITS ON WHAT IT DESCRIBES.              |
+//| Reported: «یکم چسیده هستش ... روی همون نیم‌دایره بالا قرار بگیره».  |
+//| The old placement put the box's bottom 12px above the anchor's   |
+//| CENTER, so on the orb (r = 32) the art sat on the medallion's    |
+//| top half — the screenshot — and the only fallback was the edge.  |
+//| ONE placer. A live caption (a small text box) keeps the four     |
+//| sides of the item's own button, ABOVE first, and must clear the  |
+//| orb; the FACE has TWO answers now (P-UI-126: above, else its own |
+//| place) because a bitmap cannot be turned, so a side is not a     |
+//| place it can wear. Each spot counts only when its box fits WHOLE |
+//| inside the window — the one case that cannot is clamped in.      |
+//| Cost: integer boxes, no terminal read, no per-tick work.         |
+//+------------------------------------------------------------------+
+bool CircTipCoversOrb(const int x, const int y, const int w, const int h)
+{
+   int ol = g_UI.menuX - CIRC_ORB_RADIUS, ot = g_UI.menuY - CIRC_ORB_RADIUS;
+   return (x < ol + CIRC_ORB_SIZE && x + w > ol &&
+           y < ot + CIRC_ORB_SIZE && y + h > ot);
+}
+
+void CircTipPlace(const int feat, const int ax, const int ay, const int w, const int h,
+                  int &x, int &y, int &side)
 {
    int cw, ch;
    CircUIMetrics(cw, ch);   // P-PERF-16: cached metrics
-   int x = ax - CIRC_TIP_W / 2;
-   if(x < 4) x = 4;
-   if(x > cw - CIRC_TIP_W - 4) x = MathMax(4, cw - CIRC_TIP_W - 4);   // tiny-chart floor
-   int y = ay - CIRC_TIP_H - 12;
-   if(y < 4) y = ay + CIRC_BTN_SIZE / 2 + 12;   // no room above → below the item
-   if(y > ch - CIRC_TIP_H - 4) y = MathMax(4, ch - CIRC_TIP_H - 4);   // no room below either
+   const bool face = CircTipIsFace(feat);
+   // Every element is written before any read: four explicit spots, so the compiler
+   // sees each one assigned (a loop index does not convince its flow analysis).
+   int px[4] = {0, 0, 0, 0}, py[4] = {0, 0, 0, 0};
+   int pw[4] = {0, 0, 0, 0}, ph[4] = {0, 0, 0, 0};
+   int n = 4;   // how many of the four spots are real answers for this kind
+   if(face)
+   {
+      // P-UI-126: above the orb (the arc's opening onto it), else the chip's OWN
+      // place. A PINNED chip with a place the hand chose has only that one answer —
+      // a banner that jumped back above the orb would not be pinned at all.
+      n = 2;
+      CircTipFaceAbove(ax, ay, px[0], py[0], pw[0], ph[0]);
+      CircTipHomeBox(cw, ch, px[1], py[1], pw[1], ph[1]);
+      int hx = 0, hy = 0;
+      if(g_UI.tipPin && CircTipHomeGet(hx, hy))
+      {
+         px[0] = px[1]; py[0] = py[1]; pw[0] = pw[1]; ph[0] = ph[1];
+         n = 1;
+      }
+   }
+   else
+   {
+      // A live caption is ONE rectangle on all four sides: the reach is measured from
+      // the described item's own button edge, and each axis clamps first, so the fit
+      // test below reads the box the chip would really wear.
+      const int reach = CIRC_BTN_SIZE / 2 + CIRC_TIP_GAP;
+      int lx = ClampInt(ax - w / 2, CIRC_TIP_EDGE, MathMax(CIRC_TIP_EDGE, cw - w - CIRC_TIP_EDGE));
+      int ly = ClampInt(ay - h / 2, CIRC_TIP_EDGE, MathMax(CIRC_TIP_EDGE, ch - h - CIRC_TIP_EDGE));
+      px[0] = lx;             py[0] = ay - reach - h;   // above
+      px[1] = lx;             py[1] = ay + reach;       // below
+      px[2] = ax + reach;     py[2] = ly;               // right
+      px[3] = ax - reach - w; py[3] = ly;               // left
+      pw[0] = w; ph[0] = h; pw[1] = w; ph[1] = h;
+      pw[2] = w; ph[2] = h; pw[3] = w; ph[3] = h;
+   }
+   // P-UI-122/123: ONE ladder for both kinds — above first («همیشه نباید بالای
+   // المان‌ها باشه ... در هر موقعیت درست باشه»). The face's spots are measured off
+   // the orb itself (+ the gap) and its fallback is CLAMPED by its own owner, so it
+   // needs no second reading order and no air vote.
+   side = -1;
+   for(int pass = 0; pass < 2 && side < 0; pass++)   // 0 = clears the orb too, 1 = fits
+      for(int s = 0; s < n; s++)
+      {
+         if(px[s] < CIRC_TIP_EDGE || py[s] < CIRC_TIP_EDGE) continue;
+         if(px[s] + pw[s] + CIRC_TIP_EDGE > cw) continue;
+         if(py[s] + ph[s] + CIRC_TIP_EDGE > ch) continue;
+         // The face's spots are measured off the orb itself (+ the gap), so the
+         // "clears it" pass is a live-caption test only (P-UI-122).
+         if(pass == 0 && !face && CircTipCoversOrb(px[s], py[s], pw[s], ph[s])) continue;
+         side = s;
+         break;
+      }
+   // No spot holds the chip whole: the one with the most air on its own outward edge
+   // wins, clamped to the window (never scaled — MT4 crops a bitmap label).
+   if(side < 0)
+   {
+      int bestAir = 0;
+      for(int s = 0; s < n; s++)
+      {
+         int air = 0;
+         if(py[s] + ph[s] <= ay)  air = py[s] - CIRC_TIP_EDGE;
+         else if(py[s] >= ay)     air = ch - (py[s] + ph[s]) - CIRC_TIP_EDGE;
+         else if(px[s] >= ax)     air = cw - (px[s] + pw[s]) - CIRC_TIP_EDGE;
+         else                     air = px[s] - CIRC_TIP_EDGE;
+         if(side < 0 || air > bestAir) { bestAir = air; side = s; }
+      }
+   }
+   x = ClampInt(px[side], CIRC_TIP_EDGE, MathMax(CIRC_TIP_EDGE, cw - pw[side] - CIRC_TIP_EDGE));
+   y = ClampInt(py[side], CIRC_TIP_EDGE, MathMax(CIRC_TIP_EDGE, ch - ph[side] - CIRC_TIP_EDGE));
+}
 
+//--- P-UI-126: the mode switch owns exactly this much — raise the banner at once when
+//--- it turns ON, park it when it turns OFF. After that the tick keeps it up, and a
+//--- still pointer costs it compares (see CircTipTick). The property writes below ARE
+//--- the repaint: writing an object property dirties the chart by itself (P-PERF-17).
+void CircTipModeChanged()
+{
+   s_TipPendFeat = -2;
+   if(g_UI.tipPin)
+   {
+      int ax = 0, ay = 0;
+      if(CircTipAnchor(-1, ax, ay)) CircTipShow(-1, ax, ay);
+   }
+   else CircTipHide();
+}
+
+//--- P-UI-126: the orb's own move path calls this (one bool) so a pinned banner that
+//--- rides "above the orb" is re-placed by the next tick, not per move event.
+static bool s_TipDirty = false;
+void CircTipPinnedTouch() { s_TipDirty = true; }
+
+//+------------------------------------------------------------------+
+//| P-UI-126: THE HAND PLACES THE CHIP.                              |
+//|                                                                  |
+//| Pinned mode is the ONE state where the banner stands still (so a |
+//| press on it is unambiguous) and where the user's own place is     |
+//| what it wears — so the grab lives there, under the menu's own     |
+//| drag claim, and a ring item under the box cannot also answer the  |
+//| press. Bound: one re-place per REAL pointer move (the art's two   |
+//| coordinates — the plate and the label are parked), no timer, no   |
+//| per-tick work, and the place is written to the UI block once, on  |
+//| release («فشار بار الکی نداشته باشیم»).                           |
+//+------------------------------------------------------------------+
+static bool s_TipDrag = false;
+static bool s_TipMoved = false;   // a real move (>= 1 px) eats the release's click echo
+static int  s_TipGrabDX = 0, s_TipGrabDY = 0;
+
+bool CircTipGrabStart(const int mx, const int my)
+{
+   if(!g_UI.tipPin || s_CircTipFeat == -2) return false;
+   if(mx < s_TipBoxX || mx > s_TipBoxX + s_TipBoxW) return false;
+   if(my < s_TipBoxY || my > s_TipBoxY + s_TipBoxH) return false;
+   s_TipDrag = true;
+   s_TipGrabDX = (s_TipBoxX + s_TipBoxW / 2) - mx;   // the place IS the box's centre
+   s_TipGrabDY = (s_TipBoxY + s_TipBoxH / 2) - my;
+   return true;
+}
+
+void CircTipDragTo(const int mx, const int my)
+{
+   if(!s_TipDrag) return;
+   int cw, ch;
+   CircUIMetrics(cw, ch);
+   const int hw = CIRC_TIP_FACE_W / 2, hh = CIRC_TIP_FACE_H / 2;
+   int cx = ClampInt(mx + s_TipGrabDX, CIRC_TIP_EDGE + hw, MathMax(CIRC_TIP_EDGE + hw, cw - CIRC_TIP_EDGE - hw));
+   int cy = ClampInt(my + s_TipGrabDY, CIRC_TIP_EDGE + hh, MathMax(CIRC_TIP_EDGE + hh, ch - CIRC_TIP_EDGE - hh));
+   int hx = 0, hy = 0;
+   if(CircTipHomeGet(hx, hy) && hx == cx && hy == cy) return;   // same spot: no write at all
+   CircTipHomeSet(cx, cy);
+   int x = 0, y = 0, w = 0, h = 0;
+   CircTipHomeBox(cw, ch, x, y, w, h);
+   if(x == s_TipBoxX && y == s_TipBoxY) return;
+   s_TipBoxX = x; s_TipBoxY = y;
+   s_TipMoved = true;
+   string ar = CircTipArt();
+   ObjectSetInteger(0, ar, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, ar, OBJPROP_YDISTANCE, y);
+}
+
+void CircTipDragEnd(const bool dropped)
+{
+   if(!s_TipDrag) return;
+   s_TipDrag = false;
+   if(!dropped) return;
+   SaveUIStates();    // the hand's answer becomes durable with the key it lives under
+   s_TipDirty = true; // the tick settles the plate and the label into the same box
+}
+
+//--- P-UI-126: the release net (`ChartPointerFinalizeOnUps`) — a motionless release
+//--- emits no move event, so the drag would outlive its own button-up. Its caller gates
+//--- it on a QUIET pointer, because that same net also runs on the press itself.
+void CircTipDragFinalize()
+{
+   if(!s_TipDrag) return;
+   CircTipDragEnd(true);
+   DragReleaseIf(DRAG_MENU);
+   CircUnlockChart();
+   if(s_TipMoved) UISuppressNextClick();
+   s_TipMoved = false;
+}
+
+//--- P-DRAW-19/A-09: this gesture takes the view lock, so it NAMES itself to the 250 ms
+//--- reconcile (`ChartLockIntended`, BiotakPanels) or the lock is read as a leak and
+//--- freed under the hand. One bool read, and the day it is born.
+bool CircTipDragLive() { return s_TipDrag; }
+
+void CircTipShow(const int feat, const int ax, const int ay)
+{
+   int tw = 0, w = 0, h = 0;
+   const bool isFace = CircTipIsFace(feat);
+   string line = CircTipLine(feat, tw, w, h);
+   int x = 0, y = 0, side = 0;
+   CircTipPlace(feat, ax, ay, w, h, x, y, side);   // P-UI-121/126: the box's ONE placer
+   s_TipBoxX = x; s_TipBoxY = y; s_TipBoxW = w; s_TipBoxH = h;
+
+   CircTipDropLegacy();
+   // The LIVE plate: every item caption wears it. For the orb it is PARKED — the
+   // face brings its own plate, its own gold hairline and a real alpha channel.
    string bg = CircTipBg();
    if(ObjectFind(0, bg) < 0) ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, y);
-   ObjectSetInteger(0, bg, OBJPROP_XSIZE, CIRC_TIP_W);
-   ObjectSetInteger(0, bg, OBJPROP_YSIZE, CIRC_TIP_H);
-   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, CIRC_TIP_BG);
+   ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, isFace ? CIRC_HIDE_POS : x);
+   ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, isFace ? CIRC_HIDE_POS : y);
+   ObjectSetInteger(0, bg, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, bg, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, GetZoneRenderColor(CIRC_TIP_BG, CIRC_TIP_TINT));
    ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, bg, OBJPROP_COLOR, CIRC_TIP_BD);
    ObjectSetInteger(0, bg, OBJPROP_WIDTH, 1);
@@ -1191,17 +1881,22 @@ void CircTipShow(const int feat, const int ax, const int ay)
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, bg, OBJPROP_ZORDER, Z_MENU_TIP_BG);
 
-   // title = first line (amber bold), hints = rest (light)
-   string title, hints;
-   CircTipSplit(CircTipText(feat), title, hints);
+   // ONE centered line — the whole chip is the caption now (P-UI-120). TWO content
+   // kinds share this one box: the LIVE line (every feature whose text carries
+   // state) and the BAKED art (the orb's title). The one that is not in use is
+   // PARKED, never left behind, so a hover moving orb -> item -> orb shows one
+   // caption at a time.
    string tt = CircTipTxT();
    if(ObjectFind(0, tt) < 0) ObjectCreate(0, tt, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, tt, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, x + CIRC_TIP_PAD_X);
-   ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, y + CIRC_TIP_PAD_Y);
-   ObjectSetString(0, tt, OBJPROP_TEXT, title);
-   ObjectSetString(0, tt, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, PnlPt(CIRC_TIP_PT_T));
+   // Centered, not padded: the box hugs the caption, so the slack the measurement
+   // leaves is what centers it (a magic pad only ever fits one caption's length).
+   int lh = PnlLineH(CIRC_TIP_PT);
+   ObjectSetInteger(0, tt, OBJPROP_XDISTANCE, isFace ? CIRC_HIDE_POS : x + (w - tw) / 2);
+   ObjectSetInteger(0, tt, OBJPROP_YDISTANCE, isFace ? CIRC_HIDE_POS : y + (h - lh) / 2);
+   ObjectSetString(0, tt, OBJPROP_TEXT, line);
+   ObjectSetString(0, tt, OBJPROP_FONT, CIRC_TIP_FONT);
+   ObjectSetInteger(0, tt, OBJPROP_FONTSIZE, PnlPt(CIRC_TIP_PT));
    ObjectSetInteger(0, tt, OBJPROP_COLOR, CIRC_TIP_BD);
    ObjectSetInteger(0, tt, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
    ObjectSetInteger(0, tt, OBJPROP_BACK, false);
@@ -1209,21 +1904,25 @@ void CircTipShow(const int feat, const int ax, const int ay)
    ObjectSetInteger(0, tt, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, tt, OBJPROP_ZORDER, Z_MENU_TIP);
 
-   string th = CircTipTxH();
-   if(ObjectFind(0, th) < 0) ObjectCreate(0, th, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, th, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, th, OBJPROP_XDISTANCE, x + CIRC_TIP_PAD_X);
-   ObjectSetInteger(0, th, OBJPROP_YDISTANCE,
-                    y + CIRC_TIP_PAD_Y + PnlLineH(CIRC_TIP_PT_T) + CIRC_TIP_GAP);
-   ObjectSetString(0, th, OBJPROP_TEXT, hints);
-   ObjectSetString(0, th, OBJPROP_FONT, "Arial");
-   ObjectSetInteger(0, th, OBJPROP_FONTSIZE, PnlPt(CIRC_TIP_PT_H));
-   ObjectSetInteger(0, th, OBJPROP_COLOR, CIRC_TIP_TX);
-   ObjectSetInteger(0, th, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-   ObjectSetInteger(0, th, OBJPROP_BACK, false);
-   ObjectSetInteger(0, th, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, th, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(0, th, OBJPROP_ZORDER, Z_MENU_TIP);
+   string ar = CircTipArt();
+   if(ObjectFind(0, ar) < 0)
+   {
+      // P-UI-126: the face is ONE file in ONE orientation now, so its bitmap and its
+      // size are written at CREATION and never again — a hover that crosses orb and
+      // items re-writes two positions instead of re-pointing a resource.
+      ObjectCreate(0, ar, OBJ_BITMAP_LABEL, 0, 0, 0);
+      ObjectSetString(0, ar, OBJPROP_BMPFILE, 0, CIRC_TIP_FACE);
+      ObjectSetString(0, ar, OBJPROP_BMPFILE, 1, CIRC_TIP_FACE);
+      ObjectSetInteger(0, ar, OBJPROP_XSIZE, CIRC_TIP_FACE_W);
+      ObjectSetInteger(0, ar, OBJPROP_YSIZE, CIRC_TIP_FACE_H);
+   }
+   ObjectSetInteger(0, ar, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, ar, OBJPROP_XDISTANCE, isFace ? x : CIRC_HIDE_POS);
+   ObjectSetInteger(0, ar, OBJPROP_YDISTANCE, isFace ? y : CIRC_HIDE_POS);
+   ObjectSetInteger(0, ar, OBJPROP_BACK, false);
+   ObjectSetInteger(0, ar, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, ar, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, ar, OBJPROP_ZORDER, Z_MENU_TIP);
 
    s_CircTipFeat = feat;
    // P-PERF-17: no forced repaint - the property writes above already dirtied the
@@ -1269,6 +1968,9 @@ void CircTipOnMove(const int mx, const int my, const bool leftDown)
    static bool s_TipDown = false;
    if(mx == s_TipMX && my == s_TipMY && leftDown == s_TipDown) return;
    s_TipMX = mx; s_TipMY = my; s_TipDown = leftDown;
+   // P-UI-126: a PINNED chip is not hover-driven — it stays up wherever the pointer
+   // is and the tick keeps its placement true, so there is nothing to arm or hide.
+   if(g_UI.tipPin) return;
    if(leftDown || g_LongPressItem >= 0) { s_TipPendFeat = -2; CircTipHide(); return; }
    if(g_UIPanelOpen) { s_TipPendFeat = -2; CircTipHide(); return; }   // a card covers the menu — never arm under it
    int feat = CircTipFeatAt(mx, my);
@@ -1291,6 +1993,21 @@ void CircTipTick()
    // instead of per move keeps that self-healing at a negligible cost.
    if(s_CircTipFeat != -2 && ObjectFind(0, CircTipBg()) < 0) s_CircTipFeat = -2;
 
+   // P-UI-126: «همیشه فعال» — the orb's banner at its place, hovered or not. The tick
+   // owns the PLACEMENT and the one show it owes when the box really moved or the
+   // chip is not up yet; a resting tick is compares only (the orb's own move path
+   // raises s_TipDirty, so nothing walks the hover stream for this).
+   if(g_UI.tipPin)
+   {
+      s_TipPendFeat = -2;
+      if(s_CircTipFeat == -1 && !s_TipDirty) return;
+      int pax = 0, pay = 0;
+      if(!CircTipAnchor(-1, pax, pay)) return;
+      s_TipDirty = false;
+      CircTipShow(-1, pax, pay);
+      return;
+   }
+
    if(s_TipPendFeat == -2) return;
    if(g_UIPanelOpen) { s_TipPendFeat = -2; return; }   // opened after arming — never fire over it
    if(GetTickCount() - s_TipPendSince < CIRC_TIP_DELAY_MS) return;
@@ -1306,10 +2023,11 @@ void CircTipTick()
 void CircTipRefresh()
 {
    if(s_CircTipFeat == -2) return;   // P-PERF-17: state, not ObjectFind
-   string title, hints;
-   CircTipSplit(CircTipText(s_CircTipFeat), title, hints);
-   ObjectSetString(0, CircTipTxT(), OBJPROP_TEXT, title);
-   ObjectSetString(0, CircTipTxH(), OBJPROP_TEXT, hints);
+   // P-UI-120: a re-state, not a text write: the status fragment changes the
+   // caption's LENGTH, so its box has to be re-measured with it — one path owns both.
+   int ax = 0, ay = 0;
+   if(!CircTipAnchor(s_CircTipFeat, ax, ay)) return;
+   CircTipShow(s_CircTipFeat, ax, ay);
    ThrottledChartRedraw();   // P-PERF-17: coalesced, never a bare full repaint
 }
 
@@ -1857,8 +2575,8 @@ void SubParkItem(const int i)
 //| 1500+ < hover tip 1700+. The orb is never covered because         |
 //| SubPanelRect() keeps SUB_ORB_GAP clear of it.                     |
 //+------------------------------------------------------------------+
-#define SUB_CLR_HDR       C'140,150,166'   // #8C96A6 header text
-#define SUB_CLR_ACCENT    C'255,194,71'    // #FFC247 gold
+#define SUB_CLR_HDR       BIO_CLR_MUTED    // #8C96A6 header text — was a pasted literal (P-UI-69c)
+#define SUB_CLR_ACCENT    BIO_CLR_ACCENT   // #FFC247 gold — same
 #define SUB_CLR_DOT_OFF   C'58,66,82'      // inactive page dot
 // The pager chevrons are OBJ_BUTTONs (the only reliably clickable object) but
 // must read as PLAIN TEXT on the panel: bg == the panel body at that height and
@@ -1945,7 +2663,7 @@ void SubSetLabel(const string name, const int x, const int y, const string txt,
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetString(0, name, OBJPROP_TEXT, txt);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+   ObjectSetString(0, name, OBJPROP_FONT, BioChromeFont());
    // `size` is the NOMINAL (design) pt - PnlPt re-expresses it for this display.
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, PnlPt(size));
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
@@ -1956,9 +2674,15 @@ void SubSetLabel(const string name, const int x, const int y, const string txt,
    ObjectSetInteger(0, name, OBJPROP_ZORDER, z);
 }
 
-// Single source of truth for the pager strip geometry: SubChromeCreate DRAWs it,
-// SubChromeMove translates it and SubPagerAt hit-tests it, so the three can
-// never drift apart (a drifting hit-box is a click that does nothing).
+// Single source of truth for the pager strip geometry: SubChromeCreate DRAWs it
+// and SubChromeMove translates it, so the two can never drift apart.
+//
+// P-UI-116: this used to promise a third reader, `SubPagerAt`, that was never
+// written — no commit contains it (`git log -S SubPagerAt` is empty), so the
+// comment named a hit test no reader could find. The pager needs none of its own:
+// the arrows and the dots sit INSIDE the panel plate, the plate is claimed as a
+// whole by `CircPointOnMenu` (its one test), and a pager press arrives by object
+// name in the click handler below. Geometry stays shared by the two real readers.
 void SubPagerGeom(const int px, const int py, const int pw, const int ph,
                   int &by, int &bh, int &bw, int &prevX, int &nextX)
 {
@@ -1995,7 +2719,7 @@ void SubSetPagerBtn(const string name, const int x, const int y, const int w, co
    ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
    ObjectSetString(0, name, OBJPROP_TEXT, txt);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+   ObjectSetString(0, name, OBJPROP_FONT, BioChromeFont());
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, PnlPt(SUB_PT_PAGER));
    ObjectSetInteger(0, name, OBJPROP_COLOR, enabled ? SUB_CLR_ACCENT : SUB_CLR_DOT_OFF);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, SUB_CLR_BTN_BG);
@@ -2164,6 +2888,11 @@ void ToolsBadgePos(const int i, int &x, int &y)
    y = (int)MathRound(cy + dy * off - CIRC_BADGE_SIZE / 2.0);
 }
 
+#endif // BIOTAK_MENU_B_MQH
+// BiotakMenu_C.mqh - BiotakMenu.mqh split 2026-09-29: exact lines 2842-4015, byte-identical, zero renames.
+#ifndef BIOTAK_MENU_C_MQH
+#define BIOTAK_MENU_C_MQH
+
 void ToolsCreateBadge(const int i)
 {
    int badgeX, badgeY;
@@ -2188,8 +2917,7 @@ void ToolsCreateBadge(const int i)
    // repaint. The badge is its BGCOLOR + the value label below; a dead bitmap
    // reference can only ever fail silently, so it is gone. Restore the two
    // OBJPROP_BMPFILE writes together with a real, DECLARED `badge.bmp` if the
-   // badge skin ever comes back.
-   ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+   // badge skin ever comes back.          ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, bg, OBJPROP_STATE, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
@@ -2207,8 +2935,7 @@ void ToolsCreateBadge(const int i)
    ObjectSetString(0, txt, OBJPROP_TEXT, CircBadgeText(feat));
    ObjectSetInteger(0, txt, OBJPROP_COLOR, CLR_CIRC_BADGE_TXT);
    ObjectSetInteger(0, txt, OBJPROP_FONTSIZE, PnlPt(CIRC_PT_BADGE));
-   ObjectSetString(0, txt, OBJPROP_FONT, "Arial Bold");
-   ObjectSetString(0, txt, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+   ObjectSetString(0, txt, OBJPROP_FONT, BioChromeFont());          ObjectSetString(0, txt, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, txt, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, txt, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, txt, OBJPROP_ZORDER, Z_MENU_BADGE_TX);
@@ -2243,16 +2970,6 @@ void CircBadgePos(const int i, int &x, int &y)
    y = (int)MathRound(cy + dy * off - CIRC_BADGE_SIZE / 2.0);
 }
 
-string CircBadgeTooltip(const int i)
-{
-   string t = CircItemTooltip(i);
-   int nl = StringFind(t, "\n");
-   string name = (nl > 0) ? StringSubstr(t, 0, nl) : t;
-   string val = CircBadgeText(i);
-   if(StringLen(val) > 0) return name + " = " + val + "\nClick: settings";
-   return name + "\nClick: settings";
-}
-
 void CircCreateBadge(const int i)
 {
    int size = CIRC_BADGE_SIZE;
@@ -2278,8 +2995,7 @@ void CircCreateBadge(const int i)
    // repaint. The badge is its BGCOLOR + the value label below; a dead bitmap
    // reference can only ever fail silently, so it is gone. Restore the two
    // OBJPROP_BMPFILE writes together with a real, DECLARED `badge.bmp` if the
-   // badge skin ever comes back.
-   ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+   // badge skin ever comes back.          ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, bg, OBJPROP_STATE, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
@@ -2298,8 +3014,7 @@ void CircCreateBadge(const int i)
    ObjectSetString(0, txt, OBJPROP_TEXT, CircBadgeText(feat));
    ObjectSetInteger(0, txt, OBJPROP_COLOR, CLR_CIRC_BADGE_TXT);
    ObjectSetInteger(0, txt, OBJPROP_FONTSIZE, PnlPt(CIRC_PT_BADGE));
-   ObjectSetString(0, txt, OBJPROP_FONT, "Arial Bold");
-   ObjectSetString(0, txt, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+   ObjectSetString(0, txt, OBJPROP_FONT, BioChromeFont());          ObjectSetString(0, txt, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, txt, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, txt, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, txt, OBJPROP_ZORDER, Z_MENU_BADGE_TX);
@@ -2312,7 +3027,7 @@ void CircCreateItem(const int i)
    int bx = x - CIRC_BTN_SIZE / 2;
    int by = y - CIRC_BTN_SIZE / 2;
    int feat = RingFeature(i);
-   bool on = CircFeatureOn(feat);
+   bool on = CircFeatureLit(feat);
 
    string bg = CircBg(i);
    if(ObjectFind(0, bg) < 0)
@@ -2327,7 +3042,7 @@ void CircCreateItem(const int i)
    ObjectSetInteger(0, bg, OBJPROP_YSIZE, CIRC_BG_SIZE);
    ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, bgRes);
    ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, bgRes);
-   ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircItemTooltip(feat));
+   ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
@@ -2354,7 +3069,7 @@ void ToolsCreateItem(const int toolIdx)
    int x, y;
    ToolsLayout(toolIdx, x, y);
    int feat = ToolFeature(toolIdx);
-   bool on = CircFeatureOn(feat);
+   bool on = CircFeatureLit(feat);
 
    // Skin follows the MODE: circular glass disc in the fan/rail/ring, rounded
    // tile in the grid panel. Size and margin move together with it (see SubBgSize).
@@ -2372,7 +3087,7 @@ void ToolsCreateItem(const int toolIdx)
    ObjectSetInteger(0, bg, OBJPROP_YSIZE, bgSize);
    ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, bgRes);
    ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, bgRes);
-   ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircItemTooltip(feat));
+   ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
@@ -2390,7 +3105,7 @@ void ToolsCreateItem(const int toolIdx)
    if(CircHasBadge(feat))
    {
       ToolsCreateBadge(toolIdx);
-      if(!CircFeatureOn(feat)) ToolsShowBadge(toolIdx, false);
+      if(!CircFeatureLit(feat)) ToolsShowBadge(toolIdx, false);
    }
 }
 
@@ -2413,14 +3128,39 @@ void ToolsShowBadge(const int i, const bool show)
    }
 }
 
+//+------------------------------------------------------------------+
+//| P-UI-122 — THE ORB GOES WHERE THE HAND PUTS IT.                  |
+//|                                                                  |
+//| P-UI-121c reserved the face's crown (124 px) inside this band so |
+//| "above" was always available — and the answer was «الان خیلی از  |
+//| فاصله گرفته»: a parked orb could no longer reach the top of its  |
+//| own chart. The reserve is gone; a top where "above" does not fit |
+//| is answered by the placer's own ladder, not by moving the orb.    |
+//|                                                                  |
+//| ONE owner: CircCreateOrb, UpdateCircularMenuPosition and the orb   |
+//| drag each carried their own copy of the same four clamp lines      |
+//| (H-06) — all three ask here now.                                  |
+//+------------------------------------------------------------------+
+void CircOrbBounds(const int cw, const int ch,
+                   int &minX, int &minY, int &maxX, int &maxY)
+{
+   minX = CIRC_PAD + CIRC_ORB_RADIUS;
+   minY = CIRC_PAD + CIRC_ORB_RADIUS;
+   maxX = cw - CIRC_PAD - CIRC_ORB_RADIUS;
+   maxY = ch - CIRC_PAD - CIRC_ORB_RADIUS;
+   if(minY > maxY) minY = maxY;
+}
+
 void CircCreateOrb()
 {
    int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
    if(cw <= 0) cw = 1920;
    if(ch <= 0) ch = 1080;
-   g_UI.menuX = MathMax(CIRC_PAD + CIRC_ORB_SIZE / 2, MathMin(cw - CIRC_PAD - CIRC_ORB_SIZE / 2, g_UI.menuX));
-   g_UI.menuY = MathMax(CIRC_PAD + CIRC_ORB_SIZE / 2, MathMin(ch - CIRC_PAD - CIRC_ORB_SIZE / 2, g_UI.menuY));
+   int bnX, bnY, bxX, bxY;
+   CircOrbBounds(cw, ch, bnX, bnY, bxX, bxY);   // P-UI-121c: the orb's one allowed band
+   g_UI.menuX = ClampInt(g_UI.menuX, bnX, bxX);
+   g_UI.menuY = ClampInt(g_UI.menuY, bnY, bxY);
 
    int x = g_UI.menuX - CIRC_ORB_SIZE / 2;
    int y = g_UI.menuY - CIRC_ORB_SIZE / 2;
@@ -2435,14 +3175,14 @@ void CircCreateOrb()
    ObjectSetInteger(0, orbBg, OBJPROP_YSIZE, CIRC_ORB_BG_SIZE);
    ObjectSetString(0, orbBg, OBJPROP_BMPFILE, 0, CircOrbRes());
    ObjectSetString(0, orbBg, OBJPROP_BMPFILE, 1, CircOrbRes());
-   ObjectSetInteger(0, orbBg, OBJPROP_BGCOLOR, C'30,22,10');
+   ObjectSetInteger(0, orbBg, OBJPROP_BGCOLOR, CLR_CIRC_ORB_SKIN);   // P-UI-69c: was a call-site literal
    ObjectSetInteger(0, orbBg, OBJPROP_STATE, false);
    ObjectSetInteger(0, orbBg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, orbBg, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, orbBg, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, orbBg, OBJPROP_BACK, false);
    ObjectSetInteger(0, orbBg, OBJPROP_ZORDER, Z_MENU_ORB);
-   ObjectSetString(0, orbBg, OBJPROP_TOOLTIP, "Biotak Terminal Menu\nClick: open/close · Drag: move");
+   ObjectSetString(0, orbBg, OBJPROP_TOOLTIP, "");   // P-UI-119: the drawn chip is the ONE hover box
 
    // No center overlay: the medallion lives entirely in orb_bg.bmp (P-ICONS-04).
    // Delete the retired CircOrbIcon object on charts that still have it.
@@ -2563,7 +3303,10 @@ void SubRelayoutIfNeeded()
    SubRebuild();
 }
 
-void DeleteMenu()
+//--- P-UI-129 (2026-09-25): the RING family alone, ONE owner. `DeleteMenu`
+//--- (every teardown) and the orb TOGGLE both want exactly this, and the toggle
+//--- wants nothing else — so it is a function, not a loop written twice.
+void DeleteRing()
 {
    for(int i = 0; i < RING_COUNT; i++)
    {
@@ -2572,6 +3315,11 @@ void DeleteMenu()
       ObjectDelete(0, CircBadgeBg(i));
       ObjectDelete(0, CircBadgeTxt(i));
    }
+}
+
+void DeleteMenu()
+{
+   DeleteRing();
    DeleteToolsMenu(false);   // ring already wiped above — do not recreate it
    ObjectDelete(0, CircOrbBg());
    ObjectDelete(0, CircOrbIcon());
@@ -2580,6 +3328,7 @@ void DeleteMenu()
    ObjectDelete(0, CircTipBg());
    ObjectDelete(0, CircTipTxT());
    ObjectDelete(0, CircTipTxH());
+   ObjectDelete(0, CircTipArt());
 }
 
 void CircMoveItem(const int i)
@@ -2605,7 +3354,7 @@ void CircMoveItem(const int i)
 void CircMoveBadge(const int i)
 {
    int feat = RingFeature(i);
-   if(!CircFeatureOn(feat))
+   if(!CircFeatureLit(feat))
    {
       CircShowBadge(i, false);
       return;
@@ -2680,16 +3429,26 @@ void UpdateCircularMenuPosition()
    if(cw <= 0) cw = 1920;
    if(ch <= 0) ch = 1080;
 
-   if(g_UI.menuX < CIRC_PAD + CIRC_ORB_SIZE / 2) g_UI.menuX = CIRC_PAD + CIRC_ORB_SIZE / 2;
-   if(g_UI.menuX > cw - CIRC_PAD - CIRC_ORB_SIZE / 2) g_UI.menuX = cw - CIRC_PAD - CIRC_ORB_SIZE / 2;
-   if(g_UI.menuY < CIRC_PAD + CIRC_ORB_SIZE / 2) g_UI.menuY = CIRC_PAD + CIRC_ORB_SIZE / 2;
-   if(g_UI.menuY > ch - CIRC_PAD - CIRC_ORB_SIZE / 2) g_UI.menuY = ch - CIRC_PAD - CIRC_ORB_SIZE / 2;
+   // P-UI-131e: the HOME is the truth, the live pair is DERIVED from it. A resize used to
+   // ratchet the clamped value for the rest of the session and never give the place back
+   // when the chart grew again. Guarded off mid-drag: the hand owns the pair until release.
+   if(!g_OrbDragging)
+   {
+      int hx = 0, hy = 0;
+      if(CircOrbHomeGet(hx, hy)) { g_UI.menuX = hx; g_UI.menuY = hy; }
+   }
+
+   int bnX, bnY, bxX, bxY;
+   CircOrbBounds(cw, ch, bnX, bnY, bxX, bxY);   // P-UI-121c: one band, three clamps
+   g_UI.menuX = ClampInt(g_UI.menuX, bnX, bxX);
+   g_UI.menuY = ClampInt(g_UI.menuY, bnY, bxY);
 
    CircApplyMenuPosition();
    // A resize / TF switch can change the sub-menu's SHAPE (the arc may no longer
    // fit, or fewer rows may fit and the panel must page). Rebuild only when the
    // shape actually changed — a plain move already ran above.
    SubRelayoutIfNeeded();
+   CircTipPinnedTouch();   // P-UI-126: a pinned banner "above the orb" follows by tick, not per move
    SaveUIStates();
 }
 
@@ -2789,6 +3548,24 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
    // behind (see the block note). One bool on the steady-state path.
    if(pressStart) CircReapStaleRingClaims();
 
+   // P-UI-126: THE CHIP'S OWN DRAG. A press edge proves the last gesture is over, so
+   // the latch is cleared there (the same forward heal the ring uses); a press ON the
+   // banner then takes the claim BEFORE any ring arithmetic can, because the chip is
+   // drawn over the menu — it is what was pressed. While it is held, nothing else moves.
+   if(pressStart) { s_TipDrag = false; s_TipMoved = false; }
+   if(s_TipDrag)
+   {
+      if(leftDown) CircTipDragTo(mx, my);
+      else CircTipDragFinalize();   // one ender, shared with the button-up net
+      return;
+   }
+   if(pressStart && CircTipGrabStart(mx, my))
+   {
+      DragClaim(DRAG_MENU);
+      CircLockChart();
+      return;
+   }
+
    CircTipOnMove(mx, my, leftDown);   // custom hover tooltip (runs before
    // the hidden-menu guard below so a stale tip also hides when hidden)
 
@@ -2840,20 +3617,33 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
    //     nothing when I click them");
    //   * the orb followed the cursor out from under the card ("the panel
    //     detaches and moves to another part").
-   // A long-press armed BEFORE the card opened still finishes (its own block
-   // above), and a live orb drag still runs to its release - only a NEW grab is
-   // refused. Closing the card hands the ring back; nothing is lost.
-   if(g_UIPanelOpen && g_LongPressItem < 0 && !g_OrbDragging) return;
+    // A long-press armed BEFORE the card opened still finishes (its own block
+    // above), and a live orb drag still runs to its release. While a card is
+    // open the RING arms stay refused (P-UI-72: a ring box under the card would
+    // claim DRAG_MENU before the panel sees the press, killing its controls),
+    // but the ORB itself stays draggable from pixels the card + palette do not
+    // cover — read from the published cover rects, the only panel geometry
+    // this earlier include can see. A press ON the card still belongs to it.
+    bool panelModal = (g_UIPanelOpen && g_LongPressItem < 0 && !g_OrbDragging);
+    bool onCard = (panelModal && g_UIPanelRX >= 0 && g_UIPanelRW > 0 &&
+                   mx >= g_UIPanelRX && mx <= g_UIPanelRX + g_UIPanelRW &&
+                   my >= g_UIPanelRY && my <= g_UIPanelRY + g_UIPanelRH);
+    bool onPal = (panelModal && g_UIPPalRX >= 0 && g_UIPPalRW > 0 &&
+                  mx >= g_UIPPalRX && mx <= g_UIPPalRX + g_UIPPalRW &&
+                  my >= g_UIPPalRY && my <= g_UIPPalRY + g_UIPPalRH);
+    if(panelModal && (onCard || onPal)) return;
+    bool orbOnly = (panelModal && !onCard && !onPal);
 
    if(!g_OrbDragging)
    {
       if(!pressStart) return;
       if(!DragCanGrab(DRAG_MENU)) return;
 
-      const int hitIdx = CircItemAt(mx, my);
-      // Items do not exist while the menu is hidden — never arm a long-press
-      // on an invisible ring position (only the orb is interactive then).
-      if(hitIdx >= 0 && g_UI.menuVisible)
+       const int hitIdx = CircItemAt(mx, my);
+       // Items do not exist while the menu is hidden — never arm a long-press
+       // on an invisible ring position (only the orb is interactive then).
+       // While a card is open only the orb grabs (`orbOnly` above).
+       if(hitIdx >= 0 && g_UI.menuVisible && !orbOnly)
       {
          int feat = RingFeature(hitIdx);
          if(feat == CIR_TOOLS) return; // tools toggles submenu on click, no long press
@@ -2866,8 +3656,8 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
          CircLockChart();
          return;
       }
-      const int toolHit = ToolsItemAt(mx, my);
-      if(toolHit >= 0)
+       const int toolHit = ToolsItemAt(mx, my);
+       if(toolHit >= 0 && !orbOnly)
       {
           // Base/Knot arms drawing on CLICK; a hold opens its style card
           // instead (g_LongPressFired guard below skips the arm then).
@@ -2887,6 +3677,7 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
       if(mx < ox || mx > ox + CIRC_ORB_SIZE || my < oy || my > oy + CIRC_ORB_SIZE) return;
       g_OrbDragging = true;
       g_OrbWasDragged = false;
+      g_OrbMoved = false;   // P-UI-147: a fresh press owes the release its own answer
       g_OrbGrabDX = g_UI.menuX - mx;
       g_OrbGrabDY = g_UI.menuY - my;
       g_OrbPressX = mx;
@@ -2905,7 +3696,14 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
       // the cursor was still moving at button-up (no click → menu won't toggle).
       if(g_OrbWasDragged) UISuppressNextClick();
       CircUnlockChart();
-      if(g_OrbWasDragged) SaveUIStates();
+      // P-UI-131e: the RELEASE is the hand's answer, so the HOME is what may be saved
+      // from here on — the live pair is clamped and must never become the stored one.
+      // P-UI-147: it reads `g_OrbMoved`, the flag ONLY the release clears — so a trailing
+      // click that ate `g_OrbWasDragged` can no longer cost the user their drag.
+      if(g_OrbMoved)
+      {
+         CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates(); g_OrbMoved = false;
+      }
       // The mode was FROZEN for the whole drag (rebuilding geometry under the
       // hand would flicker). The release is where it is allowed to change, so
       // re-derive it now: dragging out of a corner may turn the arc into a
@@ -2916,8 +3714,20 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
 
    if(MathAbs(mx - g_OrbPressX) > ORB_DRAG_THRESHOLD ||
       MathAbs(my - g_OrbPressY) > ORB_DRAG_THRESHOLD)
-      g_OrbWasDragged = true;
-   if(!g_OrbWasDragged) return;
+   {
+      //--- P-UI-147 (2026-10-02, user: «چرا این منوی اصلی رو که درگ میکنم بعضی وقتا
+      //--- بریمیگرده سرجای قبلیش»): TWO FACTS WERE ONE FLAG, and each reader wanted a
+      //--- different half. `g_OrbWasDragged` used to mean «the hand really moved the orb»
+      //--- AND «the click that follows a drag must be eaten» — so BiotakMenu_D.mqh:16, which
+      //--- CLEARS it when the trailing click arrives, could clear it BEFORE the release read
+      //--- it, and the home was never saved: the next repaint put the orb back exactly where
+      //--- it was. That is the «بعضی وقتا». The movement keeps its own flag, which only the
+      //--- release may clear, and the click-eater keeps its own — two facts, two owners, and
+      //--- nothing that reads the other.
+      g_OrbMoved = true;
+      g_OrbWasDragged = true;   // the click-eater's own flag (unchanged meaning)
+   }
+   if(!g_OrbMoved) return;
    CircReassertLock();   // LEARNING §5: the orb owns the view until release
 
    int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
@@ -2926,10 +3736,8 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
    if(ch <= 0) ch = 1080;
    int nx = mx + g_OrbGrabDX;
    int ny = my + g_OrbGrabDY;
-   int orbMinX = CIRC_PAD + CIRC_ORB_SIZE / 2;
-   int orbMinY = CIRC_PAD + CIRC_ORB_SIZE / 2;
-   int orbMaxX = cw - CIRC_PAD - CIRC_ORB_SIZE / 2;
-   int orbMaxY = ch - CIRC_PAD - CIRC_ORB_SIZE / 2;
+   int orbMinX, orbMinY, orbMaxX, orbMaxY;
+   CircOrbBounds(cw, ch, orbMinX, orbMinY, orbMaxX, orbMaxY);   // P-UI-121c: one band, three clamps
    if(nx <= CIRC_EDGE_TRIGGER || nx >= cw - CIRC_EDGE_TRIGGER ||
       ny <= CIRC_EDGE_TRIGGER || ny >= ch - CIRC_EDGE_TRIGGER)
    {
@@ -2968,7 +3776,7 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
 void CircUpdateItemState(const int i)
 {
    int feat = RingFeature(i);
-   bool on = CircFeatureOn(feat);
+   bool on = CircFeatureLit(feat);
 
    string icon = CircIcon(i);
    if(ObjectFind(0, icon) >= 0)
@@ -2983,7 +3791,7 @@ void CircUpdateItemState(const int i)
       string res = on ? "::Files\\Icons\\circ_on.bmp" : "::Files\\Icons\\circ_off.bmp";
       ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, res);
       ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, res);
-      ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircItemTooltip(feat));   // bg ring keeps a live tooltip too
+      ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119   // bg ring keeps a live tooltip too
    }
 
    if(CircHasBadge(feat)) CircShowBadge(i, on);
@@ -2994,7 +3802,7 @@ void ToolsUpdateItemState(const int t)
    if(!SubItemOnPage(t)) { SubParkItem(t); return; }   // page not shown -> park
 
    int feat = ToolFeature(t);
-   bool on = CircFeatureOn(feat);
+   bool on = CircFeatureLit(feat);
    string icon = ToolsIcon(t);
    if(ObjectFind(0, icon) >= 0)
    {
@@ -3008,7 +3816,7 @@ void ToolsUpdateItemState(const int t)
       string res = SubBgRes(on);
       ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, res);
       ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, res);
-      ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircItemTooltip(feat));   // bg ring keeps a live tooltip too
+      ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119   // bg ring keeps a live tooltip too
    }
    // Refresh badge text + visibility (e.g. Step/Factor override → Auto)
    if(CircHasBadge(feat) && ObjectFind(0, ToolsBadgeBg(t)) >= 0)
@@ -3018,10 +3826,10 @@ void ToolsUpdateItemState(const int t)
       if(ObjectFind(0, ttxt) >= 0)
       {
          ObjectSetString(0, ttxt, OBJPROP_TEXT, CircBadgeText(feat));
-         ObjectSetString(0, ttxt, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+         ObjectSetString(0, ttxt, OBJPROP_TOOLTIP, "");   // P-UI-119
       }
       string tbg = ToolsBadgeBg(t);
-      ObjectSetString(0, tbg, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+      ObjectSetString(0, tbg, OBJPROP_TOOLTIP, "");   // P-UI-119
    }
 }
 
@@ -3060,12 +3868,12 @@ void UpdateCircularBadges()
       if(!CircHasBadge(feat)) continue;
       string bg = CircBadgeBg(i);
       if(ObjectFind(0, bg) >= 0)
-         ObjectSetString(0, bg, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+         ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
       string txt = CircBadgeTxt(i);
       if(ObjectFind(0, txt) >= 0)
       {
          ObjectSetString(0, txt, OBJPROP_TEXT, CircBadgeText(feat));
-         ObjectSetString(0, txt, OBJPROP_TOOLTIP, CircBadgeTooltip(feat));
+         ObjectSetString(0, txt, OBJPROP_TOOLTIP, "");   // P-UI-119
       }
    }
 }
@@ -3088,7 +3896,7 @@ void UpdateMenuSyncIfChanged()
    for(int i = 0; i < RING_COUNT; i++)
    {
       int feat = RingFeature(i);
-      ulong v = (ulong)(CircFeatureOn(feat) ? 1 : 0);
+      ulong v = (ulong)(CircFeatureLit(feat) ? 1 : 0);
       h = (h ^ (v + 0x9E3779B97F4A7C15 * (ulong)(feat + 1))) * 1099511628211;
       string t = CircBadgeText(feat);
       for(int c = 0; c < StringLen(t); c++)
@@ -3097,7 +3905,7 @@ void UpdateMenuSyncIfChanged()
    for(int t = 0; t < TOOL_COUNT; t++)
    {
       int feat = ToolFeature(t);
-      ulong v = (ulong)(CircFeatureOn(feat) ? 1 : 0);
+      ulong v = (ulong)(CircFeatureLit(feat) ? 1 : 0);
       h = (h ^ (v + 0x9E3779B97F4A7C15 * (ulong)(feat + 1))) * 1099511628211;
       string bt = CircBadgeText(feat);
       for(int c = 0; c < StringLen(bt); c++)
@@ -3187,11 +3995,113 @@ int CircArmBaseKnot()
    CreateMenu();   // orb only — the ring is gone while menuVisible=false
    SaveUIStates();
    PnlCloseAll();   // a stale strip/card must not survive under the draw session
+   if(HRaySessionActive()) HRayCancel();   // P-HR-06: the ray yields (its lock goes back)
+   if(PathSessionActive()) { PathSessionClear(); PathCancel(); }
    BaseKnotArm();
    UpdateCircularBadges();
    ChartRedraw();
    return REFRESH_NONE;
 }
+
+int CircArmPath()
+{
+   if(BaseKnotSessionActive()) return REFRESH_NONE;
+#ifndef BUILD_LITE
+   if(LegMeasureSessionActive() || TH3SessionActive()) return REFRESH_NONE;
+#endif
+   if(PathSessionActive()) { PathSessionClear(); PathCancel(); }
+   else PathArm();
+   ChartRedraw();
+   return REFRESH_NONE;
+}
+
+//+------------------------------------------------------------------+
+//| P-HR-01 — THE HORIZONTAL RAY'S ARM PATH, ONE OWNER.              |
+//| Toggle: press arms, second press cancels. The menu stays OPEN —   |
+//| one chart click is what places the ray, and the lit cell is what  |
+//| cancels it. No recalc — REFRESH_NONE (Arm redraws itself).        |
+//+------------------------------------------------------------------+
+int CircArmHRay()
+{
+   // P-HR-06: one gesture at a time — the ray yields to a live draw session
+   // instead of arming under it (a second light whose clicks never arrive).
+   if(BaseKnotSessionActive()) return REFRESH_NONE;
+#ifndef BUILD_LITE
+   if(LegMeasureSessionActive() || TH3SessionActive()) return REFRESH_NONE;
+#endif
+   if(HRaySessionActive()) HRayCancel();
+   else HRayArm();
+   ChartRedraw();
+   return REFRESH_NONE;
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-96 (2026-09-19) — THE TH3 TOOL'S ARM PATH, ONE OWNER.        |
+//|                                                                  |
+//| The ring press used to flip `g_enableTH3Tool` and nothing else:   |
+//| the switch moved, the light came on, and no drawing ever started  |
+//| — the AB=CD session was reachable only from the V key, which no   |
+//| surface of the panel ever mentions.                              |
+//|                                                                  |
+//| A press now does what the item's tooltip promises: it gets the    |
+//| tool READY and takes the four pivots (X, A, B, C). Both           |
+//| preconditions are REPAIRED when false, never obeyed silently:     |
+//|                                                                  |
+//|   * `g_enableTH3Tool` off — the four clicks would draw into a     |
+//|     chart whose TH3 objects the visibility hooks skip, i.e. a     |
+//|     pattern nobody can see;                                     |
+//|   * drawing mode STEPS — that mode ships no click path at all     |
+//|     (`ToggleTH3Tool` handles AB=CD only), so the press would be   |
+//|     the dead press P-UI-93 forbids. The mode is switched, logged  |
+//|     AND persisted, so the card's MODE row cannot disagree with    |
+//|     the session that is running.                                |
+//|                                                                  |
+//| A second press CANCELS, so the item is a toggle whose "on" is the |
+//| armed session — which is exactly what the ring light reads.      |
+//|                                                                  |
+//| The ring is deliberately NOT hidden while placing (BASEKNOT hides |
+//| its own): that tool needs the whole chart for ONE drag gesture,   |
+//| while four discrete clicks do not compete with a corner menu —    |
+//| and the visible item is what lets the same press cancel.         |
+//+------------------------------------------------------------------+
+int CircArmTH3Draw()
+{
+#ifndef BUILD_LITE
+   if(!g_enableTH3Tool)
+   {
+      g_enableTH3Tool = true;
+      RequestUISync();   // the TH3 TOOL card's ENABLED row displays this flag
+      Print("TH3: engine was DISABLED - enabled by the ring press that armed the draw");
+   }
+   if(g_th3DrawingMode != TH3_MODE_ABCD)
+   {
+      g_th3DrawingMode = TH3_MODE_ABCD;
+      // The mode is a PERSISTED setting, so a repair that lived only in RAM
+      // would come back as STEPS on the next attach (the E key's own save
+      // rides the same owner).
+      RuntimeSettingsSaveOverridesThrottled();
+      RequestUISync();   // ...and the MODE row shows the mode the session is in
+      Print("TH3: drawing mode STEPS has no click path - switched to AB=CD");
+   }
+   PnlCloseAll();        // a stale card must not sit under the four clicks (BASEKNOT's arm does the same)
+   ToggleTH3Tool(true);  // ONE owner for the toggle; true = swallow the arming press
+   CircTipDisarm();      // a hover tip describing "Ready" must not outlive the press
+   ChartRedraw();
+   return REFRESH_NONE;  // the session draws itself - nothing to recalculate
+#else
+   // Lite ships no chart-event routing for the AB=CD session (EventHandlers
+   // compiles that block out), so an armed session there would take no click
+   // and could never end. This build keeps the control it already had.
+   g_enableTH3Tool = !g_enableTH3Tool;
+   UpdateAllTH3Objects();
+   return REFRESH_ALL;
+#endif
+}
+
+#endif // BIOTAK_MENU_C_MQH
+// BiotakMenu_D.mqh - BiotakMenu.mqh split 2026-09-29: exact lines 4016-4443, byte-identical, zero renames.
+#ifndef BIOTAK_MENU_D_MQH
+#define BIOTAK_MENU_D_MQH
 
 //+------------------------------------------------------------------+
 //| Handle Button Click Events                                       |
@@ -3202,9 +4112,15 @@ int HandleButtonClick(const string clickedObject)
    {
       // Orb doubles as the session EXIT while drawing (menu is hidden then).
       if(BaseKnotSessionActive()) { BaseKnotExitToMenu(); return REFRESH_NONE; }
+      if(HRaySessionActive()) { HRayCancel(); return REFRESH_NONE; }   // P-HR-01: orb exits the ray arm
+      if(PathSessionActive()) { PathSessionClear(); PathCancel(); return REFRESH_NONE; }
       if(g_OrbWasDragged)
       {
-         g_OrbWasDragged = false;
+         g_OrbWasDragged = false;   // P-UI-147: this flag is the CLICK-EATER's alone. It used
+         //--- to also carry «the hand really moved the orb», and clearing it here could land
+         //--- before the release read it — the orb's home was then never saved and the next
+         //--- repaint put it back where it was. The movement has its own flag (g_OrbMoved),
+         //--- which only the release clears.
          return REFRESH_NONE;
       }
       // Hierarchy: orb -> ring -> sub-menu. While the sub-menu is open the ring is
@@ -3285,9 +4201,18 @@ int HandleButtonClick(const string clickedObject)
             g_customPriceKeyboardOverride = true;
             ObjectDelete(0, g_customPriceHorizontalLineName);
             g_customPriceLineCreated = false;
-            double currentPrice = iClose(_Symbol, CompatTF(GetCachedPeriod()), 0);
+            // P-UI-98d v2: the line is born where the user is LOOKING — the
+            // vertical middle of the visible chart, wherever they have scrolled
+            // («زمانی که فعال میشه هر جایی که کاربر هست وسط صفحه ظاهر بشه») —
+            // and the market's last price is only the fallback.
+            double currentPrice = ScreenMiddlePrice();
+            if(!(currentPrice > 0.0))
+                currentPrice = iClose(_Symbol, CompatTF(GetCachedPeriod()), 0);
             g_customTHStartPrice = currentPrice;
             g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+            // P-UI-98e: a FRESH placement wakes the armed/set pair through its
+            // ONE owner - a line the user had SET must not come back inert.
+            HandsetPlacementArm();
             // P-UI-56: the placement pair has ONE writer, in the domain layer
             // (`EventHandlers`, included before this file). The keys are chart-scoped
             // now, so pressing PIN on this chart can no longer move the ladder of
@@ -3316,6 +4241,23 @@ int HandleButtonClick(const string clickedObject)
           g_redrawTHLevelsNeeded = true;
           tflags = REFRESH_ALL;
        }
+       else if(tfeat == CIR_GENERAL)   // P-UI-131: a pure door — no switch to invert
+       {
+          // OPEN on the CLICK, the same act the HOLD performs (the long-press path
+          // asks ToolPanel too), so the one gesture the user already knows works and
+          // nothing else in the ladder changes state.
+          UISuppressNextClick();
+          PnlOpen(ToolPanel(tidx));
+          return REFRESH_NONE;
+       }
+        else if(tfeat == CIR_HRAY)   // P-HR-01: momentary toggle — the cell light is the session
+        {
+           tflags = CircArmHRay();
+        }
+        else if(tfeat == CIR_PATH)
+        {
+           tflags = CircArmPath();
+        }
        else if(tfeat == CIR_BASEKNOT)
        {
           // UIBK-OFF (P-UI-95): the MEASURING tool has its own RING slot now
@@ -3372,25 +4314,37 @@ int HandleButtonClick(const string clickedObject)
       return REFRESH_NONE;
    }
 
+   // P-UI-93 — THE PRESS ANSWERS WHAT THE LIGHT SHOWED.
+   //
+   // While the chart is muted the four family lights read OFF (CircFeatureOn
+   // folds the mute), so this press means "show the family again", and the mute
+   // has to go for that to be visible at all. `wantOn` is captured BEFORE the
+   // release, because the release is exactly what changes what the light reports.
+   //
+   // The mute is NOT a switch (P-PERF-41 stays intact: each light still owns one
+   // switch), it is the whole-indicator master every family already shares.
+   bool familyToggle = (feat == CIR_TRIGGER || feat == CIR_ZONES ||
+                        feat == CIR_ATR     || feat == CIR_TH);
+   bool mutedPress   = (familyToggle && IsIndicatorHidden());
+   bool wantOn       = (familyToggle && !mutedPress) ? !CircFeatureOn(feat) : mutedPress;
+   if(mutedPress) ReleaseIndicatorMute();
+
    int refreshFlags = REFRESH_NONE;
    if(feat == CIR_TRIGGER)
    {
-      g_triggerLevelsEnabled = !g_triggerLevelsEnabled;
       // P-UI-40: the ring repaints ITSELF below (CircUpdateItemState +
       // UpdateCircularBadges), but it cannot repaint an OPEN card — this file is
       // included before the panel's. The same state is the TRIGGER card's SHOW
       // row, so the UI layer is asked as well; the drain is idempotent.
       RequestUISync();
-      string triggerGvarName = "Biotak_TriggerLevels_" + GetCachedChartIdStr();
-      GlobalVariableSet(triggerGvarName, g_triggerLevelsEnabled ? 1.0 : 0.0);
-      // P-PERF-21: this used to raise g_forceClearOnNextDraw, i.e. delete every
-      // level, zone and label on the chart and rebuild the pipeline in four
-      // staged frames - for a switch that provably changes no geometry. Only the
-      // trigger ZONES change, so the repair is a buffers re-render (the frame
-      // signature carries the flag, RenderZones applies it, and the unchanged
-      // line/label writes are already skipped by P-PERF-02).
-      g_redrawTHLevelsNeeded = true;
-      refreshFlags = REFRESH_BUFFERS;
+      // P-PERF-32b: ONE owner for the transition (state, persisted key, the
+      // family's own mask walk, the discrete repaint). This branch, the T hotkey
+      // and the card's SHOW row used to keep three copies of the state write and
+      // let the RENDER produce the pixels - which is why the light felt dead on
+      // a weak PC. The structure switches' technique (P-PERF-32), for the family
+      // whose property is its mask; P-PERF-21 still holds: NO force-clear.
+      SetTriggerLevelsVisible(wantOn);
+      refreshFlags = REFRESH_NONE;   // the owner painted; the ring repaints below
    }
    else if(feat == CIR_ZONES)
    {
@@ -3401,14 +4355,14 @@ int HandleButtonClick(const string clickedObject)
       // It must NOT call SetLinesVisible: the SHOW LINES row (and the L key) own
       // that switch, and a press that turned the lines on would overwrite a
       // choice the user made elsewhere. See the note on CircFeatureOn.
-      g_showMidZones = !g_showMidZones;
+      g_showMidZones = wantOn;   // P-UI-93: what the light showed, inverted
       RequestUISync();   // P-UI-40: the Zones card's MID ZONES row shows this
       g_redrawTHLevelsNeeded = true;
       refreshFlags = REFRESH_BUFFERS;
    }
    else if(feat == CIR_ATR)
    {
-      g_atrLabelsVisible = !g_atrLabelsVisible;
+      g_atrLabelsVisible = wantOn;   // P-UI-93: what the light showed, inverted
       RequestUISync();   // P-UI-40: the ATR card's own rows show this switch
       g_showATRLabels = g_atrLabelsVisible;   // keep the ATR card mirror in sync
       string atrGvarNameKey = "Biotak_ATRLabels_" + GetCachedChartIdStr();
@@ -3420,16 +4374,22 @@ int HandleButtonClick(const string clickedObject)
    }
    else if(feat == CIR_TH)
    {
-      if(g_thLabelsMode == 1) {
-         if(inpShowStandardTHs) g_thLabelsMode = 3;
-         else g_thLabelsMode = 0;
-      }
-      else if(g_thLabelsMode == 3) {
-         g_thLabelsMode = 0;
-      }
-      else {
-         g_thLabelsMode = 1;
-      }
+       // Exclusive: ON -> OFF (remembers), OFF -> remembered ON (default STANDARD).
+       if(g_thLabelsMode != 0) {
+          g_thLabelsMode = 0;
+       }
+       else {
+          g_thLabelsMode = g_thLastOnMode;
+          if(g_thLabelsMode == 0) g_thLabelsMode = 2;
+       }
+       // P-UI-93: this item CYCLES the mode rather than flipping a switch, and the
+       // cycle contains 0 (off). A muted press means "show TH", so it must not land
+       // on 0 - the mute would go and the family would stay hidden, which is the
+       // dead press again. A mode of 0 is raised to the remembered ON mode.
+       if(mutedPress && g_thLabelsMode == 0) {
+          g_thLabelsMode = g_thLastOnMode;
+          if(g_thLabelsMode == 0) g_thLabelsMode = 2;
+       }
       g_thLabelsVisible = (g_thLabelsMode != 0);
       RequestUISync();   // P-UI-40: the TH LABELS card cycles on this mode
       SyncTHFlagsFromMode();   // flags follow the mode → TH card stays in sync
@@ -3450,13 +4410,15 @@ int HandleButtonClick(const string clickedObject)
    //   SaveUIStates();
    //   return REFRESH_NONE;
    //}
-   // TH3TOOL-OFF:
-   //else if(feat == CIR_TH3)
-   //{
-   //   g_enableTH3Tool = !g_enableTH3Tool;
-   //   UpdateAllTH3Objects();
-   //   refreshFlags = REFRESH_ALL;
-   //}
+   // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+   else if(feat == CIR_TH3)
+   {
+      // P-UI-96: the press ARMS the AB=CD draw. One owner for the whole
+      // decision (enable + mode repairs + the session itself) lives in
+      // `CircArmTH3Draw`; the ENABLED switch this branch used to flip is the
+      // TH3 TOOL card's row 0.
+      refreshFlags = CircArmTH3Draw();
+   }
    else if(feat == CIR_HTF)
    {
       g_UI.showHTF = !g_UI.showHTF;
@@ -3479,6 +4441,15 @@ int HandleButtonClick(const string clickedObject)
       // on the chart is recalculated for it (REFRESH_NONE).
       refreshFlags = CircArmBaseKnot();
    }
+#ifndef BUILD_LITE
+   else if(feat == CIR_LEG)
+   {
+      // Momentary: the light is LegMeasureSessionActive(). A press arms/cancels
+      // the 2-click trendline session. No chart recalc needed.
+      LegMeasureToggle();
+      refreshFlags = REFRESH_NONE;
+   }
+#endif
 
    CircUpdateItemState(idx);
    UpdateCircularBadges();
@@ -3486,6 +4457,27 @@ int HandleButtonClick(const string clickedObject)
    return refreshFlags;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-129 (2026-09-25) — A TOGGLE CHANGES VISIBILITY, NOT THE WORLD.
+//
+// User report: «روی منوی اصلی که کلیک میکنم او تریگر پرایس اکشن هم حالت پرپر
+// میکنه که نباید باشه و هزینه مصرف بارش باید نزدیک صفر باشه کلا».
+//
+// The old body called `DeleteMenu()` + `CreateMenu()`, which delete and re-create
+// the ORB and the HOVER CHIP as well as the ring. The pointer is ON the orb at
+// that moment, so the chip that had just told the user what the orb does was
+// destroyed and re-made under the cursor: the flash is the chip's own lifetime
+// being punched per click. The click also paid a full family rebuild (orb +
+// chip + ring + badges) for a state change that only the RING and the tools
+// family can express — the orb's art does not depend on the state at all
+// (ORBSTATE is retired: `CircOrbRes()` returns one skin).
+//
+// So the toggle owns EXACTLY the two families that change sides. The orb and the
+// chip are never named here, their statics (`s_CircTipFeat`) stay valid because
+// nothing they own was deleted, and the orb-skin write is change-guarded
+// (P-PERF-51) so today's call is a read and nothing else. When ORBSTATE returns,
+// `CircRefreshOrbSkin()` is already on the state edge where it belongs.
+// ══════════════════════════════════════════════════════════════════════════
 void ToggleMenuVisibility()
 {
    bool willShow = !g_UI.menuVisible;
@@ -3493,8 +4485,22 @@ void ToggleMenuVisibility()
    else PnlUnlockForeground();
    g_UI.menuVisible = willShow;
    if(!g_UI.menuVisible) PnlCloseAll();
-   DeleteMenu();
-   CreateMenu();
+   // kept from the pair's CreateMenu half: a toggle during a click must not
+   // change that click's outcome (two bool reads under a live press, so it is a
+   // no-op inside the dispatch that just called us).
+   UIReleaseClaimReset();
+   if(willShow)
+   {
+      for(int i = 0; i < RING_COUNT; i++) CircCreateItem(i);
+      if(g_ToolsOpen)
+         for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
+   }
+   else
+   {
+      DeleteRing();
+      if(g_ToolsOpen) DeleteToolsMenu(false);
+   }
+   CircRefreshOrbSkin();   // ORBSTATE's state edge — one read today
    SaveUIStates();
    ChartRedraw();
 }
@@ -3509,26 +4515,28 @@ void CleanupUIStates(const int reason)
    // No-op when we hold no lock, so a user's own disabled scroll is kept.
    while(g_ChartLockCount > 0) CircUnlockChart();
    while(g_PnlForegroundLock > 0) PnlUnlockForeground();
+   // P-UI-131e: A REMOVE IS NOT AN UNINSTALL. This branch used to ClearAllGVs() — every
+   // saved key (the orb's place, the strip's and the chip's homes, the panel positions,
+   // the card settings) died with the indicator, so the next attach re-seeded the
+   // defaults: the user's «اندیکاتور رو خاموش و روشن میکنی … جاش عوض میشه». A remove
+   // SAVES like any other teardown now. The HTF block keeps its own rule (its own prefix
+   // and its own writer, untouched here).
    if(reason == REASON_REMOVE)
-   {
-      ClearAllGVs();
-      CleanupHTFCandlesGVs();
-   }
-   else
-   {
-      // P-PERF-44 (2): the HTF block writes FIRST so the ONE disk flush covers
-      // it as well. The two used to serialise the terminal's whole
-      // global-variable table back to back.
-      SaveHTFCandlesSettings();
-      SaveUIStates(true);
-      // The teardown's ONE flush point. `SaveUIStates(true)` already commits
-      // whatever was owed, and this call is the net for the case where it
-      // early-returned (nothing of ITS six keys moved while the HTF block did
-      // edit one): a request nobody commits is a setting that only lives in
-      // memory, and the previous shape let exactly that happen. Nothing owed ⇒
-      // one bool read, zero terminal calls.
-      GVFlushCommit();
-   }
+      CleanupHTFCandlesGVs();   // the HTF block keeps its OWN rule (prefix + writer)
+   // P-PERF-44 (2): the HTF block writes FIRST so the ONE disk flush covers
+   // it as well. The two used to serialise the terminal's whole
+   // global-variable table back to back.
+   SaveHTFCandlesSettings();
+   SaveUIStates(true);
+   // The teardown's ONE flush point. `SaveUIStates(true)` already commits
+   // whatever was owed, and this call is the net for the case where it
+   // early-returned (nothing of ITS six keys moved while the HTF block did
+   // edit one): a request nobody commits is a setting that only lives in
+   // memory, and the previous shape let exactly that happen. Nothing owed ⇒
+   // one bool read, zero terminal calls.
+   GVFlushCommit();
 }
+
+#endif // BIOTAK_MENU_D_MQH
 
 #endif // BIOTAK_MENU_MQH

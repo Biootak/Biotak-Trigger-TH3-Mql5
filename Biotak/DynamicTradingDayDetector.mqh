@@ -1,4 +1,16 @@
-﻿  //+------------------------------------------------------------------+
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/DynamicTradingDayDetector.mqh
+//   regenerate : python tools/parity/resync-module.py --write DynamicTradingDayDetector.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * MQL5 CopyTime takes ENUM_TIMEFRAMES; MT4 passed a raw timeframe number  (1 substitution)
+// ============================================================================
+  //+------------------------------------------------------------------+
 //|                                   DynamicTradingDayDetector.mqh |
 //|                                                                  |
 //|  Dynamic Trading Day Detection from actual market data          |
@@ -24,8 +36,6 @@ bool DetectFetchBarTimes(const int timeframe, const int count, datetime &times[]
     got = 0;
     if(count <= 0) return false;
     if(ArrayResize(times, count) != count) return false;
-    // R-TF-UNIT: `timeframe` is minutes; CompatTF is identity on MT4 and the
-    // sanctioned minutes->ENUM crossing on MT5 (bare cast breaks H1+ there).
     got = CopyTime(Symbol(), CompatTF(timeframe), 0, count, times);
     if(got <= 0) return false;
     // MT4 may hand the array back either way round; normalise to OLDEST FIRST

@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/PropertiesAndInputs.mqh
+//   regenerate : python tools/parity/resync-module.py --write PropertiesAndInputs.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   #ifndef PROPERTIES_AND_INPUTS_MQH
 #define PROPERTIES_AND_INPUTS_MQH
 
@@ -32,6 +44,26 @@ input ENUM_ADAPTIVE_MODE inpAdaptiveMode = ADAPTIVE_FRACTAL;      // Adaptive Mo
 input double inpAdaptiveBlendRatio = 0.5;                        // Adaptive Blend Ratio
 input int inpAdaptiveSmoothingPeriod = 10;                       // Adaptive Smoothing (v3.11: reduced to 10 for better response)
 input ENUM_FRACTAL_JUMP_STRATEGY inpFractalJumpStrategy = JUMP_AGGRESSIVE; // Fractal Jump Strategy
+// P-TH-01 (2026-09-18) — THE TH PERCENTAGE, AS A RESEARCH KNOB.
+//
+// User: «این درصد محاسبات هم th هم بشه تنظیم کرد برای تحقیقات لازم دارمش».
+//
+// The percentage is NOT one number and NOT an Input today: it is the nine-rung
+// ladder `MODIFIED_FRACTAL_PERCENTAGES` (ConstantsAndEnums.mqh:230), and the rung
+// this chart reads is picked by its own TF (FractalTimeframes.mqh:5). On D1 that
+// rung is H17+M4 = 66.66%.
+//
+// WHAT THIS KNOB ACTUALLY SETS — read this before changing its meaning: the value
+// is the percentage for THIS chart's own rung, and every other rung scales by the
+// SAME ratio (`FractalPercentScale`). So 66.66 -> 75 makes the whole ladder
+// 2.34/4.69/9.38/18.75/37.5/75/150/300/600 — every x2 relationship the ladder is
+// built on survives. Replacing only ONE rung would be a different feature: Pattern
+// and Trigger are read one and two rungs DOWN (GetLowerTimeframeTH), so a
+// single-rung override silently breaks their half/quarter relationship with the
+// Structure step and the zone hierarchy stops being provable.
+//
+// 0 (the default) = OFF: the professor's table, byte for byte.
+input double inpTHPercentOverride = 0.0;   // TH % for THIS chart's rung (0 = professor's table)
 
 input group "02) BASE PRICE - ANCHOR"
 input string S4 = "[02] BASE PRICE / ANCHOR";
@@ -86,7 +118,7 @@ input int inpLSLevelWidth = 1;
 input group "05) STYLE - COMBO STEP"
 input string S8 = "[05] STYLE / COMBO STEP";
 input ENUM_COMBO_MODE inpComboMode = COMBO_MODE_PRESET;
-input ENUM_COMBO_PRESET inpComboPreset = COMBO_PRESET_BALANCED_MEDIUM;
+input ENUM_COMBO_PRESET inpComboPreset = COMBO_PRESET_RATIO_4_3; // P-COMBO-01: shipped default is 4/3
 input color inpComboLevelColor = clrMagenta;
 input ENUM_LINE_STYLE inpComboLevelStyle = STYLE_DOT;
 input int inpComboLevelWidth = 1;
@@ -124,7 +156,12 @@ input group "07) ZONES - MID"
 input string S10 = "[07] ZONES / MID";
 input group "07.1) ZONES - ENABLE & TYPE"
 input string S10a = "[07.1] ZONES / ENABLE & TYPE";
-input bool inpShowMidZones = true;
+input bool inpShowMidZones = false;   // P-UI-119 (user order 2026-09-25: «سطوح هم پیش فرض
+                                     // خاموش باشه»): the ZONES & LEVELS band was the last
+                                     // level family still defaulting ON (trigger levels,
+                                     // level lines, TH labels and ATR labels were already
+                                     // OFF). The ring's own light is the switch — a chart
+                                     // attaches clean and the user lights what they want.
 input ENUM_ZONE_STYLE inpMidZoneStyle = ZONE_STYLE_BOX_FILLED;
 input group "07.2) ZONES - VISUAL DENSITY"
 input string S10b = "[07.2] ZONES / VISUAL DENSITY";
@@ -181,7 +218,7 @@ input int inpLineTransparency = 50;                // Lines Transparency (0=Soli
 
 input group "08.5) BASE BOX - BORDER"
 input string S16e = "[08.5] BASE BOX / BORDER";
-input color inpBoxBorderColor = C'255,171,0';            // Base Box Border Color (amber, no fill — like MT4)
+input color inpBoxBorderColor = C'0,0,139';              // Base Box Border Color (P-BK-69: DARK BLUE — the mark's ink, and the ink of its two points)
 input ENUM_LINE_STYLE inpBoxBorderStyle = STYLE_SOLID;   // Base Box Border Style
 input int inpBoxBorderWidth = 2;                         // Base Box Border Width (1-5)
 input int inpBKTargetR = 3;                              // Base Box TP COUNT (P-BK-50: how many of the trade plan's TP1..TP3 legs the box draws, 1..3)
@@ -193,6 +230,10 @@ input int inpBKShowInfo = 0;                             // Base Box Info Label:
 // Size" (the readout is the box' own text); 1-24 = raw points.
 input int inpBKInfoFontSize = 0;                         // Base Box Info Size (0 = follow Base Box Text Size)
 input color inpBoxFillColor = C'255,171,0';              // Base Box Fill Color (bucket — TV Style tab)
+// P-UI-117: this literal STAYS one (it is the brand amber's own value): this file
+// is included at 25, BEFORE the palette owner `ConstantsAndEnums` (26), so A-12
+// forbids naming `BIO_CLR_BRAND` here. Every runtime reader of the colour takes the
+// seed from this input and asks the owner.
 input color inpBKTextColor = C'255,255,255';             // Base Box Text Color (T button — TV Text tab)
 input int inpBKTextSize = 10;                            // Base Box Text Size (TV default 10)
 input bool inpBKBold = false;                            // Base Box Text Bold
@@ -224,7 +265,10 @@ input group "09.3) TRIGGER - ENABLE & LABEL"
 input string S15c = "[09.3] TRIGGER / ENABLE & LABEL";
 input bool inpShowTrigger = false;       // Show Trigger Levels
 input int inpTriggerTransparency = 50;   // Trigger Transparency (0=Solid, 100=Invisible)
-input color inpTriggerLabelColor = clrBlack;     // Trigger Label Color
+// P-UI-131j: clrNONE = AUTO. The trigger family's pip label wears the unified [08.4]
+// line look until this is pinned (P-UI-66: a label wears its own line's live look);
+// the trigger card's LABEL COLOR / LABEL OPACITY rows own the pinned state.
+input color inpTriggerLabelColor = clrNONE;      // Trigger Label Color (none = AUTO)
 
 input group "10) HIGH/LOW - TOOLTIPS"
 input string S14c = "[10] HIGH-LOW / TOOLTIPS";
@@ -303,43 +347,54 @@ input int inpLabelColumnGap = 50;         // Horizontal gap between columns
 input int inpSectionGap = 30;             // Gap between ATR and TH sections
 input int inpMaxLabelWidth = 250;
 
-// TH3TOOL-OFF: whole "14) TH3 TOOL" group retired with the tool (was #ifndef BUILD_LITE) —
-//#ifndef BUILD_LITE
-//input group "14) TH3 TOOL"
-//input string S12 = "[14] TH3 TOOL";
-//input bool inpEnableTH3Tool = true;
-//input ENUM_TH3_DRAWING_MODE inpTH3DrawingMode = TH3_MODE_ABCD;
-//input double inpTH3BaseStepPercent = 28.125;
-//input color inpTH3Color = clrDarkBlue;            // Visual align MT5: was clrForestGreen
-//input color inpTH3PipTextColor = clrDarkBlue;     // Visual align MT5: was clrNavy
-//input ENUM_LINE_STYLE inpTH3Style = STYLE_SOLID;
-//input int inpTH3Width = 1;
-//input bool inpShowTH3Labels = true;
-//input ENUM_TH3_LABEL_POSITION inpTH3LabelPosition = TH3_LABEL_END;
-//input ENUM_ZONE_STYLE inpTH3ZoneStyle = ZONE_STYLE_BOX_FILLED;
-//input color inpTH3ZoneColor = clrNONE;
-//input int inpTH3ZoneTransparency = 50;
-//input double inpTH3ZoneHeightPercent = 33.0;
-//input ENUM_LINE_STYLE inpTH3ZoneBorderStyle = STYLE_DOT;
-//input int inpTH3ZoneBorderWidth = 1;
-//#endif
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF — the [14] TH3 TOOL group
+// is LIVE again (was #ifndef BUILD_LITE).
+#ifndef BUILD_LITE
+input group "14) TH3 TOOL"
+input string S12 = "[14] TH3 TOOL";
+input bool inpEnableTH3Tool = true;
+input ENUM_TH3_DRAWING_MODE inpTH3DrawingMode = TH3_MODE_ABCD;
+input double inpTH3BaseStepPercent = 28.125;
+// P-TH3-PB-MAN (2026-09-21): the pivot base is no longer DRAWN (stage 5 retired).
+// Its height is typed here, in pips, and Path 1 of TH3LockedStep reads it.
+// The marked leg is a three-step run, so one step = leg/3 (course k = 3 fixed).
+// 0 = OFF: the pattern timeframe's own ATR answers (the default before this knob).
+input double inpTH3PivotBasePips = 0.0;
+input color inpTH3Color = clrDarkBlue;            // Visual align MT5: was clrForestGreen
+input color inpTH3PipTextColor = clrDarkBlue;     // Visual align MT5: was clrNavy
+input ENUM_LINE_STYLE inpTH3Style = STYLE_SOLID;
+input int inpTH3Width = 1;
+input bool inpShowTH3Labels = true;
+input ENUM_TH3_LABEL_POSITION inpTH3LabelPosition = TH3_LABEL_END;
+input ENUM_ZONE_STYLE inpTH3ZoneStyle = ZONE_STYLE_BOX_FILLED;
+input color inpTH3ZoneColor = clrNONE;
+input int inpTH3ZoneTransparency = 50;
+input double inpTH3ZoneHeightPercent = 33.0;
+input ENUM_LINE_STYLE inpTH3ZoneBorderStyle = STYLE_DOT;
+input int inpTH3ZoneBorderWidth = 1;
+// P-TH3-P6e (2026-09-19) — MOTHER-PIVOT OVERLAY SWITCH. OFF = the chart
+// shows only the pattern + ladder (clean chart); ON = the active pattern
+// also wears its matched mother pivot (two dotted bounds + one badge).
+input bool inpShowMotherPivotZone = true;   // Show the matched mother pivot on the active pattern
+#endif
 
-// TH3TOOL-OFF: whole "15) AB=CD" group retired with the tool (was #ifndef BUILD_LITE) —
-//#ifndef BUILD_LITE
-//input group "15) AB=CD"
-//input string S13 = "[15] AB=CD";
-//input bool inpABCDShowLabels = false;             // Visual align MT5: was true
-//input color inpABCDPointColor = clrDarkBlue;      // Visual align MT5: was clrGold
-//input double inpABCDLabelOffsetPercent = 20.0;
-//input color inpABCDLineColor = clrDarkBlue;       // Visual align MT5: was clrDodgerBlue
-//input int inpABCDWidth = 2;
-//input bool inpABCDExtendCD = true;
-//input ENUM_BASE_CORNER inpABCDInfoCorner = CORNER_LEFT_UPPER;
-//input int inpABCDInfoXDistance = 10;
-//input int inpABCDInfoYDistance = 20;
-//input int inpABCDInfoFontSize = 9;
-//input color inpABCDInfoColor = clrDarkBlue;       // Visual align MT5: was clrNavy
-//#endif
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF — the [15] AB=CD group is
+// LIVE again (was #ifndef BUILD_LITE).
+#ifndef BUILD_LITE
+input group "15) AB=CD"
+input string S13 = "[15] AB=CD";
+input bool inpABCDShowLabels = false;             // Visual align MT5: was true
+input color inpABCDPointColor = clrDarkBlue;      // Visual align MT5: was clrGold
+input double inpABCDLabelOffsetPercent = 20.0;
+input color inpABCDLineColor = clrDarkBlue;       // Visual align MT5: was clrDodgerBlue
+input int inpABCDWidth = 2;
+input bool inpABCDExtendCD = true;
+input ENUM_BASE_CORNER inpABCDInfoCorner = CORNER_LEFT_UPPER;
+input int inpABCDInfoXDistance = 10;
+input int inpABCDInfoYDistance = 20;
+input int inpABCDInfoFontSize = 9;
+input color inpABCDInfoColor = clrDarkBlue;       // Visual align MT5: was clrNavy
+#endif
 
 input group "16) ALERTS"
 input string S17 = "[16] ALERTS";
@@ -361,10 +416,11 @@ input string inpLockKey = "G";
 input string inpCustomPriceKey = "C";
 input string inpTriggerLevelsKey = "T";
 input string inpStepModeKey = "E";
-// TH3TOOL-OFF:
-//#ifndef BUILD_LITE
-//input string inpTH3ToolKey = "V";
-//#endif
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+input string inpTH3ToolKey = "V";
+input bool   inpTH3AutoPivots = true;   // P-TH3-P6: auto-find the course's six-condition pivots (PDF pp. 6-7) on the chart TF and one fractal step up; marks them on the chart and snaps the draw-session clicks onto them
+#endif
 input string inpATRLabelsKey = "A";        // Toggle ATR labels on/off
 input string inpTHLabelsKey = "S";          // Toggle TH labels on/off
 input string inpShowStatusKey = "W";        // Show current mode status
@@ -397,7 +453,7 @@ input ENUM_LOG_LEVEL inpLogLevel = LOG_LEVEL_WARN;   // Minimum log level (TRACE
 // mirrored into runtime copies in RuntimeSettings.mqh, which seeds them from
 // these inputs at attach (RuntimeSettingsInit) — so both the MT4 Inputs dialog
 // and the on-chart panels drive the same settings. Derived render helpers
-// (e.g. GetTriggerRenderColor) also live in RuntimeSettings.mqh.
+// (e.g. GetLineRenderColor) also live in RuntimeSettings.mqh.
 //==============================================================================
 
 #endif // PROPERTIES_AND_INPUTS_MQH

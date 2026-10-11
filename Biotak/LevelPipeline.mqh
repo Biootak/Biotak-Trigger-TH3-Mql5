@@ -1,9 +1,26 @@
-﻿  #property copyright "Copyright 2025, Biotak Project"
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/LevelPipeline.mqh
+//   regenerate : python tools/parity/resync-module.py --write LevelPipeline.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  #property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
 #property strict
 
 #ifndef LEVEL_PIPELINE_MQH
 #define LEVEL_PIPELINE_MQH
+
+// LevelPipe_A.mqh - LevelPipeline.mqh split 2026-09-29: exact lines 7-1438, byte-identical, zero renames.
+#ifndef LEVEL_PIPE_A_MQH
+#define LEVEL_PIPE_A_MQH
+
 
 //+------------------------------------------------------------------+
 //| LEVEL PIPELINE   Zone-First Architecture                         |
@@ -102,6 +119,8 @@ struct STriggerLine {
     string tooltip;
     color  clr;
     string labelText;
+    bool   isTrigger;       // P-UI-131j: this line's LEVEL is a trigger subdivision,
+                            // so its pip label wears the TRIGGER LABEL surface
     bool   inViewport;      // false = skip render
     bool   isMidpoint;
     bool   setBack;         // OBJPROP_BACK value (mode-specific)
@@ -246,6 +265,9 @@ int CalculateLevels(
     while(drawnAbove < safeMaxAbove && iterations < maxIterations) {
         iterations++;
         double price;
+        // P-LEVEL-BOUND-03: the step THIS iteration advances by, so the historical
+        // bound can be extended by whole rungs instead of a price guess.
+        double iterStep = stepSizes[0];
         if(stepMode == LEVEL_STEP_UNIFORM) {
             price = shiftedCenter + (stepSizes[0] * logicalStep);
         } else {
@@ -255,12 +277,15 @@ int CalculateLevels(
             int parity = (logicalStep - 1) % 2;
             int selectedIndex = (parity == 0) ? sequenceIndex : ((sequenceIndex + 1) % stepSizeCount);
             double dist = stepSizes[selectedIndex];
+            iterStep = dist;
             cumAbove += dist;
             price = shiftedCenter + cumAbove;
         }
         
-        // Price boundary check
-        if(boundByHistorical && maxPrice > 0 && price > maxPrice) break;
+        // Price boundary check — P-LEVEL-BOUND-03: the bound is extended by
+        // `P_LEVEL_BOUND_OVERDRAW` whole rungs so the chart shows where the next
+        // levels WOULD be, without touching where the historical extreme is.
+        if(boundByHistorical && maxPrice > 0 && price > maxPrice + P_LEVEL_BOUND_OVERDRAW * iterStep) break;
         
         levels[count].price = price;
         levels[count].logicalStep = logicalStep;
@@ -282,6 +307,7 @@ int CalculateLevels(
     while(drawnBelow < safeMaxBelow && iterations < maxIterations) {
         iterations++;
         double price;
+        double iterStep = stepSizes[0];
         if(stepMode == LEVEL_STEP_UNIFORM) {
             price = shiftedCenter - (stepSizes[0] * logicalStep);
         } else {
@@ -289,12 +315,13 @@ int CalculateLevels(
             int parity = (logicalStep - 1) % 2;
             int selectedIndex = (parity == 0) ? sequenceIndex : ((sequenceIndex + 1) % stepSizeCount);
             double dist = stepSizes[selectedIndex];
+            iterStep = dist;
             cumBelow += dist;
             price = shiftedCenter - cumBelow;
         }
         
-        // Price boundary check
-        if(boundByHistorical && minPrice > 0 && price < minPrice) break;
+        // Price boundary check — P-LEVEL-BOUND-03, same margin as the above side.
+        if(boundByHistorical && minPrice > 0 && price < minPrice - P_LEVEL_BOUND_OVERDRAW * iterStep) break;
         if(price <= 0) break;
         
         levels[count].price = price;
@@ -327,6 +354,36 @@ string GetLabelTextForLevel(const SLevelClassified &level, const int baseMultipl
     
     // For trigger subdivisions, show distance in base multiplier units if possible
     return StringFormat("%s%d", direction, level.logicalStep);
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-131m: A BAND'S INK IS ONE PAIR, FADED EXACTLY ONCE.         |
+//|                                                                  |
+//| The trigger card's COLOR row could not reach the chart:           |
+//| `GetTriggerRenderColor()` had already blended g_triggerColor with  |
+//| g_triggerTransparency, and CreateZone blended that result AGAIN   |
+//| with the MID ZONE transparency - two owners fading one band. At   |
+//| the measured 43 % the band kept 8 % of the picked colour.        |
+//|                                                                  |
+//| So a band carries a BASE that is never pre-faded plus the opacity |
+//| that owns it: card 0's TRANSPARENCY for a trigger band, the band  |
+//| row on card 1 for a structure one. The EDGE derives from the same |
+//| base, so the trigger card's colour reaches the surface that is    |
+//| actually visible. No reader may hand CreateZone a self-faded      |
+//| colour (P-UI-66's law, applied to the band).                     |
+//+------------------------------------------------------------------+
+color PipelineBandBaseColor(const int step, const bool triggerEnabled, const int baseMultiplier)
+{
+    color zc = GetZoneColorForLevel(step, triggerEnabled, baseMultiplier);
+    if(zc != clrNONE) return zc;     // a structure tier owns this band's ink
+    return g_triggerColor;           // the trigger family's own ink, RAW
+}
+
+int PipelineBandTransparency(const bool isTrigger, const int bandTransparency)
+{
+    if(!isTrigger) return bandTransparency;
+    int t = (int)MathMax(0, MathMin(100, g_triggerTransparency));
+    return t;
 }
 
 //+------------------------------------------------------------------+
@@ -402,13 +459,9 @@ int ClassifyLevels(
             classified[i].isTrigger = true;
         }
 
-        // Zone color from level (zones keep their family identity)
-        classified[i].zoneColor = GetZoneColorForLevel(step, triggerEnabled, baseMultiplier);
-        if(classified[i].zoneColor == clrNONE) {
-            // Trigger-subdivision zones fall back to the trigger zone color
-            // (NOT the unified line color — zones and lines are independent).
-            classified[i].zoneColor = GetTriggerRenderColor();
-        }
+        // Zone color from level (zones keep their family identity). RAW - the
+        // fade belongs to the row that owns it, and CreateZone does it once.
+        classified[i].zoneColor = PipelineBandBaseColor(step, triggerEnabled, baseMultiplier);
         
         // Populate label text
         classified[i].labelText = GetLabelTextForLevel(classified[i], baseMultiplier);
@@ -646,6 +699,7 @@ void BuildZonesAndLines(
         lines[lIdx].lineWidth = s_aboveLevels[i].levelWidth;
         lines[lIdx].clr = s_aboveLevels[i].levelColor;
         lines[lIdx].labelText = s_aboveLevels[i].labelText;
+        lines[lIdx].isTrigger = s_aboveLevels[i].isTrigger;   // P-UI-131j
         lines[lIdx].tooltip = "Midpoint +" + IntegerToString(s_aboveLevels[i].logicalStep) + 
             " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
@@ -708,6 +762,7 @@ void BuildZonesAndLines(
         lines[lIdx].lineWidth = s_belowLevels[i].levelWidth;
         lines[lIdx].clr = s_belowLevels[i].levelColor;
         lines[lIdx].labelText = s_belowLevels[i].labelText;
+        lines[lIdx].isTrigger = s_belowLevels[i].isTrigger;   // P-UI-131j
         lines[lIdx].tooltip = "Midpoint -" + IntegerToString(s_belowLevels[i].logicalStep) + 
             " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
@@ -760,7 +815,9 @@ void BuildZonesAndLines(
 //| Creates/updates MT5 rectangle objects for each zone.             |
 //| Handles all zone styles: Lines, Filled Box, Empty Box, Hidden.   |
 //+------------------------------------------------------------------+
-void SetPipelineObjectTimeframesIfExists(const string name, const long timeframes)
+// Returns true only when a real mask WRITE reached the chart (P-PERF-32b: the
+// family walks report their cost as a number, and a guarded no-op is not a write).
+bool SetPipelineObjectTimeframesIfExists(const string name, const long timeframes)
 {
     // PERF FIX: Check object cache first to skip ObjectFind MT4 syscall when object is known absent.
     // ObjectFind is a slow kernel call; using CacheObjectExists avoids it for untracked names.
@@ -772,8 +829,7 @@ void SetPipelineObjectTimeframesIfExists(const string name, const long timeframe
     // (hundreds of writes per frame for masks that had not changed).
     bool knownInCache = CacheObjectExists(name);
     if(knownInCache) {
-        ApplyTfMaskGuarded(name, timeframes);
-        return;
+        return ApplyTfMaskGuarded(name, timeframes);
     }
     // P-PERF-07: the ObjectFind fallback is a terminal call, and this function
     // is reached 7x per ZONE plus once per LINE and once per LABEL of every
@@ -782,17 +838,21 @@ void SetPipelineObjectTimeframesIfExists(const string name, const long timeframe
     // for every culled level on every heavy frame (~2.6k probes/frame at
     // inpMaxLevels=144), each scanning a chart holding thousands of objects.
     // A name already proven absent on this chart costs one hash instead.
-    if(CacheIsAbsentKnown(name)) return;
+    if(CacheIsAbsentKnown(name)) return false;
     // Not in cache — check chart directly (only for sub-objects like _Top, _Bottom, _B_*)
     if(ObjectFind(0, name) >= 0) {
         CacheForgetAbsent(name);
-        ApplyTfMaskGuarded(name, timeframes);
-    } else {
-        CacheMarkAbsent(name);
+        return ApplyTfMaskGuarded(name, timeframes);
     }
+    CacheMarkAbsent(name);
+    return false;
 }
 
-void SetPipelineZoneVisibility(const string zoneName, const bool visible)
+// Returns the number of masks that actually reached the chart (0..7).
+// P-PERF-32b: the trigger family's press-time walk (TriggerFamilyWalk) and the
+// render share THIS writer, so the two can never disagree about which objects a
+// zone is made of or which of them L owns.
+int SetPipelineZoneVisibility(const string zoneName, const bool visible)
 {
     // FIX: The L key controls only the zone boundary LINES (_Top/_Bottom).
     // The box object itself (rectangle or empty-box borders) is never
@@ -801,20 +861,24 @@ void SetPipelineZoneVisibility(const string zoneName, const bool visible)
     // zone's visibility did not change (the common case by far).
     long tfAll = (visible && !IsIndicatorHidden()) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
     long tfLine = (visible && !IsIndicatorHidden() && GetCachedLinesVisible()) ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS;
-    SetPipelineObjectTimeframesIfExists(zoneName, tfAll);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_Top", tfLine);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_Bottom", tfLine);
+    int wrote = 0;
+    if(SetPipelineObjectTimeframesIfExists(zoneName, tfAll)) wrote++;
+    if(SetPipelineObjectTimeframesIfExists(zoneName + "_Top", tfLine)) wrote++;
+    if(SetPipelineObjectTimeframesIfExists(zoneName + "_Bottom", tfLine)) wrote++;
     // Empty-box border segments follow the box itself (F key)
-    SetPipelineObjectTimeframesIfExists(zoneName + "_B_Top", tfAll);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_B_Bottom", tfAll);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_B_Left", tfAll);
-    SetPipelineObjectTimeframesIfExists(zoneName + "_B_Right", tfAll);
+    if(SetPipelineObjectTimeframesIfExists(zoneName + "_B_Top", tfAll)) wrote++;
+    if(SetPipelineObjectTimeframesIfExists(zoneName + "_B_Bottom", tfAll)) wrote++;
+    if(SetPipelineObjectTimeframesIfExists(zoneName + "_B_Left", tfAll)) wrote++;
+    if(SetPipelineObjectTimeframesIfExists(zoneName + "_B_Right", tfAll)) wrote++;
+    return wrote;
 }
 
 void RenderZones(
     const SZoneDefinition &zones[],
     const int zoneCount,
-    const SModeConfig &config)
+    const SModeConfig &config,
+    const double vpTop,
+    const double vpBottom)
 {
     // P-PERF-41: THE FAMILY SWITCH IS A MASK, NOT A DESTRUCTION.
     //
@@ -851,10 +915,26 @@ void RenderZones(
     }
 
     for(int i = 0; i < zoneCount; i++) {
-        if(!zones[i].inViewport) {
-            SetPipelineZoneVisibility(zones[i].name, false);
-            continue;
-        }
+        // P-VIEW-01 (2026-09-29) — THE CULL DECIDES PAINT, THE VIEWPORT NEVER OWNS
+        // VISIBILITY. It used to write `SetPipelineZoneVisibility(name,false)` here,
+        // i.e. the window HID the band — and a hidden object is only shown again by
+        // the frame that re-decides it. Measured: the cull window is allowed to lag
+        // the chart by P_P4_VP_HYSTERESIS_PCT 0.20 of the visible range
+        // (ExtDraw_A.mqh 105-125) and the window is a term of the geometry signature
+        // (EventHandlers_Calc.mqh 1329), so a band the price walked up to stayed
+        // HIDDEN until some other input forced a rebuild — the report «سطوح حذف
+        // میشه ولی دیگه نمیاد تا یک تکونی به چارت بدم». Now the band is asserted with
+        // the SAME mask the in-window path asserts (F/L alone own it, read-guarded by
+        // ApplyTfMaskGuarded: zero writes in steady state) and simply not painted this
+        // frame. MT4 draws an object it already holds at its own paint time, so the
+        // band is there BEFORE the user scrolls to it — the only allocation this
+        // costs is MT4's own clipping, not an indicator write.
+        // P-VIEW-03 (2026-09-29): the window no longer skips a band here either —
+        // see the same law and the same MEASURED band (EURUSD M15: 1.11520..1.15185
+        // missing between two drawn groups) at RenderTriggerLines below. A band that
+        // is only \"not painted this frame\" is a band that can stay unpainted forever,
+        // because nothing else re-decides it. The thin-zone guard below stays: it is
+        // re-decided by the same frame that sees the scale change.
 
         if(p4PxPerPrice > 0.0 &&
            (zones[i].renderTop - zones[i].renderBottom) * p4PxPerPrice < P_P4_MIN_ZONE_PX)
@@ -869,25 +949,62 @@ void RenderZones(
         // family - is exactly what the card's third pill used to be: the user could
         // see two controls claiming to do the same thing, and they disagreed.
         
-        // Trigger bands when the trigger overlay is off: DELETE, as it always
-        // did - and the reason is worth recording, because "hide it instead" is
-        // the obvious-looking edit.
+        // P-PERF-32b — THE TRIGGER OVERLAY IS A MASK, NOT A DESTRUCTION.
         //
-        // A trigger band and a structure band are the SAME `_Zone_` names with
-        // the same object shape, so nothing outside this list can tell them
-        // apart: hiding one would also commit the F show path
-        // (VisibilityShowAllCached) to repaint it ALL_PERIODS, because the only
-        // input that path has is the FAMILY switch. The band would then blink
-        // back for the frame between the F press and the render that re-hides
-        // it - a new flicker, traded for nothing: after the first delete this
-        // branch costs 7 proved-absent hash lookups per band (P-PERF-07/13),
-        // and the render itself only runs when IsTriggerLevelsEnabled() moved
-        // (it is in frameCore). Hiding would add a repaint risk to the one
-        // switch whose whole job is to make a family visible.
-        if(zones[i].isTrigger && !triggerEnabled) {
-            DeleteManagedZoneObjects(zones[i].name);
-            continue;
+        // This branch used to DELETE the band (and the F-show path's blanket
+        // ALL_PERIODS was the reason it had to: a trigger band and a structure
+        // band are the same `_Zone_` names, so a hidden trigger band would have
+        // been re-shown by an F press - the flicker this delete existed to
+        // prevent).
+        //
+        // What the delete could not survive is the LATENCY: the T toggle, the
+        // ring's TRIGGER light and the card's SHOW row all flipped the switch
+        // and then asked the RENDER for the pixels ("سطح تریگر دیر خاموش و روشن
+        // میشه"), because a deleted band leaves the ON direction nothing to
+        // show without a full family render. The structure switches (card 11,
+        // P-PERF-32) have painted in their own event since they were fixed:
+        // state + a walk over the objects + a discrete repaint.
+        //
+        // So the family is a MASK now, exactly like the mid-zone family
+        // (P-PERF-41) and the unified lines (P-PERF-25): the band stays as a
+        // hidden object and OFF/ON is one guarded mask per object, written by
+        // the SAME `SetPipelineZoneVisibility` the press-time walk calls
+        // (TriggerFamilyWalk, LevelPipe_B). A later render asserts the live
+        // switch here and changes no pixel - and the F-show corner is closed at
+        // the source: `ApplyHideAllState` re-asserts this family through its own
+        // owner, in the same event.
+        //
+        // Cost: while the overlay is OFF the bands exist as masked objects
+        // (MT4 culls a masked object before rasterising) - the same trade
+        // P-PERF-41 made for the zone family, and what P-PERF-04's thin-zone
+        // guard already does with a single band.
+        //
+        // AND HIDDEN, BUT NEVER STALE. The ON press paints from these very
+        // objects (its walk writes masks, not geometry), so a band left at the
+        // previous centre would flash at the old price for a frame - exactly the
+        // class P-VIEW-01/03 refuse. The test is this list's own first guard, read
+        // from the cache (the top price we last WROTE vs the top this geometry
+        // gives): on a match the band is masked and skipped (seven guarded masks,
+        // zero terminal calls); on a miss it falls through to the ONE creator
+        // below, which updates it in place - still masked. That same fall-through
+        // is what MATERIALISES the family while the overlay is off (the first
+        // render after attach creates it), so the first ON press is a mask flip
+        // too, exactly like a structure switch.
+        bool triggerHidden = (zones[i].isTrigger && !triggerEnabled);
+        if(triggerHidden) {
+            SObjectCacheEntry trigEntry;
+            if(CacheGetObject(zones[i].name, trigEntry) &&
+               MathAbs(trigEntry.lastPrice - zones[i].renderTop) <= GetCachedPoint() * 0.1) {
+                SetPipelineZoneVisibility(zones[i].name, false);
+                // P-KEY-PROBE: only while a T press is outstanding (one int read per
+                // band in the steady state would be the cost this project refuses).
+                if(g_triggerPressMs != 0) g_triggerPressHidden++;
+                continue;
+            }
         }
+        // P-KEY-PROBE: the bands this render reaches for the toggle (the show
+        // direction pays these; the hide direction pays the masks above).
+        if(zones[i].isTrigger && g_triggerPressMs != 0) g_triggerPressReached++;
         
         if(zones[i].renderTop <= zones[i].renderBottom) continue;
         
@@ -896,12 +1013,17 @@ void RenderZones(
             // `filled` = the band, `outline` = its edge (three segments), and each is
             // independent - so FILLED, EMPTY and OUTLINED are three real pictures and
             // the BORDER / BORDER WIDTH settings apply wherever an edge is drawn.
-            SZoneCreationRequest request;
+            SZoneCreationRequest request = ZoneRequestNew();   // P-UI-131h
             request.name = zones[i].name;
             request.topPrice = zones[i].renderTop;
             request.bottomPrice = zones[i].renderBottom;
             request.zoneColor = zones[i].zoneColor;
-            request.transparency = zones[i].transparency;
+            // P-UI-131m: the band's OWN opacity, read live next to the border rows
+            // below - a trigger band is faded by card 0's TRANSPARENCY, a structure
+            // band by the band row on card 1. The BASE colour above is unfaded, so
+            // this is the one fade (the double blend it replaces left a trigger band
+            // at 8 % of the picked colour at 43 %).
+            request.transparency = PipelineBandTransparency(zones[i].isTrigger, zones[i].transparency);
             request.filled = zones[i].filled;
             request.outline = zones[i].outline;
             request.borderStyle = inpMidZoneBorderStyle;
@@ -910,11 +1032,20 @@ void RenderZones(
             // independently, and both values are read here (next to the border style and
             // width they belong with) rather than threaded through the zone definition.
             request.borderTransparency = inpMidZoneBorderTransparency;
+            // P-UI-131h: the two halves' own surfaces, read here with the three rows
+            // above. AUTO (clrNONE / -1) is the factory state, so this changes nothing
+            // until a row is touched.
+            request.borderTopColor = inpZoneEdgeTopColor;
+            request.borderBottomColor = inpZoneEdgeBottomColor;
+            request.borderTopTransparency = inpZoneEdgeTopTransparency;
+            request.borderBottomTransparency = inpZoneEdgeBottomTransparency;
             request.startTime = 0;
             request.endTime = 0;
             
             CreateZone(request);
-            SetPipelineZoneVisibility(zones[i].name, true);
+            // P-PERF-32b: a band whose overlay is OFF is created/updated in place
+            // and stays MASKED - the render never shows what the switch turned off.
+            SetPipelineZoneVisibility(zones[i].name, !triggerHidden);
         }
     }
 }
@@ -926,8 +1057,8 @@ void RenderZones(
 //| A structure switch (master / L1-L5, card 11) changes NO geometry: |
 //| the level SET is switch-invariant (ClassifyLevels always builds   |
 //| every step; the switches only choose zone colours via              |
-//| GetZoneColorForLevel + the GetTriggerRenderColor fallback, exactly |
-//| as ClassifyLevels lines 395-400 do). Re-deriving the whole level  |
+//| PipelineBandBaseColor, exactly as ClassifyLevels does).           |
+//| Re-deriving the whole level                                        |
 //| family to repaint a few hundred zone colours is what made the     |
 //| switch feel dead on a weak PC. So the switch never reaches the    |
 //| render: this walk rewrites the blended colour of every cached     |
@@ -989,9 +1120,13 @@ int StructureRecolourWalk()
         if(StringFind(nm, "_BK_") >= 0) continue;          // independent layer
         int step = StructureZoneStepFromName(nm);
         if(step <= 0) continue;
-        color zc = GetZoneColorForLevel(step, trigOn, baseMult);
-        if(zc == clrNONE) zc = GetTriggerRenderColor();
-        color want = GetZoneRenderColor(zc, tr);
+        // P-UI-131m: the walk repaints through the SAME two owners the paint path
+        // uses, or a structure switch would write a trigger band a colour the
+        // render never produces (it used to blend the mid-zone transparency into a
+        // base that was already faded).
+        bool isTrig = (GetHighestStructureLevel(step, g_cachedIntervals) <= 0);
+        color zc = PipelineBandBaseColor(step, trigOn, baseMult);
+        color want = GetZoneRenderColor(zc, PipelineBandTransparency(isTrig, tr));
         color have = clrNONE;
         if(!CacheGetColor(nm, have)) continue;   // nothing painted under this name
         if(have == want) continue;
@@ -1008,13 +1143,199 @@ int StructureRecolourWalk()
 //| Creates/updates MT5 horizontal line objects.                     |
 //| Uses CreateOrUpdateHLine for consistency.                        |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| P-UI-98: THE STEP-1 HANDLE'S FACE AND ITS MARKER.                 |
+//|                                                                   |
+//| In custom-price start-point mode the two rung-1 trigger lines are |
+//| the user's step handle: while ARMED they are SELECTABLE (MT4's    |
+//| own drag moves them), they sit at a z-order above the zone fills  |
+//| (a zone rectangle under the cursor would otherwise eat the grab — |
+//| the reported «الان step اول قابل درگ کردن نیستش»), and ONE small  |
+//| red dot at the chart's right edge (time 0 — the pip labels' own   |
+//| anchoring, so it follows the market with no per-bar write) marks  |
+//| them. The user's marker order: «خط کاستوم پرایس ... نشانه سبز و   |
+//| step اول ... نشانه قرمز ... یک نشانه باشه که خیلی مزاحم هم نباشه» |
+//| and «وقتی لاین ها رو خاموش میکنم نشان ها هم نباشه» — the dot      |
+//| wears the line family's mask, so the L switch owns it with the    |
+//| lines.                                                            |
+//|                                                                   |
+//| SET (the click-to-commit model, P-UI-98d): a set handle is not    |
+//| selectable, its dot is gone, and the marker object is DELETED —   |
+//| not masked — so no other mask writer can resurrect it. The       |
+//| armed/set pair is owned HERE in the refresh path, so a state that |
+//| changed under the chart is re-owned on the next render. Guarded:  |
+//| one read per line per frame, a write only on drift (the perf law).|
+//+------------------------------------------------------------------+
+void Step1HandleOwnFace(const string name, const double price, const int direction,
+                        const long lineTf, const string naturalTip)
+{
+    bool draggable = (g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) && g_s1LinesArmed;
+    // P-UI-98e: WHILE OUR OWN CARRY OWNS THIS LINE, THE FLAG IS BORROWED.
+    // P-LM-21 learned it on the leg metre: MT4 re-arms its own per-object drag on
+    // every paint for as long as SELECTABLE sits on the object, so the line fights
+    // the hand and the gesture «سریع قطع میشه». The face owner must not re-arm
+    // what the gesture took, and the selection face it would otherwise drop
+    // mid-drag stays (that is the separate property the borrow leaves alone).
+    bool dragOwnsThis = (g_s1DragLive && g_s1DragName == name);
+    if(!dragOwnsThis)
+    {
+        bool current = (bool)ObjectGetInteger(0, name, OBJPROP_SELECTABLE);
+        if(current != draggable)
+            ObjectSetInteger(0, name, OBJPROP_SELECTABLE, draggable);
+        if(!draggable && (bool)ObjectGetInteger(0, name, OBJPROP_SELECTED))
+            ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+    }
+    // P-UI-31's rule: the rung is NOT read back (the zorder audit bans
+    // OBJPROP_ZORDER reads in product code - a diagnostic, not a product
+    // question) and it is not re-decided either: the handle's one rung is
+    // Z_CHART_LABEL, spelled here and nowhere else.
+    ObjectSetInteger(0, name, OBJPROP_ZORDER, Z_CHART_LABEL);
+    // P-UI-98g: an armed handle whose circle is not up yet asks for the click.
+    string tip = draggable
+        ? (g_s1HandleShown
+           ? "[STEP 1] Drag the red handle to set the ladder step - click to commit, double-click re-arms"
+           : "[STEP 1] Click it to bring up the red handle")
+        : naturalTip;
+    if(tip != "" && ObjectGetString(0, name, OBJPROP_TOOLTIP) != tip)
+        ObjectSetString(0, name, OBJPROP_TOOLTIP, tip);
+
+    // the drag handle: ONE circular icon (S1_HANDLE_RES), centred on the line
+    // at the screen's horizontal middle; a SET or hidden handle PARKS it
+    // off-window (nothing can grab a set line, so nothing points at it either).
+    // The name AND the price are stashed for the grab hit test and the ride
+    // channels (P-UI-98e): the press edge must name the line it claims, and the
+    // carry needs the object to move.
+    // P-UI-98e: the rung-1 line's own NAME and PRICE are stashed whenever the
+    // line is THERE — not only while it is draggable. A SET handle stays
+    // CLICKABLE: the double-click that re-arms it has to find the row it names,
+    // and the click's hit test reads this very stash. What a SET handle LOSES is
+    // the icon (parked below), never the address — and the icon itself is placed
+    // only while the pair is armed (HandsetMarkersRide obeys the same term).
+    bool addressable = (price > 0.0) && MathIsValidNumber(price) && !IsIndicatorHidden();
+    if(addressable) g_s1MarkPeriod = Period();   // P-UI-98e: the stash's own timeframe
+    if(direction > 0) { g_s1MarkAbovePrice = addressable ? price : 0.0; g_s1MarkAboveName = addressable ? name : ""; }
+    else              { g_s1MarkBelowPrice = addressable ? price : 0.0; g_s1MarkBelowName = addressable ? name : ""; }
+    string mark = S1MarkName(direction);
+    // P-UI-98g: the RED circle is painted on request too («فقط وقتی روش کلیک
+    // کردیم دایره ها بیاد برای درگ کردن») — `g_s1HandleShown` is what the click
+    // on the line sets, and a SET or unasked pair keeps the circle parked.
+    if(!draggable || !g_s1HandleShown || !(price > 0.0) || !MathIsValidNumber(price) ||
+       IsIndicatorHidden() || !g_linesVisible)
+    {
+        HandsetHandlePark(mark, S1_HANDLE_RES);
+        return;
+    }
+    HandsetHandleAt(mark, price, S1_HANDLE_RES);
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-98f: WHICH LINE WEARS THE STEP-1 HANDLE (2026-09-22).        |
+//|                                                                   |
+//| Reported: «استپ اول که کلیک میکنم دوتا فعال میشه ... اون قرمز    |
+//| خیلی نزدیک کاستوم پرایس نباید باشه». The old rule was             |
+//| `logicalStep == 1` — the LADDER's rung 1, which is not the line    |
+//| one STEP away from the custom price. Trigger lines are drawn at    |
+//| the MIDPOINT of each pair of neighbouring levels, and the custom   |
+//| price line is a zone EDGE (the ladder's centre sits half a step    |
+//| above it, P-UI-98's `shiftedCenter`), so the drawn family is:      |
+//|                                                                   |
+//|     above:  start + 1*step, + 2*step, + 3*step ...  (= _Above_1)   |
+//|     below:  start + 0*step, - 1*step, - 2*step ...  (= _Below_2)   |
+//|                                                                   |
+//| `_Below_1` is the boundary between the centre zone and the first   |
+//| below zone: it is drawn ON the custom price line, so its red icon  |
+//| landed exactly under the custom price line's green one - the two   |
+//| reds the user saw, one of them «خیلی نزدیک». And the drag math     |
+//| (`newFirst = |dragged - start| / natural`, the ONE owner in        |
+//| EventHandlers) only reads correctly for a line that IS one step    |
+//| from the start: on the coincident line it read 0 at rest and any   |
+//| hair of a downward move collapsed the whole ladder to a fraction   |
+//| of a step - «step اول سریع قطع میشه».                             |
+//|                                                                   |
+//| So the handle is picked by GEOMETRY, never by rung number: on each |
+//| side, the drawn trigger line nearest ONE STEP from the custom      |
+//| price line, and never a line closer than half a step to it (the    |
+//| coincident boundary can never carry a handle - nothing may be      |
+//| grabbed on top of the custom price line's own handle). The step is |
+//| the project's ONE owner of "the current step", F x the F-free       |
+//| natural first step the mode factory noted, so the pick is          |
+//| invariant under the override: F scales every line and the step     |
+//| together, and the same two lines stay the handle (a drag can       |
+//| never hand the gesture to a different line mid-flight).            |
+//+------------------------------------------------------------------+
+void Step1HandlePick(const STriggerLine &lines[], const int lineCount,
+                     const double anchor, const double stepNow,
+                     string &aboveName, string &belowName)
+{
+    aboveName = "";
+    belowName = "";
+    if(!(anchor > 0.0) || !(stepNow > 0.0)) return;   // no step known = no handle
+    double bestAbove = 0.0, bestBelow = 0.0;
+    for(int i = 0; i < lineCount; i++)
+    {
+        if(lines[i].isMidpoint) continue;
+        if(!(lines[i].price > 0.0) || !MathIsValidNumber(lines[i].price)) continue;
+        double dist = MathAbs(lines[i].price - anchor);
+        if(dist < stepNow * 0.5) continue;             // on the anchor: never a handle
+        double err = MathAbs(dist - stepNow);          // how far from ONE step
+        if(lines[i].direction > 0)
+        {
+            if(aboveName == "" || err < bestAbove)
+            { bestAbove = err; aboveName = lines[i].name; }
+        }
+        else
+        {
+            if(belowName == "" || err < bestBelow)
+            { bestBelow = err; belowName = lines[i].name; }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-131j - THE TRIGGER LABEL'S OWN COLOUR + OPACITY.            |
+//|                                                                  |
+//| The trigger card has carried a LABEL COLOR row since the first   |
+//| card layout and nothing ever read it: the pip label took the     |
+//| unified line colour. The row is now live, with an opacity beside |
+//| it (the LABEL OPACITY row), and BOTH ends of both are AUTO -     |
+//| which is the shipped picture, so an untouched chart cannot move. |
+//|                                                                  |
+//| Lives here, not in RuntimeSettings (which owns the two mirrors), |
+//| because the generic blender `GetZoneRenderColor` is defined in   |
+//| ZoneFactory, a LATER file than RuntimeSettings - same include      |
+//| order that made the two effective-colour getters there duplicate |
+//| the blend inline. Cost: the AUTO/AUTO call is one cached         |
+//| getter, and a pinned one blends once per render pass.            |
+//+------------------------------------------------------------------+
+color GetTriggerLabelRenderColor()
+{
+    if(g_triggerLabelColor == clrNONE && g_triggerLabelTransparency < 0)
+        return GetLineRenderColor();   // AUTO/AUTO = P-UI-66's shipped look
+    color base = (g_triggerLabelColor == clrNONE) ? g_lineColor : g_triggerLabelColor;
+    int   tr   = (g_triggerLabelTransparency >= 0) ? g_triggerLabelTransparency
+                                                   : g_lineTransparency;
+    return GetZoneRenderColor(base, tr);
+}
+
 void RenderTriggerLines(
     const STriggerLine &lines[],
     const int lineCount,
     const SModeConfig &config,
     const bool makeLines,
-    const bool makeLabels)
+    const bool makeLabels,
+    const double vpTop,
+    const double vpBottom)
 {    double currentPrice = GetCurrentPriceForLabels();
+
+    // P-UI-98f: the step-1 handle is picked by GEOMETRY once per render (the
+    // line one step from the custom price on each side - see Step1HandlePick),
+    // so the face owner below is reached by the same pair the click and drag
+    // channels will answer, in every start-point mode (the owner itself makes
+    // the handle grabbable in the custom-price mode only).
+    string s1AboveName = "", s1BelowName = "";
+    Step1HandlePick(lines, lineCount, GetMidpointPrice(g_thStartPointType),
+                    StepOverrideFactor() * NaturalFirstStep(),
+                    s1AboveName, s1BelowName);
 
     // P-UI-66: THE LOOK IS A PAINT PROPERTY. `lines[].clr/lineStyle/lineWidth`
     // are the BUILD's copy of the unified [08.4] look, and they are only correct
@@ -1028,6 +1349,9 @@ void RenderTriggerLines(
     // (`CreateOrUpdateHLine` compares colour/style/width before it writes), so a
     // steady frame still costs zero terminal calls for an unchanged look.
     color           lineClr   = GetLineRenderColor();
+    // P-UI-131j: read once per pass - the trigger label's own surface. In the shipped
+    // AUTO state this is the line colour again (one cached getter, three compares).
+    color           lblClr    = GetTriggerLabelRenderColor();
     ENUM_LINE_STYLE lineStyle = inpLineStyle;
     int             lineWidth = inpLineWidth;
 
@@ -1045,6 +1369,14 @@ void RenderTriggerLines(
         AlertCacheAdd(lines[i].name, lines[i].price, lines[i].logicalStep,
                       lines[i].direction > 0);
 
+        // P-UI-98: the step-1 handle. While ITS gesture is live the line is
+        // MT4's to move: nothing on the object (P-BK-15), and the recomputed
+        // line price equals the dragged price anyway (it is where F came
+        // from) — the settle frame re-asserts it. Keyed on the NAME alone
+        // (P-UI-98f): the handle is not always the ladder's rung 1, so a rung
+        // number here let the render write the line the hand was holding.
+        if(g_s1DragLive && lines[i].name == g_s1DragName)
+            continue;
 
         // ALL pipeline lines (trigger-subdivision AND structure-interval)
         // share the unified [08.4] appearance set in ClassifyLevels. They are
@@ -1053,21 +1385,68 @@ void RenderTriggerLines(
         // the ONLY place the trigger overlay hides things — the trigger ZONES.
         // (The old Factor hideLineWhenTriggerOnly inversion is retired: every
         //  mode config leaves it false, and line visibility belongs to L alone.)
-        if(!lines[i].inViewport) {
-            // P-PERF-06: a staged family asserts only its own visibility — the
-            // other family was (or will be) culled by its own stage frame.
-            if(makeLines)  SetPipelineObjectTimeframesIfExists(lines[i].name, OBJ_NO_PERIODS);
-            if(makeLabels) SetPipelineObjectTimeframesIfExists(labelName, OBJ_NO_PERIODS);
-            continue;
-        }
+        // P-VIEW-01 (2026-09-29) — THE CULL DECIDES PAINT, THE VIEWPORT NEVER OWNS
+        // VISIBILITY. This branch used to write OBJ_NO_PERIODS on the line AND its
+        // label, i.e. the window HID them, and only the frame that re-evaluated
+        // `inViewport` could bring them back. Measured on this machine: the cull
+        // window is deliberately allowed to lag P_P4_VP_HYSTERESIS_PCT = 0.20 of the
+        // visible range (ExtDraw_A.mqh 105-125) while the geometry signature that
+        // decides whether a render runs AT ALL carries that same window
+        // (EventHandlers_Calc.mqh 1329-1330). So a level the price walked to could sit
+        // hidden through any number of frames — exactly the report «سطوح حذف میشه
+        // ولی دیگه نمیاد تا یک تکونی به چارت بدم» — and every window re-derivation
+        // flipped the mask on hundreds of objects in ONE frame, which is the flicker
+        // that carried the whole chart with it (the card and the countdown are
+        // re-created by the same rebuild).
+        //
+        // The mask is now the OWNER's (F / L / IsIndicatorHidden), asserted exactly as
+        // the in-window path asserts it and read-guarded in ApplyTfMaskGuarded — zero
+        // writes in steady state, one cache read per object — and this branch only
+        // skips the PAINT. The object keeps its price, so when the user scrolls to it
+        // MT4 draws it from its own state at its own paint time: nothing to wait for,
+        // nothing to flip, no cost on this side (that is the "قبل از کاربر" order).
+        long lineTf  = (IsIndicatorHidden() || !g_linesVisible) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+        long labelTf = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
+        // P-VIEW-03 (2026-09-29) — THE WINDOW IS NOT AN OWNER OF THE OBJECT, AND A
+        // FRAME THAT SKIPS A PAINT IS A LEVEL THAT CAN STAY MISSING.
+        //
+        // This is where an `if(!inView) { assert mask; continue; }` fence stood (and,
+        // before that, an `if(!inView) SetPipelineObjectTimeframesIfExists(...,
+        // OBJ_NO_PERIODS)`). Both shapes are the same defect with different clothes:
+        // they make the object's EXISTENCE depend on the moment the render happened
+        // to run, and nothing guarantees a later frame re-decides it. MEASURED in the
+        // user's own chart (2026-09-29, EURUSD M15, this build): the family above the
+        // live price was drawn from 1.15185 up to 1.17630 and two rungs at the bottom
+        // (1.11520 / 1.11250) were drawn, while the whole band around the price —
+        // 1.11520..1.15185, nine rungs on the same 41-pip pitch — was simply ABSENT.
+        // A hole in the MIDDLE cannot come from the level list (the ladder is built
+        // outward from the centre and is contiguous, and BuildZonesAndLines culls
+        // nothing — it only FLAGS `inViewport`), so the band existed in `lines[]` and
+        // was skipped here, with no later frame to bring it back after a scale change.
+        //
+        // The law this restores, and it is the same one the class already follows for
+        // zones and labels: THE WINDOW DECIDES NOTHING. Every level the build produced
+        // is asserted with the OWNER's mask (F / L / IsIndicatorHidden, read-guarded in
+        // ApplyTfMaskGuarded) and painted; MT4 clips what is off the chart itself, and
+        // that clipping costs this indicator nothing. "Painted but off-screen" is free;
+        // "not painted and back in view" is a hole.
+        //
+        // Cost, stated: the loop no longer skips, so a level outside the window now
+        // runs the same change-guarded `CreateOrUpdateHLine` the in-window ones run —
+        // a handful of property reads that write NOTHING when the object already holds
+        // those values (P-PERF-51's law), against a full level family (bounded by the
+        // ladder's own count, the same number the level list already carries). And it
+        // removes the reason for a pan to rebuild anything: with no window term in the
+        // frame signature (P-VIEW-02) a scroll now costs zero indicator work AND the
+        // picture is complete, which is the "قبل از کاربر" order the user asked for.
+        //
 
         // Use the individual line color instead of config.triggerColor
         if(makeLines) {
             bool isNew = CreateOrUpdateHLine(lines[i].name, lines[i].price,
                                               lineClr, lineStyle, lineWidth,
                                               lines[i].tooltip);
-            long lineTf = (IsIndicatorHidden() || !g_linesVisible) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-            SetPipelineObjectTimeframesIfExists(lines[i].name, lineTf);
+            SetPipelineObjectTimeframesIfExists(lines[i].name, lineTf);   // P-VIEW-01: hoisted, one owner
 
             // Set mode-specific properties on new objects
             if(isNew) {
@@ -1078,6 +1457,13 @@ void RenderTriggerLines(
                     ObjectSetInteger(0, lines[i].name, OBJPROP_ZORDER, config.zOrder);
                 }
             }
+            // P-UI-98: the face is owned AFTER the creator — CreateOrUpdateHLine
+            // writes SELECTABLE=false on every fresh object, so a face write
+            // before it landed on nothing and a just-created handle stayed
+            // un-grabbable until a topology change re-rendered the family.
+            if(lines[i].name == s1AboveName || lines[i].name == s1BelowName)
+                Step1HandleOwnFace(lines[i].name, lines[i].price, lines[i].direction,
+                                   lineTf, lines[i].tooltip);
         }
 
         // Render Pip Distance Label
@@ -1098,9 +1484,12 @@ void RenderTriggerLines(
             // `lines[i].clr` is the BUILD's copy, so a colour edit would have
             // gone stale on the label in exactly the frames the line was fixed
             // up in (`CreatePipDistanceLabel` is change-guarded too).
-            CreatePipDistanceLabel(labelName, lines[i].price, pips, lineClr, lines[i].labelText);
-            long labelTf = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-            SetPipelineObjectTimeframesIfExists(labelName, labelTf);
+            // P-UI-131j: ... unless the level is the TRIGGER's, whose label is a
+            // surface of its own (`lblClr` == `lineClr` while both its ends are AUTO).
+            CreatePipDistanceLabel(labelName, lines[i].price, pips,
+                                   lines[i].isTrigger ? lblClr : lineClr,
+                                   lines[i].labelText);
+            SetPipelineObjectTimeframesIfExists(labelName, labelTf);   // P-VIEW-01: hoisted, one owner
         }
     }
 }
@@ -1119,8 +1508,11 @@ void CleanupSurplusPipeline(
     const SModeConfig &config,
     const int maxLogicalStep)
 {
-    // During custom-price drag, do lightweight throttled cleanup instead of skipping entirely.
-    if(g_customPriceLineDragging) {
+    // During a hand-set drag (custom-price or step-1), do lightweight throttled
+    // cleanup instead of skipping entirely. P-UI-98i: the step-1 drag re-steps
+    // the ladder live like the line's drag, so it owns the same throttle - a
+    // full surplus sweep mid-gesture deletes under the hand.
+    if(g_customPriceLineDragging || g_s1DragLive) {
         static uint s_lastDragCleanupMs = 0;
         uint nowMs = GetTickCount();
         if(s_lastDragCleanupMs != 0 && (nowMs - s_lastDragCleanupMs) < 250)
@@ -1180,6 +1572,11 @@ void CleanupSurplusPipeline(
         ObjectDelete(0, midpointName);
     }
 }
+
+#endif // LEVEL_PIPE_A_MQH
+// LevelPipe_B.mqh - LevelPipeline.mqh split 2026-09-29: exact lines 1439-2181, byte-identical, zero renames.
+#ifndef LEVEL_PIPE_B_MQH
+#define LEVEL_PIPE_B_MQH
 
 //+------------------------------------------------------------------+
 //| BUILD MODE CONFIG: Create config from current input parameters   |
@@ -1291,13 +1688,17 @@ string PipelineGeometryKey(const SModeConfig &config,
     key += "," + IntegerToString((int)config.midpointColor) + "," + IntegerToString((int)config.midpointStyle);
     key += "," + IntegerToString(config.midpointWidth);
     // P-PERF-21b: the ZONE COLOURS are part of what this geometry carries
-    // (ClassifyLevels stores zoneColor per level, read from GetZoneColorForLevel
-    // and GetTriggerRenderColor), yet none of THOSE inputs were in the key: a
-    // structure-tier colour, a tier's show flag, the zones switch or the trigger
-    // colour could change while the key stayed equal and the cached zones would
-    // keep painting the old colour. The staleness was invisible because every
-    // one of those edits also changes levelSig and therefore wipes - but the
-    // cache must not RELY on a different guard to be correct.
+    // (ClassifyLevels stores zoneColor per level, read from PipelineBandBaseColor),
+    // yet none of THOSE inputs were in the key: a structure-tier colour, a tier's
+    // show flag, the zones switch or the trigger colour could change while the key
+    // stayed equal and the cached zones would keep painting the old colour. The
+    // staleness was invisible because every one of those edits also changes
+    // levelSig and therefore wipes - but the cache must not RELY on a different
+    // guard to be correct.
+    // P-UI-131m: the trigger term is the RAW `g_triggerColor` the geometry stores.
+    // It used to be `GetTriggerRenderColor()`, which put the trigger TRANSPARENCY
+    // in the key and so made every step of that slider a full family recompute -
+    // a PAINT input read as geometry, the mistake P-UI-66 removed from the lines.
     key += "|zc" + IntegerToString(inpShowMidZones ? 1 : 0)
               + IntegerToString(inpShowStructure ? 1 : 0)
               + IntegerToString(inpShowStructureL1 ? 1 : 0) + IntegerToString(inpShowStructureL2 ? 1 : 0)
@@ -1306,7 +1707,7 @@ string PipelineGeometryKey(const SModeConfig &config,
               + "," + IntegerToString((int)inpStructureL1Color) + IntegerToString((int)inpStructureL2Color)
               + IntegerToString((int)inpStructureL3Color) + IntegerToString((int)inpStructureL4Color)
               + IntegerToString((int)inpStructureL5Color)
-              + "," + IntegerToString((int)GetTriggerRenderColor());
+              + "," + IntegerToString((int)g_triggerColor);
     key += "|" + IntegerToString(g_customPriceLineDragging ? 1 : 0);
     // P-UI-66 - THE LINE LOOK IS NOT GEOMETRY, SO IT IS NOT A KEY TERM.
     //
@@ -1421,12 +1822,26 @@ int SweepForeignLevelObjects(const SModeConfig &config,
    const double tol = GetCachedPoint() * 0.1;
    int removed = 0;
 
-   for(int i = 0; i < lineCount; i++)
-   {
-      // The line and its pip-distance label share one price and one owner.
-      for(int pass = 0; pass < 2; pass++)
-      {
-         string nm = (pass == 0) ? lines[i].name : (lines[i].name + "_Label");
+    for(int i = 0; i < lineCount; i++)
+    {
+       // P-UI-98k: the render skips the live-dragged handle (it must never
+       // rewrite a line the hand is holding, P-BK-15) - so this sweep must
+       // not delete it either. Every step-1 drag changes the pitch (F), so
+       // this pass runs on the drag's own frames and the cache still holds
+       // the pre-drag price: without this term the sweep deletes the very
+       // line being dragged, the render refuses to re-create it while the
+       // gesture is live, the factor math reads 0 and freezes (no write, no
+       // redraw flag), and the settle's forced frame is gated off - the
+       // handle stays missing until an unrelated rebuild. The above handle
+       // never blinks because it is deleted AND re-created in the same
+       // frame; only the dragged one (here: the below handle) vanishes.
+       bool s1SkipSweep = (g_s1DragLive && g_s1DragName != "" &&
+                           lines[i].name == g_s1DragName);
+       // The line and its pip-distance label share one price and one owner.
+       for(int pass = 0; pass < 2; pass++)
+       {
+          if(s1SkipSweep) continue;
+          string nm = (pass == 0) ? lines[i].name : (lines[i].name + "_Label");
          SObjectCacheEntry e;
          if(!CacheGetObject(nm, e)) continue;   // cold cache: nothing to compare
          if(!e.exists) continue;                // dead slot: no object under this name
@@ -1523,6 +1938,61 @@ bool LadderFamilyName(const string nm, const string fam)
 bool LadderNameIsZoneBand(const string nm)
 {
     return (StringFind(nm, "_Zone_") >= 0) && ZoneNameIsBand(nm);
+}
+
+//+------------------------------------------------------------------+
+//| P-PERF-32b — THE TRIGGER FAMILY'S OWN MASK WALK.                  |
+//|                                                                   |
+//| THE DEFECT IT CLOSES: «سطوح تریگر دیر خاموش و روشن میشه» — the     |
+//| T hotkey, the ring's TRIGGER light and the card's SHOW row all     |
+//| flipped `g_triggerLevelsEnabled` and then asked the RENDER for     |
+//| the pixels, so the picture waited for a whole heavy frame (and the |
+//| render had to rebuild a family the OFF press had deleted). The     |
+//| structure switches (card 11, P-PERF-32) have painted in their own  |
+//| event since they were fixed — state, a walk over the objects that  |
+//| own the property, one discrete repaint — and the frame is never    |
+//| the owner of the feedback. This is that technique for the family   |
+//| whose property IS its mask.                                        |
+//|                                                                   |
+//| ONE OWNER FOR THE PROPERTY: the walk writes through                |
+//| `SetPipelineZoneVisibility` — the render's own writer — so which   |
+//| objects a zone is made of, and which of them L owns, is spelled    |
+//| once. This walk only decides WHICH cached `_Zone_` names are       |
+//| trigger bands: the ladder's own classification                     |
+//| (`GetHighestStructureLevel(step, g_cachedIntervals) <= 0`, the     |
+//| same test ClassifyLevels and StructureRecolourWalk use), read      |
+//| from the name's step (sub-objects included: their band decides).   |
+//|                                                                   |
+//| BOUNDED BY THE CACHE, like every sibling walk: one hash probe per  |
+//| occupied slot, zero ObjectName calls, zero type probes, and a      |
+//| guarded mask write that is FREE when that object is already right. |
+//| `seen` = the trigger bands the walk found (0 says the chart does   |
+//| not carry the family yet, which is the one case that still needs a |
+//| render to build it), return = the masks that really reached the    |
+//| chart. Both numbers are printed by the press that paid for them.   |
+//+------------------------------------------------------------------+
+int TriggerFamilyWalk(const bool on, int &seen)
+{
+    seen = 0;
+    int written = 0;
+    int visited = 0;
+    for(int i = 0; i < CACHE_HASH_BUCKETS && visited < g_objectCacheSize; i++)
+    {
+        if(!g_objectCacheHash[i].occupied) continue;
+        visited++;
+        if(!CacheSlotIsLive(i)) continue;         // P-UI-62: liveness is the permission to touch
+        const string nm = g_objectCacheHash[i].name;
+        if(StringFind(nm, "_Zone_") < 0) continue;         // lines/labels/HTF
+        if(StringFind(nm, "_Zone_Center_") >= 0) continue; // mode colour, not a ladder band
+        if(StringFind(nm, "_BK_") >= 0) continue;          // independent layer (P-BK-01)
+        if(!ZoneNameIsBand(nm)) continue;                   // a sub-object: its band decides
+        int step = StructureZoneStepFromName(nm);
+        if(step <= 0) continue;
+        if(GetHighestStructureLevel(step, g_cachedIntervals) > 0) continue;   // a structure tier
+        seen++;
+        written += SetPipelineZoneVisibility(nm, on);
+    }
+    return written;
 }
 
 //+------------------------------------------------------------------+
@@ -1778,7 +2248,42 @@ SPipelineResult ExecutePipeline(
         {
             string stepSig = IntegerToString((int)stepMode) + "," + IntegerToString(stepSizeCount);
             for(int ss = 0; ss < stepSizeCount; ss++) stepSig += "," + DoubleToString(stepSizes[ss], 8);
-            if(stepSig != s_lastStepSig)
+            // P-UI-153 (2026-10-02) — A HAND MID-DRAG DOES NOT SWEEP THE PITCH.
+            //
+            // User order: «هنوز هم مثل خود خط کاستوم پرایس ریل تایم واقعی نشده ...
+            // برای اون نقاط قرمز معماری شئ کپی کن». MEASURED FIRST, on the flushed
+            // channel, by pricing the ONE frame owner both hand-set gestures share
+            // (P-UI-152's `[drag]` witness):
+            //   the custom price LINE drag  ->  ms=0..16,  lv=0..16
+            //   the step-1 handle drag      ->  ms=172..203, lv == ms, on EVERY step
+            // So the whole cost of a step-1 step is the LEVELS phase, and this pass
+            // is why: the handle's drag changes the STEP SIZES, `stepSig` therefore
+            // changes on every held event, and this block runs on every one of them.
+            // It then finds the cache's `lastPrice` for the SAME name disagreeing
+            // with the new pitch (the family has just moved) and DELETES those
+            // objects - so the render that follows re-CREATES a whole family per
+            // step (ObjectDelete + ObjectCreate + every property) instead of
+            // re-pricing it in place. The custom price line's drag never trips this
+            // pass: it moves the CENTRE, the step sizes and `stepSig` are untouched,
+            // and its frames are the render alone (16 ms). THAT is the architecture
+            // the user asked to copy, and this is the half of it the handle lacked.
+            //
+            // The pass's own reason to exist is "the ladder ITSELF moved": a
+            // timeframe switch, a mode change, an ATR-scaling regime change - the
+            // moments in which nothing else can name the objects a previous pitch
+            // left behind. A hand on the handle is none of those: the same names are
+            // about to be re-asserted at the new pitch by the render line below, and
+            // whatever the new ladder no longer produces is removed by
+            // `CleanupSurplusPipeline`, which already throttles itself to 250 ms for
+            // a live gesture for exactly this reason.
+            //
+            // So the pass is DEFERRED, never dropped: `s_lastStepSig` is left stale
+            // on purpose while a gesture is live, and the release's own forced frame
+            // (both drag flags are down by then) sweeps ONCE against the final pitch
+            // - the frame that can afford it. This also retires the P-UI-98k hazard
+            // at its source: the pass that could delete the very line under the hand
+            // no longer runs under the hand at all.
+            if(stepSig != s_lastStepSig && !g_s1DragLive && !g_customPriceLineDragging)
             {
                 s_lastStepSig = stepSig;
                 int swept = SweepForeignLevelObjects(config, lines, result.lineCount,
@@ -1815,21 +2320,94 @@ SPipelineResult ExecutePipeline(
     // frames instead of one ~8k-call freeze. buildStage 0 (or anything
     // unexpected) is the full legacy render — steady frames always take it.
     if(buildStage == BUILD_STAGE_LINES) {
-        RenderTriggerLines(lines, result.lineCount, config, true, false);
+        RenderTriggerLines(lines, result.lineCount, config, true, false, vpTop, vpBottom);
     } else if(buildStage == BUILD_STAGE_ZONES) {
-        RenderZones(zones, result.zoneCount, config);
+        RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
     } else if(buildStage == BUILD_STAGE_LABELS) {
-        RenderTriggerLines(lines, result.lineCount, config, false, true);
+        RenderTriggerLines(lines, result.lineCount, config, false, true, vpTop, vpBottom);
         // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
         CleanupSurplusPipeline(config, maxStep);
     } else {
-        RenderZones(zones, result.zoneCount, config);
-        RenderTriggerLines(lines, result.lineCount, config, true, true);
+        RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
+        RenderTriggerLines(lines, result.lineCount, config, true, true, vpTop, vpBottom);
 
         // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
         CleanupSurplusPipeline(config, maxStep);
     }
     
+    // ══════════════════════════════════════════════════════════════════════
+    // P-VIEW-04 (2026-09-29) — THE "MIDDLE BAND IS EMPTY" CENSUS, ONE LINE,
+    // ONE NUMBER PER STAGE. Reported by the user with a screenshot (EURUSD M15,
+    // price 1.139): the family was drawn from 1.15185 up to 1.17630 and two rungs
+    // at the bottom (1.11520 / 1.11250), while the whole band between them — nine
+    // rungs on the SAME pitch — was absent. A hole in the MIDDLE cannot be explained
+    // by a count limit at either end, so the loss is somewhere in the chain
+    //   ladder -> classified -> BuildZonesAndLines -> RenderTriggerLines -> object
+    // and this line says WHERE, once, with numbers:
+    //   lines=<built>  nearAbove/nearBelow = the closest built line to the centre on
+    //   each side (a build whose nearest above is 3 pitches away IS the hole, said
+    //   numerically), pitch=maxStep, span=[lo..hi] of the built list, then the two
+    //   object-level answers that separate the two remaining causes:
+    //     absent=<n>  the name is in `lines[]` but NO object holds it   -> deleted/
+    //                 name collision (a sweep, a duplicate logicalStep);
+    //     hidden=<n>  the object exists but its mask is not ALL_PERIODS -> a mask
+    //                 writer owns it (F / L / a per-TF rule).
+    // A still picture prints nothing: the guard is the shape itself, so this costs
+    // one string compare per rebuild and one line of log per SHAPE change.
+    {
+        static string s_lastViewCensus = "";
+        string shape = IntegerToString(result.lineCount) + ":" + IntegerToString(result.zoneCount) + ":" +
+                       DoubleToString(vpTop - vpBottom, GetCachedDigits());
+        if(shape != s_lastViewCensus)
+        {
+            s_lastViewCensus = shape;
+            double lo = 0.0, hi = 0.0;
+            double nearAbove = 0.0, nearBelow = 0.0;
+            int absent = 0;
+            long rawMask = 0, maskMin = 0, maskMax = 0;
+            for(int ci = 0; ci < result.lineCount; ci++)
+            {
+                double p = lines[ci].price;
+                if(lo == 0.0 || p < lo) lo = p;
+                if(p > hi) hi = p;
+                if(p > centerPrice && (nearAbove == 0.0 || p < nearAbove)) nearAbove = p;
+                if(p < centerPrice && (nearBelow == 0.0 || p > nearBelow)) nearBelow = p;
+                if(ObjectFind(0, lines[ci].name) < 0) absent++;
+                else
+                {
+                    // P-VIEW-04b: the mask is compared against OBJ_NO_PERIODS and the
+                    // RAW value is carried out with it. `!= OBJ_ALL_PERIODS` was a
+                    // WRONG test and it said `hidden=288` of 288 lines on a chart that
+                    // visibly paints its levels: MT4 stores "every timeframe" as a
+                    // 32-bit -1, while the constant's own value can be read as
+                    // 0xFFFFFFFF, so a signed-long compare calls every VISIBLE object
+                    // hidden. OBJ_NO_PERIODS is 0 on both sides of that edge.
+                    // P-VIEW-04c: NOT `hidden++`. The census must not depend on
+                    // OBJ_NO_PERIODS vs OBJ_ALL_PERIODS being distinct numbers in this
+                    // compiler: measured `rawMask=-1` on every level of a chart that
+                    // paints them, while the counter built on `== OBJ_NO_PERIODS`
+                    // called all of them hidden — i.e. the two constants share the
+                    // value -1 here and the comparison proves nothing. The FACT is the
+                    // range of the raw masks across the family: `maskMin=maskMax=-1`
+                    // means every level carries the same mask the painter wrote.
+                    long m = (long)ObjectGetInteger(0, lines[ci].name, OBJPROP_TIMEFRAMES);
+                    if(ci == 0) { rawMask = m; maskMin = m; maskMax = m; }
+                    if(m < maskMin) maskMin = m;
+                    if(m > maskMax) maskMax = m;
+                }
+            }
+            Print("[P-VIEW] stage=census lines=", result.lineCount, " zones=", result.zoneCount,
+                  " pitch=", DoubleToString(maxStep, GetCachedDigits()),
+                  " centre=", DoubleToString(centerPrice, GetCachedDigits()),
+                  " nearAbove=", DoubleToString(nearAbove, GetCachedDigits()),
+                  " nearBelow=", DoubleToString(nearBelow, GetCachedDigits()),
+                  " span=", DoubleToString(lo, GetCachedDigits()), "..", DoubleToString(hi, GetCachedDigits()),
+                  " absent=", absent, " mask=", (int)maskMin, "..", (int)maskMax,
+                  " win=", DoubleToString(vpBottom, GetCachedDigits()), "..", DoubleToString(vpTop, GetCachedDigits()),
+                  " stage=", buildStage);
+        }
+    }
+
     result.success = true;
     return result;
 }
@@ -1905,5 +2483,7 @@ void GetAllLevelSuffixes(string &suffixes[], int &count)
     }
     count = idx;
 }
+
+#endif // LEVEL_PIPE_B_MQH
 
 #endif // LEVEL_PIPELINE_MQH

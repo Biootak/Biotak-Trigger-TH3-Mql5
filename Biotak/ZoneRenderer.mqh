@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/ZoneRenderer.mqh
+//   regenerate : python tools/parity/resync-module.py --write ZoneRenderer.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   //+------------------------------------------------------------------+
 //|                                                 ZoneRenderer.mqh |
 //|                                  Copyright 2025, Biotak Project  |
@@ -194,7 +206,7 @@ void RenderZones(const SZoneRenderInfo &zones[])
         //            Zone Factory (    DRY)
         //                                                            
         
-        SZoneCreationRequest request;
+        SZoneCreationRequest request = ZoneRequestNew();   // P-UI-131h: AUTO edge halves
         request.name = zones[i].name;
         request.topPrice = zones[i].topPrice;
         request.bottomPrice = zones[i].bottomPrice;

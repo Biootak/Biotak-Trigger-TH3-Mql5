@@ -1,27 +1,32 @@
-﻿  #ifndef TIMEFRAME_FUNCTIONS_MQH
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/TimeframeFunctions.mqh
+//   regenerate : python tools/parity/resync-module.py --write TimeframeFunctions.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  #ifndef TIMEFRAME_FUNCTIONS_MQH
 #define TIMEFRAME_FUNCTIONS_MQH
 
 #property strict
 
 string GetCurrentTimeframe() {
-    // R-TF-UNIT: `timeframe` is MINUTES on both platforms (MT5's Period() is
-    // shimmed to minutes in MT5Compat). The case labels must therefore be
-    // minute literals, not PERIOD_* constants: on MT4 the two are identical
-    // (PERIOD_H1==60) so this changes nothing there, but on MT5 PERIOD_W1 is
-    // 32769 while a weekly chart reports 10080 - the old labels missed every
-    // TF above M30 and the function returned "UNKNOWN", which collapsed the
-    // whole fractal ladder to M1-sized steps on H1+ charts.
     int timeframe = (g_timeframeLocked && g_lockedPeriod > 0) ? g_lockedPeriod : Period();
     switch(timeframe) {
-        case 1:return "M1";
-        case 5:return "M5";
-        case 15:return "M15";
-        case 30:return "M30";
-        case 60:return "H1";
-        case 240:return "H4";
-        case 1440:return "D1";
-        case 10080:return "W1";
-        case 43200:return "MN1";
+        case PERIOD_M1:return "M1";
+        case PERIOD_M5:return "M5";
+        case PERIOD_M15:return "M15";
+        case PERIOD_M30:return "M30";
+        case PERIOD_H1:return "H1";
+        case PERIOD_H4:return "H4";
+        case PERIOD_D1:return "D1";
+        case PERIOD_W1:return "W1";
+        case PERIOD_MN1:return "MN1";
         default:return "UNKNOWN";
     }
 }

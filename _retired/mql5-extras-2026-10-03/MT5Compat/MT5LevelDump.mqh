@@ -66,6 +66,8 @@
 // was built for is closed (docs/LEVELS-FOREIGN-GEOMETRY_FA.md), so it goes off.
 //
 // Uncomment the line below ONLY for a diagnosis build.
+// DIAGNOSIS BUILD 2026-09-17 (H1-empty + W1/MN-density): temporarily ON.
+// Revert to OFF before shipping the fix.
 //#define ENABLE_MT5_LEVEL_DUMP
 
 #ifdef ENABLE_MT5_LEVEL_DUMP
@@ -173,8 +175,14 @@ void MT5LevelDumpWrite()
                   "  highestHigh=", DoubleToString(g_highestHigh, 8),
                   "  lowestLow=", DoubleToString(g_lowestLow, 8));
    FileWrite(fh, "inpMaxLevels=", inpMaxLevels,
-                  "  stepMode=", (int)inpStepCalculationMode,
-                  "  baseMult=", GetValidatedBaseMultiplier());
+                   "  stepMode=", (int)inpStepCalculationMode,
+                   "  baseMult=", GetValidatedBaseMultiplier());
+   // Zone paint state: distinguishes "zones off by switch" from "zones built
+   // but painted invisible" without touching the chart.
+   FileWrite(fh, "midZones=", (inpShowMidZones ? 1 : 0),
+                   "  midZoneStyle=", (int)inpMidZoneStyle,
+                   "  midZoneTr=", inpMidZoneTransparency,
+                   "  bgColor=", ColorToString(GetCachedChartBgColor()));
    FileWrite(fh, "");
 
    // ---- families of interest ----
@@ -224,6 +232,25 @@ void MT5LevelDumpWrite()
 
       FileWrite(fh, nm, " | ", LevelDumpTypeName(t), " | ", DoubleToString(pr, 8),
                     " | tf=", (long)tf, " | ", (inRange ? "IN" : "-"));
+
+      // Zone paint forensics: a RECT that exists with a visible mask but does
+      // not paint is a colour/fill/geometry verdict, not an existence one.
+      if(t == OBJ_RECTANGLE)
+      {
+         long zCol  = ObjectGetInteger(0, nm, OBJPROP_COLOR);
+         long zFill = ObjectGetInteger(0, nm, OBJPROP_FILL);
+         long zBack = ObjectGetInteger(0, nm, OBJPROP_BACK);
+         long zOrd  = ObjectGetInteger(0, nm, OBJPROP_ZORDER);
+         long zT1   = ObjectGetInteger(0, nm, OBJPROP_TIME, 0);
+         long zT2   = ObjectGetInteger(0, nm, OBJPROP_TIME, 1);
+         double zP1 = ObjectGetDouble(0, nm, OBJPROP_PRICE, 0);
+         double zP2 = ObjectGetDouble(0, nm, OBJPROP_PRICE, 1);
+         FileWrite(fh, "   RECTPAINT color=", zCol, " fill=", zFill, " back=", zBack,
+                      " z=", zOrd,
+                      " t1=", TimeToString((datetime)zT1, TIME_DATE | TIME_SECONDS),
+                      " t2=", TimeToString((datetime)zT2, TIME_DATE | TIME_SECONDS),
+                      " p1=", DoubleToString(zP1, 8), " p2=", DoubleToString(zP2, 8));
+      }
 
       if(t == OBJ_HLINE)
       {

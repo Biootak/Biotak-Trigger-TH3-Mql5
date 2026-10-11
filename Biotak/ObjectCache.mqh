@@ -1,4 +1,16 @@
-﻿  #ifndef OBJECT_CACHE_MQH
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/ObjectCache.mqh
+//   regenerate : python tools/parity/resync-module.py --write ObjectCache.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  #ifndef OBJECT_CACHE_MQH
 #define OBJECT_CACHE_MQH
 
 #property copyright "Biotak"
@@ -725,6 +737,9 @@ int CacheGetSize()
     return g_objectCacheSize;
 }
 
+//--- P-UI-132: NO live caller in any commit — not one product path and not one harness (the
+//--- "only the test harness drives it" line below was never true). The body stays whole
+//--- because it owns the prefix rule (P-PERF-47); a rebuild never needed it.
 void CacheRebuild() {
     CacheClear();
 

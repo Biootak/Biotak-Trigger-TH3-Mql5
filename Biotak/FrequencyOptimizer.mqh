@@ -1,4 +1,16 @@
-﻿  //+------------------------------------------------------------------+
+﻿// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/FrequencyOptimizer.mqh
+//   regenerate : python tools/parity/resync-module.py --write FrequencyOptimizer.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
+  //+------------------------------------------------------------------+
 //| FrequencyOptimizer.mqh - Spectral Resonance Frequency Engine     |
 //| v5.1: + Gann Square Root Price Harmony scoring                   |
 //| Theory: The best frequency makes ALL steps (1,3,5,7) land on    |

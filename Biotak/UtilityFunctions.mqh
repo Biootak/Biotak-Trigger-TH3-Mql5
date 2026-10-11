@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/UtilityFunctions.mqh
+//   regenerate : python tools/parity/resync-module.py --write UtilityFunctions.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
   //+------------------------------------------------------------------+
 //|                                            UtilityFunctions.mqh |
 //|                                  Copyright 2025, Biotak Project  |
@@ -10,6 +22,21 @@
 // CRITICAL: Include guard to prevent duplicate symbols
 #ifndef UTILITY_FUNCTIONS_MQH
 #define UTILITY_FUNCTIONS_MQH
+
+// Util_A.mqh - UtilityFunctions.mqh split 2026-09-29: exact lines 13-1446, byte-identical, zero renames.
+#ifndef UTIL_A_MQH
+#define UTIL_A_MQH
+
+
+// P-UI-73's physical-button probe must never need a DLL, and the tree now has
+// ZERO `#import` statements. Measured 2026-09-27: an `#import "user32.dll"` for
+// one keyboard probe killed the whole indicator's OnInit — "unresolved import
+// function call" / "DLL is not allowed" — wherever the terminal had DLL imports
+// off, and that switch is not ours to ask anyone to flip. Two replacements were
+// tried against THIS compiler first and both are absent from the build:
+// `GetAsyncKeyState` -> error 168, `GetMouseState`/`MOUSE_LEFT` -> 168 + 256.
+// The rule, and why the host's own TERMINAL_KEYSTATE_* is the right answer, are
+// at UILeftButtonDown() below.
 
 // Include ZoneFactory for centralized zone creation
 #include "ZoneFactory.mqh"
@@ -110,12 +137,74 @@ bool PnlDpiPoll()
    s_pnlDpi = dpi;
    return true;
 }
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-69e (2026-09-25) — THE TYPE SCALE SURVIVES EVERY DPI (D-03, solved).
+// THE BUG, on the shipped `pt = round(nominal * 96 / dpi)`: twenty adjacent pairs
+// across the seven scales the band allows (96..288 step 12) land on the SAME integer
+// point. At 125% the section caption (7) and the value (8) are ONE SIZE, at 150% two
+// pairs are, and from 250% up the whole six-size scale is a single 4pt size — the
+// hierarchy is the first casualty of a scaled display, and it is invisible on the 96
+// DPI machine every number was measured on.
+// THE FIX, one line: a size is the design's device-px answer, LIFTED rung by rung so
+// no two sizes the UI uses are ever equal, and CAPPED at the tallest em the row
+// geometry can hold (`14 + 24 = 38 < 42`). Three properties, asserted by
+// `tests/Biotak_TypeScale_Test.mq4`: identity at 96 DPI, never equal below the cap,
+// never overflows the row — and above ~240 DPI the cap must merge the top rungs, where
+// hierarchy comes from weight or colour instead. The lift is the MINIMUM that makes the
+// rungs distinct, so at 125% only the top three sizes move, by one point.
+// ══════════════════════════════════════════════════════════════════════════
+#define PNL_PT_LADDER_MIN 5    // the smallest nominal the UI uses (PNL_PT_CSET)
+#define PNL_PT_LADDER_MAX 14   // head-room above the biggest (SUB_PT_PAGER 10)
+#define PNL_PT_LADDER_N  (PNL_PT_LADDER_MAX - PNL_PT_LADDER_MIN + 1)
+//--- the cap's own arithmetic, spelled out here because its INPUTS (PNL_ROW_H 42,
+//--- PNL_LBL_Y 14) live in BiotakPanels.mqh — include 116, above this module's 47
+//--- (MQL4 is define-before-use). One number, one derivation, named once: if the
+//--- row geometry ever moves, this line moves with it. 4px is the breathing gap.
+#define PNL_PT_FIT_PX    24    // 42 - 14 - 4
+
+//--- the PURE answer for one nominal at one dpi: no cache, no terminal read, so a
+//--- harness can sweep every scale a user owns. THE rule lives here.
+int PnlPtAt(const int nominal,const int dpi)
+{
+   int d = (dpi < 96 || dpi > 288) ? 96 : dpi;      // the sane band PnlDpiRead enforces
+   int rawMin = (int)MathRound(PNL_PT_LADDER_MIN * 96.0 / (double)d);
+   int shift  = (rawMin < PNL_PT_MIN) ? (PNL_PT_MIN - rawMin) : 0;   // the floor lifts the WHOLE ladder
+   int pt = 0;
+   for(int m = PNL_PT_LADDER_MIN; m <= nominal; m++)
+   {
+      // the rung for `nominal` if the ladder's floor were m, plus one point for
+      // every rung between: the maximum over m IS the minimal distinct ladder.
+      int c = (int)MathRound(m * 96.0 / (double)d) + (nominal - m) + shift;
+      if(c > pt) pt = c;
+   }
+   // FLOOR, never round: rounding the cap UP gave an em of 25px for a 24px budget
+   // at 180/228/252/264 DPI — the very overflow the cap exists to prevent (found
+   // by the type-scale sweep, tests/Biotak_TypeScale_Test.mq4).
+   int cap = (int)MathFloor(PNL_PT_FIT_PX * 72.0 / (double)d);
+   if(cap < PNL_PT_MIN) cap = PNL_PT_MIN;
+   if(pt > cap) pt = cap;                            // the row wins over the rung
+   if(pt < PNL_PT_MIN) pt = PNL_PT_MIN;
+   return pt;
+}
+//--- the ladder, built once per DPI: index = nominal - PNL_PT_LADDER_MIN.
+//--- PnlPt is called several times per drawn caption, so the per-DPI build is
+//--- amortised to nothing and the hot path stays two compares and an array read.
+static int s_pnlPtDpi = -1;
+static int s_pnlPtLad[PNL_PT_LADDER_N];
+void PnlPtBuild(const int dpi)
+{
+   for(int i = 0; i < PNL_PT_LADDER_N; i++)
+      s_pnlPtLad[i] = PnlPtAt(PNL_PT_LADDER_MIN + i, dpi);
+   s_pnlPtDpi = dpi;
+}
 //--- a NOMINAL (design px * 3/4) point size, re-expressed for this display.
 int PnlPt(const int nominal)
 {
-   int pt = (int)MathRound(nominal * 96.0 / (double)PnlDpi());
-   if(pt < PNL_PT_MIN) pt = PNL_PT_MIN;
-   return pt;
+   int dpi = PnlDpi();
+   if(s_pnlPtDpi != dpi) PnlPtBuild(dpi);            // P-UI-93: the DPI is a measurement
+   int i = nominal - PNL_PT_LADDER_MIN;
+   if(i >= 0 && i < PNL_PT_LADDER_N) return s_pnlPtLad[i];
+   return PnlPtAt(nominal, dpi);                     // off the ladder: a one-off size
 }
 //--- the line box MT4 gives a NOMINAL point size, in px (em = pt * dpi / 72).
 //--- the ONE owner of that arithmetic: PnlTextW measures with it, and every
@@ -167,8 +256,9 @@ int PnlRawLineH(const int rawPt)
 //   * `UILeftButtonUp()` is TRUE only if BOTH conventions agree the button is
 //     free. A false "up" would tear a LIVE gesture down, so it is never
 //     inferred from one convention.
-// Never read TERMINAL_KEYSTATE_LEFT anywhere else again.
-// ══════════════════════════════════════════════════════════════════════════
+// Never read TERMINAL_KEYSTATE_LEFT anywhere else again. No `#import` for this
+// probe — the file header note says why, and the host's own keystate is the
+// answer, read below exactly as UIMagnetModifierDown reads SHIFT.
 bool UILeftButtonDown()
 {
    long v = TerminalInfoInteger(TERMINAL_KEYSTATE_LEFT);
@@ -217,6 +307,10 @@ bool UIMagnetModifierDown()
    return (v < 0) || ((v & 1) != 0);
 }
 
+//--- P-UI-114 (2026-09-23) — deleted: RightClickTerminalOwns[/Set],
+//--- RightClickStripOwns[Set/Take], RightClickSelfEsc[Stamp/Ms] (dead gates of
+//--- the deleted right-click era; the strip opens on a LEFT hold now).
+
 //--- Arial Bold advances, units per 1000 em (the face the panels set).
 int PnlAdvUnits(const ushort ch)
 {
@@ -246,6 +340,17 @@ int PnlAdvUnits(const ushort ch)
    if(ch == 47)  return 278;   // /
    if(ch == 37)  return 889;   // %
    if(ch == 183) return 333;   // · (the P-LBL-01 middle dot)
+   //--- P-BK-86: the three characters the BASE NOTE prints that this table never carried.
+   //--- `[`, `]` and `|` all fell through to the 611 below, so the note's plate — the opaque
+   //--- bar the ink is read on — was measured +1.27 em too wide: +14 px at 8pt/96dpi, +20 px
+   //--- at 8pt/144dpi. A tail with nothing in it, and the note is the one surface whose whole
+   //--- point is that its box fits its ink. The values are READ OFF the installed face, never
+   //--- guessed: `tools/font-adv-check.py` parses arialbd.ttf's own `hmtx` table (unitsPerEm
+   //--- 2048) and prints these three beside every other entry here. Nothing else measures
+   //--- them — the panels split their option lists on `|` before measuring a single option
+   //--- (PnlDdOptText), so this closes a gap rather than moving a layout.
+   if(ch == 91 || ch == 93) return 333;   // [ ]  (arialbd.ttf hmtx)
+   if(ch == 124) return 280;              // |    (arialbd.ttf hmtx)
    if(ch == 38)  return 722;   // &
    if(ch == 40 || ch == 41) return 333;   // ( )
    if(ch == 47 || ch == 39) return 278;   // / '
@@ -327,22 +432,6 @@ double GetSymbolPoint() {
     return point;
 }
 
-double GetArrayMax(const double &array[]) {
-    int size=ArraySize(array);
-    if(size<=0) return EMPTY_VALUE;
-    double maxValue=array[0];
-    for(int i=1; i<size; i++) if(array[i]>maxValue) maxValue=array[i];
-    return maxValue;
-}
-
-double GetArrayMin(const double &array[]) {
-    int size=ArraySize(array);
-    if(size<=0) return EMPTY_VALUE;
-    double minValue=array[0];
-    for(int i=1; i<size; i++) if(array[i]<minValue) minValue=array[i];
-    return minValue;
-}
-
 void CheckArraySizes() {
     // OPTIMIZATION: Use smarter initial sizing based on actual needs
     // Cache arrays: size based on number of fractal timeframes + buffer
@@ -375,22 +464,28 @@ double CalculatePipsDistance(const double price1, const double price2) {
 //+------------------------------------------------------------------+
 //| Format tooltip with distance in pips                            |
 //+------------------------------------------------------------------+
-string FormatTooltipWithDistance(const string baseTooltip, const double priceLevel) {
-    double pips = CalculatePipsDistance(priceLevel, g_currentPrice);
-    return baseTooltip + ", Distance: +/- " + DoubleToString(pips, 1) + " pips";
-}
-
-// PERF: Overload accepting pre-computed pips to avoid redundant CalculatePipsDistance
-string FormatTooltipWithDistanceFast(const string baseTooltip, const double precomputedPips) {
-    return baseTooltip + ", Distance: +/- " + DoubleToString(precomputedPips, 1) + " pips";
-}
-
 //+------------------------------------------------------------------+
 //| Get midpoint price based on start point type                    |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| P-UI-98d v2: the price at the VERTICAL MIDDLE of the visible     |
+//| chart — wherever the user has scrolled to. The custom price line |
+//| activates there («خط کاستوم پرایس زمانی که فعال میشه هر جایی که |
+//| کاربر هست وسط صفحه ظاهر بشه که راحت باشه»): the line is born     |
+//| where the user is LOOKING, not at the market's last price.       |
+//| 0.0 = the chart could not answer (the caller keeps its fallback).|
+//+------------------------------------------------------------------+
+double ScreenMiddlePrice() {
+    double pmax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double pmin = ChartGetDouble(0, CHART_PRICE_MIN);
+    if(!(pmax > pmin) || pmin <= 0.0) return 0.0;
+    double mid = (pmax + pmin) / 2.0;
+    if(!(mid > 0.0) || !MathIsValidNumber(mid)) return 0.0;
+    return NormalizeDouble(mid, Digits);
+}
+
 double GetMidpointPrice(ENUM_TH_START_POINT_TYPE startPointType) {
-    switch(startPointType) {
-        case TH_START_POINT_HISTORICAL_HIGH:
+    switch(startPointType) {        case TH_START_POINT_HISTORICAL_HIGH:
             return g_highestHigh;
         case TH_START_POINT_HISTORICAL_LOW:
             return g_lowestLow;
@@ -519,6 +614,22 @@ double GetCurrentModePrimaryStepPrice(ENUM_STEP_CALCULATION_MODE mode)
 }
 
 //+------------------------------------------------------------------+
+//| P-UI-98: the same answer the ladder draws.                       |
+//| The step override (the draggable rung-1 handle in custom-price   |
+//| mode) multiplies the mode's steps at the factory's only consumer, |
+//| so the "S:" pips the status label shows must ride the same       |
+//| factor — a label that quotes the natural step over a scaled      |
+//| ladder is the lie the label family exists to prevent.            |
+//+------------------------------------------------------------------+
+double GetCurrentModePrimaryStepPriceOverridden(ENUM_STEP_CALCULATION_MODE mode)
+{
+    double natural = GetCurrentModePrimaryStepPrice(mode);
+    if(natural <= 0.0) return natural;
+    double f = StepOverrideFactor();
+    return (f != 1.0) ? natural * f : natural;
+}
+
+//+------------------------------------------------------------------+
 //| Get ATR Info string for status display                           |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
@@ -572,7 +683,8 @@ string BuildUnifiedModeLabelText()
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
     string modeName = GetStepModeName(currentMode);
     double pipSize = GetCachedPipSize();
-    double stepPrice = GetCurrentModePrimaryStepPrice(currentMode);
+    // P-UI-98: the overridden answer — the step the ladder actually wears.
+    double stepPrice = GetCurrentModePrimaryStepPriceOverridden(currentMode);
 
     if(pipSize <= 0 || stepPrice <= 0) return "[ " + modeName + " ]";
 
@@ -623,9 +735,6 @@ void UpdateStepModeLabel(bool clearFirst = true) {
 //| Shows both basis and current step mode: "ATR | SS/LS"           |
 //| Duration: inpModeLabelDuration (0=permanent, >0=seconds)        |
 //+------------------------------------------------------------------+
-void UpdateBasisModeLabel(ENUM_CALCULATION_BASIS basis) {
-    /* ATR basis removed - matching MT5 */
-}
 
 //+------------------------------------------------------------------+
 //| Build the factor label text (shared by show + real-time refresh)|
@@ -682,77 +791,109 @@ void UpdateFactorLabel(double factorValue, double directStepSize = 0, bool clear
     SetLabelTextIfChanged(g_factorLabelName, labelText);
 }
 
-// TH3TOOL-OFF: whole block retired with the tool (was #ifndef BUILD_LITE) —
-// BuildTH3FrequencyLabelText + UpdateTH3FrequencyLabel commented out, not deleted.
-//#ifndef BUILD_LITE
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
 //+------------------------------------------------------------------+
-//| Build TH3 Frequency label text (shared by show + real-time      |
+//| Build TH3 Movement-Step label text (shared by show + real-time  |
 //| refresh). The FIBO object scan is throttled (max once per 5s or |
-//| when the frequency changed) so the per-second refresh stays     |
+//| when the step changed) so the per-second refresh stays          |
 //| lightweight.                                                    |
 //+------------------------------------------------------------------+
-//string BuildTH3FrequencyLabelText(const double frequency) {
-//    static uint s_lastStepInfoMs = 0;
-//    static double s_lastStepInfoFreq = -1;
-//    static string s_cachedStepInfo = "";
-//    uint nowMs = GetTickCount();
-//    bool freqChanged = (frequency != s_lastStepInfoFreq);
-//    if(freqChanged || nowMs - s_lastStepInfoMs >= 5000) {
-//        s_lastStepInfoMs = nowMs;
-//        s_lastStepInfoFreq = frequency;
-//        s_cachedStepInfo = "";
-//
-//        // PERF: Use pattern store instead of ObjectsTotal(OBJ_FIBO) loop
-//        // g_th3Patterns holds A,B,C,D — range = |pB - pA| (AB wave)
-//        int patCount = TH3PatternStoreCount();
-//        for(int i = 0; i < patCount; i++) {
-//            double p1 = g_th3Patterns.items[i].A.price;
-//            double p2 = g_th3Patterns.items[i].B.price;
-//            if(p1 <= 0 || p2 <= 0) continue;
-//
-//            double rangePips = CalculatePipsDistance(p1, p2);
-//            double stepPips  = rangePips * (frequency / 100.0);
-//            if(stepPips > 0) {
-//                double stepCount = rangePips / stepPips;
-//                int    fullSteps = (int)MathFloor(stepCount);
-//                double remainder = stepCount - fullSteps;
-//                s_cachedStepInfo = StringFormat(" | Step: %.1f pips | Steps: %d + %.2f",
-//                    stepPips, fullSteps, remainder);
-//                break;
-//            }
-//        }
-//    }
-//    return StringFormat("[ TH3 Freq: %.3f%%%s ]", frequency, s_cachedStepInfo);
-//}
+string BuildTH3FrequencyLabelText(const double frequency) {
+    static uint s_lastStepInfoMs = 0;
+    static double s_lastStepInfoFreq = -1;
+    static string s_cachedStepInfo = "";
+    uint nowMs = GetTickCount();
+    bool freqChanged = (frequency != s_lastStepInfoFreq);
+    if(freqChanged || nowMs - s_lastStepInfoMs >= 5000) {
+        s_lastStepInfoMs = nowMs;
+        s_lastStepInfoFreq = frequency;
+        s_cachedStepInfo = "";
+
+        // PERF: Use pattern store instead of ObjectsTotal(OBJ_FIBO) loop
+        // g_th3Patterns holds A,B,C,D — range = |pB - pA| (AB wave)
+        int patCount = TH3PatternStoreCount();
+        for(int i = 0; i < patCount; i++) {
+            double p1 = g_th3Patterns.items[i].A.price;
+            double p2 = g_th3Patterns.items[i].B.price;
+            if(p1 <= 0 || p2 <= 0) continue;
+
+            double rangePips = CalculatePipsDistance(p1, p2);
+            double stepPips  = rangePips * (frequency / 100.0);
+            if(stepPips > 0) {
+                double stepCount = rangePips / stepPips;
+                int    fullSteps = (int)MathFloor(stepCount);
+                double remainder = stepCount - fullSteps;
+                s_cachedStepInfo = StringFormat(" | AB = %d steps + %.2f x %.1f pips",
+                    fullSteps, remainder, stepPips);
+                break;
+            }
+        }
+
+        // The step the ARRANGEMENT implies, alongside the one the percentage
+        // cuts off. These are two different answers to "how big is a step": the
+        // first is a share of AB, the second comes from the pattern's skeleton
+        // (momentum band, cover depth, cover delay). Showing both is the point -
+        // the skeleton reading is the one that can be checked against the market.
+        for(int j = 0; j < patCount; j++) {
+            if(!g_th3Patterns.items[j].skeleton.valid) continue;
+            double skelStep = g_th3Patterns.items[j].skeleton.stepPips;
+            if(skelStep <= 0) continue;
+            s_cachedStepInfo += StringFormat(" | skeleton %0.1f pips (key %d)",
+                                             skelStep, g_th3Patterns.items[j].skeleton.key);
+            break;
+        }
+    }
+    // The number is a MOVEMENT STEP, not a frequency. `frequency` is the name
+    // the field carried when a step was expressed as "100/freq = N steps", and
+    // a percentage label reads like a signal frequency — which it is not. It is
+    // how far one step of the move is, so the label says so. The internal name
+    // stays `frequency` deliberately: the GlobalVariable keys are
+    // `Biotak_TH3Freq_<chart>` and `Biotak_TH3FreqIdx_<chart>`, and renaming
+    // those would orphan every setting already saved on a live terminal.
+    // P-TH3-THB (2026-09-19) — the CLOSED step (|C-B|/K, the unified formula)
+    // rides beside the percentage when a pattern exists, so the label shows the
+    // formula the ladder actually wears, not only the legacy AB cut.
+    // P-TH3-INFO-05 (2026-09-21) — ONE LEG SHORT. This read passed the store's
+    // A/B/C, which under P-TH3-D4's naming (TH3Pivots.mqh:1320: our A = their B,
+    // our B = their C, our C = their D) is the wave's X/A/B, not its A/B/C. It
+    // measured the RETRACEMENT leg instead of the closing one, so the label's
+    // `closed` number never agreed with the ladder DrawABCDPattern actually
+    // wears (TH3Renderer.mqh:549 and :1996 both pass B/C/D). A pattern whose
+    // retrace is flat also fell past the K table's 0.75 floor and printed
+    // nothing while the ladder carried a real closed step.
+    string closedInfo = "";
+    int closedCount = TH3PatternStoreCount();
+    for(int c = 0; c < closedCount; c++) {
+        double cs = 0, ck = 0, cr = 0;
+        if(TH3ClosedStepFromLegs(g_th3Patterns.items[c].B.price,
+                                 g_th3Patterns.items[c].C.price,
+                                 g_th3Patterns.items[c].D.price, cs, ck, cr)) {
+            closedInfo = StringFormat(" | closed %.1f pips (K=%.1f R=%.2f)",
+                                      cs / GetCachedPipSize(), ck, cr);
+            break;
+        }
+    }
+    return StringFormat("[ TH3 Movement Step: %.3f%%%s%s ]", frequency,
+                        closedInfo, s_cachedStepInfo);
+}
 
 //+------------------------------------------------------------------+
-//| Update TH3 Frequency Label (configurable duration)              |
+//| Update TH3 Frequency Label — RETIRED (P-TH3-INFO-07, 2026-09-21).|
+//| The readout plate (TH3InfoFamilyDraw, TH3Renderer.mqh) is the ONE |
+//| surface that says the step now, so this mode-stack label         |
+//| (`[ TH3 Movement Step: ... ]`) is a second mouth in the OLD       |
+//| format — and a mouth that AUTO-HIDES, which is exactly the user's |
+//| «یکبار میاد ولی ... دیگه نمیشه». Every historical call site is a  |
+//| cleanup point now: delete any legacy object, reset its clock,     |
+//| draw nothing. (The 3/4 keys keep their log line + the panel row;  |
+//| the F-hide/show writes on a missing name are documented no-ops.)  |
 //+------------------------------------------------------------------+
-//void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
-//    // Only show TH3 info when the TH3 tool is actually enabled
-//    if(!inpEnableTH3Tool) return;
-//    // Check if mode label display is enabled
-//    if(!inpShowModeChangeLabel) return;
-//    
-//    // Clear ALL temporary labels first (prevents overlap)
-//    if(clearFirst) ClearAllModeLabels();
-//    
-//    // CRITICAL FIX: Don't show label if indicator is hidden
-//    if(IsIndicatorHidden()) return; // Don't show mode labels when hidden
-//    
-//    string labelText = BuildTH3FrequencyLabelText(frequency);
-//    
-//    // GOLD FIX: Check if object exists before creating
-//    if(ObjectFind(0, g_th3FreqLabelName) < 0) {
-//        if(!ObjectCreate(0, g_th3FreqLabelName, OBJ_LABEL, 0, 0, 0)) return;
-//        // Timestamp set ONLY on creation so auto-hide still fires on schedule.
-//        g_th3FreqLabelCreateTime = GetTickCount();
-//        ApplyModeLabelStyle(g_th3FreqLabelName, inpModeLabelColor);
-//    }
-//    
-//    SetLabelTextIfChanged(g_th3FreqLabelName, labelText);
-//}
-//#endif   // TH3TOOL-OFF: was #ifndef BUILD_LITE guard for the two functions above
+void UpdateTH3FrequencyLabel(double frequency, bool clearFirst = true) {
+    ObjectDelete(0, g_th3FreqLabelName);   // legacy sweep (no-op when absent)
+    g_th3FreqLabelCreateTime = 0;
+}
+#endif   // TH3TOOL-ON: was #ifndef BUILD_LITE guard for the two functions above
 
 
 //+------------------------------------------------------------------+
@@ -773,15 +914,15 @@ void ShowAllStatusLabels() {
         ComputeFactorModeValues(basePrice, factorVal, stepVal);
         UpdateFactorLabel(factorVal, stepVal, false);
     }
-    // TH3TOOL-OFF:
-    //#ifndef BUILD_LITE
-    //    // TH3 frequency info belongs to the TH3 tool - only show it when the
-    //    // tool is enabled (UpdateTH3FrequencyLabel also gates internally).
-    //    if(inpEnableTH3Tool) {
-    //        double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
-    //        UpdateTH3FrequencyLabel(freq, false);
-    //    }
-    //#endif
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+    // TH3 frequency info belongs to the TH3 tool - only show it when the
+    // tool is enabled (UpdateTH3FrequencyLabel also gates internally).
+    if(inpEnableTH3Tool) {
+        double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
+        UpdateTH3FrequencyLabel(freq, false);
+    }
+#endif
     UpdateLockStatusLabel();
 }
 
@@ -807,6 +948,19 @@ void RefreshVisibleStatusLabels() {
             double stepVal = 0;
             double basePrice = (g_dailyClosePriceForTH > 0) ? g_dailyClosePriceForTH : Bid;
             ComputeFactorModeValues(basePrice, factorVal, stepVal);
+            // P-UI-98: the step override is the drawn truth here too. In DIRECT
+            // display mode the factor NUMBER is derived from the step, so it is
+            // re-derived from the overridden step to keep the pair honest; in
+            // CLASSIC mode the factor number IS the input and only the pips move.
+            double s1F = StepOverrideFactor();
+            if(s1F != 1.0 && stepVal > 0.0) {
+                stepVal *= s1F;
+                if(inpFactorDisplayMode == FACTOR_DISPLAY_DIRECT) {
+                    double s1ReFactor = CalculateFactorFromStep(GetFactorRange(), stepVal);
+                    if(s1ReFactor > 0.0)
+                        factorVal = NormalizeDouble(MathMax(0.01, MathMin(10000, s1ReFactor)), 2);
+                }
+            }
             SetLabelTextIfChanged(g_factorLabelName, BuildFactorLabelText(factorVal, stepVal));
         }
     } else {
@@ -817,22 +971,22 @@ void RefreshVisibleStatusLabels() {
         }
     }
     
-    // TH3TOOL-OFF:
-    //#ifndef BUILD_LITE
-    //    // TH3 frequency label (frequency + step info) - only when tool enabled
-    //    if(inpEnableTH3Tool) {
-    //        if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
-    //            double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
-    //            SetLabelTextIfChanged(g_th3FreqLabelName, BuildTH3FrequencyLabelText(freq));
-    //        }
-    //    } else {
-    //        // Tool disabled: remove any lingering TH3 label
-    //        if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
-    //            ObjectDelete(0, g_th3FreqLabelName);
-    //            g_th3FreqLabelCreateTime = 0;
-    //        }
-    //    }
-    //#endif
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+    // TH3 frequency label (frequency + step info) - only when tool enabled
+    if(inpEnableTH3Tool) {
+        if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
+            double freq = (g_th3FreqOverride > 0) ? g_th3FreqOverride : inpTH3BaseStepPercent;
+            SetLabelTextIfChanged(g_th3FreqLabelName, BuildTH3FrequencyLabelText(freq));
+        }
+    } else {
+        // Tool disabled: remove any lingering TH3 label
+        if(ObjectFind(0, g_th3FreqLabelName) >= 0) {
+            ObjectDelete(0, g_th3FreqLabelName);
+            g_th3FreqLabelCreateTime = 0;
+        }
+    }
+#endif
 }
 
 //+------------------------------------------------------------------+
@@ -920,7 +1074,7 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     // OPTIMIZATION: Let factory handle update vs create decision
     //                                                                
     
-    SZoneCreationRequest request;
+    SZoneCreationRequest request = ZoneRequestNew();   // P-UI-131h
     request.name = zoneName;
     request.topPrice = upperPrice;
     request.bottomPrice = lowerPrice;
@@ -929,6 +1083,12 @@ bool CreateGenericMidZone(const string zoneName, const double prevPrice, const d
     // P-UI-63: this path draws a BAND only (filled = true, so no edge is produced), but
     // the field is written anyway: a stack struct must never leave a value to chance.
     request.borderTransparency = inpMidZoneBorderTransparency;
+    // P-UI-131h: a band-only picture draws no edge, so the four half-surfaces are inert
+    // here - written anyway, because a stack struct must never leave a value to chance.
+    request.borderTopColor = inpZoneEdgeTopColor;
+    request.borderBottomColor = inpZoneEdgeBottomColor;
+    request.borderTopTransparency = inpZoneEdgeTopTransparency;
+    request.borderBottomTransparency = inpZoneEdgeBottomTransparency;
     request.filled = true;
     request.borderStyle = inpMidZoneBorderStyle;
     request.borderWidth = inpMidZoneBorderWidth;
@@ -984,11 +1144,10 @@ void ThrottledChartRedraw(bool forceRedraw = false) {
 //| the pointer - never from the tick path, never per mouse event.    |
 //| Cost when idle: zero (no caller runs).                           |
 //|                                                                  |
-//| PANELDRAG-OFF (2026-09-14): the card-move gesture was REMOVED    |
-//| (user decision — see BiotakPanels.mqh), so this owner is now     |
-//| UNCALLED. Kept compiled on purpose: it is one half of the        |
-//| restore path, and deleting it would be the only part of the      |
-//| feature that cannot come back by uncommenting.                   |
+//| PANELDRAG-OFF (2026-09-14) retired the card-move gesture and left |
+//| this owner UNCALLED; P-UI-127 (2026-09-25, user order: «پنل رو هم  |
+//| بشه درگ کرد») restored the gesture, so it is called again — once  |
+//| per applied batch of a live drag, and nothing else.               |
 //+------------------------------------------------------------------+
 void DragFrameRedraw() {
     ChartRedraw();
@@ -1050,6 +1209,13 @@ bool CheckAndClearExpiredLabels() {
     bool anyCleared = false;
 
     if(durationMs > 0) {
+        // P-UI-57f-OFF (2026-09-22): the step-mode (SS/LS) row's clock
+        // exemption is retired by user order — «لیبل مود ها ... باید بعد چند
+        // ثانیه حذف بشن هرچی که اطلاعاتی هستش». EVERY info row is a timed
+        // visitor now: the step-mode row expires on the same
+        // inpModeLabelDuration the event rows always kept, and a real change
+        // (a mode press, a refresh that recreates the object) re-arms it
+        // through its creation timestamp, exactly as before.
         if(g_stepModeLabelCreateTime > 0) {
             if((now - g_stepModeLabelCreateTime) >= durationMs) {
                 ClearSingleModeLabel(g_stepModeLabelName, g_stepModeLabelCreateTime);
@@ -1185,6 +1351,11 @@ void ApplyModeLabelStyle(const string name, const color textColor, const int yOf
     ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
     ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+    // P-TH3-INFO-09: the BACK flag is owned here like every other property the
+    // style writes — a stale label with BACK=true paints behind the chart art
+    // and reads as "the label does not show" (the all-labels check the user
+    // asked for: «برای تمام لیبل ها چک بکنش»).
+    ObjectSetInteger(0, name, OBJPROP_BACK, false);
 }
 
 //+------------------------------------------------------------------+
@@ -1204,11 +1375,172 @@ void RepositionAllOverlayLabels() {
         ApplyModeLabelStyle(g_lockStatusLabelName, (color)ObjectGetInteger(0, g_lockStatusLabelName, OBJPROP_COLOR));
 
     UpdateLockStatusLabel(false);
-    // TH3TOOL-OFF:
-    //#ifndef BUILD_LITE
-    //    RepositionABCDInfoLabels();
-    //#endif
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+#ifndef BUILD_LITE
+    RepositionABCDInfoLabels();
+#endif
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-100 (2026-09-22) — SELECTION HYGIENE OF THE TWO HAND-SET LINES.
+//
+// REPORTED: «وقتی فیو یا باکس از همون محل میکشم کاستوم پرایس جابجا میشه» — the
+// custom price line moves, and with it the whole ladder (every level is derived
+// from its price), while the user draws a fib or a box somewhere else.
+//
+// THE LAW, measured in this project twice already (P-UI-45 on the line,
+// P-BK-26 on the box): an MT4 drag does not move the object under the cursor,
+// it moves EVERY SELECTED OBJECT. A hand-set line that is SELECTED when somebody
+// else's gesture begins is therefore carried by that gesture — our own box draw,
+// MT4's fib tool, a panel drag, a pan — and its price lands wherever the foreign
+// gesture ended.
+//
+// WHY THIS IS OURS TO KEEP: both lines are INVISIBLE by design (P-UI-98p), and
+// MT4 cannot select an object it does not paint. Every selection they can wear
+// was written by US — P-UI-49d's claim, which hands the movement to the
+// terminal. That makes the invariant one sentence, and this module its one home:
+//
+//   A hand-set line is SELECTED only while a gesture of OURS owns it.
+//
+// Everything else is stale by definition. Three owners, one per direction:
+//   * `HandLineDropSelection`    — the ONE writer of "this line is not selected".
+//   * `HandLinesSelectionGuard`  — drop every hand-set line that no live gesture
+//     of ours owns. Called by the gesture STARTS of every layer that can begin
+//     one (the box tool, the TH3 band, the panel finalizer, the custom-price
+//     press edge) and by the 250 ms net for the paths we do not see at all.
+//     `HandLinesDropAll` is the same drop without the question, for the presses
+//     another layer provably owns.
+//   * `HandLinesRestorePrice`    — put a line back where the user left it, for
+//     the one case no guard can prevent: a press that lands ON a line and then
+//     turns out to be a DRAW (P-UI-100b, EventHandlers).
+//
+// Cost: three name compares plus a guarded read per line, and a write only on
+// drift. Every caller gates the call behind a gesture of its own or the timer,
+// so no pointer-rate path pays for it.
+// ══════════════════════════════════════════════════════════════════════════
+
+// The ONE writer of "this line is not selected". A line that is absent, or not
+// selected, costs two reads and no terminal write (the guarded-write law this
+// project follows everywhere).
+void HandLineDropSelection(const string name)
+{
+   if(name == "") return;
+   if(ObjectFind(0, name) < 0) return;
+   if(!(bool)ObjectGetInteger(0, name, OBJPROP_SELECTED)) return;
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+}
+
+// Is a gesture of OURS holding the custom price line right now? The
+// `g_...NativeDrag` flag is deliberately NOT in the test: it means "a gesture is
+// in flight and the clear is owed to its release" — the FOREIGN case (P-UI-96),
+// never ours.
+bool CustomPriceLineGestureLive()
+{
+   return g_customPriceLineDragging;
+}
+
+// Is a gesture of OURS holding the step-1 pair? Both channels count: the claim's
+// own carry (P-UI-98e) and the terminal's per-object drag (P-UI-98 OBJECT_DRAG).
+bool Step1LinesGestureLive()
+{
+   return (g_s1DragLive || g_s1OwnActive);
+}
+
+// Drop the selection of every hand-set line THIS gesture does not own. Each line
+// is asked separately because the two gestures are independent: dragging the
+// custom price line must not leave a stale selection on the red handles (they
+// would ride along with it), and vice versa.
+void HandLinesSelectionGuard()
+{
+   if(!CustomPriceLineGestureLive() && g_customPriceLineCreated)
+      HandLineDropSelection(g_customPriceHorizontalLineName);
+   if(!Step1LinesGestureLive())
+   {
+      HandLineDropSelection(g_s1MarkAboveName);
+      HandLineDropSelection(g_s1MarkBelowName);
+   }
+}
+
+#endif // UTIL_A_MQH
+// Util_B.mqh - UtilityFunctions.mqh split 2026-09-29: exact lines 1447-1520, byte-identical, zero renames.
+#ifndef UTIL_B_MQH
+#define UTIL_B_MQH
+
+// The UNCONDITIONAL form: every hand-set line, whatever gesture is live. For the
+// callers where the press provably belongs to another layer — a UI owner claimed
+// it, so no gesture of ours can be holding either line — and asking would only
+// leave a line selected under somebody else's drag.
+void HandLinesDropAll()
+{
+   if(g_customPriceLineCreated)
+      HandLineDropSelection(g_customPriceHorizontalLineName);
+   HandLineDropSelection(g_s1MarkAboveName);
+   HandLineDropSelection(g_s1MarkBelowName);
+}
+
+// The ONE writer of "the line's price goes back". Guarded twice: an invalid or
+// already-correct price is not a write. The caller owns everything the price
+// implies (the anchor, the marker, the frame) — this function owns the number.
+void HandLinesRestorePrice(const string name, const double price)
+{
+   if(name == "") return;
+   if(!(price > 0.0) || !MathIsValidNumber(price)) return;
+   if(ObjectFind(0, name) < 0) return;
+   double now = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
+   if(now > 0.0 && MathIsValidNumber(now) && MathAbs(now - price) <= _Point * 0.5)
+      return;   // already where the user left it — no write, no repaint
+   ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-100c (2026-09-22) — THE LINE IS THE ANCHOR'S PICTURE, AND THE ANCHOR WINS.
+//
+// REPORTED, with a screenshot: «خط کاستوم پرایس رو بردم پایین، میخواستم باکس بکشم»
+// — while a BOX was being drawn, the custom price line followed the cursor down
+// and STAYED there. The selection guard above stops the one mechanism this
+// project has already measured (MT4 carries every SELECTED object with a drag),
+// but the symptom survived it, so the invariant is now stated as a LAW instead
+// of as a cause:
+//
+//   OUTSIDE a gesture of our own, the line object MUST sit on the anchor the
+//   whole ladder is derived from (`g_customTHStartPrice`). Any other price is
+//   a displacement by definition, and the ladder is already drawn for the
+//   anchor — the line is the only thing that is wrong.
+//
+// WHY THIS IS SAFE, AND WHY IT IS NOT A FIGHT WITH THE TERMINAL. A legitimate
+// move of this line is always one of two things, and both are excluded here:
+//   * OUR gesture (the claim/carry/native drag) — `g_customPriceLineDragging`
+//     is live, so the heal stands down;
+//   * the terminal's own grab — which the claim picks up (terminalGrab) in the
+//     same press, and whose RELEASE anchors the new price (P-UI-61), so by the
+//     time any caller of this function runs, the anchor already holds it.
+// What is left is exactly the reported case: somebody ELSE's gesture (a box, a
+// fib, a pan) moved an object that had no business moving.
+//
+// The callers are the two places that KNOW a foreign gesture owns the mouse:
+// the box layer's own event (BaseKnotTool, before it consumes the event) and
+// the 250 ms net. Cost: two guarded reads, and a write only on drift.
+// ══════════════════════════════════════════════════════════════════════════
+void HandLineHealToAnchor()
+{
+   if(g_customPriceLineDragging) return;            // our own hand is on it
+   if(!g_customPriceLineCreated) return;
+   if(!(g_customTHStartPrice > 0.0) || !MathIsValidNumber(g_customTHStartPrice)) return;
+   if(ObjectFind(0, g_customPriceHorizontalLineName) < 0) return;
+   double now = ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0);
+   if(now > 0.0 && MathIsValidNumber(now) &&
+      MathAbs(now - g_customTHStartPrice) <= _Point * 0.5) return;   // already on it
+   HandLinesRestorePrice(g_customPriceHorizontalLineName, g_customTHStartPrice);
+   // The dot is re-projected by the ride channel on the very same mouse stream
+   // (HandsetMarkersRide), so this owner does not touch it — one writer per
+   // object, and the marker already has one.
+   _LOG_GATE_W Print("[W][GEN] custom price line healed back to the anchor: ",
+                     DoubleToString(now, Digits), " -> ",
+                     DoubleToString(g_customTHStartPrice, Digits),
+                     " (a foreign gesture had moved the line)");
+}
+
+#endif // UTIL_B_MQH
 
 #endif // UTILITY_FUNCTIONS_MQH
 

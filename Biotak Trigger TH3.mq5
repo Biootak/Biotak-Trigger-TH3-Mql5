@@ -1,33 +1,38 @@
-﻿  //+------------------------------------------------------------------+
-//|                                           Biotak Trigger TH3.mq5 |
-//|                                                                  |
-//|  MT5 mirror of the MT4 entry. The Biotak/ modules below are NOT   |
-//|  copies: Biotak/ is a directory junction into                        |
-//|  Biotak-Trigger-TH3-mql4/Biotak, so both terminals compile one and   |
-//|  the same source and can never drift apart. Only the platform      |
-//|  shims in MT5Compat/ are MT5-specific.                             |
+﻿// ========================================================================
+// GENERATED MIRROR of Biotak Trigger TH3.mq4 - MT4 is the source of truth.
+// regenerate: python tools/parity/resync-module.py --entry
+// Only the declared MT5 platform blocks below are added (MQL4 series
+// arrays + MQL5 timeseries direction); nothing else is MT5-specific.
+// ========================================================================
+  //+------------------------------------------------------------------+
+//|                                           Biotak Trigger TH3.mq4 |
 //+------------------------------------------------------------------+
 #property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
 #property version   "3.11"
+#property strict
 #property indicator_chart_window
+// MT5-ONLY PLATFORM PROPERTY: MQL5 warns when an indicator declares no plot;
+// MQL4 never needed to say it. The indicator draws objects, not buffers.
 #property indicator_plots 0
-#property description "Version 3.11 - MT5 mirror of the MT4 build"
-#property description "Shared source: Biotak-Trigger-TH3-mql4/Biotak"
 
-//
+#property description "Version 3.10 - GOLD: Post-Audit - All Critical Issues Fixed"
+#property description "Race conditions fixed | Memory leaks eliminated | Buffer overflow prevented"
+
+//                                                                    
 // BUILD CONFIG - Must be first include!
-//                      BuildConfig.mqh
-//
+//                      BuildConfig.mqh               
+//                                                                    
 #include "Biotak\BuildConfig.mqh"
 
 #include "Biotak\MathConstants.mqh"
 #include "Biotak\Logger.mqh"
-
-// MT5-ONLY: MQL4 API shims (Symbol/Digits/Point/Bid/Ask, MarketInfo, value
-// iATR, Time[]..Close[]/Bars series emulation, MQL4 object-call forms,
-// ObjectSetText). Must precede every shared module that uses them.
+// MT5-ONLY PLATFORM LAYER - MQL4 API shims (Symbol/Digits/Point/Bid/Ask,
+// MarketInfo, value iATR, the Time[]..Close[]/Bars series emulation, the MQL4
+// object-call forms and ObjectSetText). It must precede every shared module.
+// It adds NO feature: it is what lets the MT4 source compile and behave as MT4.
 #include "MT5Compat\MQL5Compat.mqh"
+
 
 #ifndef BUILD_LITE
 #include "Biotak\Profiler.mqh"
@@ -38,19 +43,19 @@
 #include "Biotak\ProjectConstants.mqh"
 #include "Biotak\InputValidator.mqh"
 
-//
+//                                                                    
 // Security & Performance Foundations (must precede GlobalVariables)
-//
+//                                                                    
 #include "Biotak\FloatingPointHelper.mqh"
 #include "Biotak\ObjectCountManager.mqh"
 #include "Biotak\PerformanceOptimizations.mqh"
 #include "Biotak\InputValidationEnhanced.mqh"
 
-//
+//                                                                    
 // RUNTIME SETTINGS - single owner of panel-editable setting mirrors.
 // MUST follow PropertiesAndInputs.mqh (input declarations) and precede
 // GlobalVariables.mqh + all consumers (redirection #defines start here).
-//
+//                                                                    
 #include "Biotak\RuntimeSettings.mqh"
 
 #include "Biotak\GlobalVariables.mqh"
@@ -61,10 +66,13 @@
 // Included here (before EventHandlers/menu) so both Full and Lite compile:
 // Lite has no ring menu but keeps drag/delete/badge handling alive.
 #include "Biotak\BaseKnotTool.mqh"
+// P-HR-01: Horizontal Ray (Tools cell → 1 click places; same layer, same rule).
+#include "Biotak\HRayTool.mqh"
+#include "Biotak\PathTool.mqh"
 
-//
+//                                                                    
 // Cache & Object Management Systems
-//
+//                                                                    
 #include "Biotak\CalculationCache.mqh"
 #include "Biotak\ZoneFactory.mqh"
 #include "Biotak\ZoneConfig.mqh"       // single owner of zone settings
@@ -74,9 +82,9 @@
 #include "Biotak\PropertyChangeDetector.mqh"
 #include "Biotak\VisibilityManager.mqh"
 
-//
+//                                                                    
 // Timeframe & Calculation Modules
-//
+//                                                                    
 #include "Biotak\TimeframeFunctions.mqh"
 #include "Biotak\FractalTimeframes.mqh"
 #include "Biotak\StandardTimeframes.mqh"
@@ -90,14 +98,29 @@
 #ifndef BUILD_LITE
 #include "Biotak\WaveAnalysis.mqh"
 #include "Biotak\FrequencyOptimizer.mqh"
-// TH3TOOL-OFF (tool retired - commented out, not deleted):
-// #include "Biotak\TH3Tool.mqh"
+// TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF — the TH3 tool is LIVE again.
+#include "Biotak\TH3Tool.mqh"
 #endif
 
-//
+//                                                                    
 // Drawing & Rendering Pipeline
-//
+//                                                                    
 #include "Biotak\ObjectFunctions.mqh"
+// P-DRAW-01: the user's OWN drawings (fib, trend, hline, channel, box, …) and
+// the style memory behind their toolbar. Above EventHandlers/BiotakPanels so
+// both halves can ask it (the strip lives in the panels, the create hook in the
+// event handlers).
+#include "Biotak\DrawToolbar.mqh"
+// P-DRAW-116: the CARD SURFACE'S OWN NUMBER TABLE, as a standalone header. BiotakPanels
+// owns these names and re-includes this itself, so the cards are byte-identical — the
+// only change is that it now sits ABOVE the strip. DrawStrip is include 99 and
+// BiotakPanels is 118, so the strip's settings panel could never reach a `PNL_*` name
+// and could only retype the value (DSTRIP_GEAR_W 312 = PNL_WEL 312, and five more).
+// One table, two readers: from here the panel and the cards CANNOT drift.
+#include "Biotak\CardMetrics.mqh"
+// P-DRAW-08: the floating strip the drawings' hold opens. Full only — it is a
+// screen surface, and Lite owns none (P-BUILD-01).
+#include "Biotak\DrawStrip.mqh"
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\ComboEngine.mqh"
 #include "Biotak\FactorMode.mqh"
@@ -109,61 +132,56 @@
 #include "Biotak\HistoricalDataFunctions.mqh"
 #include "Biotak\EventHandlers.mqh"
 
-//
-// UI MODULES - Circular Menu, Settings Panels & HTF Candles
-// (BiotakKit must precede BiotakMenu; HTFCandles precede the kit)
-//
+//                                                                    
+// UI MODULES — Circular Menu, Settings Panels & HTF Candles          
+// (BiotakKit must precede BiotakMenu; HTFCandles precede the kit)  
+//                                                                    
 #include "Biotak\HTFCandles.mqh"
 #include "Biotak\BiotakKit.mqh"
 #include "Biotak\BiotakMenu.mqh"
 #include "Biotak\BiotakPanels.mqh"
-
-// MT5-ONLY DIAGNOSTIC (compiles to nothing unless its own switch is on).
-// Included LAST: it times the interaction path, so it needs every UI owner.
-#include "MT5Compat\MT5PrimitiveProbe.mqh"
-// MT5-ONLY DIAGNOSTIC (compiles to nothing unless its own switch is on).
-// Dumps every object on this chart to MQL5/Files/biotak-level-dump.txt so
-// "the levels are absent" and "the levels are present but masked off" can be
-// told apart - see the file header for why reading the code cannot decide it.
-#include "MT5Compat\MT5LevelDump.mqh"
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-    // MT5-ONLY, AND IT MUST BE THE FIRST STATEMENT.
-    //
-    // MQL4 populates the predefined series arrays (Bars, Time[], Open[],
-    // High[], Low[], Close[]) before OnInit is entered. MQL5 has no such
-    // arrays, so MT5Compat emulates them and something has to fill them.
-    // It used to happen only in OnCalculate and OnTimer - which run AFTER
-    // OnInit - so for the whole of OnInit `Bars` was 0 and every series
-    // array was empty. The shared modules read those values during init and
-    // do not all guard for zero:
-    //
-    //   ZoneFactory::CreateZone        - "safeBars < 1" -> returns
-    //                                    ERR_ZONE_RENDER_FAILED, so no zone
-    //   ExtendedDrawingFunctions       - startTime falls back to TimeCurrent()
-    //                                    instead of Time[Bars-1], so the box
-    //                                    spans a sliver instead of the chart
-    //   BaseKnotTool::...SpanFromTimes - "s >= total" with total == 0 -> 0 bars
-    //   ATRCalculations::GetEffectiveBars / CalculateTrueRange -> 0.0
-    //
-    // The result was a first paint that did not match MT4. Refreshing here
-    // makes the emulation available exactly when MQL4's arrays are.
+
+    // MT5-ONLY PLATFORM CALL, AND IT MUST BE THE FIRST STATEMENT.
+    // MQL4 fills the predefined series arrays (Bars, Time[]..Close[]) before
+    // OnInit is entered; MQL5 has no such arrays, so MT5Compat emulates them and
+    // something has to fill them. The shared modules read those values during
+    // init (ZoneFactory's safeBars, ExtendedDrawingFunctions' startTime,
+    // BaseKnotTool's span, ATRCalculations' effective bars), so refreshing here
+    // is what makes the first paint match MT4 exactly.
     CompatRefreshChartData();
-
-    // MT5-ONLY: start the redundant-object-write memo from a clean slate. A
-    // re-attach reuses a chart the previous instance drew on, so the previous
-    // instance's facts must never be inherited.
-    MT5ObjWriteFilterReset();
-
     // P-PERF-04: attach / timeframe switch budget (both halves are measured:
     // OnInitHandler is the indicator, the UI kit restores menu + panels).
     // P-PERF-10: this entry measures BOTH halves of the init budget (the
     // indicator handler and the UI kit) so the report can name which one owns
     // the attach/timeframe-switch stall instead of reporting one opaque total.
+    // P-DRAW-120 (2026-10-01) — AN ATTACH OWNS A CHART THAT CARRIES NO PANEL.
+    // P-DRAW-85 wrote `DrawStripSweepStale()` for exactly this ("no orphan survives a
+    // reattach") and documented its ONE call as "from the entry's OnInit beside the
+    // teardown's own `DrawStripClose()`" — but `git grep SweepStale HEAD` finds the
+    // definition and NO call site: the sweep was never wired, so the promise the rule
+    // makes has never been delivered. What that costs was measured on 2026-10-01
+    // (EURUSD,M5, report «روی stroke که کلیک می‌کنم متن‌ها این‌طوری ناقص هست»): the
+    // terminal holds every object of the open Stroke tab at its own seat with its own
+    // ink (`TABCENSUS GR2T "50 % line":14865611 z=1442`, `GS0T "STROKE"` in
+    // `MQL4\Logs\20261001.log`), while the screen paints 31 of those 104 objects — and
+    // the last gear paint in that log is 14:37:08, before the 15:10:39 reload whose
+    // statics (`s_dsOpen=false`, `s_dsGear=0`) answer nothing. A family the previous
+    // instance left is REUSED (`DrawStripSkinBmp`/`DrawStripFaceZ`/`DrawStripLblAt`
+    // decide "create or rewrite?" from `ObjectFind(0,nm) < 0` alone), so one half keeps
+    // the older build's own layer and the other half never gets a second writer at all.
+    // This is the destroy an attach can prove: at OnInit this instance has painted
+    // nothing, so every `PnlDrawS_*` object on the chart is someone else's. One prefix
+    // scan per ATTACH, never per frame.
+#ifndef BUILD_LITE
+    DrawStripSweepStale();
+#endif
+
     uint p4i = GetTickCount();
     int result = OnInitHandler();
     uint p4ind = GetTickCount() - p4i;
@@ -175,6 +193,8 @@ int OnInit()
         InitializeBiotakKit();   // panel state, colors, boxes, custom lines
         InitializeHTFCandles();    // HTF candle engine
         CreateMenu();              // orb + ring + tools
+        // P-UI-114: right-click era deleted — terminal menu untouched, strip on
+        // LEFT hold (DrawStrip.mqh).
         ChartRedraw();
     }
     uint p4ui = GetTickCount() - p4i;
@@ -196,7 +216,7 @@ void OnDeinit(const int reason)
     GVLedgerResetAll();
     // --- UI teardown (before the base handler clears chart objects) ---
     // P-UI-21: close panels/palette/strip/dropdowns FIRST (flushes the
-    // card-12 text edit + releases the modal chart lock) - otherwise
+    // card-12 text edit + releases the modal chart lock) — otherwise
     // REASON_REMOVE leaves Pnl*/Pal_* ghosts behind, swept only at next attach.
     // P-PERF-15: the teardown budget line says the switch costs ~300 ms and
     // cannot say which of the six owners spent it, so each one is timed here.
@@ -205,6 +225,11 @@ void OnDeinit(const int reason)
     uint p15Pnl, p15Menu, p15Htf, p15Save, p15Cleanup, p15Handler;
     PnlCloseAll();
     p15Pnl = GetTickCount() - p15t; p15t = GetTickCount();
+    // P-DRAW-08: the drawing strip's own objects die with the instance — the
+    // removal path owns them, so no PnlDrawS_* button survives a REASON_REMOVE
+    // (the name was `Biotak_DS_*` in the note that first said this; the objects
+    // have been `PnlDrawS_*` since birth — P-DRAW-73, catalogue 24).
+    DrawStripClose();
     DeleteMenu();
     p15Menu = GetTickCount() - p15t; p15t = GetTickCount();
     DeleteHTFCandles();
@@ -245,10 +270,6 @@ void OnDeinit(const int reason)
               (GVLedgerWrites(GV_BLOCK_HTF) + GVLedgerSkipped(GV_BLOCK_HTF)),
               " flush=", GVFlushRuns(),
               " first=", RSSaveNamed(0), ",", RSSaveNamed(1), ",", RSSaveNamed(2),
-              // MT5-ONLY: what the redundant-object-write filter actually saved
-              // this session, so the next MT4-vs-MT5 comparison has a number.
-              " | objw skip=", MT5ObjWriteFilterSkips(), "/",
-              (MT5ObjWriteFilterSkips() + MT5ObjWriteFilterWrites()),
               // P-PERF-45 evidence: frames that actually ran, over the ticks that
               // ended with the frame still owed (the starvation count). `starved`
               // must read ~0 - a number tracking the frame count means the pump is
@@ -270,9 +291,11 @@ int OnCalculate(const int rates_total,
                 const long &real_volume[],
                 const int &spread[])
 {
-    // MT5-ONLY: MQL5 does not guarantee the indexing direction of these arrays,
-    // while MQL4 always passes them as timeseries (index 0 = current bar). Force
-    // the same direction so new-bar/price detection behaves identically.
+
+    // MT5-ONLY PLATFORM CALLS - MQL4 always hands these arrays over as
+    // timeseries (index 0 = current bar) and there is no first-bar race; MQL5
+    // makes no such promise, so the direction is forced and the emulated series
+    // arrays are refilled before the shared handler reads them.
     ArraySetAsSeries(time, true);
     ArraySetAsSeries(open, true);
     ArraySetAsSeries(high, true);
@@ -281,30 +304,7 @@ int OnCalculate(const int rates_total,
     ArraySetAsSeries(tick_volume, true);
     ArraySetAsSeries(real_volume, true);
     ArraySetAsSeries(spread, true);
-
-    // MT5-ONLY: refresh the Time[]/Open[]/High[]/Low[]/Close[]/Bars emulation
-    // that the shared modules read as MQL4 predefined series arrays.
     CompatRefreshChartData();
-
-    // MT5-ONLY DIAGNOSTIC: snapshot the chart's object population to a file.
-    // Reads only; compiles to nothing when its switch is off.
-    MT5LevelDumpTick();
-
-    // MT5-ONLY DIAGNOSTIC: the phase-2 primitive cost table.
-    //
-    // This call site is the one the probe was MISSING. The probe file defined
-    // MT5PrimitiveProbeRunOnce() and an empty fallback macro, but nothing ever
-    // called it - so the cost table phase 2 depends on had never once been
-    // produced, and the MT5 slowness work was running on a hypothesis instead
-    // of a number.
-    //
-    // Safe to call unconditionally: it self-arms (a 1500 ms settle, so it
-    // measures the steady state rather than the init churn), self-latches
-    // (one run per terminal burst, latched in the terminal's global-variable
-    // table so four charts produce ONE table, expiring after a minute), and
-    // compiles to nothing when ENABLE_MT5_PRIMITIVE_PROBE is off.
-    MT5PrimitiveProbeRunOnce();
-
     int result = OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
     // --- UI kit: HTF forming-candle live update + new-bar redraw ---
     RefreshKitOnBar();
@@ -326,23 +326,48 @@ void OnChartEvent(const int id,
   // the flag here (not in the handlers) is what makes the guarantee hold for
   // every path they call, including ones added later.
   g_inChartEvent = true;
-  // MT5-ONLY: an object that APPEARED or VANISHED on this chart - ours or anyone
-  // else's (a template load, the terminal's "remove all objects", another
-  // program) - is proof that the redundant-write memo's facts may be stale. Two
-  // int compares, one uint increment, and the memo can never outlive its truth.
-  // Our own ObjectCreate/ObjectDelete already bump this; the hook exists for the
-  // changes we do not make.
-  if(id == CHARTEVENT_OBJECT_CREATE || id == CHARTEVENT_OBJECT_DELETE)
-     MT5ObjWriteFilterInvalidate();
   uint p4t = GetTickCount();
   OnChartEventHandler(id,lparam,dparam,sparam);
   uint p4a = GetTickCount() - p4t;
   p4t = GetTickCount();
+  // P-UI-114: the strip opens on a LEFT hold inside DrawStripOnEvent below.
   // --- Circular menu / settings panels / palette ---
   HandleUIChartEvent(id,lparam,dparam,sparam);
+  // P-DRAW-08: the drawing strip's own buttons and its dismiss clicks. Its own
+  // owner, its own objects — it shares no state with the panels.
+  DrawStripOnEvent(id,lparam,dparam,sparam);
+  // P-PAL-19 (2026-10-02) — THE ONE BRIDGE. DrawStrip is include 99 and the panels
+  // are 124, and MQL4 needs a definition before its use, so the strip cannot call
+  // `PalOpenDraw` itself: it leaves a REQUEST (DrawStripPalAsk) and this line — the
+  // first place in the program that sees BOTH sides — performs the open. One
+  // direction, one place, no forward declaration, and the strip has no knowledge of
+  // the palette's existence beyond this handshake.
+  int palAsk = DrawStripPalAsked();
+  if(palAsk >= 0) PalOpenDraw(DrawStripPlateX(), DrawStripPlateY(), DrawStripPlateW());
+  // P-PAL-20 (2026-10-02) — THE LEDGER, REWRITTEN WHOLE, EVERY EVENT, AND WRITTEN
+  // LAST. This is the same bridge's second direction and it exists for one reason: a
+  // colour pick is a release on TWO channels, `HandleUIChartEvent` serves the palette
+  // first (above), and then the strip asks `DrawStripPointInside` about the release
+  // PIXEL — a pixel on the popup, not on the plate — read false and closed the whole
+  // strip (DrawStrip_Router:1113). The strip owns that popup, so its pixels are its
+  // pixels. The strip cannot see `g_PalX/PalW()`; these lines are the only place that
+  // can, and LAST is the whole discipline: the ledger answers for the chart as the
+  // event LEFT it, so a popup closed above is already out of it.
+  //
+  // P-PAL-19f — AND THE REPAINT IS SPENT HERE, ONCE, AFTER the popup's route. The
+  // apply owns a flag and nobody repaints from inside a gesture it does not own
+  // (P-PERF-34's law, the same sentence the owed-frame comment below is built on).
+  if(DrawStripPalRepaintTake()) { DrawStripPaint(); ChartRedraw(); }
+  // P-PAL-19e — AND THE PALETTE CLOSES WITH ITS PARENT. A colour popup opened by
+  // the STRIP belongs to the strip: when the strip goes (close, kind switch, deinit)
+  // the popup must go with it, or it stays on the chart as a floater nobody owns
+  // («همراه والدش بسته بشه»). One direction, same bridge.
+  if(!DrawStripPalParentLive() && PalKindIsDrawing(g_PalKind)) PalClose();
+  DrawStripSurfaceClear();
+  if(g_PalOpen && PalKindIsDrawing(g_PalKind) && DrawStripPalTargetLive())
+     DrawStripSurfacePublish(g_PalX, g_PalY, PalW(), PalH());
   uint p4b = GetTickCount() - p4t;
-  g_inChartEvent = false;
-  // P-PERF-40: A USER ACTION SETTLES THE FRAME IT OWED - IN THE SAME EVENT.
+  g_inChartEvent = false;  // P-PERF-40: A USER ACTION SETTLES THE FRAME IT OWED — IN THE SAME EVENT.
   //
   // P-PERF-34 made a forced frame inside an event SCHEDULED instead of executed,
   // because the body it measured was 531 ms of rebuild and it froze the press
@@ -351,8 +376,8 @@ void OnChartEvent(const int id,
   //
   //   [W][PERF] owed frame (chart-event) waited=46..266ms body=0ms stage=0 clear=0
   //
-  // `waited` is the whole story - a press was answered between 0 and 266 ms
-  // later, uniformly up to the timer's cadence - and `body=0ms` is worse than it
+  // `waited` is the whole story — a press was answered between 0 and 266 ms
+  // later, uniformly up to the timer's cadence — and `body=0ms` is worse than it
   // looks: by the time the timer ran the frame there was nothing left to draw,
   // because the discrete path had already repainted the OLD picture. So the
   // switch was acknowledged by a repaint that changed nothing and the real frame
@@ -362,13 +387,13 @@ void OnChartEvent(const int id,
   // frame on the leftover slice, budget-bounded (COOP_BUDGET_MS) so this cannot
   // become an unbounded in-event stall, and single-flight so three fast presses
   // are one frame. It runs the frame with force_redraw = FALSE, which is exactly
-  // what keeps RedrawAllObjects' event guard meaningful - the guard still
+  // what keeps RedrawAllObjects' event guard meaningful — the guard still
   // protects every event-path caller that does NOT pump, and this is the one
   // place that has explicitly earned the pass.
   //
   // Cost when nothing is owed: four flag reads and a couple of GetTickCount.
   // It is therefore correct to call it on EVERY event, not just the discrete
-  // ones - and that is deliberate, because the entry point is the only place that
+  // ones — and that is deliberate, because the entry point is the only place that
   // covers the paths inside both handlers (and the ones added later).
   p4t = GetTickCount();
   CoopPump();
@@ -376,7 +401,7 @@ void OnChartEvent(const int id,
   // P-UI-40: AND THE PANEL FOLLOWS WHAT IT DOES NOT OWN.
   //
   // A hotkey changes state that an OPEN card displays, but the hotkeys live in
-  // EventHandlers and the panel in a later file, so they cannot repaint it - the
+  // EventHandlers and the panel in a later file, so they cannot repaint it — the
   // rows read the live value, the switch IMAGE is a bitmap only a paint pass
   // replaces. Draining the request HERE (same event) means a key press and the
   // panel switch it drives land together; RefreshKitOnBar drains it too, as the
@@ -391,12 +416,20 @@ void OnChartEvent(const int id,
   // recalling which number means what is how id=1 (OBJECT_CLICK) got filed as a
   // cursor-move for two cycles.
   // P-PERF-40: `settle=` is the frame this event drained, and it is IN the budget
-  // check on purpose - a drain that hides its own cost from the ledger would be
+  // check on purpose — a drain that hides its own cost from the ledger would be
   // the same defect this cycle is fixing, one level up.
-  P4ReportSlow("chart event " + P4EventName(id) + "(id=" + IntegerToString(id) + ") [indicator=" +
+   // P-PERF-50: the ledger message is ~15 string ops (P4EventName + six
+   // IntegerToString + concatenations) and P4ReportSlow no-ops under budget —
+   // so building it on EVERY event (a MOUSE_MOVE storm is hundreds/sec) was
+   // pure garbage for the same silence. The total is hoisted first and the
+   // message is built only when it will actually print: identical log lines,
+   // zero steady-state strings. Same gate in the Lite entry.
+   uint p4tot = p4a + p4b + p4c + p4e;
+   if(p4tot >= P_P4_EVENT_WARN_MS)
+      P4ReportSlow("chart event " + P4EventName(id) + "(id=" + IntegerToString(id) + ") [indicator=" +
                P4MsTag(p4a) + " ui=" + P4MsTag(p4b) + " settle=" + P4MsTag(p4c) +
                " panels=" + P4MsTag(p4e) + "]",
-               p4a + p4b + p4c + p4e, P_P4_EVENT_WARN_MS);
+               p4tot, P_P4_EVENT_WARN_MS);
 }
 
 //+------------------------------------------------------------------+
@@ -404,29 +437,11 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-    // MT5-ONLY: keep the MQL4 series-array emulation live on a tick-less chart.
+
+    // MT5-ONLY PLATFORM CALL - keep the emulated MQL4 series arrays live on a
+    // chart that is not ticking (MQL4's arrays always were).
     CompatRefreshChartData();
-
-    // MT5-ONLY DIAGNOSTIC: the timer is what makes the dump land even on a
-    // chart that is not ticking.
-    MT5LevelDumpTick();
-
-    // MT5-ONLY DIAGNOSTIC: and the same reason applies to the probe - a closed
-    // market is exactly when a measurement is most useful, and OnCalculate
-    // never runs then. Both calls share the probe's own latch, so the second
-    // one is a bool read.
-    MT5PrimitiveProbeRunOnce();
-
-    // MT5-ONLY: drive a staged rebuild DIRECTLY, never only through the pump.
-    // A post-wipe/post-switch rebuild (LINES->ZONES->LABELS->BLOCK) is the
-    // progress-maker: owed solely to CoopPump it runs last under a 12 ms slice
-    // on 15.6 ms-tick timing, and on a slow chart the three re-owed sweeps can
-    // starve it past every 250 ms tick - the chart then sits empty after a
-    // timeframe switch. The frame's own 60 ms gate still spaces the stages, so
-    // this only guarantees the call happens; the pump's pass right below then
-    // hits that gate and returns. Cost when nothing stages: one int compare.
-    if(g_buildStage != 0)
-        RedrawAllObjects(false);
+    // P-UI-113-OFF (2026-09-23): no fast window — every tick is housekeeping.
 
     // P-PERF-16: the 250 ms safety refresh behind the cached UI metrics. Resizing
     // the chart also fires a chart-change event (which invalidates immediately);
@@ -450,7 +465,58 @@ void OnTimer()
     CoopPump();
 
     // --- UI kit: HTF forming candle + new-bar redraw + chart-lock watchdog ---
-    // (P-UI-40's UISyncDrain rides inside RefreshKitOnBar - one drain owner.)
+    // (P-UI-40's UISyncDrain rides inside RefreshKitOnBar — one drain owner.)
     RefreshKitOnBar();
     ChartScrollReconcile();
+
+    // P-LM-09: the leg meter's readout is a 4-second VISITOR, and this is its clock.
+    // It belongs here and not in OnCalculate: a plate must expire on a chart that has
+    // not ticked (a weekend, a dead symbol) exactly as on a busy one, and the timer is
+    // the only thing already running when the market is asleep. The sweep is one
+    // comparison while the tool has no measurement on the chart, and one bool per
+    // measurement while it has; the four deletes of an expiry happen exactly once.
+    // (P-LM-10's drag channel retired here with the native drag itself: P-LM-11's
+    // edit owner moves the family in the mouse event, so there is nothing left
+    // for a timer to chase.)
+    LegMeasureExpireSweep();
+
+    // P-LM-16b: the handles' third riding channel — the net under MOUSE_MOVE
+    // (drag-pans) and CHART_CHANGE (wheel, keys, auto-scroll). Guarded writes:
+    // a chart that has not moved costs one loop of reads and no ObjectSet*.
+    LegMeasureRideChart();
+
+    // P-UI-100 (2026-09-22): the selection net of the two hand-set lines — the
+    // one owner that does not depend on any event reaching us. A selection that
+    // outlived the gesture that made it is what lets MT4 drag the custom price
+    // line (and the whole ladder derived from its price) along with somebody
+    // else's fib or box («وقتی فیو یا باکس از همون محل میکشم کاستوم پرایس
+    // جابجا میشه»). The 250 ms clock is the net under the layers whose events
+    // are consumed whole (the box tool's draw session); the gesture starts
+    // themselves clear it in their own event, so this is a floor, not the path.
+    // Cost: one probe while the button is down, then three guarded reads.
+    HandLinesSelectionNet();
+
+    // P-TH3-INFO-11 (2026-09-22): the caption heal net - the active family's
+    // one question every 250 ms (reads-only while healthy; one TH3CAP line
+    // per action). Full entry only: Lite owns no caption UI (P-BUILD-01).
+    TH3InfoCaptionHeal();
+
+    // P-UI-98r: the net under the card-cull's event hooks (open/close/drag/
+    // draw) - zoom, resize and forming-candle drift converge here within one
+    // tick of the 250 ms clock. Closed / HTF-off / nothing drawn: three bool
+    // reads and out.
+    HTFCardCullRefresh();
+
+    // P-TH3-PB-DRAG-LOCK (2026-09-22): the band's drag heartbeat - a stuck
+    // terminal or an off-chart release leaves OBJECT_DRAG silent, and the
+    // button-up MOUSE_MOVE never arrives; the 1.5 s idle here is the only
+    // heal that does not need the terminal to cooperate.
+    TH3BaseBandDragHeartbeat();
+
+    // NOTE (2026-09-23, P-DRAW-18): `WindowPriceMax()/Min()` answer 0/0 during
+    // OnInit - the chart window is not mapped yet (`run hi=0.00000 lo=0.00000` in
+    // the terminal's log) - while a timer tick ~1 s later reads the real range
+    // (`window hi=4410.70000 lo=4230.80000` on XAUUSD,H1). Anything needing the
+    // visible window belongs HERE, never in OnInitHandler.
 }
+

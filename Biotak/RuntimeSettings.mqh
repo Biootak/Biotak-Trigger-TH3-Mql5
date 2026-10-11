@@ -1,3 +1,15 @@
+// ============================================================================
+// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
+// truth.  Do not add anything here that MT4 does not have: with MT4 there is
+// "nothing less, nothing more".
+//
+//   MT4 source : Biotak/Biotak/RuntimeSettings.mqh
+//   regenerate : python tools/parity/resync-module.py --write RuntimeSettings.mqh
+//
+// The MT4 part files are inlined (MT5 has no such parts), includes of modules
+// both trees own are kept, and only these platform patches are applied:
+//   * none
+// ============================================================================
 //+------------------------------------------------------------------+
 //|                                             RuntimeSettings.mqh  |
 //|  SINGLE OWNER of the runtime-editable settings.                  |
@@ -35,6 +47,11 @@
 //+------------------------------------------------------------------+
 #ifndef RUNTIME_SETTINGS_MQH
 #define RUNTIME_SETTINGS_MQH
+
+// Runtime_A.mqh - RuntimeSettings.mqh split 2026-09-29: exact lines 38-1446, byte-identical, zero renames.
+#ifndef RUNTIME_A_MQH
+#define RUNTIME_A_MQH
+
 #property strict
 
 //==============================================================================
@@ -46,7 +63,11 @@ static bool g_useDynamicTradingDay = true;                       // [01] inpUseD
 static bool g_basePriceThresholdEnabled = true;                  // [01] inpBasePriceThresholdEnabled
 static double g_basePriceThresholdPercent = 0.066;               // [01] inpBasePriceThresholdPercent
 static int g_maxLevels = 144;                                    // [01] inpMaxLevels
-static bool g_triggerLevelsEnabled = true;                       // [09.3] inpShowTrigger (+ hotkey toggle state)
+static bool g_triggerLevelsEnabled = false;                      // [09.3] inpShowTrigger (+ hotkey
+                                                                 // toggle state). P-UI-119: the
+                                                                 // initial now MATCHES the input's
+                                                                 // own default (false) — it used to
+                                                                 // advertise ON before the seed ran.
 static int g_triggerWidth = 1;                                   // [08.1] inpTriggerWidth (legacy — pipeline lines use g_line* [08.4])
 static ENUM_LINE_STYLE g_triggerStyle = STYLE_DOT;               // [08.1] inpTriggerStyle (legacy — pipeline lines use g_line* [08.4])
 static color g_triggerColor = clrBlack;                          // [08.1] inpTriggerColor (trigger ZONE fill)
@@ -59,7 +80,7 @@ static color g_lineColor = clrBlack;                             // [08.4] inpLi
 static int g_lineTransparency = 50;                              // [08.4] inpLineTransparency
 // [08.5] BASE BOX BORDER — the committed box look (border only, never
 // filled — like MT4's own rectangle). Edited from the Base Box card (12).
-static color g_boxBorderColor = C'255,171,0';                    // [08.5] inpBoxBorderColor
+static color g_boxBorderColor = C'0,0,139';                      // [08.5] inpBoxBorderColor (P-BK-69: dark blue default — the mark and its two points)
 static ENUM_LINE_STYLE g_boxBorderStyle = STYLE_SOLID;           // [08.5] inpBoxBorderStyle
 static int g_boxBorderWidth = 2;                                 // [08.5] inpBoxBorderWidth
 static int g_boxBorderTransparency = 0;                          // [08.5] palette TR (default solid)
@@ -86,7 +107,15 @@ static bool g_bkBold = false;                                  // [08.5] inpBKBo
 static bool g_bkItalic = false;                                // [08.5] inpBKItalic
 static int g_bkAlign = 2;                                      // [08.5] inpBKAlign (0=Left,1=Center,2=Right)
 static int g_bkVAlign = 1;                                     // [08.5] inpBKVAlign (0=Top,1=Inside,2=Bottom)
-static color g_triggerLabelColor = clrBlack;                     // [09.3] inpTriggerLabelColor
+// P-UI-131j: THE TRIGGER'S LABEL IS A SURFACE OF ITS OWN — colour AND opacity, the
+// shape the trigger ZONE has had since the beginning (TRANSPARENCY + COLOR). The
+// colour shipped DEAD: it was mirrored, persisted and painted on a card row, and no
+// renderer ever read it, so the pip label kept wearing the unified [08.4] line colour
+// whatever the row said. AUTO (`clrNONE` / `-1`) is the shipped picture — the label
+// wears its own line's live look (P-UI-66) — so an untouched chart is pixel-identical
+// and a pinned value is the trigger family's own.
+static color g_triggerLabelColor = clrNONE;                      // [09.3] inpTriggerLabelColor (clrNONE = AUTO)
+static int g_triggerLabelTransparency = -1;                      // P-UI-131j (-1 = AUTO: follow the Lines TR)
 static int g_triggerTransparency = 50;                           // [09.3] inpTriggerTransparency
 static int g_ssLevelWidth = 1;                                   // [04] inpSSLevelWidth
 static ENUM_LINE_STYLE g_ssLevelStyle = STYLE_DOT;               // [04] inpSSLevelStyle
@@ -107,7 +136,9 @@ static bool g_showStructureL3 = true;                            // [09.2] inpSh
 static bool g_showStructureL4 = true;                            // [09.2] inpShowStructureL4
 static bool g_showStructureL5 = true;                            // [09.2] inpShowStructureL5
 static bool g_showMidpointLine = true;                           // [03] inpShowMidpointLine
-static bool g_showMidZones = true;                               // [07.1] inpShowMidZones
+static bool g_showMidZones = false;                              // [07.1] inpShowMidZones.
+                                                                 // P-UI-119: the level families
+                                                                 // start OFF (user order).
 static ENUM_ZONE_STYLE g_midZoneStyle = ZONE_STYLE_BOX_FILLED;   // [07.1] inpMidZoneStyle
 static int g_midZoneTransparency = 50;                           // [07.2] inpMidZoneTransparency
 static double g_midZoneHeightPercent = 33.0;                     // [07.2] inpMidZoneHeightPercent
@@ -117,6 +148,15 @@ static int g_midZoneBorderWidth = 1;                             // [07.2] inpMi
 // BAND (the filled rectangle); this one owns the edge the BORDER / BORDER WIDTH rows
 // style, so the two can be set apart - the reported «شفافیت خط و زون جدا از هم باشد».
 static int g_midZoneBorderTransparency = 50;                     // [07.2] inpMidZoneBorderTransparency
+// P-UI-131h: THE EDGE'S TWO HALVES, each one surface of its own. The bevel derives a LIT
+// tone (top/left) and a SHADED one (bottom) from the edge colour; the user can now pin
+// either half instead - clrNONE = AUTO, i.e. keep the derivation, and -1 opacity =
+// follow `g_midZoneBorderTransparency` above. The factory default is AUTO on all four, so
+// a fresh install draws exactly the soft, surface-anchored edge the derivation produces.
+static color g_zoneEdgeTopColor = clrNONE;
+static color g_zoneEdgeBottomColor = clrNONE;
+static int   g_zoneEdgeTopTransparency = -1;
+static int   g_zoneEdgeBottomTransparency = -1;
 static bool g_showPipDistanceLabels = true;                      // [03] inpShowPipDistanceLabels
 static bool g_showATRLabels = false;                             // [03] inpShowATRLabels
 static bool g_showATRTargets = true;                             // [03] inpShowATRTargets
@@ -131,6 +171,22 @@ static int g_atrLabelRowGap = 10;                                // [03] inpATRT
 static int g_atrTradeFontSize = 0;                               // [03] inpATRTradeLabelFontSize (0 = follow inpFontSize)
 static int g_trexStampGapRows = 0;                               // [13] inpTrexStampGapRows
 static int g_tradeMarginBottom = 8;                              // [13] inpLabelsMarginBottom (the card's floor)
+// P-UI-131 — the LABEL GRID's own two knobs, promoted from "Inputs only" to live
+// settings so the GENERAL SETTINGS card can drive them. Each has ONE reader family
+// (the label layout), so the dialog input and the panel row are the same value.
+static int g_labelFontSize = 8;                                  // [11] inpFontSize (the label grid's own size)
+static int g_labelRowGap   = 18;                                 // [13] inpLabelRowGap (the shared column pitch)
+// P-UI-131 — the rest of group 13, the LABEL LAYOUT. All six were "dialog only"
+// until the GENERAL card: they are the grid's own geometry (one font, four
+// margins/gaps, one width cap), read by LabelFunctions, BaseKnotTool,
+// ObjectFunctions, UtilityFunctions and TH3Tool. Each mirror keeps ONE reader
+// family, so the panel row and the dialog input are the same value.
+static int g_labelFontIdx     = 0;                               // [11] inpFontName, as a list index
+static int g_labelsMarginTop  = 30;                              // [13] inpLabelsMarginTop
+static int g_labelsMarginLeft = 25;                              // [13] inpLabelsMarginLeft
+static int g_labelColumnGap   = 50;                              // [13] inpLabelColumnGap
+static int g_sectionGap       = 30;                              // [13] inpSectionGap
+static int g_maxLabelWidth    = 250;                             // [13] inpMaxLabelWidth
 // The card's five colours (P-UI-70d). Defaults are the SHIPPED literals, so a
 // chart that never touches them looks exactly as before.
 static color g_atrTradeTRColor = clrBlue;                        // [13] inpATRTradeTRColor
@@ -148,20 +204,36 @@ static bool g_showTHLabels = false;                              // [03] inpShow
 static bool g_showFractalTHs = false;                            // [03] inpShowFractalTHs
 static bool g_showStandardTHs = false;                           // [03] inpShowStandardTHs
 static bool g_showTHTargets = true;                              // [03] inpShowTHTargets
+// [01] P-TH-01 — the TH percentage for THIS chart's rung (0 = the professor's
+// table). The ladder itself is NOT stored here: `FractalPercentScale` derives the
+// ratio from this one number, so a panel edit and the engine can never hold two
+// different ladders. See the Input's own note in PropertiesAndInputs.mqh.
+static double g_thPercentOverride = 0.0;                         // [01] inpTHPercentOverride
 static int g_thLabelsMarginBottom = 40;                          // [13] inpTHLabelsMarginBottom
 static bool g_enableTH3Tool = true;                              // [14] inpEnableTH3Tool
 static ENUM_TH3_DRAWING_MODE g_th3DrawingMode = TH3_MODE_ABCD;  // [14] inpTH3DrawingMode
 static double g_th3BaseStepPercent = 28.125;                     // [14] inpTH3BaseStepPercent
+static double g_th3PivotBasePips = 0.0;                            // [14] inpTH3PivotBasePips (P-TH3-PB-MAN: 0 = OFF, the pattern TF's own ATR)
 static int g_th3Width = 1;                                       // [14] inpTH3Width
 static ENUM_LINE_STYLE g_th3Style = STYLE_SOLID;                 // [14] inpTH3Style
 static color g_th3Color = clrDarkBlue;                           // [14] inpTH3Color
 static color g_th3PipTextColor = clrDarkBlue;                    // [14] inpTH3PipTextColor
 static bool g_showTH3Labels = true;                              // [14] inpShowTH3Labels
+static bool g_showMotherPivotZone = true;                        // [14] inpShowMotherPivotZone (P-TH3-P6e)
 static int g_customPriceLevelWidth = 1;                          // [02] inpCustomPriceLevelWidth
 static color g_customPriceLevelColor = clrDodgerBlue;            // [02] inpCustomPriceLevelColor
 static int g_customPriceTransparency = 0;                        // palette TR (default solid)
 static bool g_enableMagnet = true;                               // [02] inpEnableMagnet
 static int g_magnetSensitivityPips = 10;                         // [02] inpMagnetSensitivityPips
+// P-UI-101 (2026-09-22): THE CUSTOM PRICE PLACEMENT'S OWN LOCK.
+//
+// User order: «روی خط کاستوم پرایس که هولد کردم پنل تنظیماتش بازه بشه و بشه از
+// اونجا قفلش کرد». A LOCK is not the armed/set state (P-UI-98d): SET is one click
+// away from being undone — a double-click re-arms it — and the user asked for a
+// state that only a deliberate act in the panel can release. It is therefore its
+// own flag, and it is PERSISTED (the placement survives a re-attach, so its lock
+// must too, or the line would be free again after every recompile).
+static bool g_customPriceLocked = false;                         // [02] P-UI-101 — no Input: a placement's own lock
 static ENUM_FACTOR_MODE g_factorMode = FACTOR_MODE_AUTO;         // [06] inpFactorMode
 static ENUM_FACTOR_DISPLAY_MODE g_factorDisplayMode = FACTOR_DISPLAY_DIRECT; // [06] inpFactorDisplayMode
 static ENUM_FACTOR_AUTO_BASIS g_factorAutoBasis = FACTOR_BASIS_CONTROL;      // [06] inpFactorAutoBasis
@@ -174,7 +246,7 @@ static int g_factorLevelWidth = 1;                               // [06] inpFact
 // section can edit them live (same rails as every other mirror: FF_ defaults,
 // OV_ persistence, Q-reset). Consumers read inpComboX == these copies.
 static ENUM_COMBO_MODE g_comboMode = COMBO_MODE_PRESET;           // [05] inpComboMode
-static ENUM_COMBO_PRESET g_comboPreset = COMBO_PRESET_BALANCED_MEDIUM; // [05] inpComboPreset
+static ENUM_COMBO_PRESET g_comboPreset = COMBO_PRESET_RATIO_4_3; // [05] inpComboPreset (P-COMBO-01)
 static ENUM_COMBO_TIMEFRAME_TYPE g_comboComp1TF = COMBO_TF_PATTERN;    // [05] inpComboComp1TF
 static ENUM_COMBO_STEP_TYPE g_comboComp1Step = COMBO_STEP_TH;     // [05] inpComboComp1Step
 static ENUM_COMBO_OPERATION g_comboOp1 = COMBO_OP_AVERAGE;        // [05] inpComboOp1
@@ -279,8 +351,18 @@ enum FactorySetting
    FF_BK_ITALIC,         // inpBKItalic
    FF_BK_ALIGN,          // inpBKAlign
    FF_BK_VALIGN,         // inpBKVAlign
-   FF_BK_INFO_SIZE,      // inpBKInfoFontSize (P-BK-27 — appended: FF_ addresses never renumber)
-   FF_COUNT
+    FF_BK_INFO_SIZE,      // inpBKInfoFontSize (P-BK-27 — appended: FF_ addresses never renumber)
+    FF_TH_PERCENT,        // inpTHPercentOverride (P-TH-01 — appended for the same reason)
+    FF_TH3_PIVOT_BASE,    // inpTH3PivotBasePips (P-TH3-PB-MAN — appended for the same reason)
+    FF_LABEL_SIZE,        // inpFontSize (P-UI-131 — appended: FF_ addresses never renumber)
+    FF_LABEL_ROW_GAP,     // inpLabelRowGap (P-UI-131)
+    FF_LABEL_FONT,        // inpFontName, as the list index (P-UI-131)
+    FF_MARGIN_TOP,        // inpLabelsMarginTop (P-UI-131)
+    FF_MARGIN_LEFT,       // inpLabelsMarginLeft (P-UI-131)
+    FF_COLUMN_GAP,        // inpLabelColumnGap (P-UI-131)
+    FF_SECTION_GAP,       // inpSectionGap (P-UI-131)
+    FF_MAX_LABEL_W,       // inpMaxLabelWidth (P-UI-131)
+    FF_COUNT
 };
 static double g_factoryDefaults[FF_COUNT];
 
@@ -343,20 +425,31 @@ void RuntimeSettingsInit()
    g_factoryDefaults[FF_TH_STANDARD]         = inpShowStandardTHs;
    g_factoryDefaults[FF_TH_TARGETS]          = inpShowTHTargets;
    g_factoryDefaults[FF_TH_MARGIN_BOTTOM]    = inpTHLabelsMarginBottom;
+   g_factoryDefaults[FF_TH_PERCENT]          = inpTHPercentOverride;   // P-TH-01
+   g_factoryDefaults[FF_LABEL_SIZE]          = inpFontSize;            // P-UI-131
+   g_factoryDefaults[FF_LABEL_ROW_GAP]       = inpLabelRowGap;         // P-UI-131
+   g_factoryDefaults[FF_LABEL_FONT]          = LabelFontIdxOf(inpFontName);
+   g_factoryDefaults[FF_MARGIN_TOP]          = inpLabelsMarginTop;
+   g_factoryDefaults[FF_MARGIN_LEFT]         = inpLabelsMarginLeft;
+   g_factoryDefaults[FF_COLUMN_GAP]          = inpLabelColumnGap;
+   g_factoryDefaults[FF_SECTION_GAP]         = inpSectionGap;
+   g_factoryDefaults[FF_MAX_LABEL_W]         = inpMaxLabelWidth;
 #ifndef BUILD_LITE
-    // TH3TOOL-OFF: inputs retired — mirrors keep their static defaults:
-    //g_factoryDefaults[FF_ENABLE_TH3]          = inpEnableTH3Tool;
-    //g_factoryDefaults[FF_TH3_DRAW_MODE]       = inpTH3DrawingMode;
-    //g_factoryDefaults[FF_TH3_BASE_STEP]       = inpTH3BaseStepPercent;
-    //g_factoryDefaults[FF_TH3_WIDTH]           = inpTH3Width;
-    //g_factoryDefaults[FF_TH3_STYLE]           = inpTH3Style;
-    //g_factoryDefaults[FF_TH3_SHOW_LABELS]     = inpShowTH3Labels;
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+    g_factoryDefaults[FF_ENABLE_TH3]          = inpEnableTH3Tool;
+    g_factoryDefaults[FF_TH3_DRAW_MODE]       = inpTH3DrawingMode;
+    g_factoryDefaults[FF_TH3_BASE_STEP]       = inpTH3BaseStepPercent;
+    g_factoryDefaults[FF_TH3_PIVOT_BASE]      = inpTH3PivotBasePips;   // P-TH3-PB-MAN (0 = OFF, the pattern TF's own ATR)
+    g_factoryDefaults[FF_TH3_WIDTH]           = inpTH3Width;
+    g_factoryDefaults[FF_TH3_STYLE]           = inpTH3Style;
+    g_factoryDefaults[FF_TH3_SHOW_LABELS]     = inpShowTH3Labels;
 #else
    // Lite: TH3 inputs don't exist; factory = the same static defaults the
    // runtime copies keep (no input seeding happens in Lite for TH3).
-   g_factoryDefaults[FF_ENABLE_TH3]          = true;
-   g_factoryDefaults[FF_TH3_DRAW_MODE]       = TH3_MODE_ABCD;
-   g_factoryDefaults[FF_TH3_BASE_STEP]       = 28.125;
+    g_factoryDefaults[FF_ENABLE_TH3]          = true;
+    g_factoryDefaults[FF_TH3_DRAW_MODE]       = TH3_MODE_ABCD;
+    g_factoryDefaults[FF_TH3_BASE_STEP]       = 28.125;
+    g_factoryDefaults[FF_TH3_PIVOT_BASE]      = 0.0;   // P-TH3-PB-MAN (Lite: same OFF default, no input seeding)
    g_factoryDefaults[FF_TH3_WIDTH]           = 1;
    g_factoryDefaults[FF_TH3_STYLE]           = STYLE_SOLID;
    g_factoryDefaults[FF_TH3_SHOW_LABELS]     = true;
@@ -511,18 +604,35 @@ void RuntimeSettingsInit()
 
    // [13] ADVANCED / LABEL LAYOUT
    g_thLabelsMarginBottom = inpTHLabelsMarginBottom;
+   // P-UI-131: the label grid's own size and pitch — seeded HERE, above the #define
+   // block (below it `inpFontSize` already IS the mirror and this is a no-op).
+   g_labelFontSize = inpFontSize;
+   g_labelRowGap = inpLabelRowGap;
+   g_labelFontIdx = LabelFontIdxOf(inpFontName);   // -1 = a name typed in the dialog
+   g_labelsMarginTop = inpLabelsMarginTop;
+   g_labelsMarginLeft = inpLabelsMarginLeft;
+   g_labelColumnGap = inpLabelColumnGap;
+   g_sectionGap = inpSectionGap;
+   g_maxLabelWidth = inpMaxLabelWidth;
+
+   // P-TH-01: the TH-percentage knob. MUST be seeded HERE, above the #define
+   // block — below it `inpTHPercentOverride` already IS the mirror and this
+   // line would be a no-op self-assign (this file's own header warning).
+   g_thPercentOverride = inpTHPercentOverride;
 
 #ifndef BUILD_LITE
-    // TH3TOOL-OFF: inputs retired — mirrors keep their static defaults:
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
     // [14] TH3 TOOL
-    //g_enableTH3Tool = inpEnableTH3Tool;
-    //g_th3DrawingMode = inpTH3DrawingMode;
-    //g_th3BaseStepPercent = inpTH3BaseStepPercent;
-    //g_th3Width = inpTH3Width;
-    //g_th3Style = inpTH3Style;
-    //g_th3Color = inpTH3Color;
-    //g_th3PipTextColor = inpTH3PipTextColor;
-    //g_showTH3Labels = inpShowTH3Labels;
+    g_enableTH3Tool = inpEnableTH3Tool;
+    g_th3DrawingMode = inpTH3DrawingMode;
+    g_th3BaseStepPercent = inpTH3BaseStepPercent;
+    g_th3PivotBasePips = inpTH3PivotBasePips;   // P-TH3-PB-MAN (seeded HERE, above the #defines, like every mirror)
+    g_th3Width = inpTH3Width;
+    g_th3Style = inpTH3Style;
+    g_th3Color = inpTH3Color;
+    g_th3PipTextColor = inpTH3PipTextColor;
+    g_showTH3Labels = inpShowTH3Labels;
+    g_showMotherPivotZone = inpShowMotherPivotZone;   // P-TH3-P6e (no FF_/OV_: display-only, like the TH3 inks)
 #endif
 }
 
@@ -554,6 +664,10 @@ void RuntimeSettingsInit()
 #define inpMidZoneBorderStyle g_midZoneBorderStyle
 #define inpMidZoneBorderWidth g_midZoneBorderWidth
 #define inpMidZoneBorderTransparency g_midZoneBorderTransparency
+#define inpZoneEdgeTopColor g_zoneEdgeTopColor
+#define inpZoneEdgeBottomColor g_zoneEdgeBottomColor
+#define inpZoneEdgeTopTransparency g_zoneEdgeTopTransparency
+#define inpZoneEdgeBottomTransparency g_zoneEdgeBottomTransparency
 #define inpShowPipDistanceLabels g_showPipDistanceLabels
 #define inpTriggerWidth g_triggerWidth
 #define inpTriggerStyle g_triggerStyle
@@ -597,6 +711,22 @@ void RuntimeSettingsInit()
 #define inpATRTradeLabelFontSize g_atrTradeFontSize
 #define inpTrexStampGapRows g_trexStampGapRows
 #define inpLabelsMarginBottom g_tradeMarginBottom
+#define inpFontSize g_labelFontSize           // P-UI-131 — the label grid's own size
+#define inpLabelRowGap g_labelRowGap          // P-UI-131 — the shared column pitch
+// The font: the panel row is an INDEX (a dropdown), the readers want a STRING. A
+// name typed into the dialog has no list slot (index -1) and keeps winning until
+// the row is used, which is what makes this a promotion and not a lock-out.
+string LabelFontName()
+{
+   if(g_labelFontIdx < 0 || g_labelFontIdx >= LABEL_FONT_N) return inpFontName;
+   return LabelFontNameAt(g_labelFontIdx);
+}
+#define inpFontName LabelFontName()
+#define inpLabelsMarginTop  g_labelsMarginTop
+#define inpLabelsMarginLeft g_labelsMarginLeft
+#define inpLabelColumnGap   g_labelColumnGap
+#define inpSectionGap       g_sectionGap
+#define inpMaxLabelWidth    g_maxLabelWidth
 #define inpATRTradeTRColor g_atrTradeTRColor
 #define inpATRTradeExColor g_atrTradeExColor
 #define inpATRTradeHunterColor g_atrTradeHunterColor
@@ -611,14 +741,17 @@ void RuntimeSettingsInit()
 #define inpShowStandardTHs g_showStandardTHs
 #define inpShowTHTargets g_showTHTargets
 #define inpTHLabelsMarginBottom g_thLabelsMarginBottom
+#define inpTHPercentOverride g_thPercentOverride
 #define inpEnableTH3Tool g_enableTH3Tool
 #define inpTH3DrawingMode g_th3DrawingMode
 #define inpTH3BaseStepPercent g_th3BaseStepPercent
+#define inpTH3PivotBasePips g_th3PivotBasePips   // P-TH3-PB-MAN
 #define inpTH3Width g_th3Width
 #define inpTH3Style g_th3Style
 #define inpTH3Color g_th3Color
 #define inpTH3PipTextColor g_th3PipTextColor
 #define inpShowTH3Labels g_showTH3Labels
+#define inpShowMotherPivotZone g_showMotherPivotZone   // P-TH3-P6e
 #define inpCustomPriceLevelWidth g_customPriceLevelWidth
 #define inpCustomPriceLevelColor g_customPriceLevelColor
 #define inpEnableMagnet g_enableMagnet
@@ -654,6 +787,24 @@ void RuntimeSettingsSetPersistPrefix(const string prefix)
 
 int ClampSettingInt(const int v, const int lo, const int hi)
 {
+   if(v < lo) return lo;
+   if(v > hi) return hi;
+   return v;
+}
+
+// P-TH-01: the double sibling of the above. `inpTHPercentOverride` is the
+// only double setting the panel can edit, so this exists for exactly one
+// caller pair — the persisted-override load and nothing else. The bound is
+// named once (`TH_PERCENT_OVERRIDE_MAX`, ConstantsAndEnums.mqh) because the
+// panel's slider reads the same number: a slider whose max is past the
+// engine's clamp stops responding at the end of its travel.
+double ClampSettingDbl(const double v, const double lo, const double hi)
+{
+   // P-UI-57: NaN passes every range test, so a non-finite value fell through
+   // both gates and was returned as-is (a NaN TH-percent / pivot-base override
+   // persisted and reloaded). Non-finite clamps to the floor: for every caller
+   // (TPC, PBP) the floor is 0.0 = OFF, the safe default.
+   if(!MathIsValidNumber(v)) return lo;
    if(v < lo) return lo;
    if(v > hi) return hi;
    return v;
@@ -871,6 +1022,22 @@ void GVShadowsInvalidate()
    for(int i = 0; i < RS_SAVE_SLOTS; i++) s_rsShadowKnown[i] = false;
 }
 
+// P-UI-119 — the mid-zone switch's SAVED state, forgotten on purpose.
+//
+// This file is the ONE owner of that key's spelling (`p + "ZO"` above, with
+// `p = g_settingsGVPrefix + "OV_"`), so the one-time levels-start-off migration
+// (EventHandlers, OnInit) asks HERE instead of re-spelling the prefix at a second
+// site. Deleting the key — not just overwriting the runtime flag — is what makes
+// the new default real: the loader re-applies `OV_*` on EVERY attach, so a stored
+// `ZO = 1` would have brought the band back and the user would call that "the
+// default did not change". The shadow epoch is bumped with it, or the saver would
+// compare against a key that no longer exists and skip writing the new value.
+void MidZonesStateForget()
+{
+   GlobalVariableDel(g_settingsGVPrefix + "OV_ZO");
+   GVShadowsInvalidate();
+}
+
 // P-PERF-27c: shared change-guard for the OTHER two blocks that persisted their
 // state during the same teardown (SaveUIStates, SavePalRecent). Each keeps its
 // own shadow array and passes an index; returns true only when the value really
@@ -903,6 +1070,7 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "TS",  g_triggerStyle);
    RSSetNext(p + "TC",  g_triggerColor);
    RSSetNext(p + "TL",  g_triggerLabelColor);
+   RSSetNext(p + "TLT", g_triggerLabelTransparency);   // P-UI-131j
    RSSetNext(p + "TT",  g_triggerTransparency);
    RSSetNext(p + "LNW", g_lineWidth);
    RSSetNext(p + "LNS", g_lineStyle);
@@ -947,11 +1115,21 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "MP",  g_showMidpointLine ? 1 : 0);
    RSSetNext(p + "ZO",  g_showMidZones ? 1 : 0);
    RSSetNext(p + "MZ",  g_midZoneStyle);
+   // P-UI-62b: the migration stamp travels WITH the value it protects. The stamp
+   // was load-only, so a freshly picked OUTLINED (MZ = 2, saved before any load
+   // stamped it) reloaded as retired-HIDDEN: style forced to FILLED and zones
+   // turned OFF. Load-before-save keeps the old-HIDDEN migration intact (it runs
+   // before any save of this instance can stamp).
+   RSSetNext(p + "MZ2", 1.0);
    RSSetNext(p + "ZT",  g_midZoneTransparency);
    RSSetNext(p + "ZH",  g_midZoneHeightPercent);
    RSSetNext(p + "ZB",  g_midZoneBorderStyle);
    RSSetNext(p + "ZW",  g_midZoneBorderWidth);
    RSSetNext(p + "ZBT", g_midZoneBorderTransparency);   // P-UI-63
+   RSSetNext(p + "ZCT", g_zoneEdgeTopColor);            // P-UI-131h
+   RSSetNext(p + "ZCB", g_zoneEdgeBottomColor);
+   RSSetNext(p + "ZPT", g_zoneEdgeTopTransparency);
+   RSSetNext(p + "ZPB", g_zoneEdgeBottomTransparency);
    RSSetNext(p + "PD",  g_showPipDistanceLabels ? 1 : 0);
    RSSetNext(p + "AL",  g_showATRLabels ? 1 : 0);
    RSSetNext(p + "A1",  g_showATRTargets ? 1 : 0);
@@ -976,6 +1154,7 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "TS2", g_showStandardTHs ? 1 : 0);
    RSSetNext(p + "TG",  g_showTHTargets ? 1 : 0);
    RSSetNext(p + "TB",  g_thLabelsMarginBottom);
+   RSSetNext(p + "TPC", g_thPercentOverride);   // P-TH-01 — 0 = professor's table
    RSSetNext(p + "E3",  g_enableTH3Tool ? 1 : 0);
    RSSetNext(p + "D3",  g_th3DrawingMode);
    RSSetNext(p + "B3",  g_th3BaseStepPercent);
@@ -983,12 +1162,14 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "Y3",  g_th3Style);
    RSSetNext(p + "C3",  g_th3Color);
    RSSetNext(p + "P3",  g_th3PipTextColor);
-   RSSetNext(p + "L3",  g_showTH3Labels ? 1 : 0);
+    RSSetNext(p + "L3",  g_showTH3Labels ? 1 : 0);
+    RSSetNext(p + "PBP", g_th3PivotBasePips);   // P-TH3-PB-MAN (0 = OFF, the pattern TF's own ATR)
    RSSetNext(p + "CW",  g_customPriceLevelWidth);
    RSSetNext(p + "CC",  g_customPriceLevelColor);
    RSSetNext(p + "CPT", g_customPriceTransparency);
    RSSetNext(p + "MG",  g_enableMagnet ? 1 : 0);
    RSSetNext(p + "MP2", g_magnetSensitivityPips);
+   RSSetNext(p + "CPL", g_customPriceLocked ? 1 : 0);   // P-UI-101
    RSSetNext(p + "FM",  g_factorMode);
    RSSetNext(p + "FD",  g_factorDisplayMode);
    RSSetNext(p + "FB",  g_factorAutoBasis);
@@ -1005,6 +1186,14 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "C2E", g_comboComp2Enabled ? 1 : 0);
    RSSetNext(p + "C2T", g_comboComp2TF);
    RSSetNext(p + "C2S", g_comboComp2Step);
+   RSSetNext(p + "LFS", g_labelFontSize);   // P-UI-131 — the label grid's own
+   RSSetNext(p + "LRG", g_labelRowGap);
+   RSSetNext(p + "LFI", g_labelFontIdx);    // -1 = the dialog's own typed font
+   RSSetNext(p + "LMT", g_labelsMarginTop);
+   RSSetNext(p + "LML", g_labelsMarginLeft);
+   RSSetNext(p + "LCG", g_labelColumnGap);
+   RSSetNext(p + "LSG", g_sectionGap);
+   RSSetNext(p + "LMW", g_maxLabelWidth);
    RSShadowCommit();
 }
 
@@ -1028,6 +1217,7 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "TS"))  g_triggerStyle = (ENUM_LINE_STYLE)ClampSettingInt((int)GlobalVariableGet(p + "TS"), 0, 4);
    if(GlobalVariableCheck(p + "TC"))  g_triggerColor = (color)(int)GlobalVariableGet(p + "TC");
    if(GlobalVariableCheck(p + "TL"))  g_triggerLabelColor = (color)(int)GlobalVariableGet(p + "TL");
+   if(GlobalVariableCheck(p + "TLT")) g_triggerLabelTransparency = ClampSettingInt((int)GlobalVariableGet(p + "TLT"), -1, 100);   // P-UI-131j: -1 = AUTO
    if(GlobalVariableCheck(p + "TT"))  g_triggerTransparency = ClampSettingInt((int)GlobalVariableGet(p + "TT"), 0, 100);
    // [08.4] unified lines — upgrade path: charts customized under the old
    // layout (line look stored in TW/TS/TC/TT) carry their look over when the
@@ -1115,6 +1305,12 @@ void RuntimeSettingsLoadOverrides()
    // P-UI-63: absent key = the edge follows the band's value (the pre-split look), because
    // BOTH defaults are 50. There is no migration to write: the fallback IS the old look.
    if(GlobalVariableCheck(p + "ZBT")) g_midZoneBorderTransparency = ClampSettingInt((int)GlobalVariableGet(p + "ZBT"), 0, 100);
+   // P-UI-131h: absent key = AUTO (clrNONE / -1), which IS the pre-override look - so
+   // there is no migration to write and an older instance loads exactly as it shipped.
+   if(GlobalVariableCheck(p + "ZCT")) g_zoneEdgeTopColor    = (color)(int)GlobalVariableGet(p + "ZCT");
+   if(GlobalVariableCheck(p + "ZCB")) g_zoneEdgeBottomColor = (color)(int)GlobalVariableGet(p + "ZCB");
+   if(GlobalVariableCheck(p + "ZPT")) g_zoneEdgeTopTransparency    = ClampSettingInt((int)GlobalVariableGet(p + "ZPT"), -1, 100);
+   if(GlobalVariableCheck(p + "ZPB")) g_zoneEdgeBottomTransparency = ClampSettingInt((int)GlobalVariableGet(p + "ZPB"), -1, 100);
    if(GlobalVariableCheck(p + "PD"))  g_showPipDistanceLabels = (GlobalVariableGet(p + "PD") > 0.5);
    if(GlobalVariableCheck(p + "AL"))  g_showATRLabels = (GlobalVariableGet(p + "AL") > 0.5);
    if(GlobalVariableCheck(p + "A1"))  g_showATRTargets = (GlobalVariableGet(p + "A1") > 0.5);
@@ -1136,6 +1332,25 @@ void RuntimeSettingsLoadOverrides()
    // [03] live countdown tag — new keys, no legacy layout to upgrade from
    if(GlobalVariableCheck(p + "CD"))  g_showLiveCountdown = (GlobalVariableGet(p + "CD") > 0.5);
    if(GlobalVariableCheck(p + "CDC")) g_countdownColor = (color)(int)GlobalVariableGet(p + "CDC");
+   //--- P-BUILD-10 (2026-09-29) — A STORED COLOUR MUST BE A COLOUR, AND THE CARD'S
+   //--- OWN FACTORY INK IS THE FALLBACK. The five card inks and the countdown colour
+   //--- are read straight out of the GV file with no test: a `color` is UNSIGNED here,
+   //--- so the `(color)(int)...` cast keeps -1 (clrNONE) and every widened junk value
+   //--- as a legitimate-looking number, and MT4 paints a label it cannot read in the
+   //--- terminal's own text grey — measured in the user's own screenshot: the `TR`
+   //--- half of the wordmark went grey-blue while `ex` stayed red, i.e. the ink was
+   //--- not the caller's. The user's order for this surface is explicit (2026-09-29:
+   //--- «رنگ اصلی tr ابی پررنگ باید باشه»), so the rejection lands on the SHIPPED
+   //--- default — clrBlue for `TR` — and never on a blend or the chart's own colour.
+   //--- Scope: exactly the six inks the report touches (the card's five + the
+   //--- countdown); the zone/TH3 colours keep their own paths untouched.
+   //--- Cost: six compares on a path that runs once, at init.
+   if(!BioColorIsValid(g_atrTradeTRColor))     g_atrTradeTRColor = clrBlue;       // the bold blue `TR`
+   if(!BioColorIsValid(g_atrTradeExColor))     g_atrTradeExColor = clrRed;
+   if(!BioColorIsValid(g_atrTradeHunterColor)) g_atrTradeHunterColor = clrRed;
+   if(!BioColorIsValid(g_atrTradeRowColor))    g_atrTradeRowColor = clrBlue;
+   if(!BioColorIsValid(g_atrTradeSpreadColor)) g_atrTradeSpreadColor = clrBlack;
+   if(!BioColorIsValid(g_countdownColor))      g_countdownColor = clrRed;
    if(GlobalVariableCheck(p + "CDS")) g_countdownFontSize = ClampSettingInt((int)GlobalVariableGet(p + "CDS"), 0, 24);
    if(GlobalVariableCheck(p + "CDG")) g_countdownGapPx = ClampSettingInt((int)GlobalVariableGet(p + "CDG"), 0, 40);
    if(GlobalVariableCheck(p + "TH"))  g_showTHLabels = (GlobalVariableGet(p + "TH") > 0.5);
@@ -1143,6 +1358,10 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "TS2")) g_showStandardTHs = (GlobalVariableGet(p + "TS2") > 0.5);
    if(GlobalVariableCheck(p + "TG"))  g_showTHTargets = (GlobalVariableGet(p + "TG") > 0.5);
    if(GlobalVariableCheck(p + "TB"))  g_thLabelsMarginBottom = ClampSettingInt((int)GlobalVariableGet(p + "TB"), 10, 200);
+   // P-TH-01: `ClampSettingDbl` is the same bound the panel slider and the
+   // engine read (0 = OFF, 200 = the slider's own end stop) — a GV written by
+   // an older build cannot ask for a ladder the slider cannot reproduce.
+   if(GlobalVariableCheck(p + "TPC")) g_thPercentOverride = ClampSettingDbl(GlobalVariableGet(p + "TPC"), 0.0, TH_PERCENT_OVERRIDE_MAX);
    if(GlobalVariableCheck(p + "E3"))  g_enableTH3Tool = (GlobalVariableGet(p + "E3") > 0.5);
    if(GlobalVariableCheck(p + "D3"))  g_th3DrawingMode = (ENUM_TH3_DRAWING_MODE)ClampSettingInt((int)GlobalVariableGet(p + "D3"), 0, 1);
    if(GlobalVariableCheck(p + "B3"))  g_th3BaseStepPercent = MathMax(0.5, GlobalVariableGet(p + "B3"));
@@ -1150,12 +1369,16 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "Y3"))  g_th3Style = (ENUM_LINE_STYLE)ClampSettingInt((int)GlobalVariableGet(p + "Y3"), 0, 4);
    if(GlobalVariableCheck(p + "C3"))  g_th3Color = (color)(int)GlobalVariableGet(p + "C3");
    if(GlobalVariableCheck(p + "P3"))  g_th3PipTextColor = (color)(int)GlobalVariableGet(p + "P3");
-   if(GlobalVariableCheck(p + "L3"))  g_showTH3Labels = (GlobalVariableGet(p + "L3") > 0.5);
+    if(GlobalVariableCheck(p + "L3"))  g_showTH3Labels = (GlobalVariableGet(p + "L3") > 0.5);
+    // P-TH3-PB-MAN: 0 = OFF (the pattern TF's own ATR); the panel slider and the
+    // dialog input share this bound, so a stored value is always reproducible.
+    if(GlobalVariableCheck(p + "PBP")) g_th3PivotBasePips = ClampSettingDbl(GlobalVariableGet(p + "PBP"), 0.0, 2000.0);
    if(GlobalVariableCheck(p + "CW"))  g_customPriceLevelWidth = ClampSettingInt((int)GlobalVariableGet(p + "CW"), 1, 5);
    if(GlobalVariableCheck(p + "CC"))  g_customPriceLevelColor = (color)(int)GlobalVariableGet(p + "CC");
    if(GlobalVariableCheck(p + "CPT")) g_customPriceTransparency = ClampSettingInt((int)GlobalVariableGet(p + "CPT"), 0, 100);
    if(GlobalVariableCheck(p + "MG"))  g_enableMagnet = (GlobalVariableGet(p + "MG") > 0.5);
    if(GlobalVariableCheck(p + "MP2")) g_magnetSensitivityPips = ClampSettingInt((int)GlobalVariableGet(p + "MP2"), 0, 100);
+   if(GlobalVariableCheck(p + "CPL")) g_customPriceLocked = (GlobalVariableGet(p + "CPL") > 0.5);   // P-UI-101
    if(GlobalVariableCheck(p + "FM"))  g_factorMode = (ENUM_FACTOR_MODE)ClampSettingInt((int)GlobalVariableGet(p + "FM"), 0, 1);
    if(GlobalVariableCheck(p + "FD"))  g_factorDisplayMode = (ENUM_FACTOR_DISPLAY_MODE)ClampSettingInt((int)GlobalVariableGet(p + "FD"), 0, 1);
    if(GlobalVariableCheck(p + "FB"))  g_factorAutoBasis = (ENUM_FACTOR_AUTO_BASIS)ClampSettingInt((int)GlobalVariableGet(p + "FB"), 0, 7);
@@ -1172,6 +1395,16 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "C2E")) g_comboComp2Enabled = (GlobalVariableGet(p + "C2E") > 0.5);
    if(GlobalVariableCheck(p + "C2T")) g_comboComp2TF = (ENUM_COMBO_TIMEFRAME_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C2T"), 0, 3);
    if(GlobalVariableCheck(p + "C2S")) g_comboComp2Step = (ENUM_COMBO_STEP_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C2S"), 0, 3);
+   // P-UI-131: the label grid's own two knobs. Each bound is the SAME number the
+   // panel row's slider reads, so a saved value is one the control can reproduce.
+   if(GlobalVariableCheck(p + "LFS")) g_labelFontSize = ClampSettingInt((int)GlobalVariableGet(p + "LFS"), 4, 24);
+   if(GlobalVariableCheck(p + "LRG")) g_labelRowGap = ClampSettingInt((int)GlobalVariableGet(p + "LRG"), 0, TREX_CARD_MAX_ROW_GAP);
+   if(GlobalVariableCheck(p + "LFI")) g_labelFontIdx = ClampSettingInt((int)GlobalVariableGet(p + "LFI"), -1, LABEL_FONT_N - 1);
+   if(GlobalVariableCheck(p + "LMT")) g_labelsMarginTop = ClampSettingInt((int)GlobalVariableGet(p + "LMT"), 0, 200);
+   if(GlobalVariableCheck(p + "LML")) g_labelsMarginLeft = ClampSettingInt((int)GlobalVariableGet(p + "LML"), 0, 300);
+   if(GlobalVariableCheck(p + "LCG")) g_labelColumnGap = ClampSettingInt((int)GlobalVariableGet(p + "LCG"), 0, 200);
+   if(GlobalVariableCheck(p + "LSG")) g_sectionGap = ClampSettingInt((int)GlobalVariableGet(p + "LSG"), 0, 200);
+   if(GlobalVariableCheck(p + "LMW")) g_maxLabelWidth = ClampSettingInt((int)GlobalVariableGet(p + "LMW"), 50, 600);
    // P-PERF-27b: what was just read is what we would write back, so record it as
    // "already on disk" and stop the teardown from re-writing it.
    RuntimeSettingsPrimeOverrideShadow();
@@ -1188,59 +1421,12 @@ void RuntimeSettingsSaveOverridesThrottled()
 }
 
 //==============================================================================
-// EFFECTIVE TRIGGER ZONE COLOR — input color blended toward the chart
-// background by the transparency setting. Reads the RUNTIME copies so the
-// panels' color/transparency edits reach the renderer immediately.
-// NOTE: since the unified-LINES split this feeds ONLY the trigger zones;
-// pipeline lines use GetLineRenderColor() below and never follow the T switch.
+// P-UI-131m: THE TRIGGER COLOUR IS A BASE, NOT AN EFFECTIVE COLOUR. The
+// fade is card 0's own TRANSPARENCY row and is applied ONCE, at paint, by
+// the pipeline (`PipelineBandBaseColor` / `PipelineBandTransparency`). The
+// getter that used to live here pre-faded the colour, which is why the card's
+// COLOR row could not reach the chart — deleted with the second blend.
 //==============================================================================
-color GetTriggerRenderColor()
-{
-    static color s_cachedBase = clrNONE;
-    static int s_cachedTransparency = -1;
-    static color s_cachedBackground = clrNONE;
-    static color s_cachedRenderColor = clrNONE;
-
-    int t = (int)MathMax(0, MathMin(100, g_triggerTransparency));
-    // Stronger visual fade for line objects:
-    // 60 -> 84, 50 -> 75, 30 -> 51
-    int tVis = 100 - ((100 - t) * (100 - t)) / 100;
-    color bg = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
-
-    if(s_cachedBase == g_triggerColor && s_cachedTransparency == tVis && s_cachedBackground == bg) {
-        return s_cachedRenderColor;
-    }
-
-    s_cachedBase = g_triggerColor;
-    s_cachedTransparency = tVis;
-    s_cachedBackground = bg;
-
-    if(tVis <= 0) {
-        s_cachedRenderColor = g_triggerColor;
-        return s_cachedRenderColor;
-    }
-
-    if(tVis >= 100) {
-        s_cachedRenderColor = bg;
-        return s_cachedRenderColor;
-    }
-
-    int fr = ((int)g_triggerColor) & 0xFF;
-    int fg = (((int)g_triggerColor) >> 8) & 0xFF;
-    int fb = (((int)g_triggerColor) >> 16) & 0xFF;
-
-    int br = ((int)bg) & 0xFF;
-    int bgc = (((int)bg) >> 8) & 0xFF;
-    int bb = (((int)bg) >> 16) & 0xFF;
-
-    int outR = (fr * (100 - tVis) + br * tVis) / 100;
-    int outG = (fg * (100 - tVis) + bgc * tVis) / 100;
-    int outB = (fb * (100 - tVis) + bb * tVis) / 100;
-
-    s_cachedRenderColor = (color)(outR | (outG << 8) | (outB << 16));
-    return s_cachedRenderColor;
-}
-
 //==============================================================================
 // EFFECTIVE UNIFIED LINE COLOR — [08.4] line color blended toward the chart
 // background by the [08.4] line transparency. SINGLE appearance for ALL
@@ -1293,6 +1479,11 @@ color GetLineRenderColor()
     s_cachedRenderColor = (color)(outR | (outG << 8) | (outB << 16));
     return s_cachedRenderColor;
 }
+
+#endif // RUNTIME_A_MQH
+// Runtime_B.mqh - RuntimeSettings.mqh split 2026-09-29: exact lines 1447-1587, byte-identical, zero renames.
+#ifndef RUNTIME_B_MQH
+#define RUNTIME_B_MQH
 
 //==============================================================================
 // PER-TARGET TRANSPARENCY — every COLOR row's target is adjustable from the
@@ -1415,12 +1606,13 @@ color GetBKTextRenderColor()
     if(s_c == g_bkTextColor && s_bg == bg) return s_out;
     s_c = g_bkTextColor; s_bg = bg;
     s_out = g_bkTextColor;
-    if(g_bkTextColor == C'255,255,255')
-    {
-       int lum = ((((int)bg) & 0xFF) * 299 + ((((int)bg) >> 8) & 0xFF) * 587 +
-                  ((((int)bg) >> 16) & 0xFF) * 114) / 1000;
-       if(lum > 128) s_out = C'150,70,0';
-    }
+    // P-UI-117: the gate and the readable ink are the palette owner's now
+    // (`BioChartBgIsLight`, `BIO_CLR_ON_LIGHT`). This block used to carry its own
+    // copy of the 299/587/114 arithmetic and its own `C'150,70,0'`, annotated
+    // "same luminance gate as the INFO label" — a rule in two places is a rule
+    // that drifts, and only one of the two could ever have followed a change.
+    if(g_bkTextColor == C'255,255,255' && BioChartBgIsLight())
+        s_out = BIO_CLR_ON_LIGHT;
     return s_out;
 }
 
@@ -1433,5 +1625,7 @@ string BKTextFont()
    if(g_bkItalic) return f + " Italic";
    return f;
 }
+
+#endif // RUNTIME_B_MQH
 
 #endif // RUNTIME_SETTINGS_MQH
