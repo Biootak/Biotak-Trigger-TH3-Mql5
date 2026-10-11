@@ -599,6 +599,28 @@ static int         g_seriesSyncedAt = -1;
 // every tick into a full-history copy attempt.
 #define COMPAT_FULL_SYNC_MIN_MS 500
 
+// P-MT5-TF-SPEED (2026-10-XX) — CAP THE FULL-SYNC WINDOW.
+// MT4 never copies "all history" on a TF switch — its Time[]/Close[] are
+// predefined kernel arrays that the terminal fills instantly. The MQL5 compat
+// layer used to call CopyRates(0, bars, ...) where `bars` is the TOTAL chart
+// history (up to 100k+ bars on XAUUSD H1). That one call alone accounted for
+// the TF-switch stall: 100k × 72 bytes MqlRates → 5 × 100k scalar unpacks.
+//
+// The shared modules only ever look back MAX_BARS_LOOKBACK (10 000) bars.
+// ZoneFactory and ExtendedDrawingFunctions reference Time[safeBars-1] where
+// safeBars = Bars; that is bounded by this cap, and iBarShift / iATR calls
+// use explicit shifts that are capped to their own callers' ranges (400 for
+// the pivot scanner, 500 for TH3RealDAt). Adding a 20% safety margin gives
+// 12 000 bars — well above any real caller depth.
+//
+// On a TF switch: instead of copying 100k bars in O(n), we copy 12k and the
+// visible chart settles at the same latency as MT4 does.
+//
+// g_seriesBars continues to reflect the ACTUAL available bar count (from
+// iBars), so any caller that reads Bars for range-checking still gets the
+// true number; only the backing arrays are capped.
+#define COMPAT_SERIES_WINDOW 12000
+
 void CompatRefreshChartData()
 {
     int bars = iBars(_Symbol, PERIOD_CURRENT);
@@ -616,8 +638,10 @@ void CompatRefreshChartData()
         {
             s_lastFullSyncMs = nowMs;
             ResetLastError();
+            // P-MT5-TF-SPEED: copy only the working window, not the entire history.
+            const int copyCount = (bars < COMPAT_SERIES_WINDOW) ? bars : COMPAT_SERIES_WINDOW;
             ArraySetAsSeries(g_seriesRates, true);
-            const int copied = CopyRates(_Symbol, PERIOD_CURRENT, 0, bars, g_seriesRates);
+            const int copied = CopyRates(_Symbol, PERIOD_CURRENT, 0, copyCount, g_seriesRates);
             if(copied > 0)
             {
                 // Unpack MqlRates into the five named series arrays.
@@ -636,6 +660,15 @@ void CompatRefreshChartData()
                     g_seriesLow[i]   = g_seriesRates[i].low;
                     g_seriesClose[i] = g_seriesRates[i].close;
                 }
+                // R-TF-UNIT (P-MT5-TF-SPEED): g_seriesBars = copied, NOT bars.
+                // The arrays have exactly `copied` elements (capped at
+                // COMPAT_SERIES_WINDOW). Any code that reads Time[Bars-1] must
+                // find a valid index; setting g_seriesBars = bars (total history,
+                // possibly 100k) while the array is only 12k causes out-of-bounds
+                // access in ZoneFactory and ExtendedDrawingFunctions.
+                // Callers that need the true chart history depth call
+                // iBars(_Symbol, PERIOD_CURRENT) directly — that bypasses this
+                // variable and hits the MT5 kernel.
                 g_seriesBars     = copied;
                 g_seriesSyncedAt = bars;
                 ArrayFree(g_seriesRates);   // release staging memory immediately
