@@ -152,8 +152,18 @@ void CleanupATRCache() {
 //| Release ATR handles (MT4 no-op: no indicator handles in MT4)     |
 //+------------------------------------------------------------------+
 void ReleaseATRHandle() {
-    // In MT4, iATR uses direct function calls without handles
-    // This is a compatibility stub matching the MT5 interface
+    // In MT4, iATR uses direct function calls without handles.
+    // On MT5, iATR() creates OS-level indicator handles that the terminal
+    // keeps alive until explicitly released. Without IndicatorRelease() the
+    // handles accumulate across every timeframe switch and re-attach, which
+    // is one of the measured reasons MT5 becomes slower over time.
+    // ReleaseATRHandleCache() is defined in MT5Compat/MQL5Compat.mqh and
+    // included BEFORE this file, so the call is always resolved on MT5.
+    // On MT4 this block is a no-op (MQL4 has no #ifdef MQL5 support so the
+    // function simply does not exist, but neither does iATR() use handles).
+#ifdef __MQL5__
+    ReleaseATRHandleCache();
+#endif
     CleanupATRCache();
 }
 
