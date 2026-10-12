@@ -18,7 +18,12 @@ param(
     [Parameter(Mandatory = $true)][string]$Source,
     [switch]$ErrorsOnly,
     [string]$Tag = "",
-    [string]$Compiler = "C:\Program Files\Vittaverse  MT5 Terminal\MetaEditor64.exe"
+    [string]$Compiler = "C:\Program Files\Vittaverse  MT5 Terminal\MetaEditor64.exe",
+    # THE terminal this repository builds for. One hash, one target: the old
+    # F5617C4B... instance is retired and its junction has been removed, so a
+    # build that quietly lands in the wrong data folder is the failure mode this
+    # parameter exists to prevent.
+    [string]$TerminalHash = "D0694EE1816B0E3A2D24B3606A663CE8"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +41,39 @@ if (-not (Test-Path $src)) { throw "source not found: $src" }
 
 $logDir = Join-Path $root 'build-logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+
+# --- deployment preflight -------------------------------------------------
+# The terminal reaches this repository through ONE junction, and the indicator
+# loads its icon assets from that terminal's MQL5\Files\Icons. Neither survives
+# a terminal reinstall or a fresh clone, and both fail in a way that looks like
+# an unrelated problem (a compile that cannot resolve "#resource", or a chart
+# with blank buttons), so they are checked on every build instead.
+$terminalRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal\$TerminalHash"
+$linkPath     = Join-Path $terminalRoot 'MQL5\Indicators\Biotak-Trigger-TH3'
+$iconDst      = Join-Path $terminalRoot 'MQL5\Files\Icons'
+$iconSrc      = Join-Path $root 'Files\Icons'
+
+if (-not (Test-Path $terminalRoot)) { throw "terminal data folder not found: $terminalRoot" }
+
+$pre = @()
+if (Test-Path $linkPath) {
+    $tgt = (Get-Item $linkPath).Target
+    if ($tgt -ne $root) {
+        # rmdir takes the LINK off; it never walks into the target tree.
+        cmd /c rmdir "$linkPath" | Out-Null
+        cmd /c mklink /J "$linkPath" "$root" | Out-Null
+        $pre += "junction: repointed $root"
+    } else { $pre += "junction: ok" }
+} else {
+    cmd /c mklink /J "$linkPath" "$root" | Out-Null
+    $pre += "junction: created"
+}
+
+$want = @(Get-ChildItem $iconSrc -Filter *.bmp -ErrorAction SilentlyContinue).Count
+if (-not (Test-Path $iconDst)) { New-Item -ItemType Directory -Path $iconDst -Force | Out-Null }
+Copy-Item (Join-Path $iconSrc '*.bmp') $iconDst -Force
+$have = @(Get-ChildItem $iconDst -Filter *.bmp -ErrorAction SilentlyContinue).Count
+$pre += "icons: $have/$want"
 
 # Names carry spaces ("Biotak Trigger TH3"); Start-Process splits ArgumentList on
 # whitespace, so the log path must be quote-free. Sanitise it.
@@ -68,6 +106,8 @@ $ex5Info = if (Test-Path $ex5) {
 } else { "(no .ex5 produced)" }
 
 $report = @()
+$report += "terminal: $TerminalHash"
+$report += "preflight: $($pre -join '; ')"
 $report += "source : $src"
 $report += "log    : $txt"
 $report += "ex5    : $ex5Info"

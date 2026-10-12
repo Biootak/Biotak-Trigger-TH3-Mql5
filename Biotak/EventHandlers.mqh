@@ -1,14 +1,17 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/EventHandlers.mqh
-//   regenerate : python tools/parity/resync-module.py --write EventHandlers.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the MT5 mouse-move subscription hides the native context menu; re-assert it  (1 substitution)
+//   * the gesture census prints per mouse-move; off unless GESTURE_CENSUS  (1 substitution)
+//   * the handoff probe is DEBUG, not production  (1 substitution)
+//   * key-press diagnostics are DEBUG, not production  (3 substitutions)
+//   * the delete diagnostic is DEBUG, not production  (1 substitution)
 // ============================================================================
    //+------------------------------------------------------------------+
 //| Event Handlers - Version 3.10 GOLD                              |
@@ -1483,6 +1486,24 @@ int OnInitHandler() {
 
     ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
     ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
+    // MT5-ONLY PLATFORM FIX: GIVE THE TERMINAL ITS OWN RIGHT-CLICK BACK.
+    //
+    // In MQL5, subscribing the chart to mouse-move events (the line
+    // above) ALSO switches the chart into "the program owns the mouse"
+    // mode, and in that mode the terminal's standard context menu is not
+    // shown. MT4 does not behave this way, so the mirror inherited a
+    // silent divergence: attach the indicator and the user's own right
+    // -click on the chart does nothing at all.
+    //
+    // CHART_CONTEXT_MENU is the control property for that menu and it is
+    // writable on MT5, so asserting it AFTER the mouse-move subscription
+    // (order matters - the subscription is what clears it) puts the native
+    // menu back while mouse-move keeps flowing for the hover and drag
+    // paths that actually need it. The trade is deliberate and is the
+    // user's stated priority: with the menu on, a right click no longer
+    // reaches the indicator, so "right-click cancels a session" gives way
+    // to ESC. Nothing else changes.
+    ChartSetInteger(0, CHART_CONTEXT_MENU, true);
     // P-UI-127 (2026-09-25): THE CREATE CHANNEL IS SUBSCRIBED AT LAST. MT4 sends
     // no CHARTEVENT_OBJECT_CREATE until this flag is set, and the handler's whole
     // `if(id == CHARTEVENT_OBJECT_CREATE)` branch (P-UI-100b's "this gesture is a
@@ -2165,7 +2186,7 @@ void OnDeinitHandler(const int reason) {
         // terminal deleted it during the unload (so no adoption can be right and
         // the rebuild cost, not the wipe, is the thing to fix). One walk, once per
         // switch, and it is the number this whole report has been missing.
-        Print("[P-VIEW] probe=handoff reason=", reason, " fp=", AdoptionFingerprint(),
+        _LOG_GATE_D Print("[P-VIEW] probe=handoff reason=", reason, " fp=", AdoptionFingerprint(),
               " preexist=", LevelFamilyObjectsOnChart(), " total=", ObjectsTotal(0, -1, -1));
         DEBUG_PRINTF2("OnDeinit (reason=", reason, " - level family KEPT for in-place update)");
     }
@@ -3399,7 +3420,7 @@ void RedrawAllObjects(bool force_redraw=false)
         // printed here so the split is one line instead of a second experiment:
         // if the reconciliation is slow, either the level render owns it (levels=)
         // or the scheduling/labels do - and the fix is only allowed to target one.
-        Print("[P-KEY] T settled on=", g_triggerPressOn,
+        _LOG_GATE_D Print("[P-KEY] T settled on=", g_triggerPressOn,
               " ms=", (int)(GetTickCount() - g_triggerPressMs),
               " levels=", (int)g_p3MsLevels, " labels=", (int)g_p3MsLabels,
               " hidden=", g_triggerPressHidden, " reached=", g_triggerPressReached);
@@ -3772,7 +3793,7 @@ void SetTriggerLevelsVisible(const bool on)
    // `bands=` is the family the walk decided and `masks=` what the chart actually
    // paid for; `bands=0` says the render still has to build it (the one slow
    // direction left, and it can only happen once per attach).
-   Print("[P-KEY] T applied on=", (on ? 1 : 0),
+   _LOG_GATE_D Print("[P-KEY] T applied on=", (on ? 1 : 0),
          " ms=", (int)(GetTickCount() - t32b),
          " bands=", seen, " masks=", written);
 }
@@ -5623,7 +5644,16 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
       bool gOurs=(gl>0 && StringLen(sparam)>=gl && StringSubstr(sparam,0,gl)==inpObjectPrefix);
       if(id == CHARTEVENT_OBJECT_DRAG && !gOurs && sparam != "") GestureForeignMotion(sparam);
 #ifndef BUILD_LITE
+      // P-PERF-12 (2026-10-12) - THE GESTURE CENSUS IS OFF BY DEFAULT.
+      // It answered one investigation question (does a native draw speak,
+      // and before or after our write) and stayed compiled in afterwards,
+      // where it costs a Print per mouse-move: 4668 lines, 23% of the log,
+      // measured on the live terminal. It is a leaf - nothing reads its
+      // state - so it costs nothing to switch off and everything to keep.
+      // Define GESTURE_CENSUS in BuildConfig.mqh to bring it back.
+#ifdef GESTURE_CENSUS
       if(GestureCensusWanted(id, sparam)) { DrawStripDiagEmit("[gest] id="+IntegerToString(id)+" t="+IntegerToString(GetTickCount())+" xy="+IntegerToString((int)lparam)+","+IntegerToString((int)dparam)+" nm=\""+sparam+"\" ours="+IntegerToString(gOurs?1:0)); }
+#endif
 #endif
    }
    if(id == CHARTEVENT_OBJECT_CREATE && sparam != "")
@@ -5674,7 +5704,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             uint leakNow = GetTickCount();
             if(s_ownDeleteLeakMs == 0 || leakNow - s_ownDeleteLeakMs >= 1000)
             {
-                Print("[P-DEL] own-name delete NOT suppressed: n=", s_ownDeleteLeaks,
+                _LOG_GATE_D Print("[P-DEL] own-name delete NOT suppressed: n=", s_ownDeleteLeaks,
                       " in <=1s, last=", sparam);
                 s_ownDeleteLeakMs = leakNow;
                 s_ownDeleteLeaks  = 0;
@@ -5895,7 +5925,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_triggerPressOn      = tNext ? 1 : 0;
             g_triggerPressHidden  = 0;
             g_triggerPressReached = 0;
-            Print("[P-KEY] T press on=", g_triggerPressOn, " zones=", 
+            _LOG_GATE_D Print("[P-KEY] T press on=", g_triggerPressOn, " zones=", 
                   (tNext ? "show" : "hide"));
             // P-PERF-21: NO force-clear. The overlay owns ONE family - the trigger
             // zones - and RenderZones applies the live flag as a mask itself, so

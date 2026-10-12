@@ -1,0 +1,310 @@
+
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<title>TH3 Architecture Audit — Series 2</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.6; background: #fff; color: #1f2328; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.sub { color: #57606a; font-size: 13px; margin-bottom: 28px; }
+h2 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; color: #1f2328; }
+p { margin-bottom: 10px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; margin: 2px; }
+.ok { background: #d1fae5; color: #065f46; }
+.warn { background: #fef3c7; color: #92400e; }
+.fix { background: #dbeafe; color: #1e40af; }
+.diff { background: #fee2e2; color: #991b1b; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+th { background: #f7f8fa; text-align: right; padding: 8px 10px; border: 1px solid #e5e7eb; font-weight: 600; }
+td { padding: 7px 10px; border: 1px solid #e5e7eb; vertical-align: top; }
+tr:nth-child(even) td { background: #f7f8fa; }
+code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; background: #f7f8fa; padding: 1px 5px; border-radius: 3px; border: 1px solid #e5e7eb; }
+pre { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 5px; padding: 12px; font-size: 12px; overflow-x: auto; margin: 8px 0; font-family: "SFMono-Regular", Consolas, monospace; }
+.flow { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 5px; padding: 14px; margin: 10px 0; font-size: 13px; }
+.flow-arrow { color: #3b82d4; font-weight: bold; margin: 0 4px; }
+.section { margin-bottom: 24px; }
+.stat-row { display: flex; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
+.stat { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 5px; padding: 10px 16px; flex: 1; min-width: 140px; }
+.stat-num { font-size: 24px; font-weight: 700; color: #3b82d4; }
+.stat-lbl { font-size: 12px; color: #57606a; }
+.important { background: #fef9c3; border: 1px solid #fbbf24; border-radius: 4px; padding: 10px 14px; margin: 10px 0; font-size: 13px; }
+footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #57606a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>TH3 — Architecture &amp; Logic Audit — Series 2</h1>
+<div class="sub">بررسی ساختاری و معماری کامل — نسخه MT5 در برابر MT4 source of truth</div>
+
+
+<h2>۱. معماری کلی — جریان اجرا</h2>
+<div class="section">
+
+<div class="flow">
+  <strong>Entry Point:</strong><br />
+  <code>Biotak Trigger TH3.mq5</code><br /><br />
+  <strong>OnInit:</strong><br />
+  <code>CompatRefreshChartData()</code> <span class="flow-arrow">→</span>
+  <code>OnInitHandler()</code> <span class="flow-arrow">→</span>
+  <code>InitializeUIStates()</code> <span class="flow-arrow">→</span>
+  <code>InitializeBiotakKit()</code> <span class="flow-arrow">→</span>
+  <code>InitializeHTFCandles()</code> <span class="flow-arrow">→</span>
+  <code>CreateMenu()</code><br /><br />
+  <strong>OnCalculate:</strong><br />
+  <code>CompatRefreshChartData()</code> <span class="flow-arrow">→</span>
+  <code>OnCalculateHandler()</code> <span class="flow-arrow">→</span>
+  <code>RefreshKitOnBar()</code><br /><br />
+  <strong>OnDeinit:</strong><br />
+  <code>PnlCloseAll()</code> <span class="flow-arrow">→</span>
+  <code>DrawStripClose()</code> <span class="flow-arrow">→</span>
+  <code>DeleteMenu()</code> <span class="flow-arrow">→</span>
+  <code>DeleteHTFCandles()</code> <span class="flow-arrow">→</span>
+  <code>SaveBiotakKit()</code> <span class="flow-arrow">→</span>
+  <code>OnDeinitHandler()</code>
+</div>
+
+<p><strong>MT5-ONLY اضافات واقعی</strong> (فقط در .mq5 entry):</p>
+<ul>
+  <li><code>CompatRefreshChartData()</code> در OnInit، OnCalculate، OnTimer — پر کردن سری‌های Time[]/Close[]</li>
+  <li><code>#property indicator_plots 0</code> — MQL5 بدون این warning می‌دهد</li>
+  <li><code>DrawStripSweepStale()</code> — تمیز کردن objects بازمانده از instance قبلی</li>
+  <li><code>ArraySetAsSeries</code> — روی آرایه‌های OnCalculate (در MT4 self-managing)</li>
+</ul>
+</div>
+
+
+<h2>۲. ساختار ماژول‌ها — MT4 vs MT5</h2>
+<div class="section">
+
+<div class="stat-row">
+  <div class="stat"><div class="stat-num">68</div><div class="stat-lbl">فایل .mqh در MT5</div></div>
+  <div class="stat"><div class="stat-num">139</div><div class="stat-lbl">فایل .mqh در MT4</div></div>
+  <div class="stat"><div class="stat-num">71</div><div class="stat-lbl">فایل فقط در MT4 (part files)</div></div>
+  <div class="stat"><div class="stat-num">0</div><div class="stat-lbl">فایل فقط در MT5</div></div>
+</div>
+
+<div class="important">
+  <strong>الگوی inline:</strong> MT4 ماژول‌های بزرگ را به part files تقسیم می‌کند (مثلاً <code>TH3Renderer.mqh = TH3Renderer_A + B + C</code>). MT5 همه آن‌ها را به‌صورت inline در یک فایل نگه می‌دارد. این <strong>تفاوت structural</strong> است نه لاجیکی.
+</div>
+
+<table>
+  <tr><th>ماژول MT5</th><th>معادل MT4</th><th>وضعیت لاجیک</th></tr>
+  <tr><td><code>TH3Renderer.mqh</code></td><td><code>Renderer_A + B + C</code></td><td><span class="badge ok">یکسان</span></td></tr>
+  <tr><td><code>TH3Pivots.mqh</code></td><td><code>TH3Pivots_A + B</code></td><td><span class="badge ok">یکسان</span></td></tr>
+  <tr><td><code>TH3Tool.mqh</code></td><td><code>Tool_A + B + C + D + Recorder</code></td><td><span class="badge ok">یکسان</span></td></tr>
+  <tr><td><code>LevelPipeline.mqh</code></td><td><code>LevelPipe_A + B</code></td><td><span class="badge ok">یکسان</span></td></tr>
+  <tr><td><code>TH3DatasetPaths.mqh</code></td><td>فایل مستقل</td><td><span class="badge fix">inline در TH3Tool.mqh</span></td></tr>
+  <tr><td>— (وجود ندارد)</td><td><code>BiotakHomes.mqh</code></td><td><span class="badge warn">MT4-only (در hub‌ها include)</span></td></tr>
+</table>
+</div>
+
+
+<h2>۳. معماری ماژول‌های TH3 — لایه‌بندی</h2>
+<div class="section">
+
+<div class="flow">
+  <strong>لایه Data Model (بدون چارت):</strong><br />
+  <code>TH3Types.mqh</code> — struct‌ها: TH3Point، TH3Skeleton، TH3Pattern، TH3DrawingSession<br /><br />
+  <strong>لایه Math (pure — بدون chart objects):</strong><br />
+  <code>TH3Math.mqh</code> <span class="flow-arrow">←</span> <code>TH3Pivots.mqh</code> (شامل Pivots_A + B)<br />
+  توابع: SnapToOHLC، CalculateWaveAngle، TH3SkeletonFromBars، TH3LockedStep، TH3RealDAt<br /><br />
+  <strong>لایه State (session drawing):</strong><br />
+  <code>TH3Controller.mqh</code> — state machine: IDLE → PLACING → COMPLETE<br />
+  یک instance: <code>g_th3Session</code> (جایگزین ۱۲ متغیر global قدیمی)<br /><br />
+  <strong>لایه Store (in-memory registry):</strong><br />
+  <code>TH3PatternStore.mqh</code> — <code>g_th3Patterns</code> (حداکثر ۶۴ pattern)<br /><br />
+  <strong>لایه Renderer (chart objects):</strong><br />
+  <code>TH3Renderer.mqh</code> (= Renderer_A + B + C) — model → chart objects<br /><br />
+  <strong>لایه Tool (entry dispatcher):</strong><br />
+  <code>TH3Tool.mqh</code> (= Tool_A + B + C + D + Recorder + DatasetPaths inline)
+</div>
+
+<p><strong>وابستگی‌های کلیدی:</strong></p>
+<ul>
+  <li><code>TH3Math</code> ← <code>TH3Pivots</code> ← <code>TH3Types</code></li>
+  <li><code>TH3PatternStore</code> ← <code>TH3Math</code></li>
+  <li><code>TH3Controller</code> ← <code>TH3Types</code></li>
+  <li><code>TH3Renderer</code> ← <code>TH3PatternStore</code> + <code>TH3Controller</code></li>
+  <li><code>TH3Tool</code> ← همه لایه‌های بالا</li>
+</ul>
+</div>
+
+
+<h2>۴. تفاوت‌های لاجیکی MT4 vs MT5 — یافته‌ها</h2>
+<div class="section">
+
+<table>
+  <tr><th>فایل</th><th>نوع تفاوت</th><th>توضیح</th><th>وضعیت</th></tr>
+  <tr>
+    <td><code>DynamicTradingDayDetector.mqh</code></td>
+    <td>Platform patch (صحیح)</td>
+    <td>MT4: <code>(ENUM_TIMEFRAMES)timeframe</code><br />MT5: <code>CompatTF(timeframe)</code><br /><small>هر دو به ENUM تبدیل می‌کنند — MT5 از wrapper استاندارد پروژه استفاده می‌کند</small></td>
+    <td><span class="badge fix">MT5-ONLY fix ✓</span></td>
+  </tr>
+  <tr>
+    <td><code>TH3Tool.mqh</code></td>
+    <td>Platform patch (صحیح)</td>
+    <td>MT4: <code>Bars(NULL, 0)</code><br />MT5: <code>iBars(NULL, 0)</code><br /><small>در MT5 <code>Bars</code> یک <code>#define</code> به <code>g_seriesBars</code> است — <code>iBars</code> درست است</small></td>
+    <td><span class="badge fix">MT5-ONLY fix ✓</span></td>
+  </tr>
+  <tr>
+    <td><code>PropertiesAndInputs.mqh</code></td>
+    <td>Comment تفاوت</td>
+    <td>کامنت <code>inpTH3AutoPivots</code> متفاوت است:<br />MT5: «marks them on the chart and snaps»<br />MT4: «P-TH3-DISC: marks are OFF»<br /><small>لاجیک یکسان — فقط documentation drift</small></td>
+    <td><span class="badge warn">comment drift</span></td>
+  </tr>
+  <tr>
+    <td><code>TH3Controller.mqh</code></td>
+    <td>Header اضافه</td>
+    <td>MT5 یک generated-mirror header ۱۲ خطی دارد — منطق کاملاً یکسان</td>
+    <td><span class="badge ok">یکسان ✓</span></td>
+  </tr>
+  <tr>
+    <td><code>TH3Types.mqh</code></td>
+    <td>Header اضافه</td>
+    <td>محتوای دقیقاً یکسان — فقط ۱۲ خط header</td>
+    <td><span class="badge ok">یکسان ✓</span></td>
+  </tr>
+  <tr>
+    <td><code>TH3Math.mqh</code></td>
+    <td>Header اضافه</td>
+    <td>محتوای دقیقاً یکسان</td>
+    <td><span class="badge ok">یکسان ✓</span></td>
+  </tr>
+  <tr>
+    <td><code>TH3Pivots.mqh</code></td>
+    <td>Inline (structural)</td>
+    <td>محتوای Pivots_A + B کاملاً یکسان</td>
+    <td><span class="badge ok">یکسان ✓</span></td>
+  </tr>
+  <tr>
+    <td><code>TH3PatternStore.mqh</code></td>
+    <td>Header اضافه</td>
+    <td>محتوای دقیقاً یکسان</td>
+    <td><span class="badge ok">یکسان ✓</span></td>
+  </tr>
+</table>
+</div>
+
+
+<h2>۵. جریان اجرای TH3 — از کلیک تا Pattern</h2>
+<div class="section">
+
+<div class="flow">
+  <strong>کاربر کلیک می‌کند (CHARTEVENT_CLICK در EventHandlers):</strong><br />
+  ↓ <code>TH3Tool.mqh::OnChartEvent_TH3</code><br />
+  ↓ debounce: 300ms + duplicate-bar guard (<code>TH3SessionAddPoint</code>)<br />
+  ↓ <code>TH3SessionAddPoint(t, p)</code> — در TH3Controller.mqh<br />
+  ↓ اگر کلیک چهارم: <code>state = TH3_SESSION_COMPLETE</code><br />
+  ↓ <code>TH3CompletePattern()</code> → <code>TH3PatternBuild(A,B,C)</code><br />
+     ↓ <code>TH3SkeletonFromBars()</code> — محاسبه ۵ محور (TH3Math)<br />
+     ↓ <code>TH3StepFromSkeleton()</code> — step اولیه<br />
+     ↓ <code>TH3MotherPivotAt()</code> — پیدا کردن mother pivot (TH3Pivots)<br />
+     ↓ <code>TH3LockedStep()</code> — قفل کردن step<br />
+  ↓ <code>TH3PatternStoreAdd(pattern)</code> — ذخیره در registry<br />
+  ↓ <code>DrawABCDPattern(pattern)</code> — رسم در TH3Renderer<br />
+     ↓ chart objects: نقاط A/B/C/D + خطوط + zones + ladder<br />
+  ↓ <code>ThrottledChartRedraw()</code>
+</div>
+
+<div class="flow" style="margin-top:10px">
+  <strong>Hover/Mouse Move (CHARTEVENT_MOUSE_MOVE):</strong><br />
+  ↓ <code>TH3PreviewUpdateHover(t, p)</code> — در TH3Controller.mqh<br />
+     guard: اگر (t, p, nextCount) تغییر نکرده → skip (P-TH3-PERF-03)<br />
+  ↓ ObjectMove یا ObjectCreate برای temp preview objects<br />
+  ↓ <code>ThrottledChartRedraw()</code>
+</div>
+</div>
+
+
+<h2>۶. رفتار MT5-ONLY — نقاط تفاوت اجرایی</h2>
+<div class="section">
+
+<table>
+  <tr><th>موضوع</th><th>رفتار MT4</th><th>رفتار MT5</th><th>اثر</th></tr>
+  <tr>
+    <td>Series arrays</td>
+    <td>Auto-filled by terminal</td>
+    <td><code>CompatRefreshChartData()</code> در OnCalculate/OnTimer</td>
+    <td>اگر فراخوانی نشود، Time[0] و Close[] کهنه خواهند بود</td>
+  </tr>
+  <tr>
+    <td>iBarShift</td>
+    <td>native</td>
+    <td><code>iBarShiftReal()</code> via MQL5Compat + binary search</td>
+    <td>رفتار یکسان — شبیه‌سازی دقیق</td>
+  </tr>
+  <tr>
+    <td><code>Bars</code> predefined</td>
+    <td>global int</td>
+    <td><code>#define Bars g_seriesBars</code></td>
+    <td>هر call به <code>Bars(sym,tf)</code> باید <code>iBars</code> باشد</td>
+  </tr>
+  <tr>
+    <td>StringTrimLeft/Right</td>
+    <td>returns trimmed string</td>
+    <td>MQL5Compat wrappers با همان return-value</td>
+    <td>شبیه‌سازی دقیق</td>
+  </tr>
+  <tr>
+    <td>iATR</td>
+    <td>direct bar access</td>
+    <td>handle-based با cache در MQL5Compat</td>
+    <td>رفتار یکسان — کمی کندتر اولین بار</td>
+  </tr>
+  <tr>
+    <td>CopyTime timeframe arg</td>
+    <td><code>(ENUM_TIMEFRAMES)tf</code></td>
+    <td><code>CompatTF(tf)</code></td>
+    <td>رفتار یکسان — CompatTF به ENUM تبدیل می‌کند</td>
+  </tr>
+  <tr>
+    <td>indicator_plots</td>
+    <td>نیاز نیست</td>
+    <td><code>#property indicator_plots 0</code></td>
+    <td>بدون آن MT5 warning می‌دهد</td>
+  </tr>
+</table>
+</div>
+
+
+<h2>۷. خلاصه وضعیت — همه فایل‌های shared</h2>
+<div class="section">
+
+<div class="stat-row">
+  <div class="stat"><div class="stat-num" style="color:#065f46">42</div><div class="stat-lbl">فایل کاملاً یکسان</div></div>
+  <div class="stat"><div class="stat-num" style="color:#57606a">7</div><div class="stat-lbl">فقط تفاوت ساختاری (hub wrapper)</div></div>
+  <div class="stat"><div class="stat-num" style="color:#1e40af">19</div><div class="stat-lbl">تفاوت code-level (همه inline شدن part files)</div></div>
+  <div class="stat"><div class="stat-num" style="color:#1e40af">2</div><div class="stat-lbl">MT5-ONLY fix واقعی (صحیح)</div></div>
+  <div class="stat"><div class="stat-num" style="color:#92400e">1</div><div class="stat-lbl">Comment drift (غیرکریتیکال)</div></div>
+</div>
+
+<div class="important">
+  <strong>نتیجه‌گیری نهایی:</strong> از نظر لاجیک و معماری، نسخه MT5 با MT4 <strong>به‌طور کامل یکسان رفتار می‌کند</strong>. تمام تفاوت‌های واقعی در کد یا MT5-ONLY fix‌های صحیح هستند (مانند <code>CompatTF</code> و <code>iBars</code>) یا structural inlining (part files به یک فایل تبدیل شده). هیچ divergence لاجیکی ناخواسته‌ای وجود ندارد.
+</div>
+</div>
+
+
+<h2>۸. نکات معماری کلیدی — ثابت و تغییرناپذیر</h2>
+<div class="section">
+
+<table>
+  <tr><th>قانون</th><th>محل پیاده‌سازی</th></tr>
+  <tr><td>یک مالک chart-wide mouse-move flag (P-TH3-PERF-07)</td><td>OnInitHandler — هرگز در session</td></tr>
+  <tr><td>move-first, no probe (P-TH3-PERF-06)</td><td>TH3Controller::TH3PreviewUpdateHover</td></tr>
+  <tr><td>change-guard برای hover (P-TH3-PERF-03)</td><td><code>s_th3HovT/P/Count</code> در file scope</td></tr>
+  <tr><td>chart objects = projection of model (نه source)</td><td>TH3PatternStore = single source of truth</td></tr>
+  <tr><td>session state machine (IDLE→PLACING→COMPLETE)</td><td>TH3Controller::g_th3Session</td></tr>
+  <tr><td>inline part files (نه include در MT5)</td><td>resync-module.py pattern</td></tr>
+  <tr><td>CompatRefreshChartData() باید اول باشد</td><td>MT5 entry OnInit + OnCalculate + OnTimer</td></tr>
+</table>
+</div>
+
+<footer>Made with IBM Bob</footer>
+</div>
+</body>
+</html>

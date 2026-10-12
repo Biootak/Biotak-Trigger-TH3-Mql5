@@ -1,13 +1,12 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/THCalculations.mqh
-//   regenerate : python tools/parity/resync-module.py --write THCalculations.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * none
 // ============================================================================
   //+------------------------------------------------------------------+
@@ -115,7 +114,7 @@ double CalculateTHPoints(const double price, const int digits, const double perc
 //| The knot's type and step used to read ATR; they read the rung's   |
 //| own TH points now: (anchor-bar close x rung %) / 100. The rung    |
 //| table mirrors GetBaseFractalTimeframeForCurrent, the % is the     |
-//| knob-aware FractalPercentScaled (knob OFF = professor's table).   |
+//| FractalPercentScaled (the professor's table — the knob is gone). |
 //| Anchor-stable by construction (same bar -> same number).          |
 //| 0 = absence (unknown rung, cold series) - never a guess.          |
 //+------------------------------------------------------------------+

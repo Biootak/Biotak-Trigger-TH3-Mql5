@@ -1,14 +1,14 @@
 ﻿// ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/ObjectFunctions.mqh
-//   regenerate : python tools/parity/resync-module.py --write ObjectFunctions.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the per-level caller supplies the label lift instead of re-reading the chart  (1 substitution)
+//   * skip the 3 chart reads per label when the render pass already has them  (1 substitution)
 // ============================================================================
   #property strict
 
@@ -193,7 +193,23 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     return true;
 }
 
-bool CreatePipDistanceLabel(const string name, const double price, const double pips, const color textColor, const string levelInfo = "") {
+// P-MT5-PERF: THE PASS-SCOPED LIFT. The level loop calls this once per
+// render pass instead of letting every one of up to 400 labels pay the
+// three terminal reads that produce the same number each time. -1 means
+// "could not measure", and the label then falls back to the original
+// self-reading path, so an unmeasurable chart behaves exactly as before.
+double PipDistanceLabelLift()
+{
+    const int    hNow  = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+    const double hiNow = ChartGetDouble(0, CHART_PRICE_MAX);
+    const double loNow = ChartGetDouble(0, CHART_PRICE_MIN);
+    if(hNow > 0 && hiNow > loNow && loNow > 0)
+        return ((double)inpFontSize + 6.0) * (hiNow - loNow) / (double)hNow;
+    return -1.0;
+}
+
+bool CreatePipDistanceLabel(const string name, const double price, const double pips, const color textColor, const string levelInfo = "",
+                          const double liftOverride = -1.0) {
     if(!inpShowPipDistanceLabels) return true;
     
     //                                                                
@@ -242,6 +258,16 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
     // moves on scroll/zoom, not per frame — the 3 reads below validate it).
     static int    s_h = -1;
     static double s_hi = 0.0, s_lo = 0.0, s_lift = 0.0;
+    // P-MT5-PERF: these three reads are the validator for the static cache
+    // below, and this function is called ONCE PER LEVEL - so an unchanged
+    // chart was paying ~1 200 terminal reads per render to re-prove that
+    // nothing had moved. Inside one render pass the three values cannot
+    // differ, so the pass computes them once and hands them in. A caller
+    // that does not (the two pips labels) still self-reads exactly as
+    // before, so the lazy path is unchanged.
+    if(liftOverride >= 0.0) {
+        s_lift = liftOverride;
+    } else {
     int hNow = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
     double hiNow = ChartGetDouble(0, CHART_PRICE_MAX);
     double loNow = ChartGetDouble(0, CHART_PRICE_MIN);
@@ -251,6 +277,7 @@ bool CreatePipDistanceLabel(const string name, const double price, const double 
             double rowPx = (double)inpFontSize + 6.0;
             s_lift = rowPx * (hiNow - loNow) / (double)hNow;
         }
+    }
     }
     double labelPrice = price + s_lift;
 

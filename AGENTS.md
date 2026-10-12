@@ -10,15 +10,17 @@ no longer reachable from this repository by any path.
 
 `Biotak/` and `Files/` are **owned copies**, separated from
 `../Biotak-Trigger-TH3-mql4` on 2026-09-17 (junctions removed, contents copied
-byte-for-byte: 79/79 and 244/244 md5-identical, then the MT4 tree reverted to
-pristine). Both entries include the same 67 `.mqh` files. A sync FROM the MT4
-repository is a deliberate manual copy followed by a rebuild of both entries;
-it is never automatic, and this repository never writes back into MT4.
+byte-for-byte, then the MT4 tree reverted to pristine), and forked outright on
+2026-10-12 (the GENERATED MIRROR headers removed; nothing regenerates them).
+`../Biotak-Trigger-TH3-mql4` remains the LOGIC reference and
+`tools/parity/module-report.py` (read-only) flags any drift, but a problem in
+one tree can no longer become a problem in the other through regeneration.
+This repository never writes back into MT4.
 
-Corollary: **edit modules here freely.** MT5-only fixes (e.g. the R-TF-UNIT
-minute-literal switches) live in this copy and do not need a twin in MT4.
-When porting an MT4 change over, copy the file, diff it, rebuild both MT5
-entries, and say so in the commit message.
+Corollary: **edit modules here freely.** MT5-only work (R-TF-UNIT, the compat
+ledger, the ATR memo, prefix-sweep teardowns, gated censuses) lives in this
+copy and does not need a twin in MT4. When porting an MT4 change over, copy
+the file, diff it, rebuild both MT5 entries, and say so in the commit message.
 
 ## Layout
 
@@ -27,7 +29,7 @@ entries, and say so in the commit message.
   same include order, same five handlers, same `P4Report*` ledgers, same UI-kit
   half (`InitializeUIStates` / `InitializeBiotakKit` / `InitializeHTFCandles` /
   `CreateMenu`, and the matching teardown).
-- `Biotak/` — owned product modules (67 `.mqh`). MT5-only fixes live here;
+- `Biotak/` — owned product modules (68 `.mqh`). MT5-only fixes live here;
   they must stay behaviour-identical to MT4 on MT4-equivalent inputs, and any
   MT5-only divergence is marked `MT5-ONLY` or `R-TF-UNIT`.
 - `MT5Compat/MQL5Compat.mqh` — the **only** MT5-specific source. Every MQL4 API
@@ -35,8 +37,14 @@ entries, and say so in the commit message.
   `Logger.mqh` and before every shared module.
 - `_retired/mql5-biotak-aug21/` — the stale divergent copy this repository used
   to carry (frozen 2026-08-21). Kept for reference; never included.
-- `tools/mt5-build.ps1` — MetaEditor compile helper. `tools/check-pp-balance.py`
-  and `tools/pp-trace.py` — preprocessor balance checks (see below).
+- `tools/mt5-build.ps1` — MetaEditor compile helper (targets ONE terminal;
+  see the preflight). `tools/mt5-verify.ps1` — the closed loop: build, prune
+  old logs, restart that terminal, watch its fresh log, report a verdict.
+  `tools/parity/module-report.py` — read-only drift detector against MT4.
+  `tools/parity/_retired/resync-module.py` — the retired generator; its
+  `--write` paths must never run (its MODULE_PATCHES list stays as data for
+  the detector). `tools/check-pp-balance.py` and `tools/pp-trace.py` —
+  preprocessor balance checks (see below).
 
 ## Build
 

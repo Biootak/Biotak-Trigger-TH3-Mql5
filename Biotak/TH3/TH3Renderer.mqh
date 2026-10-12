@@ -1,14 +1,13 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/TH3/TH3Renderer.mqh
-//   regenerate : python tools/parity/resync-module.py --write TH3Renderer.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the chart-wide orphan sweep runs per frame, not per chart change  (1 substitution)
 // ============================================================================
 //+------------------------------------------------------------------+
 //| TH3/TH3Renderer.mqh                                             |
@@ -759,7 +758,26 @@ void TH3InfoFamilyReposition(const string base, const int topY)
 // Callers: the reposition pass (rare layout moments) and the attach restore.
 void TH3InfoOrphanPlateSweep()
 {
-    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+    // P-MT5-PERF: THE CHART-WIDE WALK, GATED ON THE ONE NUMBER THAT SAYS
+    // WHETHER THE CHART CHANGED. Its own header calls this a rare-layout
+    // moment, but the reposition pass reaches it on EVERY frame body
+    // (2-5 Hz), so it was walking every object on the chart ~2000 times a
+    // second to delete something that is almost never there.
+    //
+    // The gate is EXACT, not heuristic: a plate can only become an orphan
+    // when one of its rows is deleted, and a deletion changes the chart's
+    // object total. Same total => no row died since the last sweep => there
+    // is nothing new to find. The one call this replaces costs one read.
+    //
+    // Worst case is benign: if a row dies in the same frame that another
+    // object is born, the total is unchanged, the sweep waits, and the very
+    // next frame (with the count stable) removes the plate. One frame of an
+    // empty plate is not a defect; a permanent one would be.
+    static int s_lastSweptTotal = -1;
+    const int totalNow = ObjectsTotal(0, -1, -1);
+    if(totalNow == s_lastSweptTotal) return;
+    s_lastSweptTotal = totalNow;
+    for(int i = totalNow - 1; i >= 0; i--)
     {
         string nm = ObjectName(0, i, -1, -1);
         if(StringFind(nm, "ABCD_Pattern_") != 0) continue;
@@ -1273,10 +1291,13 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         labelOffset = 15.0 * pipSize;
     }
     
-    // Cleanup any lingering legacy X objects
-    ObjectDelete(0, mainObjName + "_Point_X");
-    ObjectDelete(0, mainObjName + "_Label_X");
-    ObjectDelete(0, mainObjName + "_Line_XA");
+    // Cleanup any lingering legacy X objects (retired; guard to avoid no-op API calls)
+    // P-PERF-RET1 (2026-10-12): these objects were removed in P-TH3-D4h/P-TH3-DEL1.
+    // After one redraw they are gone; subsequent unconditional deletes are silent
+    // API round-trips that cost nothing but accumulate to thousands per session.
+    if(ObjectFind(0, mainObjName + "_Point_X") >= 0) ObjectDelete(0, mainObjName + "_Point_X");
+    if(ObjectFind(0, mainObjName + "_Label_X") >= 0) ObjectDelete(0, mainObjName + "_Label_X");
+    if(ObjectFind(0, mainObjName + "_Line_XA") >= 0) ObjectDelete(0, mainObjName + "_Line_XA");
 
     // Draw points A, B, C, D with smart label positioning
     string pointNames[4];
@@ -1545,8 +1566,10 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // rayed LEFT into the past) and _Ray_C (C's price, B->C). The names survive
     // only as a retired sweep: a pattern drawn by an older build carries them,
     // and its next redraw deletes them. Never create them again.
-    ObjectDelete(0, mainObjName + "_Ray_D");
-    ObjectDelete(0, mainObjName + "_Ray_C");
+    // P-PERF-RET2 (2026-10-12): guarded so the API call only happens when the
+    // object is actually there (after one cycle they are gone on every live chart).
+    if(ObjectFind(0, mainObjName + "_Ray_D") >= 0) ObjectDelete(0, mainObjName + "_Ray_D");
+    if(ObjectFind(0, mainObjName + "_Ray_C") >= 0) ObjectDelete(0, mainObjName + "_Ray_C");
 
     // P-TH3-D4f — CD LEG LABEL. A small text at the midpoint of CD showing
     // only the ownerTF name (e.g. "H1") so the trader reads which timeframe
@@ -1640,8 +1663,10 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // measurement above STAYS (mlMotherSize feeds the caption); only the two
         // objects go, swept here so an older build's ticks die on redraw. Never
         // create them again.
-        ObjectDelete(0, mainObjName + "_MPTick");
-        ObjectDelete(0, mainObjName + "_MPTickB");
+        // P-PERF-RET3 (2026-10-12): guarded; after one redraw these are gone on
+        // every live chart and the unconditional delete just wastes an API call.
+        if(ObjectFind(0, mainObjName + "_MPTick")  >= 0) ObjectDelete(0, mainObjName + "_MPTick");
+        if(ObjectFind(0, mainObjName + "_MPTickB") >= 0) ObjectDelete(0, mainObjName + "_MPTickB");
     }
 
     // Draw TH3-style targets (Step1, Step3, Step5, Step7) from D (P-TH3-D4)
@@ -1769,15 +1794,19 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 ObjectSetString(0, lineName, OBJPROP_LEVELTEXT, 0, labelText);
             }
         } else {
-            // CRITICAL FIX: Update position AND label text when frequency changes
+            // Update position AND label text when frequency/step changes
             ObjectMove(0, lineName, 0, startTime, centerPrice);
             ObjectMove(0, lineName, 1, endTime, centerPrice);
             
             // Update label text with new pip values (P-TH3-ZONE-01: full height)
+            // P-PERF-ZB4 (2026-10-12): guard the string write — ObjectSetString*
+            // triggers a repaint; the text only changes when targetPips or
+            // zoneHalfWidth moves (point drag), not on every tick.
             if(inpTH3LabelPosition != TH3_LABEL_HIDDEN) {
                 double zonePips = (zoneHalfWidth * 2.0) / pipSize;
                 string labelText = StringFormat("%s (%.1f) ========%.1f", targetNames[i], targetPips[i], zonePips);
-                ObjectSetString(0, lineName, OBJPROP_LEVELTEXT, 0, labelText);
+                if(ObjectGetString(0, lineName, OBJPROP_LEVELTEXT, 0) != labelText)
+                    ObjectSetString(0, lineName, OBJPROP_LEVELTEXT, 0, labelText);
             }
         }
         
@@ -1826,11 +1855,18 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 ObjectSetInteger(0, topBorder, OBJPROP_SELECTABLE, false);
                 ObjectSetInteger(0, topBorder, OBJPROP_BACK, true);
             } else {
+                // P-PERF-ZB1 (2026-10-12): guard all visual-property writes on the
+                // update path — MT5/MT4 repaints on every ObjectSet*, so these three
+                // unconditional writes per border per rung per frame accumulated to
+                // ~18 forced repaints per drag even when nothing changed.
                 ObjectMove(0, topBorder, 0, startTime, upperZone);
                 ObjectMove(0, topBorder, 1, endTime, upperZone);
-                ObjectSetInteger(0, topBorder, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, topBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, topBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
+                if((color)ObjectGetInteger(0, topBorder, OBJPROP_COLOR) != zoneColor)
+                    ObjectSetInteger(0, topBorder, OBJPROP_COLOR, zoneColor);
+                if((int)ObjectGetInteger(0, topBorder, OBJPROP_STYLE) != (int)inpTH3ZoneBorderStyle)
+                    ObjectSetInteger(0, topBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
+                if((int)ObjectGetInteger(0, topBorder, OBJPROP_WIDTH) != inpTH3ZoneBorderWidth)
+                    ObjectSetInteger(0, topBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
             }
 
             // Bottom border (extends right, matching the filled box)
@@ -1846,9 +1882,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             } else {
                 ObjectMove(0, bottomBorder, 0, startTime, lowerZone);
                 ObjectMove(0, bottomBorder, 1, endTime, lowerZone);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
+                if((color)ObjectGetInteger(0, bottomBorder, OBJPROP_COLOR) != zoneColor)
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_COLOR, zoneColor);
+                if((int)ObjectGetInteger(0, bottomBorder, OBJPROP_STYLE) != (int)inpTH3ZoneBorderStyle)
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
+                if((int)ObjectGetInteger(0, bottomBorder, OBJPROP_WIDTH) != inpTH3ZoneBorderWidth)
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
             }
 
             // Left border (vertical - closes the outline)
@@ -1864,9 +1903,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             } else {
                 ObjectMove(0, leftBorder, 0, startTime, lowerZone);
                 ObjectMove(0, leftBorder, 1, startTime, upperZone);
-                ObjectSetInteger(0, leftBorder, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, leftBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, leftBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
+                if((color)ObjectGetInteger(0, leftBorder, OBJPROP_COLOR) != zoneColor)
+                    ObjectSetInteger(0, leftBorder, OBJPROP_COLOR, zoneColor);
+                if((int)ObjectGetInteger(0, leftBorder, OBJPROP_STYLE) != (int)inpTH3ZoneBorderStyle)
+                    ObjectSetInteger(0, leftBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
+                if((int)ObjectGetInteger(0, leftBorder, OBJPROP_WIDTH) != inpTH3ZoneBorderWidth)
+                    ObjectSetInteger(0, leftBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
             }
         }
         else {
@@ -1909,11 +1951,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                     ObjectSetInteger(0, zoneBoxName, OBJPROP_BACK, false);
                 }
             } else {
+                // P-PERF-ZB2 (2026-10-12): guard the visual writes — color is a
+                // transparency blend that can change per step; fill and back never
+                // change once the object is born (they are create-time properties on
+                // OBJ_RECTANGLE). Writing them unconditionally costs three repaints
+                // per rung per frame on a still chart.
                 ObjectMove(0, zoneBoxName, 0, startTime, lowerZone);
                 ObjectMove(0, zoneBoxName, 1, endTime, upperZone);
-                ObjectSetInteger(0, zoneBoxName, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, zoneBoxName, OBJPROP_FILL, true);
-                ObjectSetInteger(0, zoneBoxName, OBJPROP_BACK, false);
+                if((color)ObjectGetInteger(0, zoneBoxName, OBJPROP_COLOR) != zoneColor)
+                    ObjectSetInteger(0, zoneBoxName, OBJPROP_COLOR, zoneColor);
             }
         }
     }
@@ -1946,7 +1992,11 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         } else {
             ObjectMove(0, midName, 0, startTime, midLevels[mi]);
             ObjectMove(0, midName, 1, endTime, midLevels[mi]);
-            if(inpTH3LabelPosition != TH3_LABEL_HIDDEN)
+            // P-PERF-ZB3 (2026-10-12): guard the label text write — the mid-pip
+            // value only changes when baseUnit changes (i.e. on a point drag), not
+            // on every chart tick. ObjectSetString* triggers a repaint on MT4/MT5.
+            if(inpTH3LabelPosition != TH3_LABEL_HIDDEN &&
+               ObjectGetString(0, midName, OBJPROP_LEVELTEXT, 0) != midText)
                 ObjectSetString(0, midName, OBJPROP_LEVELTEXT, 0, midText);
         }
     }
@@ -1960,6 +2010,11 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // «drawn then deleted» — a pass that BUILDS reports born=4, a pass that only
     // re-seats them reports born=0 with bornTotal=4. The two are the same
     // picture; only the cost differs, and now the log says which one ran.
+    // P-PERF-CEN1 (2026-10-12): the census fired on every draw — every drag event
+    // and every UpdateAllTH3Objects frame — doing 8+ ObjectGetInteger reads per
+    // zone per call to compose a string it then printed unconditionally. Gate it
+    // behind ENABLE_DEBUG_LOGS so production builds skip all of that work.
+    #ifdef ENABLE_DEBUG_LOGS
     {
         int zoneStand = 0, zoneBorn = 0;
         string zoneSeen = "";
@@ -1996,6 +2051,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
               " tr=", inpTH3ZoneTransparency, " h%=", DoubleToString(inpTH3ZoneHeightPercent, 1),
               zoneSeen);
     }
+    #endif
 
     // P-TH3-STEP-03: the proof objects (retired by P-TH3-DISC below — the
     // step lines already say where L3 sits; the measure, logs and TH3LOG stay).
@@ -2011,8 +2067,10 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // lines already say where L3 sits. The measure, the log lines and TH3LOG
     // stay (the formula still wears the proved step); only the two objects
     // go. Old charts drop them on next redraw.
-    ObjectDelete(0, mainObjName + "_HitLine");
-    ObjectDelete(0, mainObjName + "_HitLabel");
+    // P-PERF-RET4 (2026-10-12): guarded; after one cycle these are gone on every
+    // live chart — the unconditional delete is a silent but accumulating API cost.
+    if(ObjectFind(0, mainObjName + "_HitLine")  >= 0) ObjectDelete(0, mainObjName + "_HitLine");
+    if(ObjectFind(0, mainObjName + "_HitLabel") >= 0) ObjectDelete(0, mainObjName + "_HitLabel");
 
     // P-TH3-P6e + P-TH3-D4 — MOTHER PIVOT AT D, ON THE CHART.
     // The matcher (TH3Pivots.mqh) answers which six-condition pivot the

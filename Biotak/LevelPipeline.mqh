@@ -1,14 +1,14 @@
 ﻿// ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/LevelPipeline.mqh
-//   regenerate : python tools/parity/resync-module.py --write LevelPipeline.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the census diagnostic is DEBUG, not production  (1 substitution)
+//   * one lift per render pass, not three chart reads per level  (1 substitution)
 // ============================================================================
   #property copyright "Copyright 2025, Biotak Project"
 #property link      "https://www.mql5.com"
@@ -1488,7 +1488,7 @@ void RenderTriggerLines(
             // surface of its own (`lblClr` == `lineClr` while both its ends are AUTO).
             CreatePipDistanceLabel(labelName, lines[i].price, pips,
                                    lines[i].isTrigger ? lblClr : lineClr,
-                                   lines[i].labelText);
+                                   lines[i].labelText, PipDistanceLabelLift());
             SetPipelineObjectTimeframesIfExists(labelName, labelTf);   // P-VIEW-01: hoisted, one owner
         }
     }
@@ -1579,39 +1579,6 @@ void CleanupSurplusPipeline(
 #define LEVEL_PIPE_B_MQH
 
 //+------------------------------------------------------------------+
-//| ASYMMETRIC REACH: split the budget toward the live price.        |
-//| Centred / invalid live reads an even split; total never exceeds  |
-//| the budget.                                                      |
-//| Port of MT4 LevelPipe_B.mqh lines 55-84 (byte-identical logic). |
-//+------------------------------------------------------------------+
-void LevelSplitCounts(const int Nin, int &above, int &below)
-{
-    int N = Nin;
-    if(N > MAX_SAFE_LEVELS) N = MAX_SAFE_LEVELS;
-    if(N < 1) N = 1;
-    int total = MathMin(N * 2, LVL_TOTAL_BUDGET);
-    above = N; below = N;
-    if(total < N * 2) { above = total / 2; below = total - above; }
-    double center = GetMidpointPrice(g_thStartPointType);
-    double step = NaturalFirstStep() * StepOverrideFactor();
-    double bid = MarketInfo(GetCachedSymbol(), MODE_BID);
-    double ask = MarketInfo(GetCachedSymbol(), MODE_ASK);
-    double live = (bid > 0.0 && ask > 0.0) ? (bid + ask) * 0.5 : bid;
-    if(!(MathIsValidNumber(center) && center > 0.0 && MathIsValidNumber(step) && step > 0.0 && live > 0.0)) return;
-    int offLvls = (int)MathCeil(MathAbs(live - center) / step);
-    if(offLvls <= LVL_SPLIT_MARGIN) return;
-    int minCtx = MathMax(1, total / LVL_SPLIT_CTXDIV);
-    if(total < minCtx * 2) return;
-    int toward = MathMin(N + offLvls, total - minCtx);
-    if(live >= center) { above = toward; below = total - toward; }
-    else               { below = toward; above = total - toward; }
-    if(above < 1) above = 1;
-    if(below < 1) below = 1;
-    static int s_wA = -1, s_wB = -1;
-    if(above != s_wA || below != s_wB) { s_wA = above; s_wB = below; Print("[LVL] split N=", N, " above=", above, " below=", below); }
-}
-
-//+------------------------------------------------------------------+
 //| BUILD MODE CONFIG: Create config from current input parameters   |
 //+------------------------------------------------------------------+
 SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
@@ -1659,6 +1626,37 @@ SModeConfig BuildModeConfig(const string objectPrefix, const string modeName)
     cfg.minPrice = isCustomPrice ? 0 : g_lowestLow;
     
     return cfg;
+}
+
+//+------------------------------------------------------------------+
+//| ASYMMETRIC REACH: split the budget toward the live price. Centred /  |
+//| invalid live reads an even split; total never exceeds the budget.    |
+//+------------------------------------------------------------------+
+void LevelSplitCounts(const int Nin, int &above, int &below)
+{
+    int N = Nin;
+    if(N > MAX_SAFE_LEVELS) N = MAX_SAFE_LEVELS;
+    if(N < 1) N = 1;
+    int total = MathMin(N * 2, LVL_TOTAL_BUDGET);
+    above = N; below = N;
+    if(total < N * 2) { above = total / 2; below = total - above; }
+    double center = GetMidpointPrice(g_thStartPointType);
+    double step = NaturalFirstStep() * StepOverrideFactor();
+    double bid = MarketInfo(GetCachedSymbol(), MODE_BID);
+    double ask = MarketInfo(GetCachedSymbol(), MODE_ASK);
+    double live = (bid > 0.0 && ask > 0.0) ? (bid + ask) * 0.5 : bid;
+    if(!(MathIsValidNumber(center) && center > 0.0 && MathIsValidNumber(step) && step > 0.0 && live > 0.0)) return;
+    int offLvls = (int)MathCeil(MathAbs(live - center) / step);
+    if(offLvls <= LVL_SPLIT_MARGIN) return;
+    int minCtx = MathMax(1, total / LVL_SPLIT_CTXDIV);
+    if(total < minCtx * 2) return;
+    int toward = MathMin(N + offLvls, total - minCtx);
+    if(live >= center) { above = toward; below = total - toward; }
+    else               { below = toward; above = total - toward; }
+    if(above < 1) above = 1;
+    if(below < 1) below = 1;
+    static int s_wA = -1, s_wB = -1;
+    if(above != s_wA || below != s_wB) { s_wA = above; s_wB = below; Print("[LVL] split N=", N, " above=", above, " below=", below); }
 }
 
 //+------------------------------------------------------------------+
@@ -2429,7 +2427,7 @@ SPipelineResult ExecutePipeline(
                     if(m > maskMax) maskMax = m;
                 }
             }
-            Print("[P-VIEW] stage=census lines=", result.lineCount, " zones=", result.zoneCount,
+            _LOG_GATE_D Print("[P-VIEW] stage=census lines=", result.lineCount, " zones=", result.zoneCount,
                   " pitch=", DoubleToString(maxStep, GetCachedDigits()),
                   " centre=", DoubleToString(centerPrice, GetCachedDigits()),
                   " nearAbove=", DoubleToString(nearAbove, GetCachedDigits()),

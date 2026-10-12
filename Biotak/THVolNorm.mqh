@@ -1,3 +1,14 @@
+// ============================================================================
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
+//   MT4 source : Biotak/Biotak/THVolNorm.mqh
+//
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the volnorm diagnostics are DEBUG, not production  (3 substitutions)
+// ============================================================================
 //| P-TH-VOLNORM (2026-10-08, user: TH شارپ/کم‌نوسان به ATR نزدیک     |
 //| نیست، بدون ATR، فقط از خود قیمت).                                |
 //|                                                                  |
@@ -371,7 +382,7 @@ double THVolNormColumnV(const bool enabled, const int tfMinutes, const double pc
    if(moved && wit != s_tvnWit[slot])
    {
       s_tvnWit[slot] = wit;
-      Print("[P-LBL] TH volnorm col ", wit);
+      _LOG_GATE_D Print("[P-LBL] TH volnorm col ", wit);
    }
    return v;
 }
@@ -475,14 +486,14 @@ double THVolNormDrawnV(const bool enabled, const int tfMinutes, const double pct
       // Adoption witness (ungated, like the column probe above): at most one
       // line per block per pair, only when the adopted value really moved.
       if(first || live != oldV)
-         Print("[P-LBL] TH drawnV adopt tf=", tfMinutes,
+         _LOG_GATE_D Print("[P-LBL] TH drawnV adopt tf=", tfMinutes,
                " blk=", TimeToString(blk, TIME_MINUTES),
                " was=", DoubleToString(oldV, 4),
                " now=", DoubleToString(live, 4), " why=block");
    }
    else if(slow > 0.0 && THVolNormJumpCuts(slow, s_dbSlow[slot]))
    {
-      Print("[P-LBL] TH drawnV adopt tf=", tfMinutes,
+      _LOG_GATE_D Print("[P-LBL] TH drawnV adopt tf=", tfMinutes,
             " blk=", TimeToString(blk, TIME_MINUTES),
             " was=", DoubleToString(s_dbV[slot], 4),
             " now=", DoubleToString(live, 4), " why=jump");

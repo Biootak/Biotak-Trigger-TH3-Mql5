@@ -1,14 +1,14 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/BiotakMenu.mqh
-//   regenerate : python tools/parity/resync-module.py --write BiotakMenu.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the HTF toggle witness is DEBUG, not production  (1 substitution)
+//   * delete the menu in three prefix sweeps instead of ~75 single deletes  (1 substitution)
 // ============================================================================
 //+------------------------------------------------------------------+
 //|                                                   BiotakMenu.mqh |
@@ -3533,16 +3533,44 @@ void DeleteRing()
 
 void DeleteMenu()
 {
-   DeleteRing();
-   DeleteToolsMenu(false);   // ring already wiped above — do not recreate it
-   ObjectDelete(0, CircOrbBg());
-   ObjectDelete(0, CircOrbIcon());
-   s_CircTipFeat = -2;   // tooltip objects share the prefix pattern below
+   // P-PERF-11b (2026-10-12) - ONE SWEEP PER FAMILY, NOT 75 DELETES.
+   // Measured on the live log: `OnDeinit ... menu=1016ms` (and 6375ms
+   // once) on every single teardown, against 0-16ms for every other
+   // phase. The old body issued ~75 individual ObjectDelete calls and
+   // the cost tracked them one for one: MT5 re-validates its object
+   // list per call, ~13ms apiece on a chart holding ~1000 objects.
+   // Closing the delete event channel first was tried and measured to
+   // make NO difference, so the cost is the per-call terminal work, not
+   // the event. ObjectsDeleteAll does the same sweep in ONE call, and
+   // this file already uses it on these exact families (the orphan purge
+   // above). Every name is btnPrefix + Circ/Tools/Sub; the three names
+   // dropped below by the prefix are the orb and the tooltip, which
+   // share those families.
+   // P-PERF-11c (2026-10-12) - TIMED PHASES, NOT ANOTHER THEORY. The 7281ms
+   // teardown survived replacing ~75 single deletes with three prefix
+   // sweeps, so the story "per-call validation" was wrong too. These three
+   // numbers say which sweep actually costs, plus the object count they
+   // ran over - one line, on a teardown, where one line cannot matter.
+   uint _m0 = GetTickCount();
+   const int _n0 = ObjectsTotal(0, -1, -1);
+   s_circChromeGen++;                     // P-PERF-55: the family is gone
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Circ");
+   const uint _m1 = GetTickCount();
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");
+   const uint _m2 = GetTickCount();
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
+   const uint _m3 = GetTickCount();
+   Print("[W][PERF] DeleteMenu phases: n=", _n0,
+         " circ=", (int)(_m1 - _m0), "ms tools=", (int)(_m2 - _m1),
+         "ms sub=", (int)(_m3 - _m2), "ms");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Circ");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
+   s_CircTipFeat = -2;   // tooltip objects share the prefix pattern
    s_TipPendFeat = -2;
-   ObjectDelete(0, CircTipBg());
-   ObjectDelete(0, CircTipTxT());
-   ObjectDelete(0, CircTipTxH());
-   ObjectDelete(0, CircTipArt());
+   g_ToolsOpen = false;  // DeleteToolsMenu(false) used to carry these
+   g_ToolsPage = 0;
+   SubInvalidateLayout();
 }
 
 void CircMoveItem(const int i)
@@ -4414,7 +4442,7 @@ void SetHTFVisible(const bool on)
    GlobalVariableSet(GetGVName("HTF_EN"), on ? 1.0 : 0.0);
    HTFApplyVisibleMasks();
    RepaintForDiscreteAction();      // P-PERF-24: the press paints NOW
-   Print("[HTF] set on=", (on ? 1 : 0), " drawn=", g_HTFDrawnCount,
+   _LOG_GATE_D Print("[HTF] set on=", (on ? 1 : 0), " drawn=", g_HTFDrawnCount,
          " ms=", (int)(GetTickCount() - t0));
 }
 

@@ -36,6 +36,7 @@ adaptation - i.e. the same arithmetic, the same numbers.
 """
 import argparse
 import collections
+import importlib.util
 import io
 import os
 import re
@@ -79,6 +80,43 @@ JUSTIFY = [
     (r'\bPeriodSeconds\s*\(', "MT4 PeriodSeconds", "mt4"),
     (r'\b(ENUM_TIMEFRAMES)\s*\(\s*timeframe', "MT5 enum cast for a timeframe", "mt5"),
     (r'^\s*#\w+', "preprocessor line", "both"),
+    # --- MT5-ONLY resource/API adaptations (each one is a declared module
+    # --- patch in resync-module.py's MODULE_PATCHES, so a resync preserves it)
+    (r'ReleaseATRHandleCache\(',
+     "MQL5 iATR is handle-based: the cached handles are released on deinit",
+     "mt5"),
+    (r'\bChartScreenShot\(',
+     "MQL4 WindowScreenShot has no MQL5 counterpart (return contract differs)",
+     "mt5"),
+    # --- the entry's OnCalculate bridge into the emulated series
+    (r'^\s*rates_total,\s*$',
+     "OnCalculate already knows the bar count - saves the iBars() call", "mt5"),
+    (r'\(rates_total\s*>\s*0\)\s*\?\s*\w+\[rates_total\s*-\s*1\]',
+     "the forming bar's live value, taken from OnCalculate's own arrays",
+     "mt5"),
+    # --- MT5-ONLY render-cost work. Each is a declared MODULE_PATCH in
+    # --- resync-module.py, and each REMOVES terminal calls; none adds logic.
+    (r'PipDistanceLabelLift',
+     "one label lift per render pass instead of three chart reads per level",
+     "mt5"),
+    (r's_lastSweptTotal', "the orphan-plate sweep is gated on the object count",
+     "mt5"),
+    (r'\btotalNow\b', "the orphan-plate sweep is gated on the object count",
+     "mt5"),
+    (r'CHART_CONTEXT_MENU', "MT5 hides the native context menu behind these",
+     "mt5"),
+    (r'\b_cl(Ms|Now)\b',
+     "the compat ledger's 60 s heartbeat (measurement build only)", "mt5"),
+    # --- the P-* diagnostics are DEBUG-gated on the MT5 side (a resync patch)
+    # --- and bare Prints on the MT4 side. Both spellings are the same diagnostic.
+    (r'_LOG_GATE_D Print\("\[P-',
+     "project diagnostic behind the DEBUG gate (off in production)", "mt5"),
+    (r'Print\("\[P-',
+     "project diagnostic that MT5 gates behind DEBUG", "mt4"),
+    (r'_LOG_GATE_D Print\("\[HTF\]',
+     "project diagnostic behind the DEBUG gate (off in production)", "mt5"),
+    (r'Print\("\[HTF\]',
+     "project diagnostic that MT5 gates behind DEBUG", "mt4"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*
@@ -260,7 +298,111 @@ def arch_only_note(a, b, limit=6):
 # ---------------------------------------------------------------------------
 # comparison
 # ---------------------------------------------------------------------------
-def justify(line, side):
+def _decl_norm(raw):
+    """Normalise a declared-patch line the way norm_body normalises a file line.
+
+    The patch text carries the explanatory trailing comments its author wrote,
+    and norm_body strips comments before comparing - so without this the two
+    sides never match and a perfectly declared patch reads as drift.
+    """
+    s = re.sub(r"//.*$", "", raw)
+    s = re.sub(r"/\*.*?\*/", "", s)
+    return " ".join(s.split())
+
+
+def _load_declared_patch_lines():
+    """Lines that a DECLARED module patch put on one side of the diff.
+
+    resync-module.py's MODULE_PATCHES is the authoritative list of the
+    MT5-only blocks this mirror carries (each with a reason). A patch replaces
+    MT4 text with MT5 text, so every line it introduces - including the
+    structural braces of the block it wraps - is one-sided BY DESIGN and no
+    regex in JUSTIFY can name it without becoming broad enough to hide real
+    drift. Reading the declarations is exact instead of heuristic: a line is
+    justified only if it literally came from a patch we declared.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    # MODULE_PATCHES lives on as pure DATA in the retired generator: it is the
+    # machine-readable list of which MT5-only blocks this fork carries and why.
+    # The generator itself is retired (2026-10-12 fork) - its --write paths must
+    # never run again, because these files are owned, not generated.
+    spec = importlib.util.spec_from_file_location(
+        "rm", os.path.join(here, "_retired", "resync-module.py"))
+    rm = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(rm)
+    except Exception:
+        return {}
+    out = {}
+    # The walk uses THIS file's MT4_REPO, not the retired generator's: moving
+    # resync-module.py one directory deeper broke its own dirname math, and the
+    # checker must not inherit that. MT4_REPO here is absolute and correct.
+    mt4_root = MT4_REPO
+    for mod, patches in getattr(rm, "MODULE_PATCHES", {}).items():
+        introduced, consumed = set(), set()
+        # what the patch PUT on the MT5 side
+        for _pat, repl, _why in patches:
+            for raw in repl.split("\n"):
+                s = _decl_norm(raw)
+                if s:
+                    introduced.add(s)
+        # what the patch ATE on the MT4 side: re-run its own pattern against the
+        # MT4 source, so the replaced original is recognised as consumed rather
+        # than mistaken for logic the mirror lost.
+        if mt4_root:
+            # Scan EVERY MT4 module. The tree splits a module into parts whose
+            # names are not a predictable prefix of the module's (LevelPipeline
+            # becomes LevelPipe_A/_B), and the generator INLINES those parts, so
+            # a patch can match text that exists in no single MT4 file. Each
+            # pattern is module-specific (it names that module's own functions),
+            # so scanning the whole tree cannot justify another module's line.
+            for base, _dirs, files in os.walk(mt4_root):
+                for fn in files:
+                    if not fn.endswith(".mqh"):
+                        continue
+                    with io.open(os.path.join(base, fn),
+                                 encoding="utf-8-sig") as fh:
+                        text = fh.read().replace("\r\n", "\n")
+                    for pat, _repl, _why in patches:
+                        for m in pat.finditer(text):
+                            for raw in m.group(0).split("\n"):
+                                s = _decl_norm(raw)
+                                if s:
+                                    consumed.add(s)
+        out[mod] = {"introduced": introduced, "consumed": consumed}
+    return out
+
+
+DECLARED_PATCH_LINES = _load_declared_patch_lines()
+
+# Names DEFINED by a declared patch (function signatures / definitions, not the
+# prose inside them). Read off the replacement text the same way.
+_SYMBOL_DEF = re.compile(r"^\s*(?:void|bool|int|double|string|datetime|long|"
+                         r"color|uint|static)\b[^;()]*\b([A-Za-z_]\w*)\s*\(")
+
+
+def declared_symbols(module):
+    decl = DECLARED_PATCH_LINES.get(module)
+    if not decl:
+        return set()
+    names = set()
+    for line in decl["introduced"]:
+        if line.lstrip().startswith("//"):
+            continue
+        m = _SYMBOL_DEF.match(line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+def justify(line, side, module=None):
+    decl = DECLARED_PATCH_LINES.get(module) if module else None
+    if decl:
+        s = _decl_norm(line)
+        if side == "mt5" and s in decl["introduced"]:
+            return "declared MT5-only platform patch (resync MODULE_PATCHES)"
+        if side == "mt4" and s in decl["consumed"]:
+            return "line consumed by a declared platform patch"
     for pat, why, allow in JUSTIFY:
         if allow in ("both", side) and re.search(pat, line):
             return why
@@ -312,10 +454,11 @@ def compare_module(p4, p5):
     c4, c5 = collections.Counter(code4), collections.Counter(code5)
     only4 = list((c4 - c5).elements())
     only5 = list((c5 - c4).elements())
-    bad4 = [(l, None) for l in only4 if not justify(l, "mt4")]
-    bad5 = [(l, None) for l in only5 if not justify(l, "mt5")]
-    just4 = [l for l in only4 if justify(l, "mt4")]
-    just5 = [l for l in only5 if justify(l, "mt5")]
+    mod = os.path.basename(p5)
+    bad4 = [(l, None) for l in only4 if not justify(l, "mt4", mod)]
+    bad5 = [(l, None) for l in only5 if not justify(l, "mt5", mod)]
+    just4 = [l for l in only4 if justify(l, "mt4", mod)]
+    just5 = [l for l in only5 if justify(l, "mt5", mod)]
 
     def owners(one_sided):
         """attribute one-sided lines to the symbols that contain them"""
@@ -339,7 +482,11 @@ def compare_module(p4, p5):
         arch=(arch_only_note([l for l in norm_body("\n".join(ref)) if is_arch(l)],
                             [l for l in norm_body("\n".join(cur)) if is_arch(l)])),
         sym4_only=sorted(set(sym4) - set(sym5) - set(GROUPED)),
-        sym5_only=sorted(set(sym5) - set(sym4) - set(GROUPED)),
+        # A symbol a DECLARED module patch introduced is not "extra logic to
+        # remove" - it is the patch. Without this, every MT5-only helper reads
+        # as a YELLOW the operator is being told to delete.
+        sym5_only=sorted(set(sym5) - set(sym4) - set(GROUPED)
+                         - declared_symbols(os.path.basename(p5))),
     )
 
 

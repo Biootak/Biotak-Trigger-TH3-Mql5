@@ -1,13 +1,12 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/ZoneRenderer.mqh
-//   regenerate : python tools/parity/resync-module.py --write ZoneRenderer.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * none
 // ============================================================================
   //+------------------------------------------------------------------+
@@ -105,7 +104,7 @@ void ResolveZoneStyles(
     // CRITICAL:                  objectPrefix
     string safePrefix = (StringLen(objectPrefix) > 0) ? objectPrefix : "Zone_";
     
-    // DIAGNOSTIC LOG: Start
+    #ifdef ENABLE_DEBUG_LOGS
     Print("====================");
     Print("   ZONE STYLE RESOLUTION DIAGNOSTIC");
     Print("====================");
@@ -114,9 +113,12 @@ void ResolveZoneStyles(
     Print("   Zone Transparency: ", config.zoneTransparency, "%");
     Print("   Object Prefix: ", safePrefix);
     Print("====================");
+    #endif
     
     if(config.showZones) {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   Zone Style Assignment:");
+        #endif
         
         for(int i = 0; i < count; i++) {
             if(geometries[i].isValid && classifications[i].isActive) {
@@ -131,36 +133,43 @@ void ResolveZoneStyles(
                 outZones[zoneCount].topPrice = geometries[i].topPrice;
                 outZones[zoneCount].bottomPrice = geometries[i].bottomPrice;
                 
-                // DIAGNOSTIC LOG: Zone Style
+                #ifdef ENABLE_DEBUG_LOGS
                 Print("  Zone ", zoneCount + 1, " [Level ", i, ", Step ", levels[i].logicalStep, "]:");
                 Print("   Name: ", outZones[zoneCount].name);
                 Print("   Color: ", ColorToString(outZones[zoneCount].clr));
                 Print("   Top: ", DoubleToString(outZones[zoneCount].topPrice, Digits));
                 Print("   Bottom: ", DoubleToString(outZones[zoneCount].bottomPrice, Digits));
                 Print("   Type: ", classifications[i].isStructure ? "STRUCTURE" : "TRIGGER");
+                #endif
                 
                 zoneCount++;
             }
             else {
+                #ifdef ENABLE_DEBUG_LOGS
                 if(!geometries[i].isValid) {
                     Print("   Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Invalid Geometry)");
                 }
                 else if(!classifications[i].isActive) {
                     Print("   Level ", i, " [Step ", levels[i].logicalStep, "]: SKIPPED (Inactive)");
                 }
+                #endif
             }
         }
     }
     else {
+        #ifdef ENABLE_DEBUG_LOGS
         Print("   Zone Display is DISABLED (config.showZones = false)");
+        #endif
     }
     
     ArrayResize(outZones, zoneCount);
     
+    #ifdef ENABLE_DEBUG_LOGS
     Print("====================");
     Print("  ResolveZoneStyles Summary:");
     Print("   Zones Prepared for Rendering: ", zoneCount);
     Print("====================");
+    #endif
 }
 
 //+------------------------------------------------------------------+
@@ -269,16 +278,19 @@ void RenderLines(const SLineRenderInfo &lines[])
     
     for(int i = 0; i < count; i++) {
         // PERFORMANCE: Check cache to skip redundant API calls
+        // P-PERF-RLN (2026-10-12): when the cache says the object exists we trust it
+        // and skip the ObjectFind — the invalidation path below still fires if
+        // ObjectCreate later fails, so the cache cannot go stale.
         SObjectCacheEntry cache;
         bool inCache = CacheGetObject(lines[i].name, cache);
-        bool objectExists = false;
-        if(inCache && cache.exists) {
-            objectExists = (ObjectFind(0, lines[i].name) >= 0);
-            if(!objectExists) {
-                CacheRemoveObject(lines[i].name);
-                inCache = false;
-            }
-        } else {
+        bool objectExists = inCache && cache.exists;
+        if(inCache && cache.exists && ObjectFind(0, lines[i].name) < 0) {
+            // stale cache entry — object was deleted externally
+            CacheRemoveObject(lines[i].name);
+            inCache = false;
+            objectExists = false;
+        }
+        if(!inCache) {
             objectExists = (ObjectFind(0, lines[i].name) >= 0);
         }
         

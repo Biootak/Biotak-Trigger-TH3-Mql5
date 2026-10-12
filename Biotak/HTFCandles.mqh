@@ -1,14 +1,13 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/HTFCandles.mqh
-//   regenerate : python tools/parity/resync-module.py --write HTFCandles.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the HTF slot/cull/mode prints are DEBUG, not production  (3 substitutions)
 // ============================================================================
 #ifndef HTF_CANDLES_MQH
 #define HTF_CANDLES_MQH
@@ -750,7 +749,7 @@ void HTFProbeSlot(const int htf)
    s_lastHtf  = htf;
    s_lastVis  = s_HTFVisBars;
    int chartTf = (int)Period();
-   Print("[P-HTF] slot htf=", htf, " chart=", chartTf, " vis=", s_HTFVisBars,
+   _LOG_GATE_D Print("[P-HTF] slot htf=", htf, " chart=", chartTf, " vis=", s_HTFVisBars,
          " ratio=", DoubleToString((chartTf > 0) ? (double)htf / (double)chartTf : 0.0, 1),
          " slot=", DoubleToString(s_HTFSlot, 1), " drawn=", g_HTFDrawnCount);
 }
@@ -1064,7 +1063,7 @@ void HTFProbeCull()
    static int s_lastTracked = -1;
    if(s_htfCulledN == s_lastTracked) return;
    s_lastTracked = s_htfCulledN;
-   Print("[P-HTF] cull masked=", s_htfCulledN, " panelOpen=", (g_UIPanelOpen ? 1 : 0),
+   _LOG_GATE_D Print("[P-HTF] cull masked=", s_htfCulledN, " panelOpen=", (g_UIPanelOpen ? 1 : 0),
          " drawn=", g_HTFDrawnCount);
 }
 
@@ -1286,7 +1285,7 @@ void HTFProbeSettings(const string why)
    s_lastMode  = g_HTFBoxMode;
    s_lastWicks = g_HTFShowWicks;
    s_lastBody  = g_HTFShowBody;
-   Print("[P-HTF] ", why, " mode=", g_HTFBoxMode, " wicks=", (g_HTFShowWicks ? 1 : 0),
+   _LOG_GATE_D Print("[P-HTF] ", why, " mode=", g_HTFBoxMode, " wicks=", (g_HTFShowWicks ? 1 : 0),
          " body=", (g_HTFShowBody ? 1 : 0), " shadow%=", g_HTFShadowPct,
          " gap%=", g_HTFGapPct, " opacity=", g_HTFOpacity, " drawn=", g_HTFDrawnCount,
          " hidden=", (IsIndicatorHidden() ? 1 : 0));

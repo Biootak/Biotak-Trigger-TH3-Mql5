@@ -1,14 +1,14 @@
 ﻿// ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/BuildConfig.mqh
-//   regenerate : python tools/parity/resync-module.py --write BuildConfig.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the gesture-census toggle, off unless a hunt needs it  (1 substitution)
+//   * count Period() reads so the compat ledger can price the emulation  (1 substitution)
 // ============================================================================
   //+------------------------------------------------------------------+
 //|                                                  BuildConfig.mqh |
@@ -37,7 +37,23 @@
 //                                                                   
 //           DEBUG                          :
 //                                                                   
-//#define DEBUG_BUILD   // P-LOG-3: re-enable for a hunt, never for a release.
+// P-LOG-3 closed 2026-10-05: the gear-panel hunt that opened this flag is over (the
+// gear panel gate is green and the strip is gated tree-wide), and leaving it on shipped
+// a DEBUG ex4: `ENABLE_DEBUG_LOGS` compiles in 302 gated blocks and 356 debug-print
+// call sites, several of them on the per-pass and per-teardown paths (OnDeinit, the
+// redraw decision, the cleanup walk). MT4's Print() is a file write with a flush, so on
+// the weakest machine this is pure cost for a log nobody reads in production. The
+// `[W][PERF]`/`[W][UI]` lines do NOT ride this flag (`Logger.mqh:381`: the WARN gate is
+// always active), so every measurement this project relies on survives the flip.
+// Re-enable for a hunt, never for a release.
+//#define DEBUG_BUILD
+//
+// P-PERF-12: the gesture census - one [gest] line per MOUSE_MOVE for
+// three seconds after any press. It is a DIAGNOSTIC for the native-draw
+// ordering question (P-UI-142/143) and is OFF in a shipped build:
+// measured at 4668 lines, 23% of the live terminal log, on the very path
+// the user moves the mouse along. Uncomment to bring it back for a hunt.
+//#define GESTURE_CENSUS
 
 //                                                                   
 
@@ -252,7 +268,11 @@ void PrintBuildInfo()
 //+------------------------------------------------------------------+
 #ifdef __MQL5__
 
-int CompatPeriodMinutes() { return PeriodSeconds(PERIOD_CURRENT) / 60; }
+// P-MT5-COST: counted, because Period() is a VARIABLE READ on MT4 and a
+// function call here, and the shared source reads it at 156 sites (the
+// ATR ladders, the HTF geometry, every cache key). The compat ledger
+// needs the count to prove whether that is where the MT5 lag lives.
+int CompatPeriodMinutes() { g_cl.periodCalls++; return PeriodSeconds(PERIOD_CURRENT) / 60; }
 
 // Minutes -> ENUM_TIMEFRAMES, deliberately forgiving: a value that is ALREADY
 // a valid enum constant passes through unchanged, so a site that crosses the

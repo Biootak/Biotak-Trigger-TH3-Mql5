@@ -1,14 +1,13 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/LabelFunctions.mqh
-//   regenerate : python tools/parity/resync-module.py --write LabelFunctions.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the mask diagnostic is DEBUG, not production  (1 substitution)
 // ============================================================================
   #ifndef LABEL_FUNCTIONS_MQH
 #define LABEL_FUNCTIONS_MQH
@@ -1804,7 +1803,7 @@ void SetTHLabelsVisibility(const string objectPrefix, const int mode) {
     // how many mask writes the terminal accepted, out of how many were aimed.
     // A toggle with everything already drawn reads applied=aimed (all names
     // exist); `applied=0` is the pre-fix signature and must never come back.
-    Print("[P-LBL] TH mask mode=", mode, " applied=", applied, " of ", aimed);
+    _LOG_GATE_D Print("[P-LBL] TH mask mode=", mode, " applied=", applied, " of ", aimed);
 }
 
 //+------------------------------------------------------------------+

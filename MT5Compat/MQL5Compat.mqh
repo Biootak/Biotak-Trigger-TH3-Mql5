@@ -1,8 +1,70 @@
-#ifndef MQL5_COMPAT_MQH
+﻿#ifndef MQL5_COMPAT_MQH
 #define MQL5_COMPAT_MQH
 
-#define Bid    SymbolInfoDouble(_Symbol, SYMBOL_BID)
-#define Ask    SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+//+------------------------------------------------------------------+
+//| COMPAT LEDGER - WHERE THE MT5 EMULATION ACTUALLY SPENDS ITS TIME   |
+//|                                                                  |
+//| Every name below is an MQL4 API this file emulates. On MT4 each of|
+//| them is a direct variable read or a single terminal call. On MT5|
+//| each one is a REAL call into the kernel, and the indicator reads |
+//| them everywhere - 156 Period(), 59 iBarShift, 22 iATR, 28 Bid/Ask|
+//| across the shared modules. That gap is invisible in the source   |
+//| and invisible in a compile; it only shows up as "MT5 lags".       |
+//|                                                                  |
+//| So: count the calls and time them, and print the ledger. It is   |
+//| MT5-ONLY by construction (this file has no MT4 twin) and costs   |
+//| two GetTickCount per measured call, so it is a MEASUREMENT build |
+//| - set COMPAT_LEDGER to 0 for a release.                           |
+//+------------------------------------------------------------------+
+#define COMPAT_LEDGER 1
+
+struct CompatLedger {
+   long refreshCalls, refreshMs;     // CompatRefreshChartData, whole
+   long seriesFull, seriesShift;     // full CopyRates vs in-memory shift
+   long seriesBars;                  // bars touched by the shift
+   long atrCalls, atrMs, atrFallback;// iATR -> handle / rates fallback
+   long atrMemoHit, atrMemoMiss;     // the same bar priced again, or not
+   long barShiftCalls, barShiftMs;   // iBarShift
+   long periodCalls;                 // Period()
+   long marketInfoCalls;             // MarketInfo()
+   long bidAskCalls;                 // Bid / Ask
+};
+static CompatLedger g_cl;
+
+string CL(const string tag, const long n, const long ms)
+{
+   return IntegerToString(n) + "/" + IntegerToString(ms) + "ms";
+}
+
+void CompatLedgerReport(const string tag)
+{
+   Print("[MT5-COMPAT] ", tag,
+         " | refresh=", CL("r", g_cl.refreshCalls, g_cl.refreshMs),
+         " (full=", IntegerToString(g_cl.seriesFull),
+         " shift=", IntegerToString(g_cl.seriesShift),
+         " bars=", IntegerToString(g_cl.seriesBars), ")",
+         " | iATR=", CL("a", g_cl.atrCalls, g_cl.atrMs),
+         " memo hit/miss=", IntegerToString(g_cl.atrMemoHit), "/", IntegerToString(g_cl.atrMemoMiss),
+         " fallback=", IntegerToString(g_cl.atrFallback),
+         " | iBarShift=", CL("b", g_cl.barShiftCalls, g_cl.barShiftMs),
+         " | Period()=", IntegerToString(g_cl.periodCalls),
+         " MarketInfo=", IntegerToString(g_cl.marketInfoCalls),
+         " Bid/Ask=", IntegerToString(g_cl.bidAskCalls));
+   g_cl.refreshCalls = 0; g_cl.refreshMs = 0;
+   g_cl.seriesFull = 0; g_cl.seriesShift = 0; g_cl.seriesBars = 0;
+   g_cl.atrCalls = 0; g_cl.atrMs = 0; g_cl.atrFallback = 0;
+   g_cl.atrMemoHit = 0; g_cl.atrMemoMiss = 0;
+   g_cl.barShiftCalls = 0; g_cl.barShiftMs = 0;
+   g_cl.periodCalls = 0; g_cl.marketInfoCalls = 0; g_cl.bidAskCalls = 0;
+}
+
+// Bid / Ask were plain macro expansions of SymbolInfoDouble. They are now
+// counting functions so the ledger can see them; the VALUE is identical.
+double CompatBid() { g_cl.bidAskCalls++; return SymbolInfoDouble(_Symbol, SYMBOL_BID); }
+double CompatAsk() { g_cl.bidAskCalls++; return SymbolInfoDouble(_Symbol, SYMBOL_ASK); }
+
+#define Bid    CompatBid()
+#define Ask    CompatAsk()
 #define Digits _Digits
 #define Point  _Point
 
@@ -50,12 +112,26 @@ int iBarShiftReal(const string symbol, const ENUM_TIMEFRAMES tf, const datetime 
 
 int iBarShiftCompat(const string symbol, const ENUM_TIMEFRAMES tf, const datetime time, const bool exact = false)
 {
-    return iBarShiftReal(symbol, tf, time, exact);
+#ifdef COMPAT_LEDGER
+   uint _t0 = GetTickCount();
+   int _r = iBarShiftReal(symbol, tf, time, exact);
+   g_cl.barShiftCalls++; g_cl.barShiftMs += (GetTickCount() - _t0);
+   return _r;
+#else
+   return iBarShiftReal(symbol, tf, time, exact);
+#endif
 }
 
 int iBarShiftCompat(const string symbol, const int tf, const datetime time, const bool exact = false)
 {
-    return iBarShiftReal(symbol, CompatTF(tf), time, exact);
+#ifdef COMPAT_LEDGER
+   uint _t0 = GetTickCount();
+   int _r = iBarShiftReal(symbol, CompatTF(tf), time, exact);
+   g_cl.barShiftCalls++; g_cl.barShiftMs += (GetTickCount() - _t0);
+   return _r;
+#else
+   return iBarShiftReal(symbol, CompatTF(tf), time, exact);
+#endif
 }
 
 // The raw builtin, reachable from anywhere in this shim that genuinely needs
@@ -156,6 +232,7 @@ string StringTrimRightReal(const string value)
 
 double MarketInfo(string symbol, int mode)
 {
+    g_cl.marketInfoCalls++;
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     switch(mode) {
         case MODE_LOW:            return SymbolInfoDouble(symbol, SYMBOL_LASTLOW);
@@ -351,7 +428,7 @@ void ResetATRFallbackCache()
     ArrayFree(g_atrFallbackRates);
 }
 
-double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
+double iATRMQL4Impl(string symbol, int timeframe, int atrPeriod, int shift)
 {
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     // `timeframe` arrives in EITHER unit: the shared ATR modules pass minutes
@@ -465,6 +542,7 @@ double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
 //+------------------------------------------------------------------+
 double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrPeriod, const int shift)
 {
+    g_cl.atrFallback++;
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
@@ -536,6 +614,104 @@ void ReleaseATRHandleCache()
     g_atrHandleCacheCount = 0;
     g_atrSelectedSymbol = "";
     ResetATRFallbackCache();
+#ifdef COMPAT_LEDGER
+    // The teardown is the one moment the whole session's emulation cost can be
+    // read in one number, and ReleaseATRHandleCache is already the declared
+    // MT5-only call on this path - so the ledger prints here and nowhere else.
+    CompatLedgerReport("session");
+#endif
+}
+
+//+------------------------------------------------------------------+
+//| THE VALUE MEMO - why MT5 lags and MT4 does not, in one number.    |
+//|                                                                  |
+//| MT4's iATR returns a value the terminal has already computed. On |
+//| MT5 an iATR is a HANDLE LOOKUP + BarsCalculated + CopyBuffer, and|
+//| the shared source calls it from inside a 400-bar scan, twice per  |
+//| structure timeframe, per new bar - and then repeats that whole   |
+//| scan six times per pattern draw (TH3SixPivotsHasPivotAt bypasses|
+//| the scan's own memo by design).                                   |
+//|                                                                  |
+//| So the SAME bar is priced four times through the kernel, and     |
+//| MT4 prices it once. That gap is invisible in the source and is   |
+//| exactly the shape of "MT4 is smooth, MT5 lags".                  |
+//|                                                                  |
+//| The memo is keyed on (symbol, tf, period, shift, bar), so a hit  |
+//| returns bit-identical data to a miss - it is a cache, not an      |
+//| approximation - and it expires the moment a new bar arrives.     |
+//+------------------------------------------------------------------+
+#define ATR_MEMO_SLOTS 1024
+struct ATRMemoEntry {
+   string symbol;
+   ENUM_TIMEFRAMES tf;
+   int period, shift, stamp;
+   double value;
+   bool used;
+};
+static ATRMemoEntry g_atrMemo[ATR_MEMO_SLOTS];
+static bool g_atrMemoReady = false;
+
+int ATRMemoSlot(const string symbol, const ENUM_TIMEFRAMES tf, const int period, const int shift, const int stamp)
+{
+   uint h = 2166136261u;
+   const string parts = symbol + "|" + IntegerToString((int)tf) + "|" +
+                        IntegerToString(period) + "|" + IntegerToString(shift);
+   for(int i = 0; i < (int)StringLen(parts); i++)
+      h = (h ^ (uchar)StringGetCharacter(parts, i)) * 16777619u;
+   int slot = (int)(h % (uint)ATR_MEMO_SLOTS);
+   if(g_atrMemo[slot].used && g_atrMemo[slot].symbol == symbol &&
+      g_atrMemo[slot].tf == tf && g_atrMemo[slot].period == period &&
+      g_atrMemo[slot].shift == shift && g_atrMemo[slot].stamp == stamp)
+      return ~slot;                       // hit: negative marker carries the slot
+   return slot;
+}
+
+// The measured front door. MT4's iATR is one terminal call that returns the
+// value; on MT5 it is a handle lookup + BarsCalculated + CopyBuffer, and it is
+// called from inside a 400-bar scan. The ledger is what makes that gap a number
+// instead of a feeling.
+double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
+{
+   if(symbol == NULL || symbol == "") symbol = _Symbol;
+   if(timeframe == PERIOD_CURRENT || timeframe == 0) timeframe = CompatPeriodMinutes();
+
+#ifdef COMPAT_LEDGER
+   uint _t0 = GetTickCount();
+   g_cl.atrCalls++;
+#endif
+   // The memo's lifetime is ONE BAR. The bar count is the stamp: it is already
+   // the function's own "is there history" quantity, and it is what every other
+   // cache in this file keys on.
+   const int stamp = iBars(symbol, CompatTF(timeframe));
+   const int _slot = ATRMemoSlot(symbol, CompatTF(timeframe), atrPeriod, shift, stamp);
+   if(_slot < 0)
+   {
+#ifdef COMPAT_LEDGER
+      g_cl.atrMemoHit++;
+      g_cl.atrMs += (GetTickCount() - _t0);
+#endif
+      return g_atrMemo[~_slot].value;
+   }
+#ifdef COMPAT_LEDGER
+   g_cl.atrMemoMiss++;
+#endif
+   const double _v = iATRMQL4Impl(symbol, timeframe, atrPeriod, shift);
+   if(!g_atrMemoReady)
+   {
+      for(int i = 0; i < ATR_MEMO_SLOTS; i++) { g_atrMemo[i].used = false; g_atrMemo[i].value = 0.0; }
+      g_atrMemoReady = true;
+   }
+   g_atrMemo[_slot].used = true;
+   g_atrMemo[_slot].symbol = symbol;
+   g_atrMemo[_slot].tf = CompatTF(timeframe);
+   g_atrMemo[_slot].period = atrPeriod;
+   g_atrMemo[_slot].shift = shift;
+   g_atrMemo[_slot].stamp = stamp;
+   g_atrMemo[_slot].value = _v;
+#ifdef COMPAT_LEDGER
+   g_cl.atrMs += (GetTickCount() - _t0);
+#endif
+   return _v;
 }
 
 #define iATR iATRMQL4
@@ -570,9 +746,11 @@ bool ObjectSetText(string name, string text, int fontSize = 0, string fontName =
 // P-PERF-MT5-01 (2026-10-11): ONE CopyRates call replaces five separate
 // Copy* calls. Five independent kernel-side locks per full sync → one lock.
 // On a 100k-bar chart that was 5 × 800 KB = 4 MB of independent copies;
-// now it is ONE 4.8 MB MqlRates read that the OS pages from one contiguous
+// now it is ONE ~7 MB MqlRates read that the OS pages from one contiguous
 // region. The five separate array unpackings below cost ~5 ns each (scalar
 // stores into pre-allocated arrays) — the syscall saving is the whole win.
+// The window is the WHOLE history, deliberately: see the P-MT5-TF-SPEED note
+// below, where `Bars` is read as a value and not merely as an index bound.
 //
 // Open[] is kept: CalculateTrueRange uses it for the oldest bar's prevClose
 // fallback (ATRCalculations.mqh:225). Removing it would break that edge case.
@@ -599,27 +777,27 @@ static int         g_seriesSyncedAt = -1;
 // every tick into a full-history copy attempt.
 #define COMPAT_FULL_SYNC_MIN_MS 500
 
-// P-MT5-TF-SPEED (2026-10-XX) — CAP THE FULL-SYNC WINDOW.
-// MT4 never copies "all history" on a TF switch — its Time[]/Close[] are
-// predefined kernel arrays that the terminal fills instantly. The MQL5 compat
-// layer used to call CopyRates(0, bars, ...) where `bars` is the TOTAL chart
-// history (up to 100k+ bars on XAUUSD H1). That one call alone accounted for
-// the TF-switch stall: 100k × 72 bytes MqlRates → 5 × 100k scalar unpacks.
+// P-MT5-TF-SPEED (2026-10-03), REVERTED (2026-10-12) - THE WINDOW MUST BE THE
+// WHOLE HISTORY, because `Bars` is a VALUE the shared modules reason with, not
+// just an index bound.
 //
-// The shared modules only ever look back MAX_BARS_LOOKBACK (10 000) bars.
-// ZoneFactory and ExtendedDrawingFunctions reference Time[safeBars-1] where
-// safeBars = Bars; that is bounded by this cap, and iBarShift / iATR calls
-// use explicit shifts that are capped to their own callers' ranges (400 for
-// the pivot scanner, 500 for TH3RealDAt). Adding a 20% safety margin gives
-// 12 000 bars — well above any real caller depth.
+// This layer used to cap the copy at COMPAT_SERIES_WINDOW (12 000) bars so a TF
+// switch would not copy 100k MqlRates. The cap was bounds-safe but it quietly
+// changed what `Bars` MEANS: MT4's Bars is the chart's loaded bar count, and
+// three shared modules read it as "how much history is there", not as a guard.
 //
-// On a TF switch: instead of copying 100k bars in O(n), we copy 12k and the
-// visible chart settles at the same latency as MT4 does.
+//   BaseKnotTool.mqh:2860-2873   total = Bars; if(s >= total) return 0;
+//       s comes from iBarShift(), which is NOT capped, so a base box older than
+//       the window reported "no base" on MT5 and a real base on MT4.
+//   ZoneFactory.mqh:337-338      startTime = Time[safeBars - 1]
+//   ExtendedDrawingFunctions.mqh:381  startTime = Time[safeBars - 1]
+//       the oldest bar. With the cap, a zone created without an explicit start
+//       began at bar 11 999 instead of at the true left edge of history.
 //
-// g_seriesBars continues to reflect the ACTUAL available bar count (from
-// iBars), so any caller that reads Bars for range-checking still gets the
-// true number; only the backing arrays are capped.
-#define COMPAT_SERIES_WINDOW 12000
+// So the full history is copied, exactly as many bars as the terminal has. The
+// cost is O(history) per NEW BAR (the sync is gated on a bar-count change and
+// throttled by COMPAT_FULL_SYNC_MIN_MS), not per tick, and the staging buffer is
+// kept rather than freed so the copy is not preceded by a realloc every bar.
 
 // R-TF-UNIT / P-MT5-PERF: overload that accepts the bar count already known
 // from OnCalculate's `rates_total` parameter, skipping the iBars() kernel
@@ -636,10 +814,12 @@ void CompatRefreshChartData(const int knownBars   = -1,
                             const double livHigh  = EMPTY_VALUE,
                             const double livLow   = EMPTY_VALUE)
 {
+    g_cl.refreshCalls++;
+    uint _rt0 = GetTickCount();
     // P-MT5-PERF: use the bar count supplied by OnCalculate (free — already
     // a local in the caller's frame) rather than paying a kernel call per tick.
     int bars = (knownBars > 0) ? knownBars : iBars(_Symbol, PERIOD_CURRENT);
-    if(bars <= 0) return;
+    if(bars <= 0) { g_cl.refreshMs += (GetTickCount() - _rt0); return; }
 
     // Full re-sync whenever the bar count changes (new bar / history download).
     // Otherwise only the forming bar (index 0) moves.
@@ -661,13 +841,64 @@ void CompatRefreshChartData(const int knownBars   = -1,
             // the very next tick, while a successful one is throttled
             // normally so history-churn cannot monopolise the CPU.
             ResetLastError();
-            // P-MT5-TF-SPEED: copy only the working window, not the entire history.
-            const int copyCount = (bars < COMPAT_SERIES_WINDOW) ? bars : COMPAT_SERIES_WINDOW;
+
+            // P-MT5-PERF: A NEW BAR IS THE COMMON CASE AND IT MUST NOT RE-READ
+            // THE HISTORY. The terminal appended the bar at the RIGHT, so the
+            // emulated series only has to SHIFT: whatever sat at index i is now
+            // at i+1, and index 0 is the new bar - which the live-value block at
+            // the foot of this function already writes from values the caller
+            // passed in. That is O(bars) scalar copies and ZERO kernel
+            // crossings, where the full path below pays a CopyRates of the
+            // ENTIRE history (a 7 MB struct copy on a 100k-bar chart) plus a
+            // 5 x bars field-by-field unpack, on every single new bar.
+            //
+            // Correctness: the oldest bar does not move when a bar is appended,
+            // and it survives the shift at the new last index - so Time[Bars-1]
+            // still answers the same bar it did before, which is the whole
+            // reason the window is the full history.
+            //
+            // The preconditions are strict on purpose. A jump of anything other
+            // than exactly +1 is a timeframe switch or a history download, not
+            // a new bar, and falls through to the full copy; so does a history
+            // shorter than iBars reported (g_seriesBars then lags the stamp),
+            // and a first sync.
+            if(g_seriesBars > 0 && g_seriesBars == g_seriesSyncedAt &&
+               bars == g_seriesSyncedAt + 1)
+            {
+                const int n = g_seriesBars;
+                ArrayResize(g_seriesTime,  n + 1);
+                ArrayResize(g_seriesOpen,  n + 1);
+                ArrayResize(g_seriesHigh,  n + 1);
+                ArrayResize(g_seriesLow,   n + 1);
+                ArrayResize(g_seriesClose, n + 1);
+                for(int i = n; i >= 1; i--)
+                {
+                    g_seriesTime[i]  = g_seriesTime[i-1];
+                    g_seriesOpen[i]  = g_seriesOpen[i-1];
+                    g_seriesHigh[i]  = g_seriesHigh[i-1];
+                    g_seriesLow[i]   = g_seriesLow[i-1];
+                    g_seriesClose[i] = g_seriesClose[i-1];
+                }
+                g_seriesBars     = n + 1;
+                g_seriesSyncedAt = bars;
+                s_lastFullSyncMs  = nowMs;
+                g_cl.seriesShift++;
+                g_cl.seriesBars += n;
+                // NO return: index 0 is the new bar and is written below.
+            }
+            else
+            {
+            // R-TF-UNIT: the WHOLE history, because `Bars` is read as a value by
+            // BaseKnotTool (a base older than the window read as "no base") and by
+            // ZoneFactory/ExtendedDrawingFunctions (Time[Bars-1] IS the oldest
+            // bar). See the P-MT5-TF-SPEED note above the series block.
+            const int copyCount = bars;
             ArraySetAsSeries(g_seriesRates, true);
             const int copied = CopyRates(_Symbol, PERIOD_CURRENT, 0, copyCount, g_seriesRates);
             if(copied > 0)
             {
                 s_lastFullSyncMs = nowMs;   // throttle ONLY after success
+                g_cl.seriesFull++;
                 // Unpack MqlRates into the five named series arrays.
                 // ArrayResize with the exact count avoids reallocating on every
                 // tick when the count is stable (MQL5 only grows, never shrinks).
@@ -684,20 +915,24 @@ void CompatRefreshChartData(const int knownBars   = -1,
                     g_seriesLow[i]   = g_seriesRates[i].low;
                     g_seriesClose[i] = g_seriesRates[i].close;
                 }
-                // R-TF-UNIT (P-MT5-TF-SPEED): g_seriesBars = copied, NOT bars.
-                // The arrays have exactly `copied` elements (capped at
-                // COMPAT_SERIES_WINDOW). Any code that reads Time[Bars-1] must
-                // find a valid index; setting g_seriesBars = bars (total history,
-                // possibly 100k) while the array is only 12k causes out-of-bounds
-                // access in ZoneFactory and ExtendedDrawingFunctions.
-                // Callers that need the true chart history depth call
+                // THE INVARIANT: Bars never exceeds what the arrays actually hold.
+                // CopyRates normally returns exactly `copyCount`, so Bars equals
+                // the terminal's true bar count and matches MT4; if history is
+                // shorter than iBars reported, this keeps the bound safe instead
+                // of handing out an index Time[99999] cannot serve.
+                // Callers that need the true chart history depth regardless call
                 // iBars(_Symbol, PERIOD_CURRENT) directly — that bypasses this
                 // variable and hits the MT5 kernel.
                 g_seriesBars     = copied;
                 g_seriesSyncedAt = bars;
-                ArrayFree(g_seriesRates);   // release staging memory immediately
+                // The staging buffer is deliberately NOT freed: ArrayResize only
+                // grows, so keeping it means the next full sync reuses the same
+                // allocation instead of taking (and releasing) the whole history
+                // block on every new bar.
+                g_cl.refreshMs += (GetTickCount() - _rt0);
                 return;
             }
+            }   // end else: full copy vs incremental shift
             // Copy failed (history still loading) — do NOT stamp s_lastFullSyncMs.
             // The next tick will retry immediately (due = true again) until the
             // history arrives. Once it does, the stamp fires and throttling begins.
@@ -724,6 +959,7 @@ void CompatRefreshChartData(const int knownBars   = -1,
             g_seriesClose[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
         }
     }
+    g_cl.refreshMs += (GetTickCount() - _rt0);
 }
 
 //+------------------------------------------------------------------+
@@ -808,8 +1044,16 @@ double ObjectGetDoubleCompat(const long chart_id, const string name, const ENUM_
 //| to the built-in) keeps the write filter and the MQL4 TIME1/TIME2    |
 //| anchor translation in the path for an int-prop write too.          |
 //+------------------------------------------------------------------+
-long ObjectGetIntegerReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier)
+// The read half of the TIME1/TIME2 mapping the setter already performs below.
+// Defined before the "#define ObjectGetInteger" rename so its body still reaches
+// the built-in. On MT4 `ObjectGetInteger(0, nm, OBJPROP_TIME1)` is a legal read
+// of the first anchor; on MQL5 the id 2010 is not a property at all, so without
+// this the call silently returns 0 and every reader believes an object has no
+// anchors.
+long ObjectGetIntegerRealT(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier)
 {
+    if(prop == OBJPROP_TIME1) return ObjectGetInteger(chart_id, name, OBJPROP_TIME, 0);
+    if(prop == OBJPROP_TIME2) return ObjectGetInteger(chart_id, name, OBJPROP_TIME, 1);
     return ObjectGetInteger(chart_id, name, prop, modifier);
 }
 
@@ -817,12 +1061,12 @@ long ObjectGetIntegerReal(const long chart_id, const string name, const ENUM_OBJ
 
 long ObjectGetIntegerCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier = 0)
 {
-    return ObjectGetIntegerReal(chart_id, name, prop, modifier);
+    return ObjectGetIntegerRealT(chart_id, name, prop, modifier);
 }
 
 long ObjectGetIntegerCompat(const long chart_id, const string name, const int prop, const int modifier = 0)
 {
-    return ObjectGetIntegerReal(chart_id, name, (ENUM_OBJECT_PROPERTY_INTEGER)prop, modifier);
+    return ObjectGetIntegerRealT(chart_id, name, (ENUM_OBJECT_PROPERTY_INTEGER)prop, modifier);
 }
 
 string ObjectGetStringReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_STRING prop, const int modifier)

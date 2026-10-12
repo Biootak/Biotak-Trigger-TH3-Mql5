@@ -1,13 +1,12 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/BuildHash.mqh
-//   regenerate : python tools/parity/resync-module.py --write BuildHash.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * none
 // ============================================================================
 //+------------------------------------------------------------------+
@@ -24,13 +23,13 @@
 //|                                                                   |
 //| same tree -> same hash ; any edit -> a different hash              |
 //|                                                                   |
-//| files=418 hash=377b5e9a2d5b36ff
+//| files=430 hash=7f63308918aafbaa
 //+------------------------------------------------------------------+
 #ifndef TH3_BUILD_HASH_MQH
 #define TH3_BUILD_HASH_MQH
 
-#define TH3_SRC_HASH   "377b5e9a2d5b36ff"   // full identity, printed in the log
-#define TH3_SRC_SHORT  "377b5e9a"           // the 8-char stamp the panel chip shows
-#define TH3_SRC_FILES  418                // files covered by the hash
+#define TH3_SRC_HASH   "7f63308918aafbaa"   // full identity, printed in the log
+#define TH3_SRC_SHORT  "7f633089"           // the 8-char stamp the panel chip shows
+#define TH3_SRC_FILES  430                // files covered by the hash
 
 #endif // TH3_BUILD_HASH_MQH

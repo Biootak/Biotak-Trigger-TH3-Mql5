@@ -1,13 +1,12 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/TradePlanFormulas.mqh
-//   regenerate : python tools/parity/resync-module.py --write TradePlanFormulas.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * none
 // ============================================================================
 //+------------------------------------------------------------------+
@@ -153,18 +152,33 @@ int TradePlanStructureMinutes(const int chartMinutes)
 int TradePlanRound(const double x) { return (int)MathRound(x); }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// EngSL / HuntSL PRECISION — ONE DECIMAL (user 2026-09-16).
+// W H Y: a whole-pip round turns a real low-TF size into 0. On EURUSD the M1
+// composite is ~1.4 pips, so Eng = 1.4/4.266666 = 0.34 -> round -> 0, and 0 is
+// the pump's word for "no EngSL pushed for this TF": the knot then sizes itself
+// by the box' own height instead of by the plan. One decimal keeps the size the
+// plan actually published (0.3), which is small but real and checkable.
+// W H A T   S T A Y S: SL/TP1..TP3/SB are WHOLE pips by construction — they are
+// the numbers verified against the professor's screenshots (XAUUSD 20/48/105/
+// 303/720/1180, EURUSD M1 SL=2), and Eng is still TR_composite/4.266666 with no
+// floor, no TH and no cap. Only the ROUNDING of the two knot legs changed.
+// 0 stays the ABSENCE value: a TF the pump never pushed keeps it, and the box
+// keeps saying so (BaseKnotEntryWhy / BaseKnotRiskTag).
+double TradePlanRound1(const double x) { return MathRound(x * 10.0) / 10.0; }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // P-LEGATR — THE LEG READ: the composite BEFORE the compression run.
 // The professor's ATR defect: the live composite averages the trailing CP bars,
 // so inside a CP it reads the CP's own sleep instead of the leg's power. The
-// as-of composite (CalculateWeightedATRAt, ATRCalculations.mqh) already reads any bar;
+// as-of composite (CalculateWeightedATRAt, ATR_A.mqh:1223) already reads any bar;
 // the only missing piece is WHICH bar: the first expansion bar behind the
 // trailing compression run (the "negative shift" by hand: shift = CP length).
 // The run test is range-only (High-Low < liveRef/2) — a DETECTOR, never the
 // measure (the measure stays the Trex composite, P-ATR-02, one ruler).
 // THE SCAN SKIPS THE BASE BAR (starts at shift 2): the breakout bar itself is
-// the leg's first bar — so its stops ride the pre-squeeze power, not the
-// depressed live the squeeze leaves behind. Inside an ongoing squeeze both
-// starts agree (the base bar joins the run).
+// the leg's first bar — «حرکت بعد از سی پی یک لگ هستش» — so its stops ride the
+// pre-squeeze power, not the depressed live the squeeze leaves behind. Inside
+// an ongoing squeeze both starts agree (the base bar joins the run).
 // COST: zero when OFF (one bool). When ON: ≤ LEGATR_MAX_SCAN × 2 series reads
 // per TF, once per TF-bar (bar-count cache below); a still frame is reads only.
 // No CP found (trending / cold history) = 0 = the live read, byte-identical.
@@ -223,21 +237,6 @@ int TradePlanLegRunBars(const int tfMinutes)
    if(idx < 0 || idx >= TRADEPLAN_LADDER_SIZE) return 0;
    return s_legAtrRun[idx];
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EngSL / HuntSL PRECISION — ONE DECIMAL (user 2026-09-16).
-// W H Y: a whole-pip round turns a real low-TF size into 0. On EURUSD the M1
-// composite is ~1.4 pips, so Eng = 1.4/4.266666 = 0.34 -> round -> 0, and 0 is
-// the pump's word for "no EngSL pushed for this TF": the knot then sizes itself
-// by the box' own height instead of by the plan. One decimal keeps the size the
-// plan actually published (0.3), which is small but real and checkable.
-// W H A T   S T A Y S: SL/TP1..TP3/SB are WHOLE pips by construction — they are
-// the numbers verified against the professor's screenshots (XAUUSD 20/48/105/
-// 303/720/1180, EURUSD M1 SL=2), and Eng is still TR_composite/4.266666 with no
-// floor, no TH and no cap. Only the ROUNDING of the two knot legs changed.
-// 0 stays the ABSENCE value: a TF the pump never pushed keeps it, and the box
-// keeps saying so (BaseKnotEntryWhy / BaseKnotRiskTag).
-double TradePlanRound1(const double x) { return MathRound(x * 10.0) / 10.0; }
 
 // Composite ATR of a specific TF in symbol pips. Returns 0 when not ready.
 // Calls CalculateWeightedATR (ATRCalculations.mqh) — the Trex SMA composite

@@ -1,14 +1,13 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/GlobalVariables.mqh
-//   regenerate : python tools/parity/resync-module.py --write GlobalVariables.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * MT5 accepts the CHART_CONTEXT_MENU write, so the menu must be restored  (1 substitution)
 // ============================================================================
   #ifndef GLOBAL_VARIABLES_MQH
 #define GLOBAL_VARIABLES_MQH
@@ -1186,6 +1185,17 @@ void ChartViewRestoreUser()
     if(((bool)ChartGetInteger(0, CHART_MOUSE_SCROLL)) != s_viewScrollUser)
         ChartSetInteger(0, CHART_MOUSE_SCROLL, s_viewScrollUser);
     // P-UI-114: menu half never restored - stub, unwritable (CTXMENU-OFF).
+    // MT5-ONLY: that is FALSE here, and the asymmetry was the bug.
+    // On MT5 `ChartSetInteger(0, CHART_CONTEXT_MENU, false)` SUCCEEDS,
+    // so every owned gesture (a base-knot session, the custom-price drag,
+    // a modal menu) turned the user's context menu OFF and - with no
+    // restore on this line - left it off for the rest of the session. The
+    // menu was dead from the first drag onwards, with nothing to undo it.
+    // The captured value is the user's own (ChartViewLockAcquire snapshots
+    // it), so this hands back exactly what they had, and the read-guard
+    // keeps it at zero terminal writes in steady state.
+    if((ChartGetInteger(0, CHART_CONTEXT_MENU) != 0) != s_viewCtxUser)
+        ChartSetInteger(0, CHART_CONTEXT_MENU, s_viewCtxUser);
 }
 
 

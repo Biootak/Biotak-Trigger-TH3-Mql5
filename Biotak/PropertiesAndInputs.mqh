@@ -1,21 +1,20 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/PropertiesAndInputs.mqh
-//   regenerate : python tools/parity/resync-module.py --write PropertiesAndInputs.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * none
 // ============================================================================
   #ifndef PROPERTIES_AND_INPUTS_MQH
 #define PROPERTIES_AND_INPUTS_MQH
 
 #property copyright "Formula by Professor Saeed Khakestar, Indicator by Biotak."
-#property link      "@biotak"
-#property version   "3.12"
+#property link "@biotak"
+#property version "3.12"
 #property strict
 #property indicator_chart_window
 #property description "Biotak Trigger TH3 v3.12 - Freeware, not for sale."
@@ -44,8 +43,6 @@ input ENUM_ADAPTIVE_MODE inpAdaptiveMode = ADAPTIVE_FRACTAL;      // Adaptive Mo
 input double inpAdaptiveBlendRatio = 0.5;                        // Adaptive Blend Ratio
 input int inpAdaptiveSmoothingPeriod = 10;                       // Adaptive Smoothing (v3.11: reduced to 10 for better response)
 input ENUM_FRACTAL_JUMP_STRATEGY inpFractalJumpStrategy = JUMP_AGGRESSIVE; // Fractal Jump Strategy
-// P-TH-01 RETIRED 2026-10-08: the knob was a research tool; FractalPercentScale()
-// now always returns 1.0 (professor's table, byte for byte). Input removed from MT4.
 
 input group "02) BASE PRICE - ANCHOR"
 input string S4 = "[02] BASE PRICE / ANCHOR";
@@ -142,9 +139,9 @@ input string S10 = "[07] ZONES / MID";
 input group "07.1) ZONES - ENABLE & TYPE"
 input string S10a = "[07.1] ZONES / ENABLE & TYPE";
 input bool inpShowMidZones = true;    // P-UI-143 (user order 2026-10-06: the card's own
-                                     // look as shipped: zones ON, 66 % opacity, 50 % height,
-                                     // border width 5). The ring's own light is the switch —
-                                     // a chart attaches clean and the user lights what they want.
+                                      // look as shipped — supersedes P-UI-119's OFF default
+                                      // for THIS family only; trigger/lines/TH/ATR stay OFF).
+                                      // The ring's own light is still the switch.
 input ENUM_ZONE_STYLE inpMidZoneStyle = ZONE_STYLE_BOX_FILLED;
 input group "07.2) ZONES - VISUAL DENSITY"
 input string S10b = "[07.2] ZONES / VISUAL DENSITY";
@@ -402,7 +399,7 @@ input string inpStepModeKey = "E";
 // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
 #ifndef BUILD_LITE
 input string inpTH3ToolKey = "V";
-input bool   inpTH3AutoPivots = true;   // P-TH3-P6: auto-find the course's six-condition pivots (PDF pp. 6-7) on the chart TF and one fractal step up; marks them on the chart and snaps the draw-session clicks onto them
+input bool   inpTH3AutoPivots = true;   // P-TH3-P6: auto-find the course's six-condition pivots (PDF pp. 6-7) on the chart TF and one fractal step up; P-TH3-DISC: marks are OFF (Renderer_C), this now owns the draw-session click snap only
 #endif
 #ifndef BUILD_LITE
 input string inpHTFKey = "R";            // Toggle HTF Candles overlay on/off (left-hand cluster)

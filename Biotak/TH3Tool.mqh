@@ -1,14 +1,14 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/TH3Tool.mqh
-//   regenerate : python tools/parity/resync-module.py --write TH3Tool.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * MQL4 Bars(symbol,timeframe) is MQL5 iBars(...) - same call, same result  (1 substitution)
+//   * MQL5 screenshot API is ChartScreenShot, not WindowScreenShot  (1 substitution)
 // ============================================================================
    //+------------------------------------------------------------------+
 //|                                                      TH3Tool.mqh |
@@ -4943,6 +4943,11 @@ void TH3_ExportCurrentSample(const string patternName = "")
    // ChartScreenShot takes the chart ID (0 = current), filename (relative to
    // the terminal Files/ folder), width, height, and alignment (ALIGN_LEFT
    // keeps the same "current bars on screen" behaviour as start_bar=0).
+   // NOTE the return contract differs, and the difference is deliberate:
+   // MQL4 returns -1 on failure, which reads as true here, so MT4 ADVANCES
+   // the sample counter on a failed capture; MQL5 returns false and does
+   // not. The MQL5 arm is the correct one - do not "restore parity" by
+   // inverting this test.
 #ifdef __MQL5__
    bool okShot = ChartScreenShot(0, shotPath, shotW, shotH, ALIGN_LEFT);
 #else

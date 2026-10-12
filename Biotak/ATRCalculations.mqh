@@ -1,14 +1,13 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/ATRCalculations.mqh
-//   regenerate : python tools/parity/resync-module.py --write ATRCalculations.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * MQL4 Bars(symbol,timeframe) is MQL5 iBars(...) - same call, same result  (1 substitution)
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * MQL5 iATR is handle-based: release the cached handles on deinit  (1 substitution)
 // ============================================================================
   //+------------------------------------------------------------------+
 //|                                            ATRCalculations.mqh   |
@@ -219,7 +218,7 @@ double CalculateTrueRange(const int barIndex) {
         // CRITICAL FIX: Validate array bounds before access
         if(barIndex >= Bars) {
             #ifdef ENABLE_DEBUG_LOGS
-            Print("   CalculateTrueRange: barIndex exceeds iBars(", barIndex, "/", Bars, ")");
+            Print("   CalculateTrueRange: barIndex exceeds Bars (", barIndex, "/", Bars, ")");
             #endif
             return 0.0;
         }

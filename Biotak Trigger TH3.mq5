@@ -1,13 +1,14 @@
 ﻿// ========================================================================
 // GENERATED MIRROR of Biotak Trigger TH3.mq4 - MT4 is the source of truth.
 // regenerate: python tools/parity/resync-module.py --entry
-// Only the declared MT5 platform blocks below are added (MQL4 series
-// arrays + MQL5 timeseries direction); nothing else is MT5-specific.
+// Only the declared MT5 platform blocks below are added (the MQL4
+// series-array emulation and the resource adaptations MQL5 needs);
+// nothing else is MT5-specific.
 // ========================================================================
   //+------------------------------------------------------------------+
 //|                                           Biotak Trigger TH3.mq4 |
 //+------------------------------------------------------------------+
-#property copyright "  Formula by Professor Saeed Khakestar, Indicator by Biotak."
+#property copyright "Formula by Professor Saeed Khakestar, Indicator by Biotak."
 #property link      "@biotak"
 #property version   "3.12"
 #property strict
@@ -16,8 +17,8 @@
 // MQL4 never needed to say it. The indicator draws objects, not buffers.
 #property indicator_plots 0
 
-#property description "Version 3.10 - GOLD: Post-Audit - All Critical Issues Fixed"
-#property description "Race conditions fixed | Memory leaks eliminated | Buffer overflow prevented"
+#property description "Biotak Trigger TH3 v3.12 - Freeware, not for sale."
+#property description "Trigger/TH/TH3 levels, HTF candles, hand drawings. By Biotak."
 
 //                                                                    
 // BUILD CONFIG - Must be first include!
@@ -302,20 +303,19 @@ int OnCalculate(const int rates_total,
     // causing currentPrice/currentBarTime to read the wrong end of history.
     // The global CompatRefreshChartData arrays (Time[]/Close[] etc.) are correctly
     // filled as timeseries by CompatRefreshChartData and are what all shared code
-    // reads — the parameter arrays are only used for the two index lookups in
+    // reads - the parameter arrays are only used for the two index lookups in
     // OnCalculateHandler (currentPrice, currentBarTime). MT5-ONLY fix.
-    // P-MT5-PERF: pass rates_total (free — already a parameter) so
+    // P-MT5-PERF: pass rates_total (free - already a parameter) so
     // CompatRefreshChartData skips the iBars() kernel call; pass the forming
     // bar's live values from the OnCalculate arrays (zero extra kernel
     // crossings) so the steady-state path skips three iHigh/iLow/iClose calls.
-    // close/high/low[rates_total-1] is the CURRENT (newest) bar — same bar
+    // close/high/low[rates_total-1] is the CURRENT (newest) bar - same bar
     // index 0 in the emulated timeseries.
     CompatRefreshChartData(
         rates_total,
         (rates_total > 0) ? close[rates_total - 1] : EMPTY_VALUE,
         (rates_total > 0) ? high[rates_total - 1]  : EMPTY_VALUE,
-        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE
-    );
+        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE);
     int result = OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
     // --- UI kit: HTF forming-candle live update + new-bar redraw ---
     RefreshKitOnBar();
@@ -452,8 +452,21 @@ void OnTimer()
     // MT5-ONLY PLATFORM CALL - keep the emulated MQL4 series arrays live on a
     // chart that is not ticking (MQL4's arrays always were).
     CompatRefreshChartData();
+    // MT5-ONLY COST LEDGER: a 60 s heartbeat, so the emulation's own price is
+    // visible while the indicator runs instead of only at teardown. Gated by
+    // COMPAT_LEDGER in MQL5Compat.mqh - undefined it and this compiles away.
+#ifdef COMPAT_LEDGER
+    static uint _clMs = 0;
+    uint _clNow = GetTickCount();
+    if(_clNow - _clMs >= 60000) { _clMs = _clNow; CompatLedgerReport("60s"); }
+#endif
     // P-UI-113-OFF (2026-09-23): no fast window — every tick is housekeeping.
 
+    // P-TH3-REC-04 (2026-10-05): age out the recorder's one-second receipt. The
+    // label is painted inside the M press and the DELETE is owed here, because
+    // MT4 paints when the event handler returns — a Sleep in the press froze the
+    // terminal for a second and showed nothing. One comparison per 250 ms, and
+    // the first line of the function so a still chart settles the label.
     TH3RecorderFlashTick();
 
     // P-PERF-16: the 250 ms safety refresh behind the cached UI metrics. Resizing

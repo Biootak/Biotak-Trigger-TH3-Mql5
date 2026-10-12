@@ -1,14 +1,13 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/PathTool.mqh
-//   regenerate : python tools/parity/resync-module.py --write PathTool.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * the Lite witness prints nothing unless DSTRIP_DIAG is set  (1 substitution)
 // ============================================================================
 //+------------------------------------------------------------------+
 //| PathTool.mqh — Path (TradingView Path parity).                    |
@@ -49,7 +48,8 @@ void PathWitness(const string line) { DrawStripDiagEmit("[Path] " + line); }
 // Lite ships no draw strip, so it ships no diag channel — MQL4 rejects a
 // prototype with no body anywhere in the unit (error 111), so the Lite witness
 // is the journal. Same bytes, one owner per build.
-void PathWitness(const string line) { Print("[Path] " + line); }
+// P-PERF-13 - silent by default, like the DrawStrip channel.
+void PathWitness(const string line) { }
 #endif
 
 static bool   s_pathArmed       = false;

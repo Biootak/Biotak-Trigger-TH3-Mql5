@@ -1,14 +1,14 @@
 // ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/DrawToolbar.mqh
-//   regenerate : python tools/parity/resync-module.py --write DrawToolbar.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
 //   * MQL5 ObjectCreate needs an explicit ENUM_OBJECT cast  (1 substitution)
+//   * the diag channel prints nothing unless DSTRIP_DIAG is set  (1 substitution)
 // ============================================================================
   //+------------------------------------------------------------------+
 //|                                              DrawToolbar.mqh      |
@@ -2055,7 +2055,8 @@ string FibPenChildParent(const string name)
 //--- P-WARN-46 (2026-10-04): no prototype owed - `DrawStripDiagEmit`'s body is in this
 //--- unit (DrawStrip_Base.mqh) and MQL4 resolves it.
 #else
-void DrawStripDiagEmit(const string line) { Print(line); }
+// P-PERF-13 (2026-10-12) - silent by default, like the DrawStrip twin.
+void DrawStripDiagEmit(const string line) { }
 #endif
 
 //--- name-keyed sweep for the delete hub (DrawStrip_Router): the object is gone,

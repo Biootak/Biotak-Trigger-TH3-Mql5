@@ -1,14 +1,13 @@
 ﻿// ============================================================================
-// GENERATED MIRROR of the MetaTrader 4 source - MT4 is the single source of
-// truth.  Do not add anything here that MT4 does not have: with MT4 there is
-// "nothing less, nothing more".
-//
+// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/Logger.mqh
-//   regenerate : python tools/parity/resync-module.py --write Logger.mqh
 //
-// The MT4 part files are inlined (MT5 has no such parts), includes of modules
-// both trees own are kept, and only these platform patches are applied:
-//   * none
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: MT5-only changes live here
+// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
+//
+// MT5-only changes this file already carries:
+//   * production log level is WARN, not INFO  (1 substitution)
 // ============================================================================
   #ifndef LOGGER_MQH
 #define LOGGER_MQH
@@ -265,7 +264,10 @@ void LogMessageP4(const ENUM_LOG_LEVEL level, const ENUM_LOG_CATEGORY category,
 
 // --- Helper: Runtime level gate (for INFO+ in production)
 // This is set from input parameter in OnInit via LoggerSetLevel()
-static ENUM_LOG_LEVEL g_runtimeLogLevel = LOG_LEVEL_INFO;
+// P-PERF-14 (2026-10-12) - PRODUCTION PRINTS WARN AND ABOVE. The default
+// was INFO, so 22 INFO emitters printed in every shipped build. WARN keeps
+// every measurement and every error; INFO returns with LoggerSetLevel.
+static ENUM_LOG_LEVEL g_runtimeLogLevel = LOG_LEVEL_WARN;
 
 void LoggerSetLevel(const ENUM_LOG_LEVEL level) { g_runtimeLogLevel = level; }
 ENUM_LOG_LEVEL LoggerGetLevel() { return g_runtimeLogLevel; }
