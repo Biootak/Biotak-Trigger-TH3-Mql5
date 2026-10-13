@@ -304,21 +304,53 @@ void InitializeUISupport()
    RestoreDiscreteToggles();   // P-UI-142: chart key, else the OV_-seeded mirror (restart-durable; the early dialog-fallback block stays for Lite)
    LoadPalRecent();
 
-   // panel drag positions (persisted per chart)
-   int kcw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0); if(kcw <= 0) kcw = 1920;
-   int kch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0); if(kch <= 0) kch = 1080;
+   // P-UI-140p/q: panel drag positions.
+   // Read priority: (1) symbol-free fraction BIOMENU_PNL_{i}_F  [canonical]
+   //                (2) symbol-prefixed fraction PNLPF{i}        [140p legacy, migrate]
+   //                (3) symbol-prefixed pixel    PNLP{i}         [pre-140p legacy, migrate]
+   // A fraction is re-derived against the LIVE window so the panel comes back to the
+   // same relative place after a restart, resize, monitor change or symbol switch.
+   int kcw = 0, kch = 0; HomeChartSize(kcw, kch);
    for(int i = 0; i < PNL_COUNT; i++)
    {
-      string vn = GetGVName("PNLP" + IntegerToString(i));
-      if(GlobalVariableCheck(vn))
+      string cfk = PnlFracKey(i);                              // canonical symbol-free
+      string ofk = GetGVName("PNLPF" + IntegerToString(i));   // old symbol-prefixed frac
+      string opk = GetGVName("PNLP"  + IntegerToString(i));   // old symbol-prefixed pixel
+      if(GlobalVariableCheck(cfk))
       {
-         double packed = GlobalVariableGet(vn);
-         g_PnlX[i] = (int)(packed / 10000.0);
-         g_PnlY[i] = (int)MathMod(packed, 10000.0);
-         // P-UI-142: a smaller window must not strand the manual spot off-screen.
-         if(g_PnlX[i] < 0) g_PnlX[i] = 0; if(g_PnlX[i] > kcw) g_PnlX[i] = kcw;
-         if(g_PnlY[i] < 0) g_PnlY[i] = 0; if(g_PnlY[i] > kch) g_PnlY[i] = kch;
+         // canonical: unpack integer-scaled fractions, re-derive pixels
+         double fx = 0, fy = 0;
+         PnlFracUnpack(GlobalVariableGet(cfk), fx, fy);
+         g_PnlX[i] = (int)MathRound(fx * kcw);
+         g_PnlY[i] = (int)MathRound(fy * kch);
          g_PnlManualPos[i] = true;
+      }
+      else if(GlobalVariableCheck(ofk))
+      {
+         // 140p symbol-prefixed fraction (old float encoding): migrate to canonical
+         double packed = GlobalVariableGet(ofk);
+         double fx = HomeFracClamp(packed / 10000.0);
+         double fy = HomeFracClamp(MathMod(packed, 10000.0));
+         g_PnlX[i] = (int)MathRound(fx * kcw);
+         g_PnlY[i] = (int)MathRound(fy * kch);
+         g_PnlManualPos[i] = true;
+         GlobalVariableSet(cfk, PnlFracPack(fx, fy));   // re-encode correctly
+         GlobalVariableDel(ofk);
+      }
+      else if(GlobalVariableCheck(opk))
+      {
+         // pre-140p pixel key: migrate once to canonical fraction, delete old
+         double packed = GlobalVariableGet(opk);
+         int px = (int)(packed / 10000.0);
+         int py = (int)MathMod(packed, 10000.0);
+         if(px < 0) px = 0; if(px > kcw) px = kcw;
+         if(py < 0) py = 0; if(py > kch) py = kch;
+         g_PnlX[i] = px; g_PnlY[i] = py;
+         g_PnlManualPos[i] = true;
+         double fx = HomeFracClamp(HomeFracOf(px, kcw));
+         double fy = HomeFracClamp(HomeFracOf(py, kch));
+         GlobalVariableSet(cfk, PnlFracPack(fx, fy));
+         GlobalVariableDel(opk);
       }
    }
 }

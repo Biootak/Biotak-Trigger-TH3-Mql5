@@ -301,10 +301,22 @@ bool DeleteIndicatorObjectManaged(const string name, const bool verifyChartObjec
 
     if(!existsOnChart) return inCache;
 
-    g_suppressDeleteEvents = true;
-    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+    // P-PERF-DIOM1 (2026-10-12): respect the CALLER's suppression window.
+    // The old pattern set+cleared g_suppressDeleteEvents around the single
+    // ObjectDelete here, which is correct for a standalone delete but
+    // WRONG for a loop caller (SweepForeignLadderObjects, CleanupSurplus*)
+    // that already armed the flag: the reset after each ObjectDelete fires
+    // the DrawStrip CHARTEVENT_OBJECT_DELETE handler for every subsequent
+    // call in the loop, producing DELFLUSH + ChartRedraw per object.
+    // If the caller already owns the suppress window, leave it alone;
+    // otherwise arm it around this one delete and clear afterwards.
+    bool ownedByUs = !g_suppressDeleteEvents;
+    if(ownedByUs) {
+        g_suppressDeleteEvents = true;
+        g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+    }
     bool deleted = ObjectDelete(0, name);
-    g_suppressDeleteEvents = false;
+    if(ownedByUs) g_suppressDeleteEvents = false;
     return deleted;
 }
 

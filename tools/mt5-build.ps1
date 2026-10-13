@@ -118,6 +118,30 @@ $errs   | ForEach-Object { $report += "ERR  $_" }
 $warns  | ForEach-Object { $report += "WARN $_" }
 $report | Set-Content -Path $summaryPath -Encoding UTF8
 
+# ---- prune old build-logs (keep last 5 per source name, drop all _raw-*) ---
+# _raw-* are the temporary Unicode copies MetaEditor writes; after the UTF-8
+# transcript is saved they are never read again but pile up to hundreds of MB.
+# The cleaned .log + .summary pairs are kept (last 5 per source), so git blame
+# can still see the last handful of builds without dragging 300+ files along.
+try {
+    # always nuke raw files
+    Get-ChildItem $logDir -Filter '_raw-*.log' -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # per-source group: derived from the source-file stem (same logic that named $name)
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($src) -replace '\s+', '-'
+    # collect all .log files whose name STARTS with the stem (exclude raw already gone)
+    $grp = @(Get-ChildItem $logDir -Filter "$stem-*.log" -ErrorAction SilentlyContinue |
+             Sort-Object LastWriteTime -Descending)
+    if ($grp.Count -gt 5) {
+        $grp | Select-Object -Skip 5 | ForEach-Object {
+            Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+            $sumFile = $_.FullName -replace '\.log$', '.summary.txt'
+            if (Test-Path $sumFile) { Remove-Item $sumFile -Force -ErrorAction SilentlyContinue }
+        }
+    }
+} catch { <# best-effort; never abort the build for a prune failure #> }
+
 if ($ErrorsOnly) {
     $errs | ForEach-Object { $_ }
 } else {

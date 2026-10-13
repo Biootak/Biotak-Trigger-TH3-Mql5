@@ -117,6 +117,50 @@ JUSTIFY = [
      "project diagnostic behind the DEBUG gate (off in production)", "mt5"),
     (r'Print\("\[HTF\]',
      "project diagnostic that MT5 gates behind DEBUG", "mt4"),
+    # --- MT5-only object housekeeping that predates the 2026-10-12 fork and
+    # --- would previously have been DESTROYED by any resync run. Both are
+    # --- behaviour-identical on MT4: deleting an absent object is a no-op
+    # --- there, and is a terminal call here, so the existence probe pays.
+    (r'if\(ObjectFind\(0, \w+ \+ "[^"]*"\) >= 0\) ObjectDelete\(0, \w+ \+ "[^"]*"\);',
+     "delete guarded by an existence probe (a terminal call MT4 does not pay)",
+     "mt5"),
+    (r'^\s*ObjectDelete\(0, \w+ \+ "[^"]*"\);\s*$',
+     "unguarded delete; MT5 guards it with an existence probe", "mt4"),
+    (r'bool objectExists = inCache && cache\.exists;',
+     "object-existence from the cache, still re-probed with ObjectFind", "mt5"),
+    (r'if\(inCache && cache\.exists && ObjectFind\(0, \w+\[i\]\.name\) < 0\) \{',
+     "stale-cache branch; MT4 probes existence in two steps", "mt5"),
+    (r'^\s*bool objectExists = false;\s*$',
+     "probed separately; MT5 derives it from the cache entry", "mt4"),
+    (r'^\s*ObjectSetInteger\(0, \w+, OBJPROP_(FILL|BACK), (true|false)\);\s*$',
+     "MT5 guards this property behind a compare (write-only-if-changed)", "mt4"),
+    (r'^if\(inpTH3LabelPosition != TH3_LABEL_HIDDEN\)',
+     "MT4's single-branch form; MT5 extends it with the changed-text check", "mt4"),
+    (r'^\s*objectExists = \(ObjectFind\(0, \w+\[i\]\.name\) >= 0\);\s*$',
+     "MT4's existence probe; MT5 answers it from the cache (still re-probed)", "mt4"),
+    (r'^\s*if\(inCache && cache\.exists\) \{',
+     "MT4's cache-hit branch; MT5 folds it into one cached read", "mt4"),
+    (r'^\s*\} else \{',
+     "MT4's else branch; MT5 reaches the same states in fewer branches", "mt4"),
+    (r'^\s*if\(!objectExists\) \{',
+     "MT4's exists/not-exists split; MT5 derives it from the cache", "mt4"),
+    (r'^\s*if\(!inCache\) \{',
+     "MT5's cache-miss branch (replaces MT4's else)", "mt5"),
+    (r'^\s*objectExists = false;\s*$',
+     "MT5's re-create path (MT4 reaches it via !objectExists)", "mt5"),
+    # --- WRITE-ONLY-IF-CHANGED. The project's own performance law ("never
+    # --- write a chart property you would not change") is implemented in MT5 by
+    # --- prefixing the write with a compare against the live property. These
+    # --- lines are exactly that guard, on the MT5 side.
+    (r'^\s*if\(\(?color\)?ObjectGetInteger\(0, \w+, OBJPROP_(COLOR|STYLE|WIDTH|FILL|BACK)\)\s*!=',
+     "write-only-if-changed guard (project performance law)", "mt5"),
+    (r'^\s*if\(\(int\)ObjectGetInteger\(0, \w+, OBJPROP_(STYLE|WIDTH)\)\s*!=',
+     "write-only-if-changed guard (project performance law)", "mt5"),
+    (r'ObjectGetString\(0, \w+, OBJPROP_LEVELTEXT, 0\) !=',
+     "write-only-if-changed guard (project performance law)", "mt5"),
+    (r'^\s*if\(inpTH3LabelPosition != TH3_LABEL_HIDDEN &&',
+     "MT4's single-branch form; MT5 extends it with the changed-text check",
+     "mt5"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*

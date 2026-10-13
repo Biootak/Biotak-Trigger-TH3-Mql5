@@ -4843,6 +4843,17 @@ void DrawStripGearClose()
 
 void DrawStripClose()
 {
+   // P-PERF-DSC1 (2026-10-12) — SUPPRESS DELETE EVENTS DURING BULK SLOT TEARDOWN.
+   // DrawStripClose issues ~60+ individual ObjectDelete calls across the slot loop,
+   // action buttons, and picker rows. Without the suppression flag every one fires
+   // CHARTEVENT_OBJECT_DELETE → the DrawStrip handler runs CHARTEVENT_OBJECT_DELETE
+   // again → DELFLUSH path → ChartRedraw() per object. On a chart with ~1000
+   // objects that is ~60 × ~10ms = ~600ms of wasted work inside the teardown of a
+   // strip that is already being closed. The suppression flag is the same bool every
+   // other bulk-delete path sets (LabelFunctions, EventHandlers, LevelPipeline,
+   // ObjectCache, DeleteMenu) — the DrawStrip handler exits early on it, skipping
+   // all family-heal work for events that are provably not user gestures.
+   g_suppressDeleteEvents = true;
    DrawStripColorHoverClear();
    for(int i = 0; i < DSTRIP_MAX_SLOTS; i++)
 
@@ -4876,6 +4887,8 @@ void DrawStripClose()
    DrawStripGearClose();
    ObjectDelete(0, DrawStripBgName());
    DrawStripSkinPurge();   // P-DRAW-29: the skin family dies with the strip
+   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+   g_suppressDeleteEvents = false;
    s_dsOpen = false;
    s_dsObj = "";
    s_dsKind = DK_NONE;
@@ -9933,7 +9946,19 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       // bulk paths arm the suppression window (their repaint is owned
       // elsewhere); an unsuppressed delete is the user's hand, and under a
       // thousand objects the terminal's own repaint lags a tick behind.
-      bool userDel = !g_suppressDeleteEvents && !TickDeadlinePending(g_suppressDeleteEventsUntilMs);
+      // P-PERF-DSH1 (2026-10-12): indicator-owned objects are NEVER user
+      // gestures — the indicator is the only writer and it owns the repaint.
+      // Treating their delete as a "HAND" delete caused DELFLUSH + ChartRedraw
+      // per object during bulk sweeps (SweepForeignLadderObjects, CleanupSurplus,
+      // DeleteAllIndicatorObjects), accumulating to the measured 4-7 second menu
+      // stall. The suppression flag was already supposed to catch this but the
+      // 250ms window expired before the terminal delivered all the queued
+      // CHARTEVENT_OBJECT_DELETE events (deleting 777 objects takes ~7s).
+      // Indicator objects are identified by name prefix (DrawIsIndicatorObject)
+      // — a prefix check is O(n) on the prefix length, free compared to the
+      // ChartRedraw it replaces.
+      bool isOurObject = DrawIsIndicatorObject(sparam);
+      bool userDel = !isOurObject && !g_suppressDeleteEvents && !TickDeadlinePending(g_suppressDeleteEventsUntilMs);
       if(casc) DrawStripDiagEmit("[drawstrip] CASCADE obj=\"" + sparam + "\"");
       if(!casc && userDel) DrawStripDiagEmit("[drawstrip] DELFLUSH obj=\"" + sparam + "\"");
       //--- P-DEL-NOW: a native delete drops the family in THIS event, so it owns

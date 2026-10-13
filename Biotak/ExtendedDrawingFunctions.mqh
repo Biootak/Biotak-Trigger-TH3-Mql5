@@ -38,6 +38,14 @@
 //+------------------------------------------------------------------+
 void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = "") {
     if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) return;
+    // P-PERF-CSO1 (2026-10-12): arm the bulk-delete suppress window for the
+    // entire loop so each DeleteIndicatorObjectManaged call does not reset
+    // g_suppressDeleteEvents=false after every ObjectDelete, which was causing
+    // CHARTEVENT_OBJECT_DELETE + DELFLUSH + ChartRedraw per surplus object.
+    // DeleteIndicatorObjectManaged now respects an already-armed caller window
+    // (P-PERF-DIOM1 in ObjectCache.mqh).
+    bool wasSupp = g_suppressDeleteEvents;
+    if(!wasSupp) g_suppressDeleteEvents = true;
     int misses = 0;
     bool zoneFamily = (suffix == "" && StringFind(prefix, "_Zone_") >= 0);
     for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {
@@ -49,6 +57,10 @@ void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutive
         } else {
             misses++;
         }
+    }
+    if(!wasSupp) {
+        g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+        g_suppressDeleteEvents = false;
     }
 }
 

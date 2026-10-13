@@ -135,6 +135,11 @@ MODULE_PATCHES = {
          '   // sweeps, so the story "per-call validation" was wrong too. These three\n'
          '   // numbers say which sweep actually costs, plus the object count they\n'
          '   // ran over - one line, on a teardown, where one line cannot matter.\n'
+         '   // P-PERF-11d (2026-10-12) - SUPPRESS DELETE EVENTS DURING BULK SWEEPS.\n'
+         '   // MT5 fires CHARTEVENT_OBJECT_DELETE for every programmatic delete;\n'
+         '   // MT4 does not fire any. The flag is this project\'s own suppression\n'
+         '   // pattern (LabelFunctions, EventHandlers, LevelPipeline, ObjectCache).\n'
+         '   g_suppressDeleteEvents = true;\n'
          '   uint _m0 = GetTickCount();\n'
          '   const int _n0 = ObjectsTotal(0, -1, -1);\n'
          '   s_circChromeGen++;                     // P-PERF-55: the family is gone\n'
@@ -144,12 +149,18 @@ MODULE_PATCHES = {
          '   const uint _m2 = GetTickCount();\n'
          '   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");\n'
          '   const uint _m3 = GetTickCount();\n'
+         '   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
+         '   g_suppressDeleteEvents = false;\n'
          '   Print("[W][PERF] DeleteMenu phases: n=", _n0,\n'
          '         " circ=", (int)(_m1 - _m0), "ms tools=", (int)(_m2 - _m1),\n'
          '         "ms sub=", (int)(_m3 - _m2), "ms");\n'
+         '   // second pass: catches any objects the first sweep missed (same guard)\n'
+         '   g_suppressDeleteEvents = true;\n'
          '   ObjectsDeleteAll(0, g_UI.btnPrefix + "Circ");\n'
          '   ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");\n'
          '   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");\n'
+         '   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
+         '   g_suppressDeleteEvents = false;\n'
          '   s_CircTipFeat = -2;   // tooltip objects share the prefix pattern\n'
          '   s_TipPendFeat = -2;\n'
          '   g_ToolsOpen = false;  // DeleteToolsMenu(false) used to carry these\n'
@@ -169,6 +180,100 @@ MODULE_PATCHES = {
          '// log, synchronous journal writes on the path they measure.\n'
          'void DrawStripDiagEmit(const string line) { }',
          "the diag channel prints nothing unless DSTRIP_DIAG is set"),
+        # P-PERF-DSC1 (2026-10-12) - MT5 fires a CHARTEVENT_OBJECT_DELETE for
+        # every programmatic delete (MT4 fires none). A teardown that issues
+        # ~60 ObjectDelete calls runs the DrawStrip delete handler ~60 times
+        # over; the project's own suppression flag makes those events exit
+        # early. The flag exists in MT4 too - only the event storm is MT5's.
+        (re.compile(
+            r'void DrawStripClose\(\)\n\{\n   DrawStripColorHoverClear\(\);'),
+         'void DrawStripClose()\n'
+         '{\n'
+         '   // P-PERF-DSC1 (2026-10-12) - SUPPRESS DELETE EVENTS DURING BULK SLOT TEARDOWN.\n'
+         '   g_suppressDeleteEvents = true;\n'
+         '   DrawStripColorHoverClear();\n',
+         "arm the delete-event suppression across the bulk slot teardown"),
+        (re.compile(
+            r'   DrawStripSkinPurge\(\);'),
+         '   DrawStripSkinPurge();\n'
+         '   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
+         '   g_suppressDeleteEvents = false;\n',
+         "close the suppression window with the 250 ms re-arm"),
+        # P-PERF-DSH1 (2026-10-12) - the queued delete events of a bulk sweep
+        # (777 objects ~ 7 s) outrun the 250 ms window on MT5, so indicator-
+        # owned objects must never be read as a user gesture. Name-prefix check
+        # only; MT4 needs no such guard because its deletes raise no events.
+        (re.compile(
+            r'      bool userDel = !g_suppressDeleteEvents && !TickDeadlinePending\(g_suppressDeleteEventsUntilMs\);'),
+         '      bool isOurObject = DrawIsIndicatorObject(sparam);\n'
+         '      bool userDel = !isOurObject && !g_suppressDeleteEvents && !TickDeadlinePending(g_suppressDeleteEventsUntilMs);\n',
+         "indicator-owned deletes are never user gestures on MT5"),
+    ],
+    "ExtendedDrawingFunctions.mqh": [
+        # P-PERF-CSO1 (2026-10-12) - MT5-only bulk-window arming (see the
+        # DrawStrip patches): the surplus loop deletes through
+        # DeleteIndicatorObjectManaged, which re-arms/clears the flag per call
+        # unless the caller already owns the window. MT4 raises no events here.
+        (re.compile(
+            r'void CleanupSurplusObjects\(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = ""\) \{\n'
+            r'    if\(g_customPriceLineDragging && StringFind\(prefix, "_Zone_"\) >= 0\) return;\n'
+            r'    int misses = 0;\n'
+            r'    bool zoneFamily = \(suffix == "" && StringFind\(prefix, "_Zone_"\) >= 0\);\n'
+            r'    for\(int idx = startIdx; misses < maxConsecutiveMiss; idx\+\+\) \{\n'
+            r'        string name = prefix \+ IntegerToString\(idx\) \+ suffix;\n'
+            r'        bool deleted = zoneFamily \? DeleteManagedZoneObjects\(name, true\)\n'
+            r'                                  : DeleteIndicatorObjectManaged\(name, true\);\n'
+            r'        if\(deleted\) \{\n'
+            r'            misses = 0;\n'
+            r'        \} else \{\n'
+            r'            misses\+\+;\n'
+            r'        \}\n'
+            r'    \}\n'
+            r'\}'),
+         'void CleanupSurplusObjects(const string prefix, int startIdx, int maxConsecutiveMiss = 6, const string suffix = "") {\n'
+         '    if(g_customPriceLineDragging && StringFind(prefix, "_Zone_") >= 0) return;\n'
+         '    // P-PERF-CSO1 (2026-10-12): arm the bulk-delete suppress window for the loop.\n'
+         '    bool wasSupp = g_suppressDeleteEvents;\n'
+         '    if(!wasSupp) g_suppressDeleteEvents = true;\n'
+         '    int misses = 0;\n'
+         '    bool zoneFamily = (suffix == "" && StringFind(prefix, "_Zone_") >= 0);\n'
+         '    for(int idx = startIdx; misses < maxConsecutiveMiss; idx++) {\n'
+         '        string name = prefix + IntegerToString(idx) + suffix;\n'
+         '        bool deleted = zoneFamily ? DeleteManagedZoneObjects(name, true)\n'
+         '                                  : DeleteIndicatorObjectManaged(name, true);\n'
+         '        if(deleted) {\n'
+         '            misses = 0;\n'
+         '        } else {\n'
+         '            misses++;\n'
+         '        }\n'
+         '    }\n'
+         '    if(!wasSupp) {\n'
+         '        g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
+         '        g_suppressDeleteEvents = false;\n'
+         '    }\n'
+         '}',
+         "arm the suppression window across the whole surplus sweep"),
+    ],
+    "ObjectCache.mqh": [
+        # P-PERF-DIOM1 (2026-10-12) - respect a caller-owned suppression window.
+        # The MT4 body sets+clears the flag around every single delete, which
+        # re-opens the event channel between loop iterations on MT5 (the events
+        # MT4 never fires). Standalone deletes behave identically on both trees.
+        (re.compile(
+            r'    g_suppressDeleteEvents = true;\n'
+            r'    g_suppressDeleteEventsUntilMs = GetTickCount\(\) \+ 250;\n'
+            r'    bool deleted = ObjectDelete\(0, name\);\n'
+            r'    g_suppressDeleteEvents = false;\n'
+            r'    return deleted;'),
+         '    bool ownedByUs = !g_suppressDeleteEvents;\n'
+         '    if(ownedByUs) {\n'
+         '        g_suppressDeleteEvents = true;\n'
+         '        g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
+         '    }\n'
+         '    bool deleted = ObjectDelete(0, name);\n'
+         '    if(ownedByUs) g_suppressDeleteEvents = false;\n'
+         '    return deleted;',
+         "only arm/clear the window when this call owns it"),
     ],
     "DrawToolbar.mqh": [
         # The Lite twin of the same channel: DrawStrip.mqh:859 is compiled for

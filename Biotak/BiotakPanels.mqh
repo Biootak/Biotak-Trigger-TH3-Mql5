@@ -5664,17 +5664,13 @@ void PnlComputePosition(const int item,const int ph,int &px,int &py)
    // fresh open uses: the card keeps its place only while the place is good.
    if(g_PnlManualPos[item])
    {
-      int manX = (int)MathMax(4, MathMin(cw - pw - 8, g_PnlX[item]));
-      int manY = (int)MathMax(4, MathMin(ch - ph - PNL_BOTTOM_SAFE, g_PnlY[item]));
-      bool parkMenuHit = !(manX + pw <= mbx - PNL_PAD_X ||
-                           manX >= mbx + mbw + PNL_PAD_X ||
-                           manY + ph <= mby - PNL_PAD_X ||
-                           manY >= mby + mbh + PNL_PAD_X);
-      // P-DRAW-31: a park on the strip's plate is as dirty as a park on the candles.
-      bool parkStripHit = (hasStrip && PnlRectHits(manX, manY, pw, ph, srX, srY, srW, srH,
-                                                   PNL_PAD_X));
-      int parkOv = (hasBand ? PnlIntervalOverlap(manY, ph, cdTop, cdBot) : 0);
-      if(!parkMenuHit && !parkStripHit && parkOv == 0) { px = manX; py = manY; return; }
+      // P-UI-140r: a hand-placed panel comes back where the hand left it.
+      // Only clamp to screen edges — never run the overlap search on a manual
+      // spot, because the user CHOSE that position and must be able to keep it
+      // even when the menu or the candle band shifted after a restart.
+      px = (int)MathMax(4, MathMin(cw - pw - 8, g_PnlX[item]));
+      py = (int)MathMax(4, MathMin(ch - ph - PNL_BOTTOM_SAFE, g_PnlY[item]));
+      return;
    }
 
    int candX[4], candY[4];
@@ -7185,11 +7181,47 @@ void PnlDestroy(const int item)
 //| Drag-to-move release — lock the spot in for future opens and     |
 //| persist it (defined early so the pointer finalizer can call it). |
 //+------------------------------------------------------------------+
+// P-UI-140q: symbol-free key for panel fraction — same pattern as GVHomeFracName.
+// A panel dragged on EURUSD must appear at the same relative place on GBPUSD.
+string PnlFracKey(const int item) { return "BIOMENU_PNL_" + IntegerToString(item) + "_F"; }
+// Pack two 0..1 fractions into one double: both scaled to 0..9999 integers.
+// packed = fx_int * 10000 + fy_int  (fx_int and fy_int each 0..9999)
+// This keeps the encoding invertible for any fx,fy in [0,1].
+double PnlFracPack(const double fx, const double fy)
+{
+   int fxi = (int)MathRound(HomeFracClamp(fx) * 9999.0);
+   int fyi = (int)MathRound(HomeFracClamp(fy) * 9999.0);
+   return (double)(fxi * 10000 + fyi);
+}
+void PnlFracUnpack(const double packed, double &fx, double &fy)
+{
+   int fxi = (int)(packed / 10000.0);
+   int fyi = (int)MathMod(packed, 10000.0);
+   fx = HomeFracClamp(fxi / 9999.0);
+   fy = HomeFracClamp(fyi / 9999.0);
+}
+
 void PnlCommitMove(const int item)
 {
    g_PnlManualPos[item] = true;
-   GlobalVariableSet(GetGVName("PNLP" + IntegerToString(item)),
-                     g_PnlX[item] * 10000.0 + g_PnlY[item]);
+   // P-UI-140p/q: store as symbol-free FRACTION so the position survives restarts,
+   // resizes, monitor changes AND symbol switches. Old keyed keys are deleted.
+   int rcw = 0, rch = 0;
+   if(HomeChartSizeRaw(rcw, rch))
+   {
+      double fx = HomeFracClamp(HomeFracOf(g_PnlX[item], rcw));
+      double fy = HomeFracClamp(HomeFracOf(g_PnlY[item], rch));
+      GlobalVariableSet(PnlFracKey(item), PnlFracPack(fx, fy));
+      // retire both old keys (symbol-prefixed fraction and pixel)
+      GlobalVariableDel(GetGVName("PNLPF" + IntegerToString(item)));
+      GlobalVariableDel(GetGVName("PNLP"  + IntegerToString(item)));
+   }
+   else
+   {
+      // window size unknown — keep pixel key as fallback (will migrate on next load)
+      GlobalVariableSet(GetGVName("PNLP" + IntegerToString(item)),
+                        g_PnlX[item] * 10000.0 + g_PnlY[item]);
+   }
 }
 
 //--- P-UI-75b: the drag's own frame window. File scope (and declared HERE,

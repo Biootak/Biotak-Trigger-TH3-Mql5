@@ -3551,6 +3551,16 @@ void DeleteMenu()
    // sweeps, so the story "per-call validation" was wrong too. These three
    // numbers say which sweep actually costs, plus the object count they
    // ran over - one line, on a teardown, where one line cannot matter.
+   // P-PERF-11d (2026-10-12) — SUPPRESS DELETE EVENTS DURING BULK SWEEPS.
+   // The three ObjectsDeleteAll calls each fire CHARTEVENT_OBJECT_DELETE for
+   // every deleted object; the DrawStrip handler runs per-event (~10ms on a
+   // chart with ~1000 objects), accumulating to the measured ~1000ms menu
+   // wall. The same suppression pattern every other bulk-delete path uses
+   // (LabelFunctions, EventHandlers, LevelPipeline, ObjectCache) arms
+   // g_suppressDeleteEvents before the sweeps and re-arms the 250ms window
+   // after; the DrawStrip handler exits early on the flag, skipping all
+   // family-heal and DELFLUSH work for events that cannot be user gestures.
+   g_suppressDeleteEvents = true;
    uint _m0 = GetTickCount();
    const int _n0 = ObjectsTotal(0, -1, -1);
    s_circChromeGen++;                     // P-PERF-55: the family is gone
@@ -3560,12 +3570,18 @@ void DeleteMenu()
    const uint _m2 = GetTickCount();
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
    const uint _m3 = GetTickCount();
+   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+   g_suppressDeleteEvents = false;
    Print("[W][PERF] DeleteMenu phases: n=", _n0,
          " circ=", (int)(_m1 - _m0), "ms tools=", (int)(_m2 - _m1),
          "ms sub=", (int)(_m3 - _m2), "ms");
+   // second pass: catches any objects the first sweep missed (same guard)
+   g_suppressDeleteEvents = true;
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Circ");
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
+   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+   g_suppressDeleteEvents = false;
    s_CircTipFeat = -2;   // tooltip objects share the prefix pattern
    s_TipPendFeat = -2;
    g_ToolsOpen = false;  // DeleteToolsMenu(false) used to carry these
