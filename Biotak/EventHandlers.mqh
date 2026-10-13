@@ -12,6 +12,7 @@
 //   * the handoff probe is DEBUG, not production  (1 substitution)
 //   * key-press diagnostics are DEBUG, not production  (3 substitutions)
 //   * the delete diagnostic is DEBUG, not production  (1 substitution)
+//   * the first paint waits for the adaptive/fractal seed (P-MT5-SEED-01)
 // ============================================================================
    //+------------------------------------------------------------------+
 //| Event Handlers - Version 3.10 GOLD                              |
@@ -2882,6 +2883,34 @@ void RedrawAllObjects(bool force_redraw=false)
     }
     g_p3MsAtr = GetTickCount() - g_p3MsLastTick;    // ATR composite + scaling
     g_p3MsLastTick = GetTickCount();
+
+    // MT5-ONLY P-MT5-SEED-01: THE FIRST PAINT WAITS FOR THE FRACTAL SEED.
+    //
+    // MT4 prices ATR synchronously, so its very first frame already carries
+    // the jump. MT5's iATR is handle-based and answers 0 for the first frames
+    // after attach (and after a timeframe switch, which re-inits the
+    // indicator). Before this gate the frame painted anyway: shift 0 went up,
+    // a frame later the seed landed, g_redrawTHLevelsNeeded was raised, and
+    // the user watched the levels appear, get deleted, and be rebuilt — every
+    // single attach («سطوح یکبار رسم میشه و بعد حذف میشه بعد فراکتال جامپ
+    // اعمال میشه؛ از همون اول همون سطوح‌ها رسم بشه»).
+    //
+    // Now the unseeded frame returns BEFORE any drawing. The 250 ms timer and
+    // the tick pump re-enter this function, UpdateATRScalingFactor retries on
+    // every entry (its 5 s resample gate is already skipped while
+    // !g_scalingInitialized — AdaptiveScaling.mqh), and the first paint lands
+    // with g_fractalShift resolved. Nothing is deleted because nothing was
+    // ever shown.
+    //
+    // The 20 s bound is the escape hatch for a symbol that never serves ATR:
+    // past it the old paint-anyway behaviour resumes. The condition mirrors
+    // UpdateATRScalingFactor's own early return (ADAPTIVE_FIXED || inpTHVolNorm
+    // price without ATR): modes that never seed must never wait.
+    static uint s_seedWaitStartMs = 0;
+    bool seedWait = (inpAdaptiveMode != ADAPTIVE_FIXED && !inpTHVolNorm && !g_scalingInitialized);
+    if(seedWait && s_seedWaitStartMs == 0) s_seedWaitStartMs = nowMs;
+    if(!seedWait && s_seedWaitStartMs != 0) s_seedWaitStartMs = 0;   // re-arm for the next unseeded stretch
+    if(seedWait && nowMs - s_seedWaitStartMs < 20000) { g_redrawTHLevelsNeeded = true; return; }   // the debt survives; the seeded frame pays it
     
     static double s_lastDrawnBasePrice = 0.0;
     bool basePriceChanged = (MathAbs(thBasePrice - s_lastDrawnBasePrice) > s_cachedPoint);

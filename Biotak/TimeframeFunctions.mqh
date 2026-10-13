@@ -7,7 +7,9 @@
 // directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
 //
 // MT5-only changes this file already carries:
-//   * none
+//   * GetCurrentTimeframe: H1..MN1 case labels are minute literals, because
+//     the switch input is minutes while MT5's PERIOD_* constants are enums
+//     (R-TF-UNIT; Weekly/Monthly levels were "UNKNOWN" without it)
 // ============================================================================
   #ifndef TIMEFRAME_FUNCTIONS_MQH
 #define TIMEFRAME_FUNCTIONS_MQH
@@ -21,11 +23,18 @@ string GetCurrentTimeframe() {
         case PERIOD_M5:return "M5";
         case PERIOD_M15:return "M15";
         case PERIOD_M30:return "M30";
-        case PERIOD_H1:return "H1";
-        case PERIOD_H4:return "H4";
-        case PERIOD_D1:return "D1";
-        case PERIOD_W1:return "W1";
-        case PERIOD_MN1:return "MN1";
+        // MT5-ONLY R-TF-UNIT: `timeframe` is MINUTES (CompatPeriodMinutes),
+        // but MT5's PERIOD_H1..PERIOD_MN1 are ENUM values (16385/16388/
+        // 16408/32768/49152). The MT4 labels above still match because
+        // M1..M30 are 1..30 on both platforms; from H1 up the enum labels
+        // could never match, so H4/D1/W1/MN1 charts fell to "UNKNOWN", the
+        // fractal ladder fell to "M1", and Weekly/Monthly levels were never
+        // drawn. Minute literals are the MT4 values of those same labels.
+        case 60:return "H1";
+        case 240:return "H4";
+        case 1440:return "D1";
+        case 10080:return "W1";
+        case 43200:return "MN1";
         default:return "UNKNOWN";
     }
 }

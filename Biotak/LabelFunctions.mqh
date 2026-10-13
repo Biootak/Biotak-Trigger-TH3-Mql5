@@ -8,6 +8,8 @@
 //
 // MT5-only changes this file already carries:
 //   * the mask diagnostic is DEBUG, not production  (1 substitution)
+//   * PeriodToString: H1..MN1 case labels are minute literals — callers pass
+//     minutes, MT5's PERIOD_* constants are enums (R-TF-UNIT)  (5 substitutions)
 // ============================================================================
   #ifndef LABEL_FUNCTIONS_MQH
 #define LABEL_FUNCTIONS_MQH
@@ -2404,11 +2406,17 @@ string PeriodToString(int period)
         case PERIOD_M5:  return "M5";
         case PERIOD_M15: return "M15";
         case PERIOD_M30: return "M30";
-        case PERIOD_H1:  return "H1";
-        case PERIOD_H4:  return "H4";
-        case PERIOD_D1:  return "D1";
-        case PERIOD_W1:  return "W1";
-        case PERIOD_MN1: return "MN";
+        // MT5-ONLY R-TF-UNIT: every caller feeds MINUTES (plan.chartMin,
+        // g_lockedPeriod through CompatMinutes). MT5's PERIOD_H1..PERIOD_MN1
+        // are enum values (16385+), so the MT4 labels above only reach
+        // through M30; from H1 up the old labels returned "TF60"/"TF10080"
+        // and corrupted label object names. The literals below are exactly
+        // the MT4 values of those labels.
+        case 60:    return "H1";
+        case 240:   return "H4";
+        case 1440:  return "D1";
+        case 10080: return "W1";
+        case 43200: return "MN";
         default:         return "TF" + IntegerToString(period);
     }
 }

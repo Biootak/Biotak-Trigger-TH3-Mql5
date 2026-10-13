@@ -9,6 +9,7 @@
 // MT5-only changes this file already carries:
 //   * the gesture-census toggle, off unless a hunt needs it  (1 substitution)
 //   * count Period() reads so the compat ledger can price the emulation  (1 substitution)
+//   * CompatPeriodMinutes pins W1/MN1 to nominal MT4 minutes (R-TF-UNIT)
 // ============================================================================
   //+------------------------------------------------------------------+
 //|                                                  BuildConfig.mqh |
@@ -272,7 +273,18 @@ void PrintBuildInfo()
 // function call here, and the shared source reads it at 156 sites (the
 // ATR ladders, the HTF geometry, every cache key). The compat ledger
 // needs the count to prove whether that is where the MT5 lag lives.
-int CompatPeriodMinutes() { g_cl.periodCalls++; return PeriodSeconds(PERIOD_CURRENT) / 60; }
+//
+// MT5-ONLY R-TF-UNIT (W1/MN1): PeriodSeconds() is calendar-truth, and the
+// MT4 minute ladder is NOMINAL truth. They part company on the monthly bar:
+// PeriodSeconds(PERIOD_MN1) counts down to the start of next month, so an
+// October chart returned 44640 minutes where MT4 says 43200 - and every
+// "minutes == 43200" comparison above D1 missed, which is how Weekly/Monthly
+// levels silently stopped drawing. W1 is pinned too (604800/60 is right, but
+// a variable-length contract month must never leak into a nominal ladder).
+// The Period() read here is the BUILTIN (this file compiles before
+// MQL5Compat.mqh defines Period() as this function), so it is an
+// ENUM_TIMEFRAMES and not a recursion.
+int CompatPeriodMinutes() { g_cl.periodCalls++; const ENUM_TIMEFRAMES raw = Period(); if(raw == PERIOD_W1) return 10080; if(raw == PERIOD_MN1) return 43200; return PeriodSeconds(raw) / 60; }
 
 // Minutes -> ENUM_TIMEFRAMES, deliberately forgiving: a value that is ALREADY
 // a valid enum constant passes through unchanged, so a site that crosses the

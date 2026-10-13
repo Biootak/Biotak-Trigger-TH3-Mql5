@@ -171,6 +171,21 @@ JUSTIFY = [
      "mt5"),
     (r'^\s*CompatConsumeObjEvent\(id, sparam\)\) return;',
      "MT5 programmatic-object-event filter: drop the tokenized event", "mt5"),
+    # --- MT5-ONLY R-TF-UNIT (2026-10-13). On MT4 PERIOD_H1..PERIOD_MN1 ARE
+    # --- minutes (60/240/1440/10080/43200); on MT5 they are enum values
+    # --- (16385+), so a switch whose INPUT is minutes can never match the
+    # --- enum labels here. The literals below are the same table's MT4
+    # --- values: same names, same outputs, one scale spelled honestly.
+    (r'^\s*case (60|240|1440|10080|43200):\s*return "(H1|H4|D1|W1|MN1|MN)";',
+     "R-TF-UNIT: minute literals where MT5's PERIOD_* enums never match minutes", "mt5"),
+    (r'^\s*case PERIOD_(H1|H4|D1|W1|MN1):\s*return "(H1|H4|D1|W1|MN1|MN)";',
+     "MT4 label spelling of the case lines MT5 writes as minute literals", "mt4"),
+    # --- MT5-ONLY P-MT5-SEED-01: iATR answers asynchronously after attach,
+    # --- so MT5's first frames have no seed and no jump. This gate DEFERS
+    # --- the same first paint (bounded 20 s) until UpdateATRScalingFactor
+    # --- seeds; it adds no drawing, only orders it.
+    (r'\bseedWait\b|s_seedWaitStartMs',
+     "first paint waits for the async ATR seed (MT5 iATR handle)", "mt5"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*
