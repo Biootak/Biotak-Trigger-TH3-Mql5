@@ -802,6 +802,54 @@ static uint     s_dsGGripMs = 0;
 //--- drift — and it lives in this block because `DrawStripClose`, defined below,
 //--- must hand the view back (MQL4 reads a bare `void f();` prototype as an
 //--- import, so owners are DEFINED before their first use here, never declared).
+
+//+------------------------------------------------------------------+
+//| P-UI-146 (2026-10-13) — THE SERVED DRAWING'S IDENTITY, AS A       |
+//| NUMBER. A GlobalVariable is a double, so the strip's target name  |
+//| (a user drawing, e.g. "Trendline 4471") has to ride the state     |
+//| record as a HASH PAIR. Two 32-bit FNV mixes of the same string —  |
+//| one 1a (xor then multiply) and one plain FNV-1 (multiply then    |
+//| xor), which are different functions of the same prime — the low   |
+//| 24 bits of each packed into one double (48 bits, exact in a       |
+//| 53-bit mantissa). The restore walks the chart's object list once  |
+//| and matches on the pair, so a false positive needs a 24-bit       |
+//| collision on BOTH hashes, and a name that matches is still         |
+//| verified with `DrawKindOf` before anything opens.                 |
+//| `uint` is the project's own arithmetic here (the same type the    |
+//| tick budgets use); no ULL suffix or 64-bit hex literal is used —  |
+//| the MetaEditor build rejects both (measured, 11 errors).          |
+//+------------------------------------------------------------------+
+uint DSNameHash1a(const string s)          // FNV-1a: xor, then multiply
+{
+   uint h = 0;
+   const int n = StringLen(s);
+   for(int i = 0; i < n; i++)
+      h = (h ^ (uint)StringGetCharacter(s, i)) * 16777619;   // FNV-32 prime (fits an int)
+   return h;
+}
+uint DSNameHash1(const string s)           // FNV-1: multiply, then xor
+{
+   uint h = 0;
+   const int n = StringLen(s);
+   for(int i = 0; i < n; i++)
+      h = (h * 16777619) ^ (uint)StringGetCharacter(s, i);
+   return h;
+}
+//--- pack: hash1a's low 24 bits in the high half, hash1's in the low. Always >= 0.
+double DSNamePack(const string s)
+{
+   const uint a = DSNameHash1a(s);
+   const uint b = DSNameHash1(s);
+   const long hi = (long)(a % 16777216);          // 2^24
+   const long lo = (long)(b % 16777216);
+   return (double)(hi * 16777216 + lo);           // < 2^48: exact in a double
+}
+bool DSNameMatches(const double packed, const string s)
+{
+   if(packed < 0.0) return false;
+   return (DSNamePack(s) == packed);
+}
+
 #endif // DRAW_STRIP_HEAD_MQH
 // DrawStrip_Base.mqh - DrawStrip split 2026-09-29: exact lines 678-1460 of DrawStrip.mqh, byte-identical, zero renames.
 #ifndef DRAW_STRIP_BASE_MQH
@@ -7650,6 +7698,18 @@ void DrawStripHomeSet(const int x, const int y)
 //--- A shrunk window must never strand the home off-screen (E-05: no dead zone).
 //--- While the strip is open this is ALL a zoom or a scroll still owes the plate:
 //--- window arithmetic, zero projections, and a paint only if it really moved.
+//---
+//--- P-UI-144 (2026-10-13): AND THE HOME ITSELF IS NO LONGER TOUCHED HERE. This
+//--- clamp used to write the clamped pair back into the home («what was placed
+//--- (or clamped) IS the home», below), which is the P-UI-131e ratchet said in
+//--- fractions: a window that came back smaller moved the STORED place inward,
+//--- and the plate never returned to the hand's spot when the window grew back
+//--- again — the same defect class the orb and the chip were fixed for in
+//--- P-UI-140, and the one docs/th3-ui-placement.md still owes the strip. The
+//--- home is the hand's place (a fresh placement or a drag release); the LIVE
+//--- pair is its derivation and is clamped here so the plate always paints
+//--- inside the window. Contract §4: the value that paints (clamped) is never
+//--- the value stored.
 void DrawStripHomeClamp()
 {
    if(!s_dsOpen || s_dsHomeX < 0) return;
@@ -7660,10 +7720,8 @@ void DrawStripHomeClamp()
    if(ny > ch - s_dsH - 4) ny = ch - s_dsH - 4;
    if(nx < 4) nx = 4;
    if(ny < 4) ny = 4;
-   if(nx == s_dsHomeX && ny == s_dsHomeY) return;
-   s_dsHomeX = nx; s_dsHomeY = ny;
-   if(nx == s_dsX && ny == s_dsY) return;
-   s_dsX = nx; s_dsY = ny;
+   if(nx == s_dsX && ny == s_dsY) return;   // the plate is already where the clamp wants it
+   s_dsX = nx; s_dsY = ny;                  // the live pair follows; the home does not
    DrawStripLayout();
    DrawStripPaint();
 }
@@ -7799,12 +7857,19 @@ bool DrawStripOpenAt(const string name, const int mx, const int my)
    // chart is the only one without one — it measures the drawing through the
    // P-DRAW-20 placer once (the drawing's own corner, never the cursor under the
    // hand) and that answer becomes the home for every open after it.
-   if(!DrawStripHomeGet(s_dsX, s_dsY)) DrawStripPlaceFresh(name, mx, my, s_dsX, s_dsY);
+   // P-UI-144 (2026-10-13): and the home is written ONLY here, on that fresh
+   // placement. The clamps below keep the plate inside the window, but a clamped
+   // pair saved back as the home is the P-UI-131e ratchet in fractions — one
+   // small window then moves the stored place for good and the plate never comes
+   // back to the hand's spot. The orb and the chip follow the same law since
+   // P-UI-140 (docs/th3-ui-placement.md); this is that contract kept for the strip.
+   const bool dsFreshHome = !DrawStripHomeGet(s_dsX, s_dsY);
+   if(dsFreshHome) DrawStripPlaceFresh(name, mx, my, s_dsX, s_dsY);
    if(s_dsX < 4) s_dsX = 4;
    if(s_dsY < 4) s_dsY = 4;
    if(s_dsX > cw - s_dsW - 4) s_dsX = cw - s_dsW - 4;
    if(s_dsY > ch - s_dsH - 4) s_dsY = ch - s_dsH - 4;
-   DrawStripHomeSet(s_dsX, s_dsY);   // P-DRAW-41: what was placed (or clamped) IS the home
+   if(dsFreshHome) DrawStripHomeSet(s_dsX, s_dsY);   // P-DRAW-41: what a FRESH placement measured IS the home
    if(k == DK_RECT) BoxMidSync(name);   // P-DRAW-21: the drag/zoom ride moves the mid too
    FibPenSync(name, false);   // P-DRAW-74b: an open re-converges the pair with the drawing
    DrawStripPaint();
@@ -8964,6 +9029,22 @@ bool DrawStripGearGroupTap(const int gid)
    //--- diffs to name the objects the terminal did not honour.
    DrawStripGearDiagDump();
    return true;
+}
+//--- P-UI-146 (2026-10-13) — THE RESTORE'S ONE DOOR. The saved gear tab is
+//--- re-opened by the SAME sequence a group tap runs (set the group, keep or
+//--- drop its collapse, layout, paint, dump) — defined HERE, in the strip's own
+//--- tap owner, because a repaint from outside the strip is a REQUEST the
+//--- bridge spends (P-PAL-19f/P-PAL-20): the restore asks the strip to restore
+//--- itself, it never paints someone else's surface. Called once, on the first
+//--- tick after a fresh attach, by `DrawStripStateRestore` (BiotakPanels_Life).
+void DrawStripGearRestoreTab(const int gid, const bool collapsed)
+{
+   if(!s_dsOpen || gid <= 0) return;
+   s_dsGear = gid;
+   s_dsGearCollapsed = collapsed;
+   DrawStripLayout();
+   DrawStripPaint();
+   DrawStripGearDiagDump();
 }
 //--- gear edits (ENDEDIT): hex colour, level add, caption. Invalid input keeps
 //--- the typed text for another try (paint re-seeds a field only while it is NOT

@@ -202,11 +202,16 @@ int OnCalculate(const int rates_total,
     // crossings) so the steady-state path skips three iHigh/iLow/iClose calls.
     // close/high/low[rates_total-1] is the CURRENT (newest) bar - same bar
     // index 0 in the emulated timeseries.
+    // MT5-ONLY FIX (2026-10-13): time/open travel with them for the same
+    // reason - the emulated series' new-bar shift must fill Time[0]/Open[0]
+    // with the NEW bar's values, not keep the previous bar's.
     CompatRefreshChartData(
         rates_total,
         (rates_total > 0) ? close[rates_total - 1] : EMPTY_VALUE,
         (rates_total > 0) ? high[rates_total - 1]  : EMPTY_VALUE,
-        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE);
+        (rates_total > 0) ? low[rates_total - 1]   : EMPTY_VALUE,
+        (rates_total > 0) ? time[rates_total - 1]  : (datetime)0,
+        (rates_total > 0) ? open[rates_total - 1]  : EMPTY_VALUE);
     return OnCalculateHandler(rates_total, prev_calculated, time, open, high, low, close, tick_volume, real_volume, spread);
 }
 
@@ -218,6 +223,15 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
 {
+  // MT5-ONLY PLATFORM FILTER (2026-10-13): our own programmatic
+  // ObjectCreate/ObjectDelete/ObjectsDeleteAll calls queue one chart event
+  // EACH on MT5 - MT4 never sends them, and every heal, style-apply and
+  // witness in the shared source is written against the MT4 meaning of
+  // these two events. A tokened event is dropped here, before ANY handler
+  // runs, exactly as if the terminal had not sent it. Full note:
+  // MT5Compat\MQL5Compat.mqh, "THE PROGRAMMATIC OBJECT EVENT STORM".
+  if((id == CHARTEVENT_OBJECT_CREATE || id == CHARTEVENT_OBJECT_DELETE) &&
+     CompatConsumeObjEvent(id, sparam)) return;
   // P-PERF-34: scope the frame deferral to this window (see EventHandlers).
   g_inChartEvent = true;
   // P-PERF-04: interaction budget (Lite has no menu/panel half to time).

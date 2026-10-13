@@ -220,6 +220,57 @@ bool GVHomeLoadFrac(const string id, const string legacyInfix, int &x, int &y)
    return true;
 }
 
+//+------------------------------------------------------------------+
+//| P-UI-144 (2026-10-13) — THE GHOST SWEEP.                          |
+//|                                                                  |
+//| Report: «پنل‌ها، لوگو و منوها بعد از ری‌استارت ترمینال یا بستن و   |
+//| باز کردن پنجره از جاش تکون میخوره، روی هم میافته» — measured on   |
+//| the live terminal (AMarkets, data folder A1660DA4…):             |
+//|   profiles/default/chart03.chr (DXY H4, written 2026-10-12        |
+//|   15:58:11) holds                                                 |
+//|     object_name=BiotakMenuV2_134342075006101685_CircOrbBg        |
+//|     x_distance=70 y_distance=79 zorder=1200 selectable=0          |
+//| while THIS session's EURUSD chart runs under chart id            |
+//| 134362571361933137 (biotak_diag_EURUSD_134362571361933137.txt,    |
+//| written 09:24 the same morning).                                 |
+//|                                                                  |
+//| Every object this family paints carries `BiotakMenuV2_<ChartID>` |
+//| (BiotakMenu_A.mqh:867), and a chart id is per SESSION: the       |
+//| terminal hands a new one out at every restart and at every       |
+//| chart reopen. MT4 saves chart objects into the chart's profile   |
+//| and restores them at their ABSOLUTE pixels, so the previous      |
+//| session's names come back under a prefix this session can never  |
+//| address — the teardown (`DeleteMenu`, the `Pnl`/`Pal_`/`Sub`     |
+//| purges, `DeleteLegacyMenuObjects`) only knows the LIVE prefix.   |
+//| The restored object is therefore a permanent ghost:              |
+//|   * it stands at a stale absolute place, which is a different    |
+//|     RELATIVE place on every window of another size — the         |
+//|     «از جاش تکون میخوره» the user reports;                       |
+//|   * the fresh family is painted at its home fraction BESIDE it —  |
+//|     «روی هم افتاده», and a selectable ghost answers clicks the    |
+//|     live surface should have had;                                 |
+//|   * the next close saves it into the profile again, so the       |
+//|     ghost re-enters the next session forever.                     |
+//|                                                                  |
+//| The strip family (`PnlDrawS_*`) never carried a chart id and is   |
+//| therefore immune, and it got exactly this sweep at attach        |
+//| (`DrawStripSweepStale`, DrawStrip_GearA.mqh:1165, wired from the |
+//| entry's OnInit). This is that owner for the menu/panel families. |
+//|                                                                  |
+//| ONE prefix walk per init, both spellings the family ever painted  |
+//| (V1 `BiotakMenu_<id>_`, retired, and V2 `BiotakMenuV2_<id>_`).   |
+//| It is exact at attach: the paired teardown deleted THIS family   |
+//| before OnInit ran (or it never existed), so the walk can only    |
+//| remove foreign spellings. Two units on one chart are refused      |
+//| (P-ARCH-03, before `InitializeUIStates` runs), so a live         |
+//| sibling's objects are never the ones swept.                      |
+//+------------------------------------------------------------------+
+void BiotakMenuGhostSweep()
+{
+   ObjectsDeleteAll(0, "BiotakMenu_",   -1, -1);   // V1 + every older V2 spelling
+   ObjectsDeleteAll(0, "BiotakMenuV2_", -1, -1);   // V2 (the char after "BiotakMenu" is 'V')
+}
+
 #endif // BIOTAK_HOMES_MQH
 
 //+------------------------------------------------------------------+
@@ -1099,6 +1150,16 @@ void InitializeUIStates()
    // while g_ToolsOpen resets to false, leaving an orphan panel that no longer
    // answers anything. One sweep, once per init.
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
+   // P-UI-144: THE GHOST SWEEP — the same orphan class one level up: objects this
+   // family painted in a PREVIOUS session carry that session's chart id in their
+   // name (measured: `BiotakMenuV2_134342075006101685_CircOrbBg` sitting in
+   // `profiles/default/chart03.chr` at x=70,y=79). MT4 restores them at their
+   // stale absolute pixels on every restart/reopen, and no purge below can see
+   // them because each one only knows the LIVE prefix. Our own family was
+   // already deleted by the paired teardown (or never existed), so one prefix
+   // walk here removes exactly the foreign spellings. Same shape, same owner
+   // law as `DrawStripSweepStale` beside it in the entry's OnInit.
+   BiotakMenuGhostSweep();
 
    bool versionOk = false;
    if(GlobalVariableCheck(GetGVName("VER")))

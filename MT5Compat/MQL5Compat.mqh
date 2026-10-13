@@ -15,8 +15,14 @@
 //| MT5-ONLY by construction (this file has no MT4 twin) and costs   |
 //| two GetTickCount per measured call, so it is a MEASUREMENT build |
 //| - set COMPAT_LEDGER to 0 for a release.                           |
+//|                                                                  |
+//| RELEASE (2026-10-13): OFF. MQL5's preprocessor has no `#if`, so  |
+//| "0" is spelled as a COMMENTED define - every touch point below    |
+//| asks `#ifdef COMPAT_LEDGER`, and an un-commented line turns the   |
+//| whole ledger back on. The counters AND their GetTickCount pairs   |
+//| compile away, which is the minimum-load build the user asked for. |
 //+------------------------------------------------------------------+
-#define COMPAT_LEDGER 1
+//#define COMPAT_LEDGER 1
 
 struct CompatLedger {
    long refreshCalls, refreshMs;     // CompatRefreshChartData, whole
@@ -60,8 +66,21 @@ void CompatLedgerReport(const string tag)
 
 // Bid / Ask were plain macro expansions of SymbolInfoDouble. They are now
 // counting functions so the ledger can see them; the VALUE is identical.
-double CompatBid() { g_cl.bidAskCalls++; return SymbolInfoDouble(_Symbol, SYMBOL_BID); }
-double CompatAsk() { g_cl.bidAskCalls++; return SymbolInfoDouble(_Symbol, SYMBOL_ASK); }
+// With COMPAT_LEDGER 0 the counter disappears - the call is the plain read.
+double CompatBid()
+{
+#ifdef COMPAT_LEDGER
+   g_cl.bidAskCalls++;
+#endif
+   return SymbolInfoDouble(_Symbol, SYMBOL_BID);
+}
+double CompatAsk()
+{
+#ifdef COMPAT_LEDGER
+   g_cl.bidAskCalls++;
+#endif
+   return SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+}
 
 #define Bid    CompatBid()
 #define Ask    CompatAsk()
@@ -232,7 +251,9 @@ string StringTrimRightReal(const string value)
 
 double MarketInfo(string symbol, int mode)
 {
+#ifdef COMPAT_LEDGER
     g_cl.marketInfoCalls++;
+#endif
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     switch(mode) {
         case MODE_LOW:            return SymbolInfoDouble(symbol, SYMBOL_LASTLOW);
@@ -542,7 +563,9 @@ double iATRMQL4Impl(string symbol, int timeframe, int atrPeriod, int shift)
 //+------------------------------------------------------------------+
 double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrPeriod, const int shift)
 {
+#ifdef COMPAT_LEDGER
     g_cl.atrFallback++;
+#endif
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     if(atrPeriod <= 0 || shift < 0) return 0.0;
 
@@ -809,17 +832,38 @@ static int         g_seriesSyncedAt = -1;
 // (no kernel crossing), saving three iHigh/iLow/iClose kernel calls per tick
 // in steady state.  Unknown callers pass EMPTY_VALUE for all three and the
 // function uses the scalar series reads as before.
+//
+// MT5-ONLY CORRECTNESS FIX (2026-10-13) - livTime / livOpen. The new-bar shift
+// branch below moves the whole array one slot and must then fill index 0 with
+// the NEW bar's values. The foot block only ever refreshed High/Low/Close, so
+// Time[0] and Open[0] kept the PREVIOUS bar's values on every bar formed after
+// the first full sync - and the shift then propagates the stale Time one slot
+// further each bar. That is a visible logic difference from MT4: ZoneFactory
+// reads Time[0] for the zone end edge (ZoneFactory.mqh:322/355) and
+// ExtendedDrawingFunctions reads it for currentTime (line 390), so every
+// zone/level anchor near the right edge sat one bar off the MT4 position.
+// OnCalculate passes time[rates_total-1] / open[rates_total-1] (free, same
+// arrays as the live H/L/C); OnInit/OnTimer pass nothing and the shift branch
+// pays two kernel reads for exactly the one call where it runs.
 void CompatRefreshChartData(const int knownBars   = -1,
                             const double livClose = EMPTY_VALUE,
                             const double livHigh  = EMPTY_VALUE,
-                            const double livLow   = EMPTY_VALUE)
+                            const double livLow   = EMPTY_VALUE,
+                            const datetime livTime = 0,
+                            const double livOpen  = EMPTY_VALUE)
 {
+#ifdef COMPAT_LEDGER
     g_cl.refreshCalls++;
     uint _rt0 = GetTickCount();
+#endif
     // P-MT5-PERF: use the bar count supplied by OnCalculate (free — already
     // a local in the caller's frame) rather than paying a kernel call per tick.
     int bars = (knownBars > 0) ? knownBars : iBars(_Symbol, PERIOD_CURRENT);
+#ifdef COMPAT_LEDGER
     if(bars <= 0) { g_cl.refreshMs += (GetTickCount() - _rt0); return; }
+#else
+    if(bars <= 0) return;
+#endif
 
     // Full re-sync whenever the bar count changes (new bar / history download).
     // Otherwise only the forming bar (index 0) moves.
@@ -845,12 +889,12 @@ void CompatRefreshChartData(const int knownBars   = -1,
             // P-MT5-PERF: A NEW BAR IS THE COMMON CASE AND IT MUST NOT RE-READ
             // THE HISTORY. The terminal appended the bar at the RIGHT, so the
             // emulated series only has to SHIFT: whatever sat at index i is now
-            // at i+1, and index 0 is the new bar - which the live-value block at
-            // the foot of this function already writes from values the caller
-            // passed in. That is O(bars) scalar copies and ZERO kernel
-            // crossings, where the full path below pays a CopyRates of the
-            // ENTIRE history (a 7 MB struct copy on a 100k-bar chart) plus a
-            // 5 x bars field-by-field unpack, on every single new bar.
+            // at i+1, and index 0 is the new bar - which THIS branch writes from
+            // the values the caller passed (Time/Open here, High/Low/Close from
+            // the foot block below). That is O(bars) scalar copies and ZERO kernel
+            // crossings on the OnCalculate path, where the full path below pays a
+            // CopyRates of the ENTIRE history (a 7 MB struct copy on a 100k-bar
+            // chart) plus a 5 x bars field-by-field unpack, on every single new bar.
             //
             // Correctness: the oldest bar does not move when a bar is appended,
             // and it survives the shift at the new last index - so Time[Bars-1]
@@ -882,9 +926,20 @@ void CompatRefreshChartData(const int knownBars   = -1,
                 g_seriesBars     = n + 1;
                 g_seriesSyncedAt = bars;
                 s_lastFullSyncMs  = nowMs;
+                // MT5-ONLY FIX (2026-10-13): the shifted-in new bar's Time and
+                // Open. The foot block below only refreshes High/Low/Close, so
+                // without these two lines index 0 (and, from the NEXT shift on,
+                // index 1 too) kept the previous bar's time and open - a silent
+                // off-by-one the whole history accumulated bar by bar.
+                g_seriesTime[0] = (livTime > 0) ? livTime
+                                                 : iTime(_Symbol, PERIOD_CURRENT, 0);
+                g_seriesOpen[0] = (livOpen != EMPTY_VALUE) ? livOpen
+                                                           : iOpen(_Symbol, PERIOD_CURRENT, 0);
+#ifdef COMPAT_LEDGER
                 g_cl.seriesShift++;
                 g_cl.seriesBars += n;
-                // NO return: index 0 is the new bar and is written below.
+#endif
+                // NO return: index 0's High/Low/Close are written by the foot block.
             }
             else
             {
@@ -898,7 +953,9 @@ void CompatRefreshChartData(const int knownBars   = -1,
             if(copied > 0)
             {
                 s_lastFullSyncMs = nowMs;   // throttle ONLY after success
+#ifdef COMPAT_LEDGER
                 g_cl.seriesFull++;
+#endif
                 // Unpack MqlRates into the five named series arrays.
                 // ArrayResize with the exact count avoids reallocating on every
                 // tick when the count is stable (MQL5 only grows, never shrinks).
@@ -929,7 +986,9 @@ void CompatRefreshChartData(const int knownBars   = -1,
                 // grows, so keeping it means the next full sync reuses the same
                 // allocation instead of taking (and releasing) the whole history
                 // block on every new bar.
+#ifdef COMPAT_LEDGER
                 g_cl.refreshMs += (GetTickCount() - _rt0);
+#endif
                 return;
             }
             }   // end else: full copy vs incremental shift
@@ -959,7 +1018,9 @@ void CompatRefreshChartData(const int knownBars   = -1,
             g_seriesClose[0] = iClose(_Symbol, PERIOD_CURRENT, 0);
         }
     }
+#ifdef COMPAT_LEDGER
     g_cl.refreshMs += (GetTickCount() - _rt0);
+#endif
 }
 
 //+------------------------------------------------------------------+
@@ -1275,6 +1336,217 @@ int ObjectFindCompat(const string name)
 int ObjectFindCompat(const long chart_id, const string name)
 {
     return ObjectFindReal(chart_id, name);
+}
+
+//+------------------------------------------------------------------+
+//| MT5-ONLY PLATFORM FILTER - THE PROGRAMMATIC OBJECT EVENT STORM.   |
+//|                                                                  |
+//| On MT4 an indicator's own ObjectCreate/ObjectDelete/               |
+//| ObjectsDeleteAll calls NEVER fire CHARTEVENT_OBJECT_CREATE/DELETE; |
+//| those events mean "the USER drew/deleted something" and every      |
+//| heal, style-apply and witness in the shared source is written      |
+//| against that meaning. On MT5 the same operations queue one chart   |
+//| event EACH (the subscription lines in EventHandlers.mqh:1487/1514 |
+//| open the channel), so a ~900-object rebuild delivers ~1800 events  |
+//| through the full dispatch chain, leaked prefixed deletes re-arm    |
+//| whole-family rebuilds (EventHandlers.mqh:5687 P-DEL-PROBE: "a     |
+//| burst of them is churn the user feels"), and a non-prefixed create |
+//| (every Pnl*/HTF/strip object - HTF candles are OBJ_TRENDs!) runs   |
+//| DrawStyleApplyOnCreate + CustomPriceForeignDrawSeen, i.e. the      |
+//| indicator restyles ITS OWN drawings with the user's style memory.  |
+//| The 250 ms bulk windows cannot fix that: the terminal may deliver  |
+//| the queued events later than the window (that is exactly what the  |
+//| probe documents), and single-object deletes own no window at all.  |
+//|                                                                  |
+//| The fix restores the MT4 MEANING of the two events: an event is    |
+//| invisible iff this program performed the operation that queued it. |
+//| Every wrapped call drops a one-shot token under the object's name; |
+//| the entry's OnChartEvent asks CompatConsumeObjEvent before ANY     |
+//| dispatch and consumes one matching token - event dropped, MT4      |
+//| behaviour. A token that is never consumed expires (10 s), and the  |
+//| first event whose name has no token dispatches normally, so a      |
+//| USER delete/create of the very same object is always honoured.     |
+//| Cost per operation: one FNV hash over the name + up to 8 slot      |
+//| probes - cheaper than the kernel crossing the operation itself     |
+//| just paid.                                                         |
+//+------------------------------------------------------------------+
+#define COMPAT_OBJT_TABLE 16384          // power of two
+#define COMPAT_OBJT_PROBE 8
+#define COMPAT_OBJT_TTL_MS  10000
+
+struct CompatObjToken { string name; uint stamp; };
+static CompatObjToken g_objTokCreate[];
+static CompatObjToken g_objTokDelete[];
+static bool g_objTokInit = false;
+
+void CompatInitObjTokens()
+{
+   if(g_objTokInit) return;
+   ArrayResize(g_objTokCreate, COMPAT_OBJT_TABLE);
+   ArrayResize(g_objTokDelete, COMPAT_OBJT_TABLE);
+   for(int i = 0; i < COMPAT_OBJT_TABLE; i++)
+   {
+      g_objTokCreate[i].name = ""; g_objTokCreate[i].stamp = 0;
+      g_objTokDelete[i].name = ""; g_objTokDelete[i].stamp = 0;
+   }
+   g_objTokInit = true;
+}
+
+uint CompatObjHash(const string nm)
+{
+   uint h = 2166136261;
+   const int len = StringLen(nm);
+   for(int i = 0; i < len; i++)
+   {
+      h ^= (uint)StringGetCharacter(nm, i);
+      h *= 16777619;
+   }
+   return h;
+}
+
+void CompatTokenWrite(CompatObjToken &tab[], const string nm, const uint now)
+{
+   const uint h = CompatObjHash(nm);
+   for(int k = 0; k < COMPAT_OBJT_PROBE; k++)
+   {
+      const int idx = (int)((h + (uint)k) % COMPAT_OBJT_TABLE);
+      if(tab[idx].name == nm || tab[idx].name == "" ||
+         (now - tab[idx].stamp) >= COMPAT_OBJT_TTL_MS)
+      {
+         tab[idx].name = nm; tab[idx].stamp = now; return;
+      }
+   }
+   const int home = (int)(h % COMPAT_OBJT_TABLE);   // table crowded: refresh home
+   tab[home].name = nm; tab[home].stamp = now;
+}
+
+void CompatNoteObjOp(const bool isDelete, const string nm)
+{
+   if(nm == "") return;
+   CompatInitObjTokens();
+   const uint now = GetTickCount();
+   if(isDelete) CompatTokenWrite(g_objTokDelete, nm, now);
+   else         CompatTokenWrite(g_objTokCreate, nm, now);
+}
+
+bool CompatTokenRead(CompatObjToken &tab[], const string nm, const uint now)
+{
+   const uint h = CompatObjHash(nm);
+   for(int k = 0; k < COMPAT_OBJT_PROBE; k++)
+   {
+      const int idx = (int)((h + (uint)k) % COMPAT_OBJT_TABLE);
+      if(tab[idx].name == nm && (now - tab[idx].stamp) < COMPAT_OBJT_TTL_MS)
+      {
+         tab[idx].name = ""; tab[idx].stamp = 0;
+         return true;
+      }
+   }
+   return false;
+}
+
+// Called from the entry's OnChartEvent BEFORE any dispatch. True = this
+// event was queued by our own create/delete call: MT4 would never have
+// seen it, so the entry returns without dispatching.
+bool CompatConsumeObjEvent(const int id, const string nm)
+{
+   if(!g_objTokInit || nm == "") return false;
+   if(id == CHARTEVENT_OBJECT_CREATE)
+      return CompatTokenRead(g_objTokCreate, nm, GetTickCount());
+   if(id == CHARTEVENT_OBJECT_DELETE)
+      return CompatTokenRead(g_objTokDelete, nm, GetTickCount());
+   return false;
+}
+
+// ObjectsDeleteAll removes a WHOLE set whose names the caller does not
+// enumerate. Token them here - same O(objects) walk the built-in itself
+// performs - so every delete event the bulk queues carries a token.
+void CompatTokenizeDeleteAll(const long chart_id, const string prefix,
+                             const int sub_window, const int type)
+{
+   const int total = ObjectsTotalReal(chart_id, sub_window, type);
+   if(total <= 0) return;
+   CompatInitObjTokens();
+   const uint now = GetTickCount();
+   const int plen = StringLen(prefix);
+   for(int i = 0; i < total; i++)
+   {
+      const string nm = ObjectNameReal(chart_id, i, sub_window, type);
+      if(nm == "") continue;
+      if(plen > 0 && StringSubstr(nm, 0, plen) != prefix) continue;
+      CompatTokenWrite(g_objTokDelete, nm, now);
+   }
+}
+
+bool ObjectCreateReal6(const long chart_id, const string name, const ENUM_OBJECT type,
+                       const int sub_window, const datetime time1, const double price1)
+{
+   return ObjectCreate(chart_id, name, type, sub_window, time1, price1);
+}
+
+bool ObjectCreateReal8(const long chart_id, const string name, const ENUM_OBJECT type,
+                       const int sub_window, const datetime time1, const double price1,
+                       const datetime time2, const double price2)
+{
+   return ObjectCreate(chart_id, name, type, sub_window, time1, price1, time2, price2);
+}
+
+#define ObjectCreate ObjectCreateCompat
+
+bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJECT type,
+                        const int sub_window, const datetime time1, const double price1)
+{
+   const bool r = ObjectCreateReal6(chart_id, name, type, sub_window, time1, price1);
+   if(r) CompatNoteObjOp(false, name);
+   return r;
+}
+
+bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJECT type,
+                        const int sub_window, const datetime time1, const double price1,
+                        const datetime time2, const double price2)
+{
+   const bool r = ObjectCreateReal8(chart_id, name, type, sub_window, time1, price1, time2, price2);
+   if(r) CompatNoteObjOp(false, name);
+   return r;
+}
+
+bool ObjectDeleteReal(const long chart_id, const string name)
+{
+   return ObjectDelete(chart_id, name);
+}
+
+#define ObjectDelete ObjectDeleteCompat
+
+bool ObjectDeleteCompat(const long chart_id, const string name)
+{
+   const bool r = ObjectDeleteReal(chart_id, name);
+   if(r) CompatNoteObjOp(true, name);
+   return r;
+}
+
+int ObjectsDeleteAllRealSub(const long chart_id, const int sub_window, const int type)
+{
+   return ObjectsDeleteAll(chart_id, sub_window, type);
+}
+
+int ObjectsDeleteAllRealPrefix(const long chart_id, const string prefix,
+                               const int sub_window, const int type)
+{
+   return ObjectsDeleteAll(chart_id, prefix, sub_window, type);
+}
+
+#define ObjectsDeleteAll ObjectsDeleteAllCompat
+
+int ObjectsDeleteAllCompat(const long chart_id, const int sub_window = -1, const int type = -1)
+{
+   CompatTokenizeDeleteAll(chart_id, "", sub_window, type);
+   return ObjectsDeleteAllRealSub(chart_id, sub_window, type);
+}
+
+int ObjectsDeleteAllCompat(const long chart_id, const string prefix,
+                           const int sub_window = -1, const int type = -1)
+{
+   CompatTokenizeDeleteAll(chart_id, prefix, sub_window, type);
+   return ObjectsDeleteAllRealPrefix(chart_id, prefix, sub_window, type);
 }
 
 //+------------------------------------------------------------------+

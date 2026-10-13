@@ -161,6 +161,16 @@ JUSTIFY = [
     (r'^\s*if\(inpTH3LabelPosition != TH3_LABEL_HIDDEN &&',
      "MT4's single-branch form; MT5 extends it with the changed-text check",
      "mt5"),
+    # --- MT5-ONLY PLATFORM FILTER (2026-10-13). MT5 fires a chart event for
+    # --- every PROGRAMMATIC ObjectCreate/ObjectDelete/ObjectsDeleteAll while
+    # --- MT4 fires none; the entries' OnChartEvent consumes a one-shot token
+    # --- for those events before dispatch, which restores MT4's semantics
+    # --- exactly. The filter removes spurious handler work, it adds no logic.
+    (r'^\s*if\(\(id == CHARTEVENT_OBJECT_CREATE \|\| id == CHARTEVENT_OBJECT_DELETE\) &&',
+     "MT5 programmatic-object-event filter gate (restore MT4 event semantics)",
+     "mt5"),
+    (r'^\s*CompatConsumeObjEvent\(id, sparam\)\) return;',
+     "MT5 programmatic-object-event filter: drop the tokenized event", "mt5"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*
