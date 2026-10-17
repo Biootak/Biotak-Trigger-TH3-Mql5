@@ -1490,12 +1490,12 @@ void PnlSpecBuild(const int item)
       // P-UI-131j gave the card's SECOND surface its pair: TRANSPARENCY + COLOR own the
       // trigger ZONE; LABEL COLOR + LABEL OPACITY owned the pip label on the trigger
       // family's levels (addresses 2 and 4, APPENDED past 0..3 so every persisted OV_
-      // key kept its meaning). P-LBL-11 (2026-10-17): the pip labels are retired, so
+      // key kept its meaning). P-LBL-12 (2026-10-17): the pip labels are retired, so
       // those two rows left the spec; the addresses and keys stay (MIDPOINT precedent).
       PnlSpecAdd(0, PNL_K_SEC, -1, 0, "", "", "ZONE APPEARANCE", 2);
       PnlSpecAdd(0, PNL_K_LEGACY, 0, 1, "contrast");
       PnlSpecAdd(0, PNL_K_LEGACY, 1, 1, "droplet");
-      // P-LBL-11 (2026-10-17): addresses 2 (LABEL COLOR) and 4 (LABEL OPACITY)
+      // P-LBL-12 (2026-10-17): addresses 2 (LABEL COLOR) and 4 (LABEL OPACITY)
       // are OFF THE CARD - they existed only to paint the trigger lines'
       // pip-distance labels (P-UI-131j), and there are no labels any more.
       // Both addresses, their palette targets, their read/apply branches and
@@ -1575,7 +1575,7 @@ void PnlSpecBuild(const int item)
       PnlSpecAdd(2, PNL_K_LEGACY, 6, 1, "tag", "T");
       PnlSpecAdd(2, PNL_K_LEGACY, 7, 1, "crosshair", "H");
       PnlSpecAdd(2, PNL_K_LEGACY, 8, 1, "flag", "P");
-      // P-LBL-11 (2026-10-17): address 9 ("H/L PIP LABELS", the ruler row) is
+      // P-LBL-12 (2026-10-17): address 9 ("H/L PIP LABELS", the ruler row) is
       // OFF THE CARD - the setting's only consumer, the pip-distance labels,
       // is retired. The address, its input, its `PD` key and its descriptor/
       // read/apply branches all stay (MIDPOINT precedent, P-UI-47).
@@ -3597,7 +3597,7 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else             { kind=5; label="LINES"; opts="7"; }              // NAV → unified lines card
    }
    else if(item==2)   // ATR LABELS — the chart-labels card (High/Low
-                      // pip-distance labels were retired by P-LBL-11; this
+                      // pip-distance labels were retired by P-LBL-12; this
                       // card keeps the countdown, ATR and trade-plan labels)
    {
       // Rows 0-3 = the countdown tag's OWN settings (independent of the ATR
@@ -3616,7 +3616,7 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       // (`inpShowPipDistanceLabels`, read by LabelFunctions AND LevelPipeline),
       // which no two-word caption in a corner card can convey. Renamed to say
       // WHERE those labels live; the setting address is untouched.
-      // P-LBL-11 (2026-10-17): the pip labels themselves are retired, so this
+      // P-LBL-12 (2026-10-17): the pip labels themselves are retired, so this
       // row is off the card (see the spec table). The branch stays as the
       // address stub - `row_arms` counts branches, not displays, and a
       // renumbered fallthrough below would misland the proof (P-TH3-PB-MAN).
@@ -3752,7 +3752,7 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
    // Zones & the STRUCTURE card) — the slot now hosts the LINES card above.
     else if(item==8)   // CUSTOM PRICE PIN — the pin only (the pip-distance
                        // labels that used to live on the ATR LABELS card are
-                       // retired, P-LBL-11)
+                       // retired, P-LBL-12)
     {
        if(row==0)       { label="WIDTH"; minV=1; maxV=5; }
        else if(row==1)  { kind=4; label="COLOR"; }
@@ -4348,7 +4348,7 @@ double PnlDefValSet(const int item,const int row)
 //|   COUNTDOWN        → LiveCountdownEnabled()                          |
 //|   ATR LABELS       → SetATRLabelsVisibility (`shouldShow`)           |
 //|   TRADE LABELS     → SetATRLabelsVisibility (`cardOn`, P-UI-84)      |
-//|   H/L PIP LABELS   → retired (P-LBL-11): the address keeps its read  |
+//|   H/L PIP LABELS   → retired (P-LBL-12): the address keeps its read  |
 //|                      branch and its mute term for shape stability,    |
 //|                      but no display row reaches it                    |
 //|   TH LABELS        → SetTHLabelsVisibility (`shouldShow`)            |
@@ -4419,7 +4419,7 @@ double PnlCurrentSet(const int item,const int row)
               if(row==6) return PnlMuteGatedValue(g_showATRTradeLabels);
               if(row==7) return g_showATRTradeSLLabels?1.0:0.0;
               if(row==8) return g_showATRTradeTPLabels?1.0:0.0;
-              // H/L pip labels are retired (P-LBL-11, 2026-10-17) and their
+              // H/L pip labels are retired (P-LBL-12, 2026-10-17) and their
               // display row is off the card; this read branch stays as the
               // address stub, reading the persisted-and-inert setting.
               if(row==9) return PnlMuteGatedValue(g_showPipDistanceLabels);

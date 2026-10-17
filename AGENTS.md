@@ -34,7 +34,7 @@ the file, diff it, rebuild both MT5 entries, and say so in the commit message.
   dedicated BACK layer) are painted by the canvas engine instead of one chart
   object per element — comment that ONE line out for the object-path A/B.
   (The pip-distance labels the engine also painted in phase 1 were removed
-  outright in P-LBL-11, same day; the engine's text family stayed, dormant.)
+  outright in P-LBL-12, same day; the engine's text family stayed, dormant.)
 - `Biotak/` — owned product modules (68 `.mqh`). MT5-only fixes live here;
   they must stay behaviour-identical to MT4 on MT4-equivalent inputs, and any
   MT5-only divergence is marked `MT5-ONLY` or `R-TF-UNIT`.

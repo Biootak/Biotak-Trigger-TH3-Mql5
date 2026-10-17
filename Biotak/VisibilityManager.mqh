@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/VisibilityManager.mqh
 //
@@ -69,7 +69,7 @@ void InvalidateAllVisibilityCaches()
 //| bounded by g_objectCacheSize, with ZERO ObjectName calls. The     |
 //| line filter is name-based (LevelPipeline naming: lines are        |
 //| <mode>_Above_/_Below_/_Midpoint_, zones carry _Zone_, label       |
-//| chrome appends _Label — pip labels retired by P-LBL-11, the       |
+//| chrome appends _Label — pip labels retired by P-LBL-12, the       |
 //| strip's own *_Label names keep the rule live) — zero OBJPROP_TYPE |
 //| probes for decided families.                                      |
 //| Anything the names cannot decide (Factor_High/Low, HTF wicks, ATR |

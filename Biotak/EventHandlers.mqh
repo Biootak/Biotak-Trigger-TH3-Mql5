@@ -3288,7 +3288,7 @@ void RedrawAllObjects(bool force_redraw=false)
         // pass records every `LBL_` name it wrote, and the sweep deletes exactly the
         // names it did not (the ladder's `SweepForeignLadderObjects` walks its
         // family by the same produced set, so half of that mechanism exists; since
-        // P-LBL-11 the produced set names no `<line>_Label`, so that sweep was also
+        // P-LBL-12 the produced set names no `<line>_Label`, so that sweep was also
         // the one-time net that cleared the retired pip labels on the handoff).
         // Only then may
         // the clear go, and the ledger to prove it is the line above: `clear=` must
@@ -3602,7 +3602,7 @@ void RedrawAllObjects(bool force_redraw=false)
                           IntegerToString(IsIndicatorHidden() ? 1 : 0) +
                           IntegerToString(IsTriggerLevelsEnabled() ? 1 : 0) +
                           IntegerToString(g_customPriceLineDragging ? 1 : 0);
-                          // P-LBL-11 (2026-10-17): `inpShowPipDistanceLabels` stood
+                          // P-LBL-12 (2026-10-17): `inpShowPipDistanceLabels` stood
                           // here as the last term. The setting lost its last door
                           // (its card row is off the display) and its consumer, so
                           // the term could only ever fold a constant - removed the
@@ -3654,7 +3654,7 @@ void RedrawAllObjects(bool force_redraw=false)
             if(g_buildStage == 0) { s_lastFrameSig = frameSig; s_lastFrameCore = frameCore; g_renderAllNeeded = false; }
             // Advance the rebuild; the LABELS stage only arms the labels block
             // below (it is stage 4 of the same sequence).
-            // P-LBL-11 (2026-10-17): the old stage 3 (pip labels) is retired;
+            // P-LBL-12 (2026-10-17): the old stage 3 (pip labels) is retired;
             // ZONES now hands straight to BLOCK, and the labels-block flag is
             // armed on that hand-off exactly as the LABELS rung armed it.
             if(g_buildStage == BUILD_STAGE_LINES)            g_buildStage = BUILD_STAGE_ZONES;

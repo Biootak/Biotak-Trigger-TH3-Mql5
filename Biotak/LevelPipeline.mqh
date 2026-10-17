@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/LevelPipeline.mqh
 //
@@ -334,7 +334,7 @@ int CalculateLevels(
     return count;
 }
 
-// P-LBL-11 (2026-10-17): GetLabelTextForLevel stood here. It derived the
+// P-LBL-12 (2026-10-17): GetLabelTextForLevel stood here. It derived the
 // per-level text ("L1 +3" / "+3", "Midpoint") for the pip-distance labels
 // only, and the labels themselves are retired — nothing reads the text now,
 // so the whole derivation is gone rather than left computing into a dead
@@ -1312,7 +1312,7 @@ void Step1HandlePick(const STriggerLine &lines[], const int lineCount,
     }
 }
 
-// P-LBL-11 (2026-10-17): P-UI-131j's `GetTriggerLabelRenderColor` stood here
+// P-LBL-12 (2026-10-17): P-UI-131j's `GetTriggerLabelRenderColor` stood here
 // - the AUTO-aware blend feeding the trigger lines' pip labels. The labels
 // are retired, so the getter had no reader; `g_triggerLabelColor` and
 // `g_triggerLabelTransparency` stay persisted and inert, exactly like the
@@ -1354,7 +1354,7 @@ void RenderTriggerLines(
     // MT5-ONLY (R-RENDER-ENGINE): the canvas staging prelude. When the engine
     // owns the ladder, this pass is diff-committed to the scene instead of the
     // terminal; pins (the step-1 handle pair + a live drag) stay object-owned.
-    // See Engine\RenderBridge.mqh. P-LBL-11 (2026-10-17): the second flag is a
+    // See Engine\RenderBridge.mqh. P-LBL-12 (2026-10-17): the second flag is a
     // fixed false — the product stages no label texts since the pip-distance
     // labels retired, so the bridge's text family stays empty by construction.
     if(RBridgeActive())
@@ -1486,7 +1486,7 @@ void RenderTriggerLines(
             }
         }
 
-        // P-LBL-11 (2026-10-17): THE PIP-DISTANCE LABEL BLOCK STOOD HERE.
+        // P-LBL-12 (2026-10-17): THE PIP-DISTANCE LABEL BLOCK STOOD HERE.
         //
         // The user's screenshot pointed at the "+7 | 4161.4" texts and the
         // order was to remove them («این پیپ لیبل ها رو کامل حذف کن») - they
@@ -1508,7 +1508,7 @@ void RenderTriggerLines(
 #endif
 }
 
-// P-LBL-11 (2026-10-17): GetCurrentPriceForLabels stood here — it priced the
+// P-LBL-12 (2026-10-17): GetCurrentPriceForLabels stood here — it priced the
 // pip-distance labels' distance to the live price. With the labels retired
 // it had no reader.
 
@@ -1906,7 +1906,7 @@ int SweepForeignLevelObjects(const SModeConfig &config,
        // frame; only the dragged one (here: the below handle) vanishes.
         bool s1SkipSweep = (g_s1DragLive && g_s1DragName != "" &&
                             lines[i].name == g_s1DragName);
-        // P-LBL-11 (2026-10-17): this pass used to probe the line's
+        // P-LBL-12 (2026-10-17): this pass used to probe the line's
         // pip-distance label too (pass 0/1 over `<name>` and `<name>_Label`).
         // The labels are retired and nothing produces the name, so the second
         // probe could only ever miss; the sweep is line-only now.
@@ -2240,7 +2240,7 @@ int SweepForeignLadderObjects(const SModeConfig &config,
         if(!g_initialized) return -1;                        // transient ladder: not judged
         if(lineCount <= 0) return -1;                        // nothing produced yet: not judged
 
-        // What this build owns, by NAME. P-LBL-11 (2026-10-17): the pip-distance
+        // What this build owns, by NAME. P-LBL-12 (2026-10-17): the pip-distance
         // labels used to be part of this set ("a line and its label are one
         // decision"). They are retired, so the `<line>_Label` names are NOT
         // produced - which is exactly what arms this sweep as the upgrade net:
@@ -2578,7 +2578,7 @@ SPipelineResult ExecutePipeline(
     // materialised per frame, so a post-wipe build lands as a few ~2k-call
     // frames instead of one ~8k-call freeze. buildStage 0 (or anything
     // unexpected) is the full legacy render — steady frames always take it.
-    // P-LBL-11 (2026-10-17): there were FOUR rungs (1=lines, 2=zones, 3=pip
+    // P-LBL-12 (2026-10-17): there were FOUR rungs (1=lines, 2=zones, 3=pip
     // labels, 4=labels block). The pip labels are retired, so stage 3 is gone;
     // the surplus cleanup it used to carry (a full family re-assert had just
     // run in that frame) now rides the ZONES rung, which is the last family

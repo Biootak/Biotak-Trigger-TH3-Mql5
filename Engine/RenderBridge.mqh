@@ -2,7 +2,7 @@
 //|  RenderBridge.mqh - Biotak render engine, product seam (MT5-ONLY)|
 //|                                                                  |
 //|  R-RENDER-ENGINE (2026-10-17): the ladder's trigger LINES and (until |
-//|  P-LBL-11) its pip LABELS are drawn by the canvas engine instead of  |
+//|  P-LBL-12) its pip LABELS are drawn by the canvas engine instead of  |
 //|  one chart object per element. The labels retired on 2026-10-17, so  |
 //|  the text family (RBridgeLevelLabel, RTexts) stays in the engine but |
 //|  dormant - the product stages no label text any more. Step 2 (same   |
@@ -24,7 +24,7 @@
 //|    - RenderTriggerLines stages the whole family every pass it     |
 //|      runs (BUILD_STAGE_LINES stages lines; steady frames stage    |
 //|      everything — the BUILD_STAGE_LABELS rung retired with the    |
-//|      pip labels, P-LBL-11, and RBridgeBegin's second flag arrives |
+//|      pip labels, P-LBL-12, and RBridgeBegin's second flag arrives |
 //|      as a fixed false since no product stage feeds the text       |
 //|      family any more) - the commit                            |
 //|      compares against the last committed copy and repaints only   |

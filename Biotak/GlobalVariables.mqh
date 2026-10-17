@@ -594,7 +594,7 @@ void MarkDrawGeneration()
 
 // P-PERF-06 STAGED REBUILD: a post-wipe level build materialises ~600 chart
 // objects (289 zones + 288 lines at inpMaxLevels=144; a third family of pip
-// labels sat in the count before P-LBL-11 retired them). Doing it in ONE
+// labels sat in the count before P-LBL-12 retired them). Doing it in ONE
 // frame freezes a weak PC for seconds on every attach, TF switch
 // and topology toggle. While g_buildStage != 0 the wipe is rebuilt one family
 // per frame (1=lines, 2=zones, 4=the labels block): every gate
@@ -606,7 +606,7 @@ void MarkDrawGeneration()
 // (P-ARCH-02: an earlier-included module can never see a later one).
 #define BUILD_STAGE_LINES  1
 #define BUILD_STAGE_ZONES  2
-// P-LBL-11 (2026-10-17): BUILD_STAGE_LABELS stood here (3, the pip-label
+// P-LBL-12 (2026-10-17): BUILD_STAGE_LABELS stood here (3, the pip-label
 // family frame). The labels are retired and the advance/paint rungs that used
 // the value are gone — the number is skipped, not reused, so every remaining
 // stage keeps its name.

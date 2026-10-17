@@ -38,7 +38,7 @@ bool DrawMainLevels(const string prefix) {
     // Skip drawing High/Low lines when Custom Price mode is active
     // In Custom Price mode, user defines their own reference point
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
-        // Delete existing High/Low lines if they exist. P-LBL-11 (2026-10-17):
+        // Delete existing High/Low lines if they exist. P-LBL-12 (2026-10-17):
         // the two `_PipsLabel` purges stay although nothing creates them any
         // more - a chart that ran an older build still carries the objects, and
         // this is one of the sweeps that clears them.
@@ -67,7 +67,7 @@ bool DrawMainLevels(const string prefix) {
         highTooltip = s_cachedHighTooltip;
     }
     if(!CreateTHLineObject(prefix+"High",g_highestHigh,inpHighColor,inpHighStyle,inpHighWidth,highTooltip, inpTHLineObjectType, false)) return false;
-    // P-LBL-11 (2026-10-17): the High line's pip-distance label block stood
+    // P-LBL-12 (2026-10-17): the High line's pip-distance label block stood
     // here (`inpShowPipDistanceLabels` -> CreatePipDistanceLabel). The labels
     // are retired; nothing replaces it - the line is the whole surface.
     
@@ -83,7 +83,7 @@ bool DrawMainLevels(const string prefix) {
         lowTooltip = s_cachedLowTooltip;
     }
     if(!CreateTHLineObject(prefix+"Low",g_lowestLow,inpLowColor,inpLowStyle,inpLowWidth,lowTooltip, inpTHLineObjectType, false)) return false;
-    // P-LBL-11 (2026-10-17): the Low line's pip-distance label block stood
+    // P-LBL-12 (2026-10-17): the Low line's pip-distance label block stood
     // here, twin of the High one above - retired with it.
     return true;
 }
@@ -290,7 +290,7 @@ bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName,
 //|    by a path that is not this pass can never enter either registry,|
 //|    and is therefore never deleted by this sweep. The fence's own   |
 //|    example used to be the level render's pip labels              |
-//|    (`CreatePipDistanceLabel`, retired by P-LBL-11, 2026-10-17) —  |
+//|    (`CreatePipDistanceLabel`, retired by P-LBL-12, 2026-10-17) —  |
 //|    the guarantee is what mattered and it is unchanged.            |
 //|  * a nested `LblSweepBegin` (a display function that clears on its |
 //|    own way out) does NOT rotate again and does NOT drop the marks  |

@@ -193,7 +193,7 @@ bool CreateTHLineObject(const string name, const double price, const color lineC
     return true;
 }
 
-// P-LBL-11 (2026-10-17): PipDistanceLabelLift and CreatePipDistanceLabel
+// P-LBL-12 (2026-10-17): PipDistanceLabelLift and CreatePipDistanceLabel
 // stood here - the per-level pip-distance label writer ("%s | %.1f" /
 // "%.1f pips", ANCHOR_RIGHT, one text row above its line) and the pass-
 // scoped lift it shared. The labels are retired, so the creator and its
