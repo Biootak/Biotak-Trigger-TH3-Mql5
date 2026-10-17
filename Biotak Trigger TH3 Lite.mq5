@@ -160,6 +160,9 @@ int OnInit()
     // BaseKnotTool's span, ATRCalculations' effective bars), so refreshing here
     // is what makes the first paint match MT4 exactly.
     CompatRefreshChartData();
+    // MT5-ONLY (P-PERF-117b): BEFORE this instance creates one object, name what
+    // the chart already carries (see the Full entry for the census' two moments).
+    P4LeftoverCensus("oninit");
     // P-PERF-04: attach / timeframe-switch budget (silent unless it overruns).
     // P-PERF-10: Lite has no UI half, but it carries the same domain phases
     // (settings / history / base-price file load / ATR) in the report.
@@ -194,6 +197,8 @@ void OnDeinit(const int reason)
     RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance
 #endif
     OnDeinitHandler(reason);
+    // MT5-ONLY (P-PERF-117b): the teardown's last word — name the survivors.
+    if(reason == REASON_REMOVE) P4LeftoverCensus("remove");
     // P-UI-142: Lite owns no surfaces, but it shares the GV table (boxes,
     // custom price, recorder) — save its overrides and flush, like the Full
     // teardown does. Shadow-guarded: zero writes when nothing moved; the flush

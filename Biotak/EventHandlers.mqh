@@ -4037,6 +4037,40 @@ void P4ObjectCensus()
    _LOG_GATE_W Print("[W][PERF] obj census: ", line, "total=", ObjectsTotal(0, -1, -1));
 }
 
+// P-PERF-117b (2026-10-17) — «خیلی چیزا باقی میمونه»: a leftover must name itself.
+//
+// Two moments make a leftover visible, and each one is printed here:
+//   * `oninit` - the first statements of OnInit, BEFORE this instance has
+//     created anything, so every object named is someone else's (a previous
+//     instance's orphan, a foreign tool's, or the user's own drawing).
+//   * `remove` - the tail of a REASON_REMOVE teardown, AFTER every owner has
+//     swept, so every object named survived the whole delete chain.
+// A timeframe switch is deliberately not a moment (its family is kept by
+// design, P-PERF-38b), which is why the remove half is gated on the reason.
+// Names are capped and a crowded chart prints its count only: the census is
+// read from a log, and the fix for a leftover is its family, i.e. its name.
+void P4LeftoverCensus(const string tag)
+{
+   const int cap = 48;
+   const int total = ObjectsTotal(0, -1, -1);
+   string names = "";
+   if(total <= 120)
+   {
+      int taken = 0;
+      for(int i = 0; i < total && taken < cap; i++)
+      {
+         string nm = ObjectName(0, i, -1, -1);
+         if(nm == "") continue;
+         if(taken > 0) names += "|";
+         names += nm;
+         taken++;
+      }
+   }
+   else
+      names = "(crowded, names skipped)";
+   _LOG_GATE_W Print("[W][PERF] leftovers@", tag, " total=", total, " names=", names);
+}
+
 void P4ReportSlow(const string what, const uint ms, const uint budget)
 {
     if(ms < budget) return;

@@ -175,6 +175,10 @@ int OnInit()
     // BaseKnotTool's span, ATRCalculations' effective bars), so refreshing here
     // is what makes the first paint match MT4 exactly.
     CompatRefreshChartData();
+    // MT5-ONLY (P-PERF-117b): BEFORE this instance creates one object, name what
+    // the chart already carries — an orphan from the previous instance names
+    // itself here, and so does the fix's target family.
+    P4LeftoverCensus("oninit");
     // P-PERF-04: attach / timeframe switch budget (both halves are measured:
     // OnInitHandler is the indicator, the UI kit restores menu + panels).
     // P-PERF-10: this entry measures BOTH halves of the init budget (the
@@ -332,6 +336,10 @@ void OnDeinit(const int reason)
     // InitializeUIStates; see UITearStampName in EventHandlers.
     StampCleanUITeardown();
     OnDeinitHandler(reason);
+    // MT5-ONLY (P-PERF-117b): the teardown's last word — anything named here
+    // survived every sweep above (a switch keeps its family by design and is
+    // not a moment; only a real removal is).
+    if(reason == REASON_REMOVE) P4LeftoverCensus("remove");
     p15Handler = GetTickCount() - p15t;
     uint p15total = GetTickCount() - p4d;
     P4ReportSlow("OnDeinit reason=" + IntegerToString(reason),
