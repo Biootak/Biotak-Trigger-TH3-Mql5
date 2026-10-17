@@ -2185,6 +2185,10 @@ void CircTipPinnedTouch() { s_TipDirty = true; }
 static bool s_TipDrag = false;
 static bool s_TipMoved = false;   // a real move (>= 1 px) eats the release's click echo
 static int  s_TipGrabDX = 0, s_TipGrabDY = 0;
+//--- P-PERF-118: the chip's place is committed on EVERY real move (the hand's answer,
+//--- P-UI-158) but its ART is painted on the orb's own living budget — one language
+//--- for every drag (CIRC_DRAG_REDRAW_INTERVAL).
+static uint s_TipLastRedrawTick = 0;
 //--- P-UI-140: the hand owns the chip's place for the whole drag, so the 250 ms
 //--- re-derivation must stand off exactly as it does for the orb (one accessor, so
 //--- the refresh never reads a static it does not own).
@@ -2218,14 +2222,32 @@ void CircTipDragTo(const int mx, const int my)
    if(CircTipHomeGet(hx, hy) && hx == cx && hy == cy) return;   // same spot: no write at all
    CircTipHomeSet(cx, cy);
    GVHomeAnswerNew("CHIP");   // P-UI-158: a real move is the hand's answer, re-claimed per move
+   s_TipMoved = true;         // P-PERF-118: the hand moved — the paint below may still be budgeted
+   //--- P-PERF-118: the chip owns the view until release, exactly like the orb
+   //--- (LEARNING §5): a third writer flipping the props back mid-drag pans the chart
+   //--- under the hand. Two reads on steady state, writes only on drift.
+   CircReassertLock();
    int x = 0, y = 0, w = 0, h = 0;
    CircTipHomeBox(cw, ch, x, y, w, h);
    if(x == s_TipBoxX && y == s_TipBoxY) return;
+   //--- P-PERF-118 (2026-10-17, user order «اونی که با فلش قرمز علامت زدم چرا سخت
+   //--- درگ میشه، مثل مال منو اصلی باشه، روان و با کمترین هزینه»): the HOME above is
+   //--- committed per real move — the hand's answer stays exact — but the ART obeys the
+   //--- orb's own living budget (CIRC_DRAG_REDRAW_INTERVAL) and paints on the same event
+   //--- that made the box, with an explicit redraw. Without them every mouse event wrote
+   //--- two properties and dirtied the chart uncapped, and nothing painted until the
+   //--- terminal found a breath — the drag read as heavy stepping. The box stays
+   //--- UNCOMMITTED while gated, so the next event re-derives and paints the then-current
+   //--- place (nothing is ever lost), and the release's tick settle paints the exact
+   //--- final home (s_TipDirty).
+   uint now = GetTickCount();
+   if(now - s_TipLastRedrawTick < CIRC_DRAG_REDRAW_INTERVAL) return;
+   s_TipLastRedrawTick = now;
    s_TipBoxX = x; s_TipBoxY = y;
-   s_TipMoved = true;
    string ar = CircTipArt();
    ObjectSetInteger(0, ar, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, ar, OBJPROP_YDISTANCE, y);
+   ChartRedraw();
 }
 
 void CircTipDragEnd(const bool dropped)
