@@ -493,6 +493,14 @@ bool TH3FamilyAnchorsAlive(const string base)
     if(ObjectFind(0, base + "_Point_A") < 0) return false;
     if(ObjectFind(0, base + "_Point_B") < 0) return false;
     if(ObjectFind(0, base + "_Point_C") < 0) return false;
+#ifdef BIOTAK_RENDER_ENGINE
+    // R-RENDER-ENGINE (MT5-ONLY): a canvas pattern carries no leg objects —
+    // probing _Line_AB here told the delete path every HEALTHY family was
+    // hand-broken, and a stray echo of our own sweep would then wipe points
+    // and caption whole. The point arrows exist in both modes and are the
+    // anchors; the line probe stays for the object render path (flag off).
+    if(RBridgeActive()) return true;
+#endif
     if(ObjectFind(0, base + "_Line_AB") < 0) return false;
     if(ObjectFind(0, base + "_Line_BC") < 0) return false;
     return true;
@@ -1015,6 +1023,20 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     Print("   C: ", TimeToString(tC), " @ ", DoubleToString(pC, Digits));
     Print("   D: ", TimeToString(tD), " @ ", DoubleToString(pD, Digits));
     #endif
+
+    // R-RENDER-ENGINE (phase A, 2026-10-17): the pattern's ink is staged onto
+    // the canvas - the skeleton, the fibo legs, targets, mids, zone bands and
+    // every label. Only Point_A..D stay objects (the terminal drags objects,
+    // not canvas pixels - the magnet reads them) and the caption family stays
+    // objects until phase A2. Comment the entry's one flag line for the
+    // object-path A/B; this branch turns off with it. Declared before the
+    // early-fail path below, which drops the base's canvas rows with its
+    // objects.
+    bool rbr = false;
+#ifdef BIOTAK_RENDER_ENGINE
+    rbr = RBridgeActive();
+#endif
+    const bool patActive = (g_activeABCDPattern == mainObjName);
     
     if(tD <= 0 || pD <= 0) {
         if(!CalculateABCDPointD(tA, pA, tB, pB, tC, pC, tD, pD)) {
@@ -1042,6 +1064,9 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 ObjectDelete(0, mainObjName + "_PBLabel_" + IntegerToString(_i));
             }
             TH3InfoFamilyDelete(mainObjName);   // P-TH3-INFO-01: the whole caption family
+#ifdef BIOTAK_RENDER_ENGINE
+            if(rbr) RBridgePatternDropBase(mainObjName);   // R-RENDER-ENGINE: the canvas rows leave with the objects
+#endif
             return;
         }
     }
@@ -1290,6 +1315,34 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // Auto mode: Use fixed 15 pips (legacy behavior)
         labelOffset = 15.0 * pipSize;
     }
+
+#ifdef BIOTAK_RENDER_ENGINE
+    if(rbr)
+    {
+        // R-RENDER-ENGINE phase A: the family that moved to the canvas leaves
+        // its objects behind ONCE. The sweep runs inside this draw, so
+        // g_th3OwnDeleteMs (stamped at the tail) and the delete-token shim both
+        // cover it - the queued OBJECT_DELETEs die in CompatConsumeObjEvent
+        // before any handler could read them as a user delete. The kept names:
+        // `_Point_*` (the drag anchors, objects on purpose) and `_Info*` (the
+        // caption family, objects until phase A2). Static per instance: after
+        // this pass the chart carries no legacy member of any pattern.
+        static bool s_rbrPatSwept=false;
+        if(!s_rbrPatSwept)
+        {
+            s_rbrPatSwept=true;
+            for(int sk=ObjectsTotal(0,-1,-1)-1; sk>=0; sk--)
+            {
+                string sn=ObjectName(0,sk,-1,-1);
+                if(TH3FamilyBaseOf(sn)=="") continue;
+                if(StringFind(sn,"_Point_")>=0) continue;
+                if(StringFind(sn,"_Info")>=0) continue;
+                ObjectDelete(0,sn);
+            }
+        }
+        RBridgePatternBegin(mainObjName);
+    }
+#endif
     
     // Cleanup any lingering legacy X objects (retired; guard to avoid no-op API calls)
     // P-PERF-RET1 (2026-10-12): these objects were removed in P-TH3-D4h/P-TH3-DEL1.
@@ -1436,7 +1489,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                     anchor = ANCHOR_UPPER;
                 }
             }
-            
+
+#ifdef BIOTAK_RENDER_ENGINE
+            if(rbr)
+                RBridgePatternText(labelName, (long)pointTimes[i], labelPrice,
+                                   pointNames[i], TH3SessionPointInk(), 10,
+                                   (int)RBrAnchorCanvas((int)anchor),
+                                   RBrFaceFlags(BioChromeFont()), BioChromeFont());
+            if(!rbr)
+#endif
             if(ObjectFind(0, labelName) < 0) {
                 if(!ObjectCreate(0, labelName, OBJ_TEXT, 0, pointTimes[i], labelPrice)) {
                     #ifdef ENABLE_DEBUG_LOGS
@@ -1465,6 +1526,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     
     // Draw line AB (solid)
     string lineAB = mainObjName + "_Line_AB";
+#ifdef BIOTAK_RENDER_ENGINE
+    if(rbr)
+        RBridgePatternSeg(lineAB, (long)tA, pA, (long)tB, pB,
+                          TH3SessionLineInk(), (int)g_th3Style, g_th3Width);
+    if(!rbr)
+#endif
     if(ObjectFind(0, lineAB) < 0) {
         if(!ObjectCreate(0, lineAB, OBJ_TREND, 0, tA, pA, tB, pB)) {
             #ifdef ENABLE_DEBUG_LOGS
@@ -1508,6 +1575,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     
     // Draw line BC (dotted)
     string lineBC = mainObjName + "_Line_BC";
+#ifdef BIOTAK_RENDER_ENGINE
+    if(rbr)
+        RBridgePatternSeg(lineBC, (long)tB, pB, (long)tC, pC,
+                          TH3InkForChart(clrGray), (int)STYLE_DOT, 1);
+    if(!rbr)
+#endif
     if(ObjectFind(0, lineBC) < 0) {
         if(!ObjectCreate(0, lineBC, OBJ_TREND, 0, tB, pB, tC, pC)) {
             #ifdef ENABLE_DEBUG_LOGS
@@ -1533,6 +1606,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // C->D leg is user-placed ink like AB (same width/style/ink), not a
     // computed projection. Without it D floated with no leg into it.
     string lineCD = mainObjName + "_Line_CD";
+#ifdef BIOTAK_RENDER_ENGINE
+    if(rbr)
+        RBridgePatternSeg(lineCD, (long)tC, pC, (long)tD, pD,
+                          TH3SessionLineInk(), (int)g_th3Style, g_th3Width);
+    if(!rbr)
+#endif
     if(ObjectFind(0, lineCD) < 0) {
         if(!ObjectCreate(0, lineCD, OBJ_TREND, 0, tC, pC, tD, pD)) {
             #ifdef ENABLE_DEBUG_LOGS
@@ -1579,6 +1658,13 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         datetime tCD_mid = tC + (tD - tC) / 2;
         double   pCD_mid = (pC + pD) / 2.0;
         string   cdLblText = TH3TfName(ownerTF);
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternText(cdLbl, (long)tCD_mid, pCD_mid, cdLblText,
+                               clrMagenta, 9, (int)RBrAnchorCanvas((int)ANCHOR_CENTER),
+                               RBrFaceFlags(BioChromeFont()), BioChromeFont());
+        if(!rbr)
+#endif
         if(ObjectFind(0, cdLbl) < 0) {
             if(ObjectCreate(0, cdLbl, OBJ_TEXT, 0, tCD_mid, pCD_mid)) {
                 ObjectSetString( 0, cdLbl, OBJPROP_TEXT,      cdLblText);
@@ -1772,7 +1858,34 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         color targetInk = TH3InkForChart(targetColors[i]);
         // Apply the zone transparency to the box/border color (blend with background)
         zoneColor = GetZoneRenderColor(zoneColor, inpTH3ZoneTransparency);
-        
+
+        // R-RENDER-ENGINE: the rung as a canvas stroke, its LEVELTEXT as a
+        // right-edge label (the object path's text rides the fibo line's right
+        // end — RAY_RIGHT makes that the right EDGE, hence the sentinel; a
+        // non-rayed line keeps its text at the end time, off-chart like the
+        // object's usually is). Masked with the ladder (P-TH3-P6f): `_Target_`
+        // is a ladder name, so inactive patterns keep no rung and no rung text.
+        // The label font is the terminal default an OBJ_FIBO level text uses
+        // (Arial 8 at the reference DPI) - no code ever set a font there.
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+        {
+            RBridgePatternSeg(lineName, (long)startTime, centerPrice, (long)endTime, centerPrice,
+                              targetInk, (int)STYLE_SOLID, 2, inpABCDExtendCD, patActive);
+            if(inpTH3LabelPosition != TH3_LABEL_HIDDEN)
+            {
+                double zonePips = (zoneHalfWidth * 2.0) / pipSize;
+                string labelText = StringFormat("%s (%.1f) ========%.1f", targetNames[i], targetPips[i], zonePips);
+                if(inpABCDExtendCD)
+                    RBridgePatternText(lineName + "_Text", 0, centerPrice, labelText,
+                                       targetInk, 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+                else
+                    RBridgePatternText(lineName + "_Text", (long)endTime, centerPrice, labelText,
+                                       targetInk, 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+            }
+        }
+        if(!rbr)
+#endif
         if(ObjectFind(0, lineName) < 0) {
             ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, centerPrice, endTime, centerPrice);
             ObjectSetInteger(0, lineName, OBJPROP_COLOR, targetInk);
@@ -1835,6 +1948,24 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             string bottomBorder = zoneBoxName + "_B_Bottom";
             string leftBorder = zoneBoxName + "_B_Left";
 
+            // R-RENDER-ENGINE: the EMPTY outline is its three strokes. Zones are
+            // NOT ladder-masked (P-TH3-DISC: every pattern keeps its zones), so
+            // the strokes always stage visible. The object sweeps in both style
+            // branches are create-time logistics the one-time family sweep at
+            // the top already covers - they all sit under `if(!rbr)`.
+#ifdef BIOTAK_RENDER_ENGINE
+            if(rbr)
+            {
+                RBridgePatternSeg(topBorder, (long)startTime, upperZone, (long)endTime, upperZone,
+                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, inpABCDExtendCD);
+                RBridgePatternSeg(bottomBorder, (long)startTime, lowerZone, (long)endTime, lowerZone,
+                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, inpABCDExtendCD);
+                RBridgePatternSeg(leftBorder, (long)startTime, lowerZone, (long)startTime, upperZone,
+                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, false);
+            }
+            if(!rbr)
+#endif
+            {
             if(s_zoneStyleFamily != (int)inpTH3ZoneStyle) {
                 if(ObjectFind(0, zoneUpperName) >= 0) ObjectDelete(0, zoneUpperName);
                 if(ObjectFind(0, zoneLowerName) >= 0) ObjectDelete(0, zoneLowerName);
@@ -1910,6 +2041,9 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 if((int)ObjectGetInteger(0, leftBorder, OBJPROP_WIDTH) != inpTH3ZoneBorderWidth)
                     ObjectSetInteger(0, leftBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
             }
+#ifdef BIOTAK_RENDER_ENGINE
+            }   // if(!rbr): the object family only
+#endif
         }
         else {
             // BOX_FILLED: single filled rectangle zone
@@ -1918,6 +2052,29 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             string topBorder = zoneBoxName + "_B_Top";
             string bottomBorder = zoneBoxName + "_B_Bottom";
             string leftBorder = zoneBoxName + "_B_Left";
+
+            // R-RENDER-ENGINE: the band is a time-bounded fill (startTime ->
+            // endTime, ray = RAY_RIGHT semantics) plus the three border strokes
+            // the rectangle's outline drew. The right edge stroke is skipped -
+            // the object's own right border sits at endTime, 100 bars out, so
+            // the divergence is at most a hairline on an extreme zoom-out.
+            // zoneColor is already the opacity-blended ink (GetZoneRenderColor),
+            // so the band covers candles exactly as the BACK=false rectangle did.
+#ifdef BIOTAK_RENDER_ENGINE
+            if(rbr)
+            {
+                RBridgePatternBand(zoneBoxName, (long)startTime, (long)endTime,
+                                   lowerZone, upperZone, zoneColor, inpABCDExtendCD);
+                RBridgePatternSeg(topBorder, (long)startTime, upperZone, (long)endTime, upperZone,
+                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, inpABCDExtendCD);
+                RBridgePatternSeg(bottomBorder, (long)startTime, lowerZone, (long)endTime, lowerZone,
+                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, inpABCDExtendCD);
+                RBridgePatternSeg(leftBorder, (long)startTime, lowerZone, (long)startTime, upperZone,
+                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, false);
+            }
+            if(!rbr)
+#endif
+            {
             if(s_zoneStyleFamily != (int)inpTH3ZoneStyle) {
                 if(ObjectFind(0, zoneUpperName) >= 0) ObjectDelete(0, zoneUpperName);
                 if(ObjectFind(0, zoneLowerName) >= 0) ObjectDelete(0, zoneLowerName);
@@ -1961,6 +2118,9 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 if((color)ObjectGetInteger(0, zoneBoxName, OBJPROP_COLOR) != zoneColor)
                     ObjectSetInteger(0, zoneBoxName, OBJPROP_COLOR, zoneColor);
             }
+#ifdef BIOTAK_RENDER_ENGINE
+            }   // if(!rbr): the object family only
+#endif
         }
     }
     // P-TH3-ZONE-04: the family is now BORN, so the next pass skips the sweep
@@ -1974,6 +2134,26 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         int mStep = 2 * (mi + 1);
         string midName = mainObjName + "_Mid_" + IntegerToString(mStep);
         string midText = StringFormat("Step%d (%.1f)", mStep, midPips[mi]);
+        // R-RENDER-ENGINE: the even rungs stage exactly like the targets —
+        // gray dotted stroke, right-edge label, ladder-masked (`_Mid_` is a
+        // ladder name), label text only when the label position shows.
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+        {
+            RBridgePatternSeg(midName, (long)startTime, midLevels[mi], (long)endTime, midLevels[mi],
+                              TH3InkForChart(clrGray), (int)STYLE_DOT, 1, inpABCDExtendCD, patActive);
+            if(inpTH3LabelPosition != TH3_LABEL_HIDDEN)
+            {
+                if(inpABCDExtendCD)
+                    RBridgePatternText(midName + "_Text", 0, midLevels[mi], midText,
+                                       TH3InkForChart(clrGray), 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+                else
+                    RBridgePatternText(midName + "_Text", (long)endTime, midLevels[mi], midText,
+                                       TH3InkForChart(clrGray), 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+            }
+        }
+        if(!rbr)
+#endif
         if(ObjectFind(0, midName) < 0) {
             if(ObjectCreate(0, midName, OBJ_FIBO, 0, startTime, midLevels[mi], endTime, midLevels[mi])) {
                 ObjectSetInteger(0, midName, OBJPROP_COLOR, TH3InkForChart(clrGray));
@@ -2015,6 +2195,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // zone per call to compose a string it then printed unconditionally. Gate it
     // behind ENABLE_DEBUG_LOGS so production builds skip all of that work.
     #ifdef ENABLE_DEBUG_LOGS
+    if(!rbr)   // R-RENDER-ENGINE: on the canvas there are no zone objects to count
     {
         int zoneStand = 0, zoneBorn = 0;
         string zoneSeen = "";
@@ -2113,6 +2294,17 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // bounds: create once, move after (same pattern as _HitLine).
         // P-UI-97: the resolver sits AT the write (no local ink var) —
         // panel-wiring-audit [th3ink] rejects an unresolved ink variable.
+        // R-RENDER-ENGINE: five canvas rows replace the five objects. The
+        // no-match branch below needs no canvas twin: this pass stages nothing
+        // for the base's MP names, and the per-base unseen sweep in
+        // RBridgePatternCommit drops their recs exactly as the ObjectDeletes
+        // drop the objects - a drag off the pivot clears the ink either way.
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternSeg(mpHi, (long)mp.time, mpTop, (long)tD, mpTop,
+                              TH3InkForChart(inpTH3Color), (int)STYLE_DOT, 1);
+        if(!rbr)
+#endif
         if(ObjectFind(0, mpHi) < 0) {
             if(ObjectCreate(0, mpHi, OBJ_TREND, 0, mp.time, mpTop, tD, mpTop)) {
                 ObjectSetInteger(0, mpHi, OBJPROP_COLOR, TH3InkForChart(inpTH3Color));
@@ -2126,6 +2318,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             ObjectMove(0, mpHi, 0, mp.time, mpTop);
             ObjectMove(0, mpHi, 1, tD, mpTop);
         }
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternSeg(mpLo, (long)mp.time, mpBot, (long)tD, mpBot,
+                              TH3InkForChart(inpTH3Color), (int)STYLE_DOT, 1);
+        if(!rbr)
+#endif
         if(ObjectFind(0, mpLo) < 0) {
             if(ObjectCreate(0, mpLo, OBJ_TREND, 0, mp.time, mpBot, tD, mpBot)) {
                 ObjectSetInteger(0, mpLo, OBJPROP_COLOR, TH3InkForChart(inpTH3Color));
@@ -2143,6 +2341,14 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // Tail = the key line (mp.keyPrice): two small circles ON the pivot
         // bar so سر و ته پیوت مادر reads at a glance. Same prefix, same
         // delete discipline as Hi/Lo.
+        // R-RENDER-ENGINE: the arrow-159 glyph as a filled dot — width 3 was
+        // the big head, width 2 the tail (the same radii the glyph's pixel
+        // blob occupied).
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternDot(mpHead, (long)mp.time, mp.price, 3, TH3InkForChart(inpTH3Color));
+        if(!rbr)
+#endif
         if(ObjectFind(0, mpHead) < 0) {
             if(ObjectCreate(0, mpHead, OBJ_ARROW, 0, mp.time, mp.price)) {
                 ObjectSetInteger(0, mpHead, OBJPROP_ARROWCODE, 159);
@@ -2154,6 +2360,11 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         } else {
             ObjectMove(0, mpHead, 0, mp.time, mp.price);
         }
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternDot(mpTail, (long)mp.time, mp.keyPrice, 2, TH3InkForChart(inpTH3Color));
+        if(!rbr)
+#endif
         if(ObjectFind(0, mpTail) < 0) {
             if(ObjectCreate(0, mpTail, OBJ_ARROW, 0, mp.time, mp.keyPrice)) {
                 ObjectSetInteger(0, mpTail, OBJPROP_ARROWCODE, 159);
@@ -2179,6 +2390,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // (TH3ReadoutInk), because a theme-flipped row on a fixed dark plate is
         // unreadable (P-TH3-INFO-04).
         color wantInk = TH3InkForChart(inpABCDInfoColor);
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternText(mpBadge, (long)tD, mpMid, mpText, wantInk, 8,
+                               (int)(TA_LEFT|TA_VCENTER), 0, BIO_FONT_BADGE);
+        if(!rbr)
+#endif
         if(ObjectFind(0, mpBadge) < 0) {
             if(ObjectCreate(0, mpBadge, OBJ_TEXT, 0, tD, mpMid)) {
                 ObjectSetString(0, mpBadge, OBJPROP_TEXT, mpText);
@@ -2276,6 +2493,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     bool orgShow = (inpShowMotherPivotZone && mpActive && atrBasis && orgSpan > 0
                     && TH3OriginPivotAt(tD, pD, dirDown, orgSpan, mpAnchor, org));
     if(orgShow) {
+#ifdef BIOTAK_RENDER_ENGINE
+        if(rbr)
+            RBridgePatternSeg(mpOrg, (long)org.time, org.price, (long)tD, org.price,
+                              TH3InkForChart(inpTH3Color), (int)STYLE_DOT, 1);
+        if(!rbr)
+#endif
         if(ObjectFind(0, mpOrg) < 0) {
             if(ObjectCreate(0, mpOrg, OBJ_TREND, 0, org.time, org.price, tD, org.price)) {
                 ObjectSetInteger(0, mpOrg, OBJPROP_COLOR, TH3InkForChart(inpTH3Color));
@@ -2414,7 +2637,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // family carries a plate (INFO-10), so `patIdx` buys nothing and costs the
     // user a 64 px empty slot above the caption plus a jump whenever the active
     // pattern changes. The caption sits at the base of the safe area.
-    bool isActive = (g_activeABCDPattern == mainObjName);
+    bool isActive = patActive;
     int rowY    = inpABCDInfoYDistance;
     int infoLines = TH3InfoFamilyDraw(mainObjName,
                                        rowIdentity + "\n" + rowLegs + "\n" + rowPrices + "\n" +
@@ -2448,6 +2671,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     Print("   Objects: Points(3:A,B,C) + Labels(3) + Lines(2) + Targets(4) + Zones(8) + Info(", infoLines, ")");
     Print("   Note: Point D not shown - target levels indicate D zone");
     #endif
+
+    // R-RENDER-ENGINE: the pass is complete — this base's unseen rows leave and
+    // the dirty families reach the front slot in ONE repaint (none when nothing
+    // compared different). Commit sits before the delete stamp below for the
+    // same reason the object path stamps there: this draw's own drops must be
+    // covered by it.
+#ifdef BIOTAK_RENDER_ENGINE
+    if(rbr) RBridgePatternCommit(mainObjName);
+#endif
 
     // P-TH3-DEL2: this draw's own drops queue their OBJECT_DELETEs behind it.
     g_th3OwnDeleteMs = GetTickCount();

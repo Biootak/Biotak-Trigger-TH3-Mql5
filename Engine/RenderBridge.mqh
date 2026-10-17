@@ -131,6 +131,10 @@ void RBridgeInit()
    ArrayResize(g_rbrLines,0);
    ArrayResize(g_rbrTexts,0);
    ArrayResize(g_rbrZones,0);
+   ArrayResize(g_rbrPatSegs,0);  ArrayResize(g_rbrPatTexts,0);
+   ArrayResize(g_rbrPatBands,0); ArrayResize(g_rbrPatDots,0);
+   g_rbrPatDirtySegs=0; g_rbrPatDirtyTexts=0;
+   g_rbrPatDirtyBands=0; g_rbrPatDirtyDots=0;
    for(int i=0;i<3;i++){ g_rbrPin[i]=""; g_rbrPrevPin[i]=""; }
    g_rbrDirtyUnder=false; g_rbrDirtyTexts=false; g_rbrDirtyZones=false;
    g_rbrStageZones=false; g_rbrZCursor=0; g_rbrZoneShow=true;
@@ -491,6 +495,408 @@ uint RBrFaceFlags(const string nm)
    return (StringFind(nm," Bold")>0) ? (uint)FW_BOLD : (uint)FW_NORMAL;
 }
 
+//==================== pattern family (phase A, 2026-10-17) ===========
+// The ABCD pattern's visual family moves to the canvas: the skeleton (AB/BC/CD
+// plus the fibo legs), the target/zone border rays and every label (point
+// names, the CD label, the info plate's text rows). Only Point_A..D stay
+// objects - the terminal drags objects, not canvas pixels, and the magnet
+// reads them. Attribution (the 2026-10-17 drag ledger) put 125 ms of chart writes per
+// drag event inside DrawABCDPattern and 0 ms in the store; on the canvas the
+// same move re-stages ~40 RAM rows and one front-slot repaint pays f(surface).
+//
+// Staging mirrors the zone family: a Begin marks the pass, every emitter
+// writes/updates one rec keyed by NAME, the commit sweeps the unseen (a name
+// the pass did not produce is gone - deleting the pattern clears its family in
+// one commit) and diffs before touching the scene.
+struct RBrPatSegRec  { string name; long t1; double p1; long t2; double p2; uint argb; int style; int width; bool rayRight; bool visible; bool seen; };
+struct RBrPatTextRec { string name; long t; double price; string text; uint argb; int size; uint flags; string font; int anchor; bool visible; bool seen; };
+struct RBrPatBandRec { string name; long t0; long t1; double p0; double p1; uint argb; bool rayRight; bool visible; bool seen; };
+struct RBrPatDotRec  { string name; long t; double price; int radius; uint argb; bool visible; bool seen; };
+RBrPatSegRec  g_rbrPatSegs[];
+RBrPatTextRec g_rbrPatTexts[];
+RBrPatBandRec g_rbrPatBands[];
+RBrPatDotRec  g_rbrPatDots[];
+int  g_rbrPatDirtySegs=0, g_rbrPatDirtyTexts=0;
+int  g_rbrPatDirtyBands=0, g_rbrPatDirtyDots=0;
+
+// Family membership: the name wears THIS base (pattern names are
+// `ABCD_Pattern_<digits>`, the overlay's `TH3_MP_` variant prefixed), and the
+// character after the base is `_` - so `ABCD_Pattern_357` can never claim a
+// member of `ABCD_Pattern_3579`.
+bool RBrPatOfBase(const string nm,const string base)
+{
+   if(base=="") return false;
+   int p=0;
+   if(StringFind(nm,"TH3_MP_")==0) p=7;
+   if(StringFind(nm,base,p)!=p) return false;
+   const int e=p+StringLen(base);
+   if(e>=StringLen(nm)) return true;
+   return StringGetCharacter(nm,e)=='_';
+}
+
+// The pass is per PATTERN, not global (DrawABCDPattern draws one family): the
+// seen-sweep touches only this base's recs, so a redraw of pattern A never
+// drops pattern B's rows.
+void RBridgePatternBegin(const string base)
+{
+   for(int i=0;i<ArraySize(g_rbrPatSegs);i++)  if(RBrPatOfBase(g_rbrPatSegs[i].name,base))  g_rbrPatSegs[i].seen=false;
+   for(int i=0;i<ArraySize(g_rbrPatTexts);i++) if(RBrPatOfBase(g_rbrPatTexts[i].name,base)) g_rbrPatTexts[i].seen=false;
+   for(int i=0;i<ArraySize(g_rbrPatBands);i++) if(RBrPatOfBase(g_rbrPatBands[i].name,base)) g_rbrPatBands[i].seen=false;
+   for(int i=0;i<ArraySize(g_rbrPatDots);i++)  if(RBrPatOfBase(g_rbrPatDots[i].name,base))  g_rbrPatDots[i].seen=false;
+}
+
+// The MT4 anchor -> the TextOut anchor. The pattern family's labels use
+// ANCHOR_UPPER/LOWER/CENTER (points, CD label) and ANCHOR_LEFT (MP badge).
+uint RBrAnchorCanvas(const int mt4Anchor)
+{
+   switch(mt4Anchor)
+   {
+      case ANCHOR_UPPER:       return TA_CENTER|TA_TOP;
+      case ANCHOR_LOWER:       return TA_CENTER|TA_BOTTOM;
+      case ANCHOR_LEFT:        return TA_LEFT|TA_VCENTER;
+      case ANCHOR_RIGHT:       return TA_RIGHT|TA_VCENTER;
+      case ANCHOR_LEFT_UPPER:  return TA_LEFT|TA_TOP;
+      case ANCHOR_LEFT_LOWER:  return TA_LEFT|TA_BOTTOM;
+      case ANCHOR_RIGHT_UPPER: return TA_RIGHT|TA_TOP;
+      case ANCHOR_RIGHT_LOWER: return TA_RIGHT|TA_BOTTOM;
+      default:                 return TA_CENTER|TA_VCENTER;
+   }
+}
+
+void RBridgePatternSeg(const string name,const long t1,const double p1,const long t2,const double p2,
+                       const color clr,const int style,const int width,const bool rayRight=false,
+                       const bool visible=true)
+{
+   const uint argb=RCol(clr,255);
+   const int n=ArraySize(g_rbrPatSegs);
+   for(int i=0;i<n;i++)
+      if(g_rbrPatSegs[i].name==name)
+      {
+         if(g_rbrPatSegs[i].t1!=t1 || g_rbrPatSegs[i].p1!=p1 || g_rbrPatSegs[i].t2!=t2 ||
+            g_rbrPatSegs[i].p2!=p2 || g_rbrPatSegs[i].argb!=argb ||
+            g_rbrPatSegs[i].style!=style || g_rbrPatSegs[i].width!=width ||
+            g_rbrPatSegs[i].rayRight!=rayRight ||
+            g_rbrPatSegs[i].visible!=visible) g_rbrPatDirtySegs++;
+         g_rbrPatSegs[i].t1=t1; g_rbrPatSegs[i].p1=p1;
+         g_rbrPatSegs[i].t2=t2; g_rbrPatSegs[i].p2=p2;
+         g_rbrPatSegs[i].argb=argb; g_rbrPatSegs[i].style=style;
+         g_rbrPatSegs[i].width=width; g_rbrPatSegs[i].rayRight=rayRight;
+         g_rbrPatSegs[i].visible=visible;
+         g_rbrPatSegs[i].seen=true;
+         return;
+      }
+   if(ArrayResize(g_rbrPatSegs,n+1)!=n+1) return;
+   g_rbrPatSegs[n].name=name;
+   g_rbrPatSegs[n].t1=t1; g_rbrPatSegs[n].p1=p1;
+   g_rbrPatSegs[n].t2=t2; g_rbrPatSegs[n].p2=p2;
+   g_rbrPatSegs[n].argb=argb; g_rbrPatSegs[n].style=style;
+   g_rbrPatSegs[n].width=width; g_rbrPatSegs[n].rayRight=rayRight;
+   g_rbrPatSegs[n].visible=visible;
+   g_rbrPatSegs[n].seen=true;
+   g_rbrPatDirtySegs++;
+}
+
+// The zone fill band (FILLED style): fill colour arrives pre-blended (opaque),
+// exactly the colour the rectangle carries.
+void RBridgePatternBand(const string name,const long t0,const long t1,
+                        const double p0,const double p1,const color clr,
+                        const bool rayRight,const bool visible=true)
+{
+   const uint argb=RCol(clr,255);
+   const int n=ArraySize(g_rbrPatBands);
+   for(int i=0;i<n;i++)
+      if(g_rbrPatBands[i].name==name)
+      {
+         if(g_rbrPatBands[i].t0!=t0 || g_rbrPatBands[i].t1!=t1 ||
+            g_rbrPatBands[i].p0!=p0 || g_rbrPatBands[i].p1!=p1 ||
+            g_rbrPatBands[i].argb!=argb || g_rbrPatBands[i].rayRight!=rayRight ||
+            g_rbrPatBands[i].visible!=visible) g_rbrPatDirtyBands++;
+         g_rbrPatBands[i].t0=t0; g_rbrPatBands[i].t1=t1;
+         g_rbrPatBands[i].p0=p0; g_rbrPatBands[i].p1=p1;
+         g_rbrPatBands[i].argb=argb; g_rbrPatBands[i].rayRight=rayRight;
+         g_rbrPatBands[i].visible=visible;
+         g_rbrPatBands[i].seen=true;
+         return;
+      }
+   if(ArrayResize(g_rbrPatBands,n+1)!=n+1) return;
+   g_rbrPatBands[n].name=name;
+   g_rbrPatBands[n].t0=t0; g_rbrPatBands[n].t1=t1;
+   g_rbrPatBands[n].p0=p0; g_rbrPatBands[n].p1=p1;
+   g_rbrPatBands[n].argb=argb; g_rbrPatBands[n].rayRight=rayRight;
+   g_rbrPatBands[n].visible=visible;
+   g_rbrPatBands[n].seen=true;
+   g_rbrPatDirtyBands++;
+}
+
+// The MP Head/Tail dot: a pixel radius (arrow 159 width 3 ~= r3, width 2 ~= r2).
+void RBridgePatternDot(const string name,const long t,const double price,
+                       const int radius,const color clr,const bool visible=true)
+{
+   const uint argb=RCol(clr,255);
+   const int n=ArraySize(g_rbrPatDots);
+   for(int i=0;i<n;i++)
+      if(g_rbrPatDots[i].name==name)
+      {
+         if(g_rbrPatDots[i].t!=t || g_rbrPatDots[i].price!=price ||
+            g_rbrPatDots[i].radius!=radius || g_rbrPatDots[i].argb!=argb ||
+            g_rbrPatDots[i].visible!=visible) g_rbrPatDirtyDots++;
+         g_rbrPatDots[i].t=t; g_rbrPatDots[i].price=price;
+         g_rbrPatDots[i].radius=radius; g_rbrPatDots[i].argb=argb;
+         g_rbrPatDots[i].visible=visible;
+         g_rbrPatDots[i].seen=true;
+         return;
+      }
+   if(ArrayResize(g_rbrPatDots,n+1)!=n+1) return;
+   g_rbrPatDots[n].name=name;
+   g_rbrPatDots[n].t=t; g_rbrPatDots[n].price=price;
+   g_rbrPatDots[n].radius=radius; g_rbrPatDots[n].argb=argb;
+   g_rbrPatDots[n].visible=visible;
+   g_rbrPatDots[n].seen=true;
+   g_rbrPatDirtyDots++;
+}
+
+void RBridgePatternText(const string name,const long t,const double price,const string text,
+                        const color clr,const int fontSize,const int anchor,
+                        const uint fontFlags,const string fontName,const bool visible=true)
+{
+   const uint argb=RCol(clr,255);
+   const int n=ArraySize(g_rbrPatTexts);
+   for(int i=0;i<n;i++)
+      if(g_rbrPatTexts[i].name==name)
+      {
+         if(g_rbrPatTexts[i].t!=t || g_rbrPatTexts[i].price!=price ||
+            g_rbrPatTexts[i].text!=text || g_rbrPatTexts[i].argb!=argb ||
+            g_rbrPatTexts[i].size!=fontSize || g_rbrPatTexts[i].flags!=fontFlags ||
+            g_rbrPatTexts[i].font!=fontName || g_rbrPatTexts[i].anchor!=anchor ||
+            g_rbrPatTexts[i].visible!=visible) g_rbrPatDirtyTexts++;
+         g_rbrPatTexts[i].t=t; g_rbrPatTexts[i].price=price;
+         g_rbrPatTexts[i].text=text; g_rbrPatTexts[i].argb=argb;
+         g_rbrPatTexts[i].size=fontSize; g_rbrPatTexts[i].flags=fontFlags;
+         g_rbrPatTexts[i].font=fontName; g_rbrPatTexts[i].anchor=anchor;
+         g_rbrPatTexts[i].visible=visible;
+         g_rbrPatTexts[i].seen=true;
+         return;
+      }
+   if(ArrayResize(g_rbrPatTexts,n+1)!=n+1) return;
+   g_rbrPatTexts[n].name=name;
+   g_rbrPatTexts[n].t=t; g_rbrPatTexts[n].price=price;
+   g_rbrPatTexts[n].text=text; g_rbrPatTexts[n].argb=argb;
+   g_rbrPatTexts[n].size=fontSize; g_rbrPatTexts[n].flags=fontFlags;
+   g_rbrPatTexts[n].font=fontName; g_rbrPatTexts[n].anchor=anchor;
+   g_rbrPatTexts[n].visible=visible;
+   g_rbrPatTexts[n].seen=true;
+   g_rbrPatDirtyTexts++;
+}
+
+void RBrPushSegs()
+{
+   const int n=ArraySize(g_rbrPatSegs);
+   RSeg tmp[]; ArrayResize(tmp,n);
+   for(int i=0;i<n;i++)
+   {
+      tmp[i].t1=g_rbrPatSegs[i].t1; tmp[i].p1=g_rbrPatSegs[i].p1;
+      tmp[i].t2=g_rbrPatSegs[i].t2; tmp[i].p2=g_rbrPatSegs[i].p2;
+      tmp[i].argb=g_rbrPatSegs[i].argb; tmp[i].width=g_rbrPatSegs[i].width;
+      tmp[i].style=g_rbrPatSegs[i].style; tmp[i].rayRight=g_rbrPatSegs[i].rayRight;
+      tmp[i].visible=g_rbrPatSegs[i].visible;
+   }
+   RSceneSetSegs(tmp,n);
+}
+
+void RBrPushBands()
+{
+   const int n=ArraySize(g_rbrPatBands);
+   RPatBand tmp[]; ArrayResize(tmp,n);
+   for(int i=0;i<n;i++)
+   {
+      tmp[i].t0=g_rbrPatBands[i].t0; tmp[i].t1=g_rbrPatBands[i].t1;
+      tmp[i].p0=g_rbrPatBands[i].p0; tmp[i].p1=g_rbrPatBands[i].p1;
+      tmp[i].argb=g_rbrPatBands[i].argb;
+      tmp[i].rayRight=g_rbrPatBands[i].rayRight;
+      tmp[i].visible=g_rbrPatBands[i].visible;
+   }
+   RSceneSetPatBands(tmp,n);
+}
+
+void RBrPushDots()
+{
+   const int n=ArraySize(g_rbrPatDots);
+   RPatDot tmp[]; ArrayResize(tmp,n);
+   for(int i=0;i<n;i++)
+   {
+      tmp[i].t=g_rbrPatDots[i].t; tmp[i].p=g_rbrPatDots[i].price;
+      tmp[i].radius=g_rbrPatDots[i].radius; tmp[i].argb=g_rbrPatDots[i].argb;
+      tmp[i].visible=g_rbrPatDots[i].visible;
+   }
+   RSceneSetPatDots(tmp,n);
+}
+
+// The FRONT slot's text family = the ladder's (dormant since P-LBL-12) plus the
+// pattern's rows, composed in one push so either source can commit alone.
+void RBrPushFront()
+{
+   const int nl=ArraySize(g_rbrTexts), np=ArraySize(g_rbrPatTexts);
+   RText tmp[]; ArrayResize(tmp,nl+np);
+   for(int i=0;i<nl;i++)
+   {
+      tmp[i].price   =g_rbrTexts[i].price;
+      tmp[i].x       =-1;                       // sentinel: the right edge, resolved at draw
+      tmp[i].anchor  =TA_RIGHT|TA_VCENTER;      // MT4's ANCHOR_RIGHT row, one text row up
+      tmp[i].text    =g_rbrTexts[i].text;
+      tmp[i].argb    =g_rbrTexts[i].argb;
+      tmp[i].fontSize=-(g_rbrTexts[i].size*10); // MT4 FONTSIZE is points; TextSetFont wants tenths
+      tmp[i].fontFlags=RBrFaceFlags(g_rbrTexts[i].font);
+      tmp[i].fontName=RBrFaceName(g_rbrTexts[i].font);
+      tmp[i].t       =0;
+      tmp[i].visible =true;
+   }
+   for(int i=0;i<np;i++)
+   {
+      tmp[nl+i].price   =g_rbrPatTexts[i].price;
+      tmp[nl+i].x       =0;                          // unused: t>0 resolves both axes
+      tmp[nl+i].anchor  =g_rbrPatTexts[i].anchor;
+      tmp[nl+i].text    =g_rbrPatTexts[i].text;
+      tmp[nl+i].argb    =g_rbrPatTexts[i].argb;
+      tmp[nl+i].fontSize=-(g_rbrPatTexts[i].size*10);
+      tmp[nl+i].fontFlags=g_rbrPatTexts[i].flags;
+      tmp[nl+i].fontName=RBrFaceName(g_rbrPatTexts[i].font);
+      tmp[nl+i].t       =g_rbrPatTexts[i].t;
+      tmp[nl+i].visible =g_rbrPatTexts[i].visible;
+   }
+   RSceneSetTexts(tmp,nl+np);
+}
+
+// The commit: the base's unseen sweep, then push the dirty families. One drag
+// event lands here ~10-30 times a second; a moved point changes a handful of
+// recs, the rest compare equal and nothing repaints until the next real change.
+void RBridgePatternCommit(const string base)
+{
+   bool changed=false;
+   int w=0;
+   const int ns=ArraySize(g_rbrPatSegs);
+   for(int i=0;i<ns;i++)
+   {
+      if(!RBrPatOfBase(g_rbrPatSegs[i].name,base)){ if(w!=i) g_rbrPatSegs[w]=g_rbrPatSegs[i]; w++; continue; }
+      if(g_rbrPatSegs[i].seen){ if(w!=i) g_rbrPatSegs[w]=g_rbrPatSegs[i]; w++; }
+      else g_rbrPatDirtySegs++;
+   }
+   ArrayResize(g_rbrPatSegs,w);
+   w=0;
+   const int nt=ArraySize(g_rbrPatTexts);
+   for(int i=0;i<nt;i++)
+   {
+      if(!RBrPatOfBase(g_rbrPatTexts[i].name,base)){ if(w!=i) g_rbrPatTexts[w]=g_rbrPatTexts[i]; w++; continue; }
+      if(g_rbrPatTexts[i].seen){ if(w!=i) g_rbrPatTexts[w]=g_rbrPatTexts[i]; w++; }
+      else g_rbrPatDirtyTexts++;
+   }
+   ArrayResize(g_rbrPatTexts,w);
+   w=0;
+   const int nb=ArraySize(g_rbrPatBands);
+   for(int i=0;i<nb;i++)
+   {
+      if(!RBrPatOfBase(g_rbrPatBands[i].name,base)){ if(w!=i) g_rbrPatBands[w]=g_rbrPatBands[i]; w++; continue; }
+      if(g_rbrPatBands[i].seen){ if(w!=i) g_rbrPatBands[w]=g_rbrPatBands[i]; w++; }
+      else g_rbrPatDirtyBands++;
+   }
+   ArrayResize(g_rbrPatBands,w);
+   w=0;
+   const int nd=ArraySize(g_rbrPatDots);
+   for(int i=0;i<nd;i++)
+   {
+      if(!RBrPatOfBase(g_rbrPatDots[i].name,base)){ if(w!=i) g_rbrPatDots[w]=g_rbrPatDots[i]; w++; continue; }
+      if(g_rbrPatDots[i].seen){ if(w!=i) g_rbrPatDots[w]=g_rbrPatDots[i]; w++; }
+      else g_rbrPatDirtyDots++;
+   }
+   ArrayResize(g_rbrPatDots,w);
+   if(g_rbrPatDirtySegs>0){ g_rbrPatDirtySegs=0; changed=true; RBrPushSegs(); }
+   if(g_rbrPatDirtyTexts>0){ g_rbrPatDirtyTexts=0; changed=true; RBrPushFront(); }
+   if(g_rbrPatDirtyBands>0){ g_rbrPatDirtyBands=0; changed=true; RBrPushBands(); }
+   if(g_rbrPatDirtyDots>0){ g_rbrPatDirtyDots=0; changed=true; RBrPushDots(); }
+   if(changed && !g_rbrLastHidden) REnginePaint();
+}
+
+// A pattern deleted (TH3Tool's prefix sweep): its canvas rows leave in one
+// call - the ObjectsDeleteAll(base...) twin, without the walk.
+void RBridgePatternDropBase(const string base)
+{
+   if(base=="") return;
+   bool any=false;
+   int w=0;
+   const int ns=ArraySize(g_rbrPatSegs);
+   for(int i=0;i<ns;i++)
+   {
+      if(RBrPatOfBase(g_rbrPatSegs[i].name,base)){ any=true; continue; }
+      if(w!=i) g_rbrPatSegs[w]=g_rbrPatSegs[i]; w++;
+   }
+   ArrayResize(g_rbrPatSegs,w);
+   w=0;
+   const int nt=ArraySize(g_rbrPatTexts);
+   for(int i=0;i<nt;i++)
+   {
+      if(RBrPatOfBase(g_rbrPatTexts[i].name,base)){ any=true; continue; }
+      if(w!=i) g_rbrPatTexts[w]=g_rbrPatTexts[i]; w++;
+   }
+   ArrayResize(g_rbrPatTexts,w);
+   w=0;
+   const int nb=ArraySize(g_rbrPatBands);
+   for(int i=0;i<nb;i++)
+   {
+      if(RBrPatOfBase(g_rbrPatBands[i].name,base)){ any=true; continue; }
+      if(w!=i) g_rbrPatBands[w]=g_rbrPatBands[i]; w++;
+   }
+   ArrayResize(g_rbrPatBands,w);
+   w=0;
+   const int nd=ArraySize(g_rbrPatDots);
+   for(int i=0;i<nd;i++)
+   {
+      if(RBrPatOfBase(g_rbrPatDots[i].name,base)){ any=true; continue; }
+      if(w!=i) g_rbrPatDots[w]=g_rbrPatDots[i]; w++;
+   }
+   ArrayResize(g_rbrPatDots,w);
+   if(!any) return;
+   RBrPushSegs(); RBrPushFront(); RBrPushBands(); RBrPushDots();
+   if(!g_rbrLastHidden) REnginePaint();
+}
+
+// The P-TH3-P6f activation mask, canvas twin: targets and mids belong to the
+// ACTIVE pattern's ladder only. The object path flips OBJPROP_TIMEFRAMES in
+// SetActiveABCDPattern's walk; with the ladder on the canvas there are no
+// objects to walk, so the same rule lands on the recs' visible flags. Rare
+// event (an activation), so the sweep is the right cost; guarded by `changed`
+// so an already-correct mask costs the paint nothing.
+void RBridgeLadderMask(const string base,const bool visible)
+{
+   if(base=="") return;
+   bool changed=false;
+   for(int i=0;i<ArraySize(g_rbrPatSegs);i++)
+      if(RBrPatOfBase(g_rbrPatSegs[i].name,base) &&
+         (StringFind(g_rbrPatSegs[i].name,"_Target_")>=0 || StringFind(g_rbrPatSegs[i].name,"_Mid_")>=0))
+      {
+         if(g_rbrPatSegs[i].visible!=visible){ g_rbrPatSegs[i].visible=visible; changed=true; }
+      }
+   for(int i=0;i<ArraySize(g_rbrPatTexts);i++)
+      if(RBrPatOfBase(g_rbrPatTexts[i].name,base) &&
+         (StringFind(g_rbrPatTexts[i].name,"_Target_")>=0 || StringFind(g_rbrPatTexts[i].name,"_Mid_")>=0))
+      {
+         if(g_rbrPatTexts[i].visible!=visible){ g_rbrPatTexts[i].visible=visible; changed=true; }
+      }
+   if(!changed) return;
+   RBrPushSegs(); RBrPushFront();
+   if(!g_rbrLastHidden) REnginePaint();
+}
+
+// A pattern deleted (or the family retired on teardown): clear its canvas rows
+// in one commit - the object path's ObjectsDeleteAll(mainObjName+"_") twin.
+void RBridgePatternClear()
+{
+   if(ArraySize(g_rbrPatSegs)==0 && ArraySize(g_rbrPatTexts)==0 &&
+      ArraySize(g_rbrPatBands)==0 && ArraySize(g_rbrPatDots)==0) return;
+   ArrayResize(g_rbrPatSegs,0); ArrayResize(g_rbrPatTexts,0);
+   ArrayResize(g_rbrPatBands,0); ArrayResize(g_rbrPatDots,0);
+   RBrPushSegs(); RBrPushFront(); RBrPushBands(); RBrPushDots();
+   if(!g_rbrLastHidden) REnginePaint();
+}
+
 void RBridgeEnd()
 {
    // --- sweep the families the caller staged this pass (produced-set law:
@@ -549,21 +955,7 @@ void RBridgeEnd()
    if(g_rbrDirtyTexts)
    {
       g_rbrDirtyTexts=false; changed=true;
-      const int n=ArraySize(g_rbrTexts);
-      RText tmp[];
-      ArrayResize(tmp,n);
-      for(int i=0;i<n;i++)
-      {
-         tmp[i].price   =g_rbrTexts[i].price;
-         tmp[i].x       =-1;                       // sentinel: the right edge, resolved at draw
-         tmp[i].anchor  =TA_RIGHT|TA_VCENTER;      // MT4's ANCHOR_RIGHT row, one text row up
-         tmp[i].text    =g_rbrTexts[i].text;
-         tmp[i].argb    =g_rbrTexts[i].argb;
-         tmp[i].fontSize=-(g_rbrTexts[i].size*10); // MT4 FONTSIZE is points; TextSetFont wants tenths
-         tmp[i].fontFlags=RBrFaceFlags(g_rbrTexts[i].font);
-         tmp[i].fontName=RBrFaceName(g_rbrTexts[i].font);
-      }
-      RSceneSetTexts(tmp,n);
+      RBrPushFront();   // ladder texts (dormant) + the pattern family's rows
    }
 
    // Paint now: a level change lands on the frame that made it, not up to a

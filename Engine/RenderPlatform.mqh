@@ -12,6 +12,21 @@ int    RPlatChartH()       { return (int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXEL
 double RPlatPriceMin()     { return ChartGetDouble(0,CHART_PRICE_MIN); }
 double RPlatPriceMax()     { return ChartGetDouble(0,CHART_PRICE_MAX); }
 
+// The pattern family's own need: its segments and labels anchor to (time,price),
+// so both painters resolve through the chart page at paint time. The axis stamp
+// lets the frameKey see a pure horizontal scroll/zoom that leaves the price
+// scale untouched (a vertical move is already caught by the price map stamp).
+bool RPlatTimePriceToXY(const long t,const double p,int &x,int &y)
+{
+   return ChartTimePriceToXY(0,0,(datetime)t,p,x,y);
+}
+long RPlatTimeAxisStamp()
+{
+   return (long)ChartGetInteger(0,CHART_FIRST_VISIBLE_BAR)*1000003
+        + (long)ChartGetInteger(0,CHART_VISIBLE_BARS)*31
+        + (long)ChartGetInteger(0,CHART_SHIFT);
+}
+
 string RPlatResName(const string tag) { return "BTRS_"+IntegerToString((long)ChartID())+"_"+tag; }
 string RPlatObjName(const string tag) { return "BTRS_OBJ_"+IntegerToString((long)ChartID())+"_"+tag; }
 

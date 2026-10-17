@@ -4893,17 +4893,11 @@ void DrawStripClose()
    // themselves the cost, each paying the terminal's per-call object-table walk
    // (~4ms at this chart's ~1200 objects; the SAME per-call law the comment above
    // cites for deletes, P-PERF-11b). So the call goes; the sweep IS the purge.
-   uint p101t = GetTickCount();   // P-PERF-TMP (remove after attribution)
    g_suppressDeleteEvents = true;
    DrawStripColorHoverClear();
-   uint p101h = GetTickCount();
    DrawStripDiagClose();   // P-PERF-95 (BUG-11): the census handle leaves with the strip
-   uint p101d = GetTickCount();
    DrawStripSweepStale();
-   uint p101s = GetTickCount();
    DrawStripGearClose();
-   uint p101g = GetTickCount();
-   uint p101k = p101g;   // P-PERF-103: no skin phase left to time
    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
    g_suppressDeleteEvents = false;
    s_dsOpen = false;
@@ -4931,15 +4925,6 @@ void DrawStripClose()
    // P-DRAW-09b: the group belongs to the OPEN strip — a new one takes its own
    // snapshot (the selection may have changed on the chart in between).
    DrawSelClear();
-   // P-PERF-TMP (remove after attribution): which phase owns the teardown second.
-   // Prints only when the total clears the close's own budget, so a healthy
-   // teardown stays silent and the slow one names its owner.
-   uint p101e = GetTickCount();
-   if((p101e - p101t) >= 100)
-      Print("[W][PERF-TMP] stripclose hover=", (int)(p101h - p101t),
-            " diag=", (int)(p101d - p101h), " sweep=", (int)(p101s - p101d),
-            " gear=", (int)(p101g - p101s), " skin=", (int)(p101k - p101g),
-            " tail=", (int)(p101e - p101k), " total=", (int)(p101e - p101t));
 }
 
 //--- P-DRAW-09d: GUARDED WRITES. In MT4 every `ObjectSet*` marks the chart dirty

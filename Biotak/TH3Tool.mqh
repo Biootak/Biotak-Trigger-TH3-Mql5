@@ -307,8 +307,22 @@ void SetActiveABCDPattern(string patternName)
     }
 
     // Set new active pattern
+    string prevActive = g_activeABCDPattern;   // R-RENDER-ENGINE: captured for the canvas mask below
     g_activeABCDPattern = patternName;
-    
+
+#ifdef BIOTAK_RENDER_ENGINE
+    // R-RENDER-ENGINE (phase A) — THE LADDER MASK, CANVAS TWIN. The walk above
+    // masks `_Target_`/`_Mid_` OBJECTS; under the canvas those objects do not
+    // exist, so the same rule (P-TH3-P6f: targets/mids follow the caption, the
+    // newly active base lights, every other base goes dark) is applied to the
+    // staged recs. Rare event (an activation), so the sweep is the right cost.
+    if(RBridgeActive())
+    {
+        RBridgeLadderMask(prevActive, false);
+        RBridgeLadderMask(patternName, true);
+    }
+#endif
+
     // Show new pattern's caption family
     if(patternName != "")
         TH3InfoFamilySetVisible(patternName, true);
@@ -1586,6 +1600,69 @@ void UpdateAllTH3Objects() {
 }
 
 //+------------------------------------------------------------------+
+//| R-RENDER-ENGINE (MT5-ONLY) — READ A PATTERN'S ANCHORS.           |
+//|                                                                  |
+//| The object render path keeps the leg TREND objects: Line_AB is   |
+//| the A/B authority, Line_BC carries C and Line_CD (else Point_D)  |
+//| D — every reader used to ObjectFind/Get them directly. A canvas  |
+//| pattern (BIOTAK_RENDER_ENGINE) paints its legs on the engine     |
+//| layer, so NO line objects exist; the point arrows are the only   |
+//| chart anchors it owns (the magnet writes them, the terminal      |
+//| drags them). Same reads, lines FIRST — the MT4 shape, unchanged  |
+//| on MT4-equivalent inputs — then the points. Returns false when   |
+//| A/B/C are not measurable: the callers' orphan rule.              |
+//+------------------------------------------------------------------+
+bool TH3ReadPatternAnchors(const string base,
+                           datetime &tA, double &pA,
+                           datetime &tB, double &pB,
+                           datetime &tC, double &pC,
+                           datetime &tD, double &pD)
+{
+    tA = 0; pA = 0; tB = 0; pB = 0; tC = 0; pC = 0; tD = 0; pD = 0;
+    string lineAB = base + "_Line_AB";
+    string lineBC = base + "_Line_BC";
+    string lineCD = base + "_Line_CD";
+    if(ObjectFind(0, lineAB) >= 0) {
+        tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
+        pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
+        tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
+        pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
+    } else {
+        string pointA = base + "_Point_A";
+        string pointB = base + "_Point_B";
+        if(ObjectFind(0, pointA) >= 0) {
+            tA = (datetime)ObjectGetInteger(0, pointA, OBJPROP_TIME, 0);
+            pA = ObjectGetDouble(0, pointA, OBJPROP_PRICE, 0);
+        }
+        if(ObjectFind(0, pointB) >= 0) {
+            tB = (datetime)ObjectGetInteger(0, pointB, OBJPROP_TIME, 0);
+            pB = ObjectGetDouble(0, pointB, OBJPROP_PRICE, 0);
+        }
+    }
+    if(ObjectFind(0, lineBC) >= 0) {
+        tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
+        pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
+    } else {
+        string pointC = base + "_Point_C";
+        if(ObjectFind(0, pointC) >= 0) {
+            tC = (datetime)ObjectGetInteger(0, pointC, OBJPROP_TIME, 0);
+            pC = ObjectGetDouble(0, pointC, OBJPROP_PRICE, 0);
+        }
+    }
+    if(ObjectFind(0, lineCD) >= 0) {
+        tD = (datetime)ObjectGetInteger(0, lineCD, OBJPROP_TIME, 1);
+        pD = ObjectGetDouble(0, lineCD, OBJPROP_PRICE, 1);
+    } else {
+        string pointD = base + "_Point_D";
+        if(ObjectFind(0, pointD) >= 0) {
+            tD = (datetime)ObjectGetInteger(0, pointD, OBJPROP_TIME, 0);
+            pD = ObjectGetDouble(0, pointD, OBJPROP_PRICE, 0);
+        }
+    }
+    return (tA > 0 && tB > 0 && tC > 0 && pA > 0 && pB > 0 && pC > 0);
+}
+
+//+------------------------------------------------------------------+
 //| P-TH3-D4h — RESTORE ON ATTACH. Chart objects outlive the in-     |
 //| memory store: after a remove/re-add the patterns sit on the chart |
 //| drawn by the OLD build (no ray, no LP token, MP:idle) and        |
@@ -1614,8 +1691,13 @@ int TH3RestorePatternsFromChart()
         // visits the STORE, which this base never reaches, so the family dies
         // HERE, through its one owner. Display-only objects: the next redraw
         // of a real pattern recreates everything it needs.
-        if(ObjectFind(0, base + "_Line_AB") < 0) { TH3InfoFamilyDelete(base); continue; }
-        if(ObjectFind(0, base + "_Line_BC") < 0) { TH3InfoFamilyDelete(base); continue; }
+        // R-RENDER-ENGINE (MT5-ONLY): a canvas pattern carries no line
+        // objects — the shared reader falls back to its point arrows, so a
+        // canvas pattern survives attach (the old line-only probe dropped
+        // it and deleted its caption family right here).
+        datetime rcA, rcB, rcC, rcD;
+        double rcpA, rcpB, rcpC, rcpD;
+        if(!TH3ReadPatternAnchors(base, rcA, rcpA, rcB, rcpB, rcC, rcpC, rcD, rcpD)) { TH3InfoFamilyDelete(base); continue; }
         bases[nb++] = base;
     }
     if(nb <= 0) return 0;
@@ -1626,21 +1708,12 @@ int TH3RestorePatternsFromChart()
     for(int k = 0; k < nb; k++)
     {
         string base = bases[k];
-        datetime tA = (datetime)ObjectGetInteger(0, base + "_Line_AB", OBJPROP_TIME, 0);
-        double pA = ObjectGetDouble(0, base + "_Line_AB", OBJPROP_PRICE, 0);
-        datetime tB = (datetime)ObjectGetInteger(0, base + "_Line_AB", OBJPROP_TIME, 1);
-        double pB = ObjectGetDouble(0, base + "_Line_AB", OBJPROP_PRICE, 1);
-        datetime tC = (datetime)ObjectGetInteger(0, base + "_Line_BC", OBJPROP_TIME, 1);
-        double pC = ObjectGetDouble(0, base + "_Line_BC", OBJPROP_PRICE, 1);
-        datetime tD = 0; double pD = 0;
-        if(ObjectFind(0, base + "_Line_CD") >= 0) {
-            tD = (datetime)ObjectGetInteger(0, base + "_Line_CD", OBJPROP_TIME, 1);
-            pD = ObjectGetDouble(0, base + "_Line_CD", OBJPROP_PRICE, 1);
-        } else if(ObjectFind(0, base + "_Point_D") >= 0) {
-            tD = (datetime)ObjectGetInteger(0, base + "_Point_D", OBJPROP_TIME, 0);
-            pD = ObjectGetDouble(0, base + "_Point_D", OBJPROP_PRICE, 0);
-        }
-        if(tA <= 0 || tB <= 0 || tC <= 0 || pA <= 0 || pB <= 0 || pC <= 0)
+        // R-RENDER-ENGINE (MT5-ONLY): same shared reader as the keep-check
+        // and the drag path — lines when the object path owns them, else
+        // the point arrows (a canvas pattern's only chart anchors).
+        datetime tA, tB, tC, tD;
+        double pA, pB, pC, pD;
+        if(!TH3ReadPatternAnchors(base, tA, pA, tB, pB, tC, pC, tD, pD))
         {
             // P-TH3-INFO-06b: unmeasurable anchors, same orphan rule as above.
             TH3InfoFamilyDelete(base);
@@ -3918,6 +3991,114 @@ void TH3BaseBandDragHeartbeat()
 //| State lives in TH3DrawingSession (TH3Controller.mqh) - no more   |
 //| scattered g_abcd* globals.                                       |
 //+------------------------------------------------------------------+
+
+// P-TH3-LIVE-DRAG (2026-10-17, R-RENDER-ENGINE — MT5-ONLY): while the
+// terminal drags a pattern point natively, MT5 speaks CHARTEVENT_OBJECT_DRAG
+// only as a slow heartbeat (measured 0.6-1.6 s apart; MT4 speaks it at every
+// step) — so the ladder re-derived once a second and the ink stood still
+// under the hand («ریل تایم نیستش… موقع کشیدن خطوط هیچی نمایش نمیده»). The
+// MOVE stream is the real cadence: the heartbeat NAMES the dragged point,
+// every held move re-reads the point object itself (the terminal keeps
+// OBJPROP_TIME/PRICE exact while it drags) and runs the same re-derive —
+// minus the magnet: writing the dragged object mid-flight is the measured
+// gesture-killer (P-BK-15), so the snap keeps landing on the heartbeat and
+// on release only. The latch ends on the first move with no button-down.
+// The gesture also holds the view lock (the band's own rule, P-UI-90): the
+// chart may not slide under the hand («چارت باید موقع کشیدن قفل باشه»).
+string   s_th3LivePoint = "";   // full object name of the point mid-drag
+datetime s_th3LiveT     = 0;    // anchor of the last applied re-derive
+double   s_th3LiveP     = 0.0;
+uint     s_th3LiveMs    = 0;    // ~50 fps floor (a drag event can be heavy)
+bool     s_th3DragLockHeld = false;  // the gesture's ChartViewLock claim
+
+// The re-derive both the heartbeat (snap=true) and the live move stream
+// (snap=false) run — the old OBJ_DRAG branch body, verbatim.
+void TH3PointDragApply(string sparam, bool snap)
+{
+    int pointPos = StringFind(sparam, "_Point_");
+    if(pointPos <= 0) return;
+    string baseName = StringSubstr(sparam, 0, pointPos);
+    string pointName = StringSubstr(sparam, pointPos + 7);
+    if(pointName != "A" && pointName != "B" && pointName != "C" && pointName != "D") return;
+    SetActiveABCDPattern(baseName);
+
+    string draggedPoint = baseName + "_Point_" + pointName;
+    datetime newTime = (datetime)ObjectGetInteger(0, draggedPoint, OBJPROP_TIME, 0);
+    double newPrice = ObjectGetDouble(0, draggedPoint, OBJPROP_PRICE, 0);
+
+    if(snap) {
+        // SMART MAGNET: snap to nearest OHLC within 5 pips
+        int barIndex = iBarShift(NULL, 0, newTime);
+        if(barIndex >= 0) {
+            double high = iHigh(NULL, 0, barIndex);
+            double low = iLow(NULL, 0, barIndex);
+            double open = iOpen(NULL, 0, barIndex);
+            double close = iClose(NULL, 0, barIndex);
+
+            double pipSize = GetCachedPipSize();
+            double distToHigh = MathAbs(newPrice - high) / pipSize;
+            double distToLow = MathAbs(newPrice - low) / pipSize;
+            double distToOpen = MathAbs(newPrice - open) / pipSize;
+            double distToClose = MathAbs(newPrice - close) / pipSize;
+
+            double snapThreshold = 5.0;
+            double minDist = MathMin(MathMin(distToHigh, distToLow), MathMin(distToOpen, distToClose));
+
+            if(minDist <= snapThreshold) {
+                if(minDist == distToHigh)       newPrice = high;
+                else if(minDist == distToLow)   newPrice = low;
+                else if(minDist == distToClose) newPrice = close;
+                else if(minDist == distToOpen)  newPrice = open;
+                ObjectSetDouble(0, draggedPoint, OBJPROP_PRICE, newPrice);
+            }
+        }
+    }
+
+    // R-RENDER-ENGINE (MT5-ONLY): a canvas pattern paints its legs
+    // on the engine layer — no _Line_AB/_Line_BC objects exist, so
+    // the old line-only read returned HERE and every drag died
+    // silent («درگ میکنم هیچی اتفاقی نمیافته»). The shared reader
+    // walks lines first (the object path — MT4's exact shape) and
+    // falls back to the point arrows, real objects in both modes.
+    datetime tA, tB, tC, tD;
+    double pA, pB, pC, pD;
+    if(!TH3ReadPatternAnchors(baseName, tA, pA, tB, pB, tC, pC, tD, pD)) return;
+
+    if(pointName == "A")       { tA = newTime; pA = newPrice; }
+    else if(pointName == "B")  { tB = newTime; pB = newPrice; }
+    else if(pointName == "C")  { tC = newTime; pC = newPrice; }
+    else if(pointName == "D")  { tD = newTime; pD = newPrice; }
+
+    // P-TH3-PB-OFF: a point drag re-anchors A/B/C/D and the step
+    // re-derives from the legs + the hand-typed base — there is no
+    // drawn base to carry along any more.
+    DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC, tD, pD);
+    TH3RegisterPattern(baseName, tA, pA, tB, pB, tC, pC, tD, pD);
+    s_th3LiveT = newTime;
+    s_th3LiveP = newPrice;
+}
+
+// The gesture's view lock and its net (P-TH3-LIVE-DRAG): every other carry in
+// this suite holds ChartViewLock while it runs (P-UI-90/P-BK-14: the band, the
+// base knot, the strip). The point drag takes it at its first heartbeat and
+// every path that ends the latch hands it back through this one door.
+void TH3LiveDragUnlatch()
+{
+    if(s_th3LivePoint == "") return;
+    s_th3LivePoint = "";
+    if(s_th3DragLockHeld) { s_th3DragLockHeld = false; ChartViewLockRelease(); }
+}
+
+// P-TH3-PB-DRAG-LOCK's rule, for the point gesture: a stuck terminal or an
+// off-chart release leaves OBJECT_DRAG and the move stream silent; 1.5 s of
+// idle (the same window the band heals on) is the only heal left.
+void TH3LiveDragHeartbeat()
+{
+    if(s_th3LivePoint == "") return;
+    if(GetTickCount() - s_th3LiveMs > 1500) TH3LiveDragUnlatch();
+}
+
+//+------------------------------------------------------------------+
 void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
     // P-TH3-PERF-05 (2026-09-19) — IDLE MOVES COST NOTHING. The event router
     // hands this dispatcher EVERY chart mouse-move (it shares the channel with
@@ -3933,8 +4114,10 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
     // until the 1.5 s heartbeat), and a chart that CARRIES a band pays one
     // ObjectFind per move so the press edge can claim the view before the
     // terminal starts the pan. Idle charts with no band skip all of it.
+    // P-TH3-LIVE-DRAG: a latched point gesture rides this stream for its
+    // live re-derive (and for its button-up release) — same deal as the band.
     if(id == CHARTEVENT_MOUSE_MOVE && !TH3SessionActive() && !TH3BaseMarkArmed()
-       && !s_bandDragLockHeld && ObjectFind(0, TH3_BASE_EDITOR) < 0) return;
+       && !s_bandDragLockHeld && s_th3LivePoint == "" && ObjectFind(0, TH3_BASE_EDITOR) < 0) return;
 
     // ---- Mouse move: right-click cancel, left-click placement ----
     if(id == CHARTEVENT_MOUSE_MOVE) {
@@ -4034,6 +4217,36 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
                 TH3PreviewUpdateHover(hoverTime, hoverPrice);
             }
         }
+
+        // P-TH3-LIVE-DRAG (MT5-ONLY): the terminal moves the point it drags
+        // natively — read the point object itself and re-derive, so the ink
+        // follows the hand (MT4's per-step OBJECT_DRAG; MT5 heartbeats). The
+        // re-derive is change-gated (a move that did not shift the anchor
+        // costs nothing) and floored to ~50 fps: a drag event can be heavy
+        // (the 2026-10-17 drag attribution measured up to 203 ms) and the move
+        // stream is far faster than any of it matters visually. The latch ends
+        // on the first move with no button-down, or when the point is gone.
+        if(s_th3LivePoint != "") {
+            if(!leftButtonDown) {
+                // The button came up: the terminal's native drag is over, so
+                // the object is writable again — land the magnet snap here in
+                // case no release heartbeat follows, then hand the view back.
+                if(ObjectFind(0, s_th3LivePoint) >= 0) TH3PointDragApply(s_th3LivePoint, true);
+                TH3LiveDragUnlatch();
+            } else if(ObjectFind(0, s_th3LivePoint) < 0) {
+                TH3LiveDragUnlatch();
+            } else {
+                uint nowMs = GetTickCount();
+                if(nowMs - s_th3LiveMs >= 20) {
+                    datetime liveT = (datetime)ObjectGetInteger(0, s_th3LivePoint, OBJPROP_TIME, 0);
+                    double liveP = ObjectGetDouble(0, s_th3LivePoint, OBJPROP_PRICE, 0);
+                    if(liveT != s_th3LiveT || liveP != s_th3LiveP) {
+                        s_th3LiveMs = nowMs;
+                        TH3PointDragApply(s_th3LivePoint, false);
+                    }
+                }
+            }
+        }
         return;
     }
 
@@ -4078,6 +4291,9 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
 
     // ---- Drag points A/B/C with smart OHLC snapping ----
     if(id == CHARTEVENT_OBJECT_DRAG) {
+        // P-TH3-LIVE-DRAG: any non-point heartbeat ends a stale point latch
+        // (and its view lock); the point branch below re-latches.
+        if(StringFind(sparam, "_Point_") <= 0) TH3LiveDragUnlatch();
         // P-UI-100 (2026-09-22): WHILE THIS TOOL DRAGS ITS OWN OBJECT, NO HAND-SET
         // LINE MAY STAY SELECTED. This drag is a chart drag like any other — MT4
         // moves every SELECTED object with it (P-UI-45/P-BK-26) — so a custom price
@@ -4092,76 +4308,14 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
         // natively-dragged object cancels its drag, the measured MT4 fact).
         if(sparam == TH3_BASE_EDITOR) { TH3BaseEditorOnDrag(); return; }
         if(StringFind(sparam, "ABCD_Pattern_") == 0 && StringFind(sparam, "_Point_") > 0) {
-            int pointPos = StringFind(sparam, "_Point_");
-            string baseName = StringSubstr(sparam, 0, pointPos);
-            string pointName = StringSubstr(sparam, pointPos + 7);
-
-            if(pointName != "A" && pointName != "B" && pointName != "C" && pointName != "D") return;
-            SetActiveABCDPattern(baseName);
-
-            // SMART MAGNET: snap to nearest OHLC within 5 pips
-            string draggedPoint = baseName + "_Point_" + pointName;
-            datetime newTime = (datetime)ObjectGetInteger(0, draggedPoint, OBJPROP_TIME, 0);
-            double newPrice = ObjectGetDouble(0, draggedPoint, OBJPROP_PRICE, 0);
-
-            int barIndex = iBarShift(NULL, 0, newTime);
-            if(barIndex >= 0) {
-                double high = iHigh(NULL, 0, barIndex);
-                double low = iLow(NULL, 0, barIndex);
-                double open = iOpen(NULL, 0, barIndex);
-                double close = iClose(NULL, 0, barIndex);
-
-                double pipSize = GetCachedPipSize();
-                double distToHigh = MathAbs(newPrice - high) / pipSize;
-                double distToLow = MathAbs(newPrice - low) / pipSize;
-                double distToOpen = MathAbs(newPrice - open) / pipSize;
-                double distToClose = MathAbs(newPrice - close) / pipSize;
-
-                double snapThreshold = 5.0;
-                double minDist = MathMin(MathMin(distToHigh, distToLow), MathMin(distToOpen, distToClose));
-
-                if(minDist <= snapThreshold) {
-                    if(minDist == distToHigh)       newPrice = high;
-                    else if(minDist == distToLow)   newPrice = low;
-                    else if(minDist == distToClose) newPrice = close;
-                    else if(minDist == distToOpen)  newPrice = open;
-                    ObjectSetDouble(0, draggedPoint, OBJPROP_PRICE, newPrice);
-                }
-            }
-
-            string lineAB = baseName + "_Line_AB";
-            string lineBC = baseName + "_Line_BC";
-            string lineCD = baseName + "_Line_CD";
-            if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) return;
-
-            datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
-            double pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
-            datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
-            double pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
-            datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
-            double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
-            datetime tD = 0; double pD = 0;
-            if(ObjectFind(0, lineCD) >= 0) {
-                tD = (datetime)ObjectGetInteger(0, lineCD, OBJPROP_TIME, 1);
-                pD = ObjectGetDouble(0, lineCD, OBJPROP_PRICE, 1);
-            } else {
-                string pointD = baseName + "_Point_D";
-                if(ObjectFind(0, pointD) >= 0) {
-                    tD = (datetime)ObjectGetInteger(0, pointD, OBJPROP_TIME, 0);
-                    pD = ObjectGetDouble(0, pointD, OBJPROP_PRICE, 0);
-                }
-            }
-
-            if(pointName == "A")       { tA = newTime; pA = newPrice; }
-            else if(pointName == "B")  { tB = newTime; pB = newPrice; }
-            else if(pointName == "C")  { tC = newTime; pC = newPrice; }
-            else if(pointName == "D")  { tD = newTime; pD = newPrice; }
-
-            // P-TH3-PB-OFF: a point drag re-anchors A/B/C/D and the step
-            // re-derives from the legs + the hand-typed base — there is no
-            // drawn base to carry along any more.
-            DrawABCDPattern(baseName, tA, pA, tB, pB, tC, pC, tD, pD);
-            TH3RegisterPattern(baseName, tA, pA, tB, pB, tC, pC, tD, pD);
+            // P-TH3-LIVE-DRAG: the heartbeat names the point the terminal is
+            // dragging; the move stream (top of this dispatcher) re-derives
+            // from it live, and the gesture takes the view lock here — the
+            // chart may not slide under the hand (the band's own rule).
+            s_th3LivePoint = sparam;
+            s_th3LiveMs = GetTickCount();
+            if(!s_th3DragLockHeld) { s_th3DragLockHeld = true; ChartViewLockAcquire(); }
+            TH3PointDragApply(sparam, true);
         }
         // P-TH3-PB-OFF: no draggable _PBTop/_PBBottom pair ever existed (the
         // base was set through stage 5 / the leg meter, both retired), so a
@@ -4253,6 +4407,12 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
             // sweep above already took the rows, this keeps the owner contract
             // (and the 8p mutant) honest on the delete path.
             TH3InfoFamilyDelete(baseName);
+#ifdef BIOTAK_RENDER_ENGINE
+            // R-RENDER-ENGINE: the family's canvas rows leave the same way —
+            // objects were the prefix walk above, this is the rec twin. Full
+            // entry only (this file), so nothing here runs in Lite.
+            RBridgePatternDropBase(baseName);
+#endif
             if(g_activeABCDPattern == baseName) SetActiveABCDPattern("");
             TH3PatternStoreRemove(baseName);
             ThrottledChartRedraw();

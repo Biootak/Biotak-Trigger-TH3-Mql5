@@ -3125,20 +3125,8 @@ void RedrawAllObjects(bool force_redraw=false)
     bool seedHold   = seedWait && (!g_adoptPreviousTopology ||
                                    g_buildStage != 0 || g_forceClearOnNextDraw);
     if(seedHold && nowMs - s_seedWaitStartMs < 20000) { g_redrawTHLevelsNeeded = true; return; }
-    // P-PERF-TMP (2026-10-16): THE GATE'S OWN WITNESS. One line when a held
-    // first paint finally opens (or the 20 s escape fires), naming how long
-    // the chart was empty. This is the evidence for the "levels missing on
-    // some TFs" dependency: if the next tour shows held=1000+ ms here, the
-    // chart was empty because the terminal had not served the real ATR yet —
-    // not because the render failed. Remove with the other TMP probes.
     if(s_seedWaitStartMs != 0)
-    {
-        const int seedHeld = (int)(nowMs - s_seedWaitStartMs);
-        if(seedHeld >= 500 || seedWait)
-            Print("[W][PERF-TMP] seedWait tf=", GetCurrentTimeframe(),
-                  " held=", seedHeld, "ms escape=", (seedWait ? 1 : 0));
-        s_seedWaitStartMs = 0;   // re-arm for the next unseeded stretch
-    }
+        s_seedWaitStartMs = 0;   // the gate opened: re-arm for the next unseeded stretch
     
     static double s_lastDrawnBasePrice = 0.0;
     bool basePriceChanged = (MathAbs(thBasePrice - s_lastDrawnBasePrice) > s_cachedPoint);
@@ -6872,9 +6860,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     //  
     if(id == CHARTEVENT_CHART_CHANGE) {
         if(IsIndicatorHidden()) return;
-        uint p_tmpCc0 = GetTickCount();   // P-PERF-TMP (remove after attribution)
         HandsetMarkersRide();   // P-UI-98d v2: the handles ride every layout change
-        uint p_tmpCc1 = GetTickCount();   // P-PERF-TMP
         static uint s_lastLayoutMs = 0;
         static int s_lastW = -1;
         static int s_lastH = -1;
@@ -6922,13 +6908,6 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // Split it the way every other ledger here is split, and only print
         // when the branch blows the event budget.
         uint p28t = GetTickCount();
-        // P-PERF-TMP (remove after attribution): the part of the branch the
-        // phase ledger below does not cover — the ride and the pre-throttle head
-        // (throttle read, chart reads, the prime). The TF-switch event that took
-        // 1141 ms showed a 78 ms phase sum, so its owner is in here.
-        if((p28t - p_tmpCc0) >= 100)
-           Print("[W][PERF-TMP] cc pre: ride=", (int)(p_tmpCc1 - p_tmpCc0),
-                 "ms head=", (int)(p28t - p_tmpCc1), "ms total=", (int)(p28t - p_tmpCc0), "ms");
         uint p28redraw = 0, p28labels = 0, p28leg = 0;
         if(sizeChanged) g_labelsRelayoutNeeded = true;
         if(viewportChanged) {

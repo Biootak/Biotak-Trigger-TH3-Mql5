@@ -11,8 +11,10 @@
 
 //==================== canvas identity (3 layers) ====================
 // Zg = the ZONE layer: BACK=true, z=0 (the product's Z_CHART_ZONE) - the zone
-// family sits BEHIND the candles exactly like its MT4 rectangle/BACK objects,
-// while lines and texts ride the front layers above.
+// family AND the pattern's fill band sit BEHIND the candles. P-TH3-ZONE-07
+// (2026-10-17): the band used to ride the FRONT slot and its opaque fill
+// covered every candle inside it («کندل ها داخل ناحیه رنگی دیده نمیشه»); the
+// line/text families stay on the front layers above.
 uint   g_engFg[];
 uint   g_engBg[];
 uint   g_engZg[];
@@ -27,7 +29,24 @@ string g_engResFg="",g_engResBg="",g_engResZg="",g_engObjFg="",g_engObjBg="",g_e
 // at draw time, so a resize never leaves a stale coordinate in the scene).
 struct RLine { double price; uint argb; int width; int style; };
 struct RBand { double p0;     double p1;  uint argb; };
-struct RText { double price;  int x; uint anchor; string text; uint argb; int fontSize; uint fontFlags; string fontName; };
+// RText.t>0 = the text anchors to a TIME (the pattern family's labels); the
+// pixel is resolved at draw time, so scroll/zoom never leaves a stale x behind.
+// t=0 keeps the ladder convention: price + the x sentinel (x<0 = right edge).
+struct RText { double price;  int x; uint anchor; string text; uint argb; int fontSize; uint fontFlags; string fontName; long t; bool visible; };
+// RSeg: a segment between two (time,price) anchors - the pattern skeleton's
+// primitive (AB/BC/CD, the fibo legs, target/zone border rays). rayRight
+// stretches point 2 to the right edge along the same slope (the object path's
+// OBJPROP_RAY_RIGHT). Segments ride the FRONT slot (with the texts): one drag
+// move re-rasterizes a few strokes and a few labels, never the ladder rungs.
+struct RSeg { long t1; double p1; long t2; double p2; uint argb; int width; int style; bool rayRight; bool visible; };
+// RPatBand: the pattern zone's time-bounded fill (the FILLED style's rectangle,
+// with RAY_RIGHT semantics). P-TH3-ZONE-07: rides the ZONE slot (BACK=true,
+// behind the candles) - the front slot's opaque fill hid every candle inside
+// the band («کندل ها داخل ناحیه رنگی دیده نمیشه»). Bands are time-anchored, so
+// a horizontal scroll re-rasters the zone slot along with the front.
+struct RPatBand { long t0; long t1; double p0; double p1; uint argb; bool rayRight; bool visible; };
+// RPatDot: the mother-pivot Head/Tail markers (OBJ_ARROW 159's filled circle).
+struct RPatDot { long t; double p; int radius; uint argb; bool visible; };
 // RZoneObj: a pipeline zone's picture - the fill band plus its own two horizontal
 // edge segments (top lit, bottom shaded; the left vertical edge is documented
 // out - see RenderBridge). The colours arrive PRE-BLENDED (opaque), exactly the
@@ -38,16 +57,20 @@ struct RZoneObj { double top; double bottom; uint fillArgb; bool hasFill; uint t
 RLine g_rLines[];
 RBand g_rBands[];
 RText g_rTexts[];
+RSeg  g_rSegs[];
+RPatBand g_rPatBands[];
+RPatDot  g_rPatDots[];
 RZoneObj g_rZones[];
 bool  g_rLinesSorted=true;
 bool  g_rBandsSorted=true;
 int   g_rSceneVer=1;   // the UNDER slot (bands + lines) content version
-int   g_rTextsVer=0;   // the TEXT slot content version
+int   g_rTextsVer=0;   // the FRONT slot content version (texts + segments)
 int   g_rZonesVer=0;   // the ZONE slot content version
 
 void RSceneClear()
 {
    ArrayResize(g_rLines,0); ArrayResize(g_rBands,0); ArrayResize(g_rTexts,0);
+   ArrayResize(g_rSegs,0); ArrayResize(g_rPatBands,0); ArrayResize(g_rPatDots,0);
    ArrayResize(g_rZones,0);
    g_rLinesSorted=true; g_rBandsSorted=true;
    g_rSceneVer++; g_rTextsVer++; g_rZonesVer++;
@@ -72,15 +95,34 @@ void RSceneAddBand(double p0,double p1,uint argb)
    g_rBands[n].p0=p0; g_rBands[n].p1=p1; g_rBands[n].argb=argb;
    g_rSceneVer++;
 }
-void RSceneAddText(double price,int x,uint anchor,const string text,uint argb,int fontSize,uint fontFlags,const string fontName="")
+void RSceneAddText(double price,int x,uint anchor,const string text,uint argb,int fontSize,uint fontFlags,const string fontName="",const long t=0)
 {
    int n=ArraySize(g_rTexts);
    if(ArrayResize(g_rTexts,n+1)!=n+1) return;
    g_rTexts[n].price=price; g_rTexts[n].x=x; g_rTexts[n].anchor=anchor;
    g_rTexts[n].text=text;   g_rTexts[n].argb=argb;
    g_rTexts[n].fontSize=fontSize; g_rTexts[n].fontFlags=fontFlags;
-   g_rTexts[n].fontName=fontName;
+   g_rTexts[n].fontName=fontName; g_rTexts[n].t=t;
+   g_rTexts[n].visible=true;
    g_rTextsVer++;
+}
+void RSceneSetSegs(RSeg &src[],int count)
+{
+   ArrayResize(g_rSegs,count);
+   for(int i=0;i<count;i++) g_rSegs[i]=src[i];
+   g_rTextsVer++;   // the FRONT slot version owns the segment family too
+}
+void RSceneSetPatBands(RPatBand &src[],int count)
+{
+   ArrayResize(g_rPatBands,count);
+   for(int i=0;i<count;i++) g_rPatBands[i]=src[i];
+   g_rZonesVer++;   // P-TH3-ZONE-07: the ZONE slot version owns the band family now
+}
+void RSceneSetPatDots(RPatDot &src[],int count)
+{
+   ArrayResize(g_rPatDots,count);
+   for(int i=0;i<count;i++) g_rPatDots[i]=src[i];
+   g_rTextsVer++;   // and the dot family
 }
 
 // WHOLESALE REPLACEMENT (the bridge's commit): the owner of a family computes
@@ -216,9 +258,19 @@ IRPaintHook *g_rPaintHook=NULL;
 // "text" slot (g_engFg bitmap) carries texts + the paint hook. Each slot has its
 // own content version, so a level commit repaints only the slot it touched.
 string g_rLastKey="";
-string g_rMapStamp="";
+// P-PERF-119c: the bucket the PRESENTED raster carries (not "the last bucket
+// seen" - a scroll ride below leaves it behind on purpose) plus the scroll
+// detector. g_rHaveBucket=false until the first raster of an instance/size.
+long   g_rPmn=0,g_rPmx=0;
+bool   g_rHaveBucket=false;
+uint   g_rTimeMovedMs=0;
+const uint SCROLL_SETTLE_MS=2000;   // quiet time after the last time-axis move
+const long SCROLL_SLACK_PX=3;       // in-motion map drift the raster rides out
+string g_rTimeStamp="";   // the time axis (horizontal scroll/zoom): the pattern
+                          // family's segments/labels are the only time-anchored
+                          // pixels, so a move dirties the FRONT slot alone
 double g_rMsRaster=0,g_rMsPresent=0;
-int    g_rPaints=0,g_rSkips=0,g_rWants=0;
+int    g_rPaints=0,g_rSkips=0,g_rWants=0,g_rNoops=0;
 int    g_rPeriodMs=15;
 bool   g_rWant=false;
 bool   g_engManageTimer=false;   // spike=true (owns the timer); product=false (250 ms product timer)
@@ -243,11 +295,38 @@ void RMapUpdate()
    g_rMapK=(double)(g_engH-1)/d;
 }
 
-string RFrameKey()
+// P-PERF-119 (2026-10-17, user: «موقعی که چارت رو اسکرول میکنم به عقب و جلو،
+// هی سطوح اپدیت میشه؛ تو متاتریدر ۴ اصلاً اینطوری نیست»): the map's fingerprint
+// is the RASTER's, not the raw scale. Every live scroll step re-fits the
+// auto-scale by a fraction of a pixel (the measured 1-point ≈ 0.3-0.4 px
+// drift), and the old %.8f prices made each of those a NEW key - the frame
+// re-rastered and re-uploaded all three layers and paid a full-chart redraw
+// for a picture that did not move by one row. One pixel of price is the
+// quantum: under it the raster already holds the frame this map would paint
+// (the same ±1 px the native object path lives within), past it the frame is
+// owed a re-map. The raster itself still uses the raw map (RMapUpdate).
+//
+// P-PERF-119b: THE QUANTUM MUST GUARD BOTH SIDES OF THE GATE. The first cut
+// quantized the KEY but left the slot invalidation below it on the raw stamp -
+// so the moment the key moved for ANY reason (and every scroll step moves the
+// time axis), the raw stamp re-invalidated all three slots and the storm
+// survived the gate. This bucket is now the single map fingerprint for both.
+string RMapBucketKey(long &pmn,long &pmx)
 {
-   return StringFormat("%d|%d|%.8f|%.8f|%d|%d|%d|%d|%d",
-                        g_engW,g_engH,g_rMapPmin,g_rMapPmax,
-                        g_rSceneVer,g_rTextsVer,g_rZonesVer,g_rHover,g_rDragIdx);
+   double d=g_rMapPmax-g_rMapPmin;
+   if(d<=0) d=1;
+   double q=d/(double)(g_engH>1?g_engH-1:1);
+   pmn=(long)MathRound(g_rMapPmin/q);
+   pmx=(long)MathRound(g_rMapPmax/q);
+   return StringFormat("%d|%d|%I64d|%I64d",g_engW,g_engH,pmn,pmx);
+}
+
+string RFrameKey(const string mk)
+{
+   return mk
+          +StringFormat("|%d|%d|%d|%d|%d",
+                        g_rSceneVer,g_rTextsVer,g_rZonesVer,g_rHover,g_rDragIdx)
+          +"|"+IntegerToString(RPlatTimeAxisStamp());
 }
 
 bool REngineResize()
@@ -282,7 +361,9 @@ bool REngineResize()
    g_rUnderPresented=-1;
    g_rTextsPresented=-1;
    g_rZonesPresented=-1;
-   g_rMapStamp="";
+   g_rHaveBucket=false;
+   g_rTimeMovedMs=0;
+   g_rTimeStamp="";
    g_rLastKey="";
    return okFg && okBg && okZg;
 }
@@ -436,15 +517,145 @@ void RDrawZones()
    }
 }
 
+// One segment stroke into the FRONT buffer: dominant-axis stepping keeps the
+// gap <= 1 px on either slope, width grows downward like the object path's
+// trendlines do, style reuses the ladder's dash approximator (path length, px).
+void RPlotSeg(const int x1,const int y1,const int x2,const int y2,
+              const uint argb,const int width,const int style)
+{
+   int lw=width; if(lw<1) lw=1;
+   int dx=x2-x1, dy=y2-y1;
+   int adx=(dx<0?-dx:dx), ady=(dy<0?-dy:dy);
+   int steps=(adx>ady)?adx:ady;
+   if(steps<=0)
+   {
+      if(x1<0||x1>=g_engW) return;
+      for(int k=0;k<lw;k++)
+      { int yy=y1+k; if(yy>=0&&yy<g_engH) g_engFg[yy*g_engW+x1]=argb; }
+      return;
+   }
+   const double sx=(double)dx/(double)steps, sy=(double)dy/(double)steps;
+   for(int s=0;s<=steps;s++)
+   {
+      if(style>0 && !RLinePixelOn(style,s)) continue;
+      int x=x1+(int)MathRound(sx*(double)s);
+      if(x<0||x>=g_engW) continue;
+      int y=y1+(int)MathRound(sy*(double)s);
+      for(int k=0;k<lw;k++)
+      {
+         int yy=y+k;
+         if(yy<0||yy>=g_engH) continue;
+         g_engFg[yy*g_engW+x]=argb;
+      }
+   }
+}
+
+// One filled dot into the FRONT buffer (the mother pivot's Head/Tail markers):
+// row spans of the midpoint circle - the arrow-159 glyph it replaces.
+void RPlotDot(const int x,const int y,const int r,const uint argb)
+{
+   for(int dy=-r;dy<=r;dy++)
+   {
+      const int yy=y+dy;
+      if(yy<0||yy>=g_engH) continue;
+      const int dx=(int)(MathSqrt((double)(r*r-dy*dy))+0.5);
+      int x0=x-dx,x1=x+dx;
+      if(x0<0)x0=0; if(x1>g_engW-1)x1=g_engW-1;
+      for(int xx=x0;xx<=x1;xx++) g_engFg[yy*g_engW+xx]=argb;
+   }
+}
+
+void RDrawSegs()
+{
+   const int n=ArraySize(g_rSegs), w=g_engW;
+   for(int i=0;i<n;i++)
+   {
+      if(!g_rSegs[i].visible) continue;
+      if(g_rSegs[i].t1<=0 || g_rSegs[i].t2<=0) continue;
+      int x1=0,y1=0,x2=0,y2=0;
+      const bool ok1=RPlatTimePriceToXY(g_rSegs[i].t1,g_rSegs[i].p1,x1,y1);
+      const bool ok2=RPlatTimePriceToXY(g_rSegs[i].t2,g_rSegs[i].p2,x2,y2);
+      if(!ok1 && !ok2) continue;
+      // A FLAT segment (the pattern's rays and zone borders) may hang an anchor
+      // past the time scale: keep the resolvable end and clamp the other to its
+      // edge - the object path's off-chart anchor clips the same way. Non-flat
+      // legs only sit between past bars, so they resolve; one that does not
+      // still draws nothing, exactly like the object it mirrors.
+      if(!ok1)
+      {
+         if(g_rSegs[i].p1!=g_rSegs[i].p2) continue;
+         y1=y2;
+         x1=(g_rSegs[i].t1<g_rSegs[i].t2)?0:w-1;
+      }
+      if(!ok2)
+      {
+         if(g_rSegs[i].p1!=g_rSegs[i].p2) continue;
+         y2=y1;
+         x2=(g_rSegs[i].t2>g_rSegs[i].t1)?w-1:0;
+      }
+      if(g_rSegs[i].rayRight && x2!=x1)
+      {
+         const double k=(double)(y2-y1)/(double)(x2-x1);
+         x2=w-1;
+         y2=y1+(int)MathRound(k*(double)(x2-x1));
+      }
+      RPlotSeg(x1,y1,x2,y2,g_rSegs[i].argb,g_rSegs[i].width,g_rSegs[i].style);
+   }
+}
+
+// The pattern zone's fill: from x(t0) to the ray's edge (or x(t1)). A band
+// whose start time is off the time scale draws nothing (its object would sit
+// entirely off-chart too); an end past the scale becomes the right edge,
+// which is what RAY_RIGHT buys on the object path.
+// P-TH3-ZONE-07: painted into the ZONE buffer - behind the candles, exactly
+// like the pipeline zones beside it.
+void RDrawPatBands()
+{
+   const int n=ArraySize(g_rPatBands), w=g_engW, h=g_engH;
+   for(int i=0;i<n;i++)
+   {
+      if(!g_rPatBands[i].visible) continue;
+      double p0=g_rPatBands[i].p0, p1=g_rPatBands[i].p1;
+      if(p0<p1){ const double tp=p0; p0=p1; p1=tp; }
+      int y0=(int)(RPriceToY(p0)+0.5), y1=(int)(RPriceToY(p1)+0.5);
+      if(y1<0||y0>=h) continue;
+      int x0=0,ty=0;
+      if(!RPlatTimePriceToXY(g_rPatBands[i].t0,g_rPatBands[i].p0,x0,ty)) continue;
+      int x1=w-1;
+      if(!g_rPatBands[i].rayRight &&
+         !RPlatTimePriceToXY(g_rPatBands[i].t1,g_rPatBands[i].p1,x1,ty)) x1=w-1;
+      if(x1<0||x0>=w||x1<x0) continue;
+      RFillRect(g_engZg,w,h,x0,y0,x1,y1,g_rPatBands[i].argb);
+   }
+}
+
+void RDrawPatDots()
+{
+   const int n=ArraySize(g_rPatDots);
+   for(int i=0;i<n;i++)
+   {
+      if(!g_rPatDots[i].visible) continue;
+      int x=0,y=0;
+      if(!RPlatTimePriceToXY(g_rPatDots[i].t,g_rPatDots[i].p,x,y)) continue;
+      RPlotDot(x,y,g_rPatDots[i].radius,g_rPatDots[i].argb);
+   }
+}
+
 void RDrawTexts()
 {
    int n=ArraySize(g_rTexts), w=g_engW, h=g_engH;
    for(int i=0;i<n;i++)
    {
+      if(!g_rTexts[i].visible) continue;
       int y=(int)(RPriceToY(g_rTexts[i].price)+0.5);
       if(y<-16||y>h+16) continue;
       int tx=g_rTexts[i].x;
-      if(tx<0) tx=w;   // sentinel: the right edge at the CURRENT width
+      if(g_rTexts[i].t>0)
+      {
+         // time-anchored (the pattern family): resolve both axes through the page
+         if(!RPlatTimePriceToXY(g_rTexts[i].t,g_rTexts[i].price,tx,y)) continue;
+      }
+      else if(tx<0) tx=w;   // sentinel: the right edge at the CURRENT width
       RTextBlit(g_engFg,w,h,g_rTexts[i].text,tx,y,
                 g_rTexts[i].anchor,g_rTexts[i].argb,
                 g_rTexts[i].fontSize,g_rTexts[i].fontFlags,g_rTexts[i].fontName);
@@ -460,24 +671,85 @@ void RAdaptivePeriod()
    if(np!=g_rPeriodMs){ g_rPeriodMs=np; RPlatTimerStart(np); }
 }
 
+// P-PERF-119: does the FRONT slot hold anything the time axis can move? (a text
+// with t>0 is time-anchored; the t<=0 sentinel texts are right-edge, price-only)
+bool RHasTimeTexts()
+{
+   for(int i=ArraySize(g_rTexts)-1;i>=0;i--)
+      if(g_rTexts[i].t>0) return true;
+   return false;
+}
+
 bool REnginePaint()
 {
    if(!REngineEnsure()) return false;
    RMapUpdate();
-   string key=RFrameKey();
-   if(key==g_rLastKey){ g_rSkips++; return false; }
+   long pmn=0,pmx=0;
+   string mk=RMapBucketKey(pmn,pmx);
+   const bool bucketDiffers=(!g_rHaveBucket || pmn!=g_rPmn || pmx!=g_rPmx);
+   const uint nowCc=GetTickCount();
+   const bool scrollingNow=(g_rTimeMovedMs!=0 && (uint)(nowCc-g_rTimeMovedMs)<SCROLL_SETTLE_MS);
+   string key=RFrameKey(mk);
+   // the skip is defeated only when the SETTLE both owes and is allowed: the
+   // bucket moved off the presented raster and the time axis has gone quiet
+   if(key==g_rLastKey && !(bucketDiffers && !scrollingNow))
+   { g_rSkips++; return false; }
 
    // A moved map (scroll/zoom) or a resize re-maps every pixel: every slot is
-   // stale even when its content version did not move.
-   string mk=StringFormat("%d|%d|%.8f|%.8f",g_engW,g_engH,g_rMapPmin,g_rMapPmax);
-   if(mk!=g_rMapStamp){ g_rMapStamp=mk; g_rUnderPresented=-1; g_rTextsPresented=-1; g_rZonesPresented=-1; }
+   // stale even when its content version did not move. A *raster* move is the
+   // test (P-PERF-119b) - the same one-pixel quantum the key uses; a raw-scale
+   // move smaller than a pixel re-maps nothing the eye can see.
+   //
+   // P-PERF-119c: this is what a live scroll really looks like - a step every
+   // second or two, each re-fitting the auto-scale by a few pixels. Re-rastering
+   // all three layers per step IS the "سطوح هی اپدیت میشه" the user sees, and no
+   // scroll step is owed that picture: while the time axis is still moving, a
+   // bucket move within SCROLL_SLACK_PX rides on the presented raster (the same
+   // way the native object path lags a pixel mid-drag and snaps when it stops).
+   // The moment the time axis goes quiet the settle below repaints EXACTLY once
+   // at the true map, so the rest state is pixel-true as before.
+   const bool nearEnough=(g_rHaveBucket &&
+                          MathAbs(pmn-g_rPmn)<=SCROLL_SLACK_PX &&
+                          MathAbs(pmx-g_rPmx)<=SCROLL_SLACK_PX);
+   if(bucketDiffers && !(scrollingNow && nearEnough))
+   { g_rUnderPresented=-1; g_rTextsPresented=-1; g_rZonesPresented=-1; }
+   // The time axis owns the FRONT slot (segments + time-anchored labels) and,
+   // since P-TH3-ZONE-07, the pattern bands on the ZONE slot; the ladder rungs
+   // and the pipeline zones do not move with a horizontal scroll.
+   string tk=IntegerToString(RPlatTimeAxisStamp());
+   const bool timeMoved=(tk!=g_rTimeStamp);
+   if(timeMoved)
+   {
+      g_rTimeStamp=tk;
+      g_rTimeMovedMs=nowCc;   // P-PERF-119c: the scroll detector reads this
+      // P-PERF-119: invalidate only what the time axis can MOVE. With no pattern
+      // staged (no segments, no dots, no time-anchored texts) a pure horizontal
+      // pan cannot change one pixel of the front slot; with no pattern bands it
+      // cannot touch the zone slot, whose pipeline zones are full-width and
+      // price-only. The old unconditional pair re-rastered and re-uploaded the
+      // whole zone family on every scroll step for a picture that never moved.
+      const bool frontMoves=(ArraySize(g_rSegs)>0 || ArraySize(g_rPatDots)>0 || RHasTimeTexts());
+      if(frontMoves) g_rTextsPresented=-1;
+      if(ArraySize(g_rPatBands)>0) g_rZonesPresented=-1;
+   }
    // The hover/drag highlight lives in the UNDER slot: moving it dirties that slot.
-   if(g_rHover!=g_rLastHoverP || g_rDragIdx!=g_rLastDragP) g_rUnderPresented=-1;
+   const bool hlMoved=(g_rHover!=g_rLastHoverP || g_rDragIdx!=g_rLastDragP);
+   if(hlMoved) g_rUnderPresented=-1;
 
-   double t0=RPlatNowMs();
    bool underDirty=(g_rUnderPresented!=g_rSceneVer);
-   bool textsDirty=(g_rTextsPresented!=g_rTextsVer);
+   bool frontDirty=(g_rTextsPresented!=g_rTextsVer);
    bool zonesDirty=(g_rZonesPresented!=g_rZonesVer);
+   if(!underDirty && !frontDirty && !zonesDirty)
+   {
+      // P-PERF-119b: the frame key moved but nothing it guards reached the
+      // raster - a pan that stayed inside the map's pixel quantum, or a
+      // time-axis step with no time-anchored family staged. Consume the key,
+      // touch no buffer, ask the terminal for nothing.
+      g_rLastKey=key; g_rLastHoverP=g_rHover; g_rLastDragP=g_rDragIdx;
+      g_rNoops++;
+      return true;
+   }
+   double t0=RPlatNowMs();
    if(underDirty)
    {
       RBufClear(g_engBg,g_engW*g_engH,0);
@@ -487,11 +759,14 @@ bool REnginePaint()
    if(zonesDirty)
    {
       RBufClear(g_engZg,g_engW*g_engH,0);
+      RDrawPatBands();   // P-TH3-ZONE-07: the pattern fills, behind the candles
       RDrawZones();
    }
-   if(textsDirty)
+   if(frontDirty)
    {
       RBufClear(g_engFg,g_engW*g_engH,0);
+      RDrawSegs();
+      RDrawPatDots();    // the MP markers over their own bounds
       RDrawTexts();
       if(g_rPaintHook!=NULL) g_rPaintHook.RPaintExt(g_engFg,g_engW,g_engH);
    }
@@ -500,10 +775,15 @@ bool REnginePaint()
    double t2=RPlatNowMs();
    if(underDirty){ RPlatResourceCreate(g_engResBg,g_engBg,g_engW,g_engH); g_rUnderPresented=g_rSceneVer; g_rBgPresents++; }
    else g_rBgSkips++;
-   if(textsDirty) { RPlatResourceCreate(g_engResFg,g_engFg,g_engW,g_engH); g_rTextsPresented=g_rTextsVer; }
+   if(frontDirty) { RPlatResourceCreate(g_engResFg,g_engFg,g_engW,g_engH); g_rTextsPresented=g_rTextsVer; }
    if(zonesDirty) { RPlatResourceCreate(g_engResZg,g_engZg,g_engW,g_engH); g_rZonesPresented=g_rZonesVer; }
    RPlatRedraw();
    double t3=RPlatNowMs();
+
+   // P-PERF-119c: every raster above drew with the CURRENT raw map (RMapUpdate
+   // at the top), so what is presented now IS this bucket - whatever rides were
+   // in flight are settled by this very frame.
+   g_rPmn=pmn; g_rPmx=pmx; g_rHaveBucket=true;
 
    g_rMsRaster=t1-t0; g_rMsPresent=t3-t2;
    g_rLastKey=key; g_rPaints++;

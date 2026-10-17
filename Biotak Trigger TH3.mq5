@@ -694,6 +694,10 @@ void OnTimer()
     // heal that does not need the terminal to cooperate.
     TH3BaseBandDragHeartbeat();
 
+    // P-TH3-LIVE-DRAG: the same net for a point drag — an off-chart release
+    // leaves the latch and its view lock with nothing else to heal them.
+    TH3LiveDragHeartbeat();
+
     // NOTE (2026-09-23, P-DRAW-18): `WindowPriceMax()/Min()` answer 0/0 during
     // OnInit - the chart window is not mapped yet (`run hi=0.00000 lo=0.00000` in
     // the terminal's log) - while a timer tick ~1 s later reads the real range
