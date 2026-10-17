@@ -2994,6 +2994,23 @@ void LegPreviewClear()
 #define LEG_MIGRATE_MAX 64
 void LegMeasureUpgradeLegacy()
 {
+    // P-PERF-114 (2026-10-17) - A MIGRATION THAT RAN EVERY ATTACH IS PRICED
+    // ONCE PER CHART. This pass re-boxes leg measurements drawn by OLDER
+    // builds (loose labels, no plate) with today's shape. The walk it opens
+    // with is one ObjectName() per chart object; the deferral added earlier
+    // moved it off the paint path, and the live log then showed what it still
+    // is: `deferred tail restore took 1094ms (leg=1063)`. But once a pass
+    // finds nothing to upgrade, nothing can ever appear again - only an older
+    // build could create a legacy item and none is running (the fork law:
+    // this ex5 is the only writer). So a clean, COMPLETE pass stamps the
+    // chart clean and later attaches skip the walk with one GVar read. The
+    // stamp is keyed by chart id, which is handed out per session: a restart
+    // runs the walk again. Conditions for "clean": the pass was not cut by
+    // its own cap (n < LEG_MIGRATE_MAX, so the whole chart was seen) and it
+    // boxed, re-inked and deferred nothing (a deferred one - no ATR yet -
+    // must be re-examined next attach, not stamped over).
+    const string legCleanStamp = "Biotak_LegNormal_" + GetCachedChartIdStr();
+    if(GlobalVariableCheck(legCleanStamp) && GlobalVariableGet(legCleanStamp) > 0) return;
     // pass 1 — COLLECT FIRST, WRITE SECOND: the walk must not run while the family
     // it is walking is being created and deleted underneath it.
     string bases[LEG_MIGRATE_MAX];
@@ -3076,6 +3093,10 @@ void LegMeasureUpgradeLegacy()
               " re-inked=", reinked);
     if(deferred > 0)
         Print("TH3: leg measure normalise deferred, no ATR yet (P-LM-07): ", deferred);
+    // P-PERF-114: the chart is normalised - stamp it and every later attach on
+    // this session's chart skips the walk. Only a COMPLETE pass may stamp.
+    if(n < LEG_MIGRATE_MAX && boxed == 0 && reinked == 0 && deferred == 0)
+        GlobalVariableSet(legCleanStamp, 1.0);
 }
 
 bool LegMeasureSessionActive() { return g_legSess.active; }

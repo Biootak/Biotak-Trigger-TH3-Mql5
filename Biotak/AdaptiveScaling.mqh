@@ -7,7 +7,7 @@
 // directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
 //
 // MT5-only changes this file already carries:
-//   * none
+//   * the seed refuses a provisional (rates-fallback) ATR — P-PERF-94 / BUG-02
 // ============================================================================
   //+------------------------------------------------------------------+
 //|                                            AdaptiveScaling.mqh   |
@@ -119,7 +119,27 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits, const bool
     
     // Use the core Weighted ATR system for calculation (consistent with labels)
     double weightedATR = CalculateWeightedATR_Locked();
-    
+
+    // P-PERF-94 (BUG-02, 2026-10-13) — MT5-ONLY. THE SEED MUST BE THE REAL ATR.
+    //
+    // The draw path holds its first paint behind a gate that reads
+    // g_scalingInitialized (EventHandlers, P-MT5-SEED-01). The gate was built
+    // for MT5's handle warm-up, where iATR answers 0 and UpdateATRScalingFactor
+    // returns early - so the flag stayed false and the gate held.
+    //
+    // The rates-based fallback (MQL5Compat) removed that 0: it answers a good
+    // MT4-equal approximation immediately, the seed latched on it, and the gate
+    // opened on a value that was not final. A moment later the terminal's own
+    // ATR arrived, the shift moved, and the user watched the levels appear, get
+    // deleted and be rebuilt — the exact cycle P-MT5-SEED-01 was written to
+    // stop. The gate was never wrong; the flag it reads was.
+    //
+    // So a provisional composite never seeds. The gate in EventHandlers stays
+    // closed (g_scalingInitialized still false), the 250 ms timer re-enters,
+    // and the first paint lands on the terminal's own ATR. Its own 20 s escape
+    // hatch still bounds a symbol that never serves one.
+    bool atrProvisional = WeightedATRWasProvisional();
+
     if(weightedATR <= 0) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("[W][ADAPT] UpdateATRScalingFactor: ATR=0, keeping previous scaling factor");
@@ -143,6 +163,10 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits, const bool
     double alpha = GetEMAAlpha(smoothingPeriod);
     
     if(!g_scalingInitialized) {
+        // P-PERF-94: see the note at `atrProvisional` above. A value that can
+        // still move must not become the EMA's seed - the seed is what the
+        // first paint is drawn from, and a re-seed is a full redraw.
+        if(atrProvisional) return false;
         // First time: seed EMA with current raw value
         g_smoothedScalingFactor = rawFactor;
         g_scalingInitialized = true;
@@ -228,7 +252,14 @@ bool UpdateATRScalingFactor(const double basePrice, const int digits, const bool
         if(g_fractalShift > 5) g_fractalShift = 5;
         
         if(g_fractalShift != oldShift) {
-             _LOG_GATE_I Print("[I][ADAPT] Fractal Shift changed: ", oldShift, " -> ", g_fractalShift, " (ATR: ", DoubleToString(weightedATR / GetCachedPoint(), 1), " pips)");
+             // P-BE-02 (2026-10-13): the sibling line above guards this identical
+             // division with `(pipSize > 0)`; this one did not. `GetCachedPoint()`
+             // returns 0 while the symbol's contract data is not loaded — the
+             // weekend / fresh-symbol-switch state PerformanceOptimizations
+             // documents — so the log read `inf` exactly when the shift moved on a
+             // chart nobody could trade. A witness that prints inf is not a witness.
+             double ptForLog = GetCachedPoint();
+             _LOG_GATE_I Print("[I][ADAPT] Fractal Shift changed: ", oldShift, " -> ", g_fractalShift, " (ATR: ", DoubleToString(ptForLog > 0 ? weightedATR / ptForLog : 0, 1), " pips)");
              return true; // Shift changed, need redraw
         }
     } else {

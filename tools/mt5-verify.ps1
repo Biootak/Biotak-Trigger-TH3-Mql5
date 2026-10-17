@@ -128,6 +128,7 @@ $prevLines = Log-Lines $mark0 $mark1
 
 # ----------------------------------------------------------- restart ------
 Say "== 4/6 start (loads THIS build) + watch ${WaitSec}s =="
+$shutdownMark = $mark1   # only lines written AFTER the new terminal starts are judged
 Start-Process -FilePath $exe | Out-Null
 $deadline = (Get-Date).AddSeconds($WaitSec)
 $seen = @{}

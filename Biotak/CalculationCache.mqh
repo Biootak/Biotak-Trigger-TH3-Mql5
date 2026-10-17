@@ -199,7 +199,7 @@ void InvalidateTimeframeCache() {
     g_timeframeCache.percentage = 0.0;
     g_timeframeCache.periodSeconds = -1;
     g_timeframeCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Timeframe Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Timeframe Cache Invalidated");
 }
 
 int GetCachedPeriodSeconds(int period) {
@@ -220,9 +220,16 @@ void InvalidatePeriodSecondsCache() {
     g_calcCachedPeriod = -1;
     g_cachedPeriodSeconds = -1;
     g_cachedPeriodSecondsUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] PeriodSeconds Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] PeriodSeconds Cache Invalidated");
 }
 
+// P-PERF-98 (BUG-12, 2026-10-13) — DEAD. NO CALLER. DO NOT REACH FOR IT.
+// Audited across Biotak/*.mqh and both entries: `GetCachedZoneGeometry` has ZERO
+// call sites, so `g_geometryCache` is never read and the zone path recomputes
+// every time. It is left in place (MT4 carries the same symbol, and the parity
+// report reads the two trees line for line) but it is NOT a cache in the running
+// build, and a reader who assumes it is will mis-time the zone render. The live
+// zone path is ZoneFactory + LevelPipeline's own geometry key.
 bool GetCachedZoneGeometry(double topPrice, double bottomPrice, 
                            int extensionMultiplier, int historicalPeriods,
                            datetime &startTime, datetime &endTime) {
@@ -271,9 +278,13 @@ void InvalidateGeometryCache() {
     g_geometryCache.startTime = 0;
     g_geometryCache.endTime = 0;
     g_geometryCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Geometry Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Geometry Cache Invalidated");
 }
 
+// P-PERF-98 (BUG-12, 2026-10-13) — DEAD. NO CALLER. Same audit as
+// `GetCachedZoneGeometry` above: `GetCachedExtensionMultiplier` has ZERO call
+// sites, so `g_extensionMultiplierCache` is written by its setter and never
+// read. Not a cache in the running build.
 double GetCachedExtensionMultiplier(int period, int periodSeconds) {
     if(!g_extensionMultiplierCache.valid || 
        g_extensionMultiplierCache.period != period ||
@@ -304,7 +315,7 @@ void InvalidateExtensionMultiplierCache() {
     g_extensionMultiplierCache.periodSeconds = -1;
     g_extensionMultiplierCache.multiplier = 0.0;
     g_extensionMultiplierCache.lastUpdate = 0;
-    _LOG_GATE_E Print("[E][SYNC] Extension Multiplier Cache Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Extension Multiplier Cache Invalidated");
 }
 
 void InvalidateTimeframeDependentCaches() {
@@ -314,13 +325,13 @@ void InvalidateTimeframeDependentCaches() {
     InvalidatePeriodSecondsCache();
     InvalidateGeometryCache();
     InvalidateExtensionMultiplierCache();
-    _LOG_GATE_E Print("[E][SYNC] Timeframe-Dependent Caches Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Timeframe-Dependent Caches Invalidated");
 }
 
 void InvalidateSettingsDependentCaches() {
     InvalidateFactorCache();
     InvalidateGeometryCache();
-    _LOG_GATE_E Print("[E][SYNC] Settings-Dependent Caches Invalidated");
+    _LOG_GATE_I Print("[I][SYNC] Settings-Dependent Caches Invalidated");
 }
 
 string GetCacheStatusSummary() {

@@ -882,8 +882,16 @@ int PaletteApplyColor(const int kind,const color clr,const bool remember=true)
       // the strip's own writer, so every dependent — the box marks, the mid line, the
       // opacity — sees it) and the pick lands in the same RECENT ring every other
       // kind uses, so the strip and the cards share one history.
+      // P-DRAW-129 (2026-10-13): AND THE RING TAKES A PICK, NOT A PREVIEW. This was
+      // the one branch that ignored `remember`, so every hover crossing on these two
+      // pages (PalHoverPreview applies with remember=false, BiotakPanels_PalB.mqh:466)
+      // pushed the hovered swatch to slot 0 and re-painted the row under the pointer:
+      // «موس روش میبیم عوض میشه یک چیزی دیگه جاش میاد». The `remember` rides down into
+      // the strip's writer too (P-DRAW-130: a preview must not learn the kind's
+      // memory either), and the ring fills on the click's own apply only — the same
+      // law line 619 gives every other kind.
       case PAL_DRAW_BORDER:
-      case PAL_DRAW_FILL:      DrawStripPalTargetApply(clr); PushPalRecent(clr); return REFRESH_BUFFERS;
+      case PAL_DRAW_FILL:      DrawStripPalTargetApply(clr, remember); if(remember) PushPalRecent(clr); return REFRESH_BUFFERS;
       case PAL_ZONE_EDGE_TOP:    g_zoneEdgeTopColor = clr;    break;
       case PAL_ZONE_EDGE_BOTTOM: g_zoneEdgeBottomColor = clr; break;
       default:                return REFRESH_NONE;
@@ -1265,6 +1273,37 @@ uint s_PalRecentAt      = 0;        // last recents repaint (drag coalescer)
 
 int PalW() { return PAL_W; }
 
+//+------------------------------------------------------------------+
+//| P-UI-150 (2026-10-13) — ONE OWNER FOR THE POPUP'S CLOSE SEAT.     |
+//|                                                                  |
+//| MEASURED, both spellings read off the source: the close button is |
+//| PAINTED at `px+w-PAL_PAD-20, py+5, 20, 18` (PalB.mqh, the         |
+//| `PnlSetButton(p+"close", ...)` line), so its own box is            |
+//| x ∈ [px+w-36, px+w-16], y ∈ [py+5, py+23]. The title carry        |
+//| EXCLUDED a hand-written band instead — `mx >= px+w-PAL_PAD-20 &&   |
+//| my >= py+3 && my <= py+21` (PalTitleGrab) — which ends 2 px SHORT  |
+//| of the button it is meant to protect. A press in `py+21 < my <=    |
+//| py+23`, i.e. on the close button's own bottom two pixels, was not  |
+//| excluded, so it ARMED THE CARRY: the popup moved instead of        |
+//| closing, and the press read as "the × does nothing".              |
+//|                                                                  |
+//| A hit test with its own arithmetic is a second grid (P-DRAW-84's  |
+//| law, and P-DRAW-77's defect before it). This is the ONE seat: the  |
+//| paint writes it and the grab test reads it, so the two can never   |
+//| disagree again.                                                   |
+//+------------------------------------------------------------------+
+#define PAL_CLOSE_W 20
+#define PAL_CLOSE_H 18
+#define PAL_CLOSE_DY 5
+void PalCloseSeat(const int px, const int py, const int w,
+                  int &cx, int &cy, int &cw, int &ch)
+{
+   cw = PAL_CLOSE_W;
+   ch = PAL_CLOSE_H;
+   cx = px + w - PAL_PAD - PAL_CLOSE_W;
+   cy = py + PAL_CLOSE_DY;
+}
+
 //--- P-DRAW-49: THE CELL SIZE IS CHOSEN, NOT ASSUMED. 26px cells are the design
 //--- (30 % bigger than the 20px they replace, so they are easy to hit); 22px is
 //--- the same layout 32px shorter, for a chart window the big one does not fit.
@@ -1305,6 +1344,25 @@ int PalFootY()  { return PalTgtY() + PAL_TGT; }
 //--- the footer's TR track: the one flexible column, measured from what is left.
 int PalTrX() { return g_PalX + PAL_PAD + PAL_FT_DONE + PAL_FT_GAP + PAL_FT_TRW + PAL_FT_GAP; }
 int PalTrW() { return PAL_W - 2*PAL_PAD - (PAL_FT_DONE + PAL_FT_GAP + PAL_FT_TRW + PAL_FT_GAP + PAL_FT_VALW); }
+
+//--- P-UI-152 (2026-10-13) — THE MIXER'S OWN TRACK, ONE OWNER.
+//--- `trackX = g_PalX + PAL_PAD + 30` / `trackW = PalW() - 2*PAL_PAD - 34` was
+//--- written out FOUR times: the paint (`PalDrawMixer`), the live knob move
+//--- (`PalUpdateLive`), the hit test (`PaletteMixHit`) and the value-from-X
+//--- reader (`PaletteMixFromX`). The footer's track two lines up already had
+//--- its single owner and a P-DRAW-49 note saying why — the mixer, which is the
+//--- one with FOUR readers, did not. Two owners that agree today are one retune
+//--- away from a press landing on a track the paint no longer draws, and the
+//--- knob would move while the bed under it did not.
+//--- The 30 turned out to be a THIRD site's number too: `PalDrawHexRow` seats the
+//--- HEX field at `px + PAL_PAD + 30`. So it is not the mixer's column, it is the
+//--- PALETTE's label column — `R`/`G`/`B`/`TR` on the mixer, `HEX` on the hex row —
+//--- and it is named for that. The 4 is the mixer track's own air before the
+//--- right-aligned value. `PalMixRowY` already owns the ROWS the same way.
+#define PAL_LBLW       30
+#define PAL_MIX_ENDGAP  4
+int PalMixTrackX() { return g_PalX + PAL_PAD + PAL_LBLW; }
+int PalMixTrackW() { return PalW() - 2*PAL_PAD - PAL_LBLW - PAL_MIX_ENDGAP; }
 
 //--- P-DRAW-46: one implementation, never a second — `BioPickColor` (include #1)
 //--- owns the user's chart; this is its face for the panels' code.
@@ -1427,18 +1485,22 @@ void PnlSpecBuild(const int item)
 {
    g_PnlSpecStart[item] = item * PNL_SPEC_MAX;
    g_PnlSpecCount[item] = 0;
-   if(item == 0)   // TRIGGER ZONES (cyan) — 5 settings / 7 display rows
+   if(item == 0)   // TRIGGER ZONES (cyan) — 3 settings / 5 display rows
    {
-      // P-UI-131j: the card's SECOND surface gets its pair. TRANSPARENCY + COLOR own the
-      // trigger ZONE; LABEL COLOR + LABEL OPACITY own the pip label on the trigger
-      // family's levels. The opacity is APPENDED (address 4) so addresses 0..3 and every
-      // persisted OV_ key keep their meaning; it RENDERS beside the colour row because
-      // the spec order — not the address — is what the user sees.
-      PnlSpecAdd(0, PNL_K_SEC, -1, 0, "", "", "ZONE APPEARANCE", 4);
+      // P-UI-131j gave the card's SECOND surface its pair: TRANSPARENCY + COLOR own the
+      // trigger ZONE; LABEL COLOR + LABEL OPACITY owned the pip label on the trigger
+      // family's levels (addresses 2 and 4, APPENDED past 0..3 so every persisted OV_
+      // key kept its meaning). P-LBL-11 (2026-10-17): the pip labels are retired, so
+      // those two rows left the spec; the addresses and keys stay (MIDPOINT precedent).
+      PnlSpecAdd(0, PNL_K_SEC, -1, 0, "", "", "ZONE APPEARANCE", 2);
       PnlSpecAdd(0, PNL_K_LEGACY, 0, 1, "contrast");
       PnlSpecAdd(0, PNL_K_LEGACY, 1, 1, "droplet");
-      PnlSpecAdd(0, PNL_K_LEGACY, 2, 1, "tag");
-      PnlSpecAdd(0, PNL_K_LEGACY, 4, 1, "contrast");   // LABEL OPACITY (-1 = AUTO)
+      // P-LBL-11 (2026-10-17): addresses 2 (LABEL COLOR) and 4 (LABEL OPACITY)
+      // are OFF THE CARD - they existed only to paint the trigger lines'
+      // pip-distance labels (P-UI-131j), and there are no labels any more.
+      // Both addresses, their palette targets, their read/apply branches and
+      // their persisted keys all stay (MIDPOINT precedent, P-UI-47): nothing
+      // renumbers and an old OV/GV still lands where it was written.
       PnlSpecAdd(0, PNL_K_SEC, -1, 0, "", "", "VISIBILITY", 1);
       PnlSpecAdd(0, PNL_K_LEGACY, 3, 1, "eye");   // hotkey T lives in the header badge only
    }
@@ -1497,9 +1559,10 @@ void PnlSpecBuild(const int item)
       // same way P-UI-126 added the row above.
       PnlSpecAdd(1, PNL_K_LEGACY, 13, 1, "info", "", "", 0, "GENERAL");
    }
-   else if(item == 2)   // ATR LABELS (gold) — 14 display rows, 19 addresses: 10..13
-                        // (the trade card's grid) render on the GENERAL card now
-                        // (P-UI-131) while their addresses stay here.
+   else if(item == 2)   // ATR LABELS (gold) — the countdown tag, the label
+                        // switches, the plan ATR and the card colours: addresses
+                        // 10..13 (the trade card's grid) render on the GENERAL
+                        // card now (P-UI-131) while their addresses stay here.
    {
       PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "COUNTDOWN", 4);
       PnlSpecAdd(2, PNL_K_LEGACY, 0, 1, "timer", "C");
@@ -1508,11 +1571,14 @@ void PnlSpecBuild(const int item)
       PnlSpecAdd(2, PNL_K_LEGACY, 3, 1, "gap");
       PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "ATR BLOCK", 2);
       PnlSpecAdd(2, PNL_K_DUAL, 4, 2, "gauge");   // ATR LABELS · ATR TARGETS in one row (15→14 rows)
-      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "TRADE PLAN ROWS", 4);
+      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "TRADE PLAN ROWS", 3);
       PnlSpecAdd(2, PNL_K_LEGACY, 6, 1, "tag", "T");
       PnlSpecAdd(2, PNL_K_LEGACY, 7, 1, "crosshair", "H");
       PnlSpecAdd(2, PNL_K_LEGACY, 8, 1, "flag", "P");
-      PnlSpecAdd(2, PNL_K_LEGACY, 9, 1, "ruler");
+      // P-LBL-11 (2026-10-17): address 9 ("H/L PIP LABELS", the ruler row) is
+      // OFF THE CARD - the setting's only consumer, the pip-distance labels,
+      // is retired. The address, its input, its `PD` key and its descriptor/
+      // read/apply branches all stay (MIDPOINT precedent, P-UI-47).
       // P-LEGATR: the plan's ATR source, APPENDED in its own band (14→16 display
       // rows, still wide). Address 19 renders here and nowhere else.
       PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "PLAN ATR", 1);
@@ -2005,7 +2071,12 @@ bool PalTitleGrab(const int mx,const int my)
    if(g_PnlMoveItem>=0 || !DragCanGrab(DRAG_PANEL_MOVE)) return false;
    int w=PalW();
    if(mx < g_PalX || mx > g_PalX+w || my < g_PalY || my > g_PalY+PAL_HEAD) return false;
-   if(mx >= g_PalX+w-PAL_PAD-20 && my >= g_PalY+3 && my <= g_PalY+21) return false;
+   // P-UI-150 (2026-10-13): the close seat is READ, never re-derived. This used to be
+   // `my >= g_PalY+3 && my <= g_PalY+21` while the button paints py+5..py+23, so the
+   // button's own bottom 2 px armed the carry instead of closing the popup.
+   int ccx = 0, ccy = 0, ccw = 0, cch = 0;
+   PalCloseSeat(g_PalX, g_PalY, w, ccx, ccy, ccw, cch);
+   if(mx >= ccx && mx <= ccx + ccw && my >= ccy && my <= ccy + cch) return false;
    s_palMoveArmed=true;
    s_palMoveGX=mx; s_palMoveGY=my; s_palMoveLX=mx; s_palMoveLY=my;
    s_palMoveMoved=false; s_palMoveTick=0;
@@ -2115,6 +2186,13 @@ void PalClose()
    if(!g_PalOpen) return;
    SavePalRecentDurable();   // P-PERF-44: flush the throttled mixer drag tail (own transaction)
    ObjectsDeleteAll(0, g_UI.btnPrefix+"Pal_", 0, -1);
+   // P-UI-145c (2026-10-13): AND THE SEATS THIS POPUP TAUGHT GO WITH IT. The cards
+   // had their `PnlSeatForget` at `PnlDestroy`, the palette had NONE — so every
+   // popup open left ~44 permanently dead entries in the registry (its own seats
+   // were never handed back), and those entries are exactly what pushed the
+   // 192-slot pool full. Same owner law as the wipe above: the family that died
+   // releases its slots, so a later card or popup is taught by its OWN paint.
+   PnlSeatForget(g_UI.btnPrefix+"Pal_");
    PalDiagEpoch();   // P-UI-137: the next open is a new census
    g_PalOpen=false; g_PalMixDrag=0; g_PalHexFocus=false;
    // P-UI-98r: palette gone - republish (invalidates) and uncover now.
@@ -2277,7 +2355,7 @@ void PalDrawHexRow(const int px,const int hy)
 {
    string p=g_UI.btnPrefix+"Pal_";
    color cur=PaletteKindColor(g_PalKind);
-   int fx=px+PAL_PAD+30;
+   int fx=px+PAL_PAD+PAL_LBLW;
    PnlSetLabel(p+"hl", px+PAL_PAD, hy+6, "HEX", PNL_CLR_LABEL, 7);
    ObjectSetInteger(0,p+"hl",OBJPROP_ZORDER,Z_PANEL_POP_BG);
    string en=p+"hex";
@@ -2350,8 +2428,8 @@ void PalDrawMixer(const int contY)
    comps[0]=cv%256; comps[1]=(cv/256)%256; comps[2]=cv/65536;
    string cl[3]={"R","G","B"};
    color fill[3]={C'255,99,99',C'102,187,106',C'92,145,255'};
-   int trackX=px+PAL_PAD+30;
-   int trackW=PalW()-2*PAL_PAD-34;
+   int trackX=PalMixTrackX();
+   int trackW=PalMixTrackW();
     //--- the four rows, centred in the band the tabs leave above the HEX row
     const int PITCH=30;
     int top=PalMixTop();
@@ -2485,8 +2563,13 @@ void PalDraw()
    // strip's; this is the popup's own 12px face).
    PnlSetBitmap(p+"grip", px+PAL_PAD, py+8, 12, 12, "::Files\\Icons\\pal_grip.bmp", Z_PANEL_POP_BG);
    ObjectSetString(0,p+"grip",OBJPROP_TOOLTIP,"Drag to move");
-   PnlSetButton(p+"close", px+w-PAL_PAD-20, py+5, 20, 18, "x", PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD, true);
-   ObjectSetInteger(0,p+"close",OBJPROP_COLOR,PNL_CLR_MUTED);
+   // P-UI-150 (2026-10-13): the seat comes from the ONE owner `PalCloseSeat`
+   // (PalA), the same one the title carry reads to exclude the button. Painted here
+   // as `px+w-PAL_PAD-20, py+5, 20, 18` and tested there as `py+3..py+21`, the two
+   // spellings disagreed by 2 px and the button's own bottom edge armed a drag.
+   int cseX = 0, cseY = 0, cseW = 0, cseH = 0;
+   PalCloseSeat(px, py, w, cseX, cseY, cseW, cseH);
+   PnlSetButton(p+"close", cseX, cseY, cseW, cseH, "x", PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD, true);   ObjectSetInteger(0,p+"close",OBJPROP_COLOR,PNL_CLR_MUTED);
    ObjectSetInteger(0,p+"close",OBJPROP_FONTSIZE,PnlPt(PNL_PT_PAL));   // P-UI-30
    ObjectSetInteger(0,p+"close",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
 
@@ -2710,8 +2793,8 @@ void PalUpdateLive()
       int cv=(int)cur;
       int comps[3];
       comps[0]=cv%256; comps[1]=(cv/256)%256; comps[2]=cv/65536;
-      int trackX=g_PalX+PAL_PAD+30;
-      int trackW=PalW()-2*PAL_PAD-34;
+      int trackX=PalMixTrackX();
+      int trackW=PalMixTrackW();
       for(int i=0;i<3;i++)
       {
          int kx=trackX+(int)MathRound(comps[i]/255.0*(trackW-10));
@@ -2799,8 +2882,8 @@ int PaletteMixHit(const int mx,const int my)
        if(mx>=fox-4 && mx<=fox+fow+4 && my>=fy+6 && my<=fy+22) return 5;
     }
      if(g_PalTab!=1) return 0;
-     int trackX=g_PalX+PAL_PAD+30;
-     int trackW=PalW()-2*PAL_PAD-34;
+     int trackX=PalMixTrackX();
+     int trackW=PalMixTrackW();
      //--- same rows the paint lays (`PalMixRowY`); bands tile edge-to-edge, so no
      //--- dead gap between two channels can swallow the press.
      for(int i=0;i<3;i++)
@@ -2831,8 +2914,8 @@ void PaletteMixFromX(const int comp,const int mx)
       if(flags!=REFRESH_NONE) RefreshDisplay(flags);
       return;
    }
-    int trackX=g_PalX+PAL_PAD+30;
-    int trackW=PalW()-2*PAL_PAD-34;
+    int trackX=PalMixTrackX();
+    int trackW=PalMixTrackW();
     //--- knob-centre mapping: the knob is 10px wide over (trackW-10), so the value
     //--- under the pointer's grip is (mx-5), the exact inverse of the paint above.
     double frac=(mx-trackX-5)/(double)(trackW-10);
@@ -3204,13 +3287,13 @@ void PnlStepSectionRowDef(const int s,int &kind,string &label,
    else if(mode==2)   // COMBO — preset or advanced components
    {
       if(s==0)      { kind=2; label="MODE"; opts="Preset|Advanced"; minV=0; maxV=1; }
-      else if(s==1) { kind=2; label="PRESET"; opts="B-Med|B-Long|B-Trip|Cons|Aggr|Trend|SS|4/3"; minV=0; maxV=7; }
+      else if(s==1) { kind=2; label="PRESET"; opts="B-Med|B-Long|B-Trip|Cons|Aggr|Trend|SS|4/3|5/3"; minV=0; maxV=8; }
       else if(s==2) { kind=2; label="COMP1 TF"; opts="Sub|Trigger|Pattern|Struct"; minV=0; maxV=3; }
-      else if(s==3) { kind=2; label="COMP1 STEP"; opts="TH|SS|LS|4/3"; minV=0; maxV=3; }
+      else if(s==3) { kind=2; label="COMP1 STEP"; opts="TH|SS|LS|4/3|5/3"; minV=0; maxV=4; }
       else if(s==4) { kind=2; label="OP"; opts="Avg|Add|Sub|Mul|Min|Max|Wtd"; minV=0; maxV=6; }
       else if(s==5) { kind=1; label="COMP2"; }
       else if(s==6) { kind=2; label="COMP2 TF"; opts="Sub|Trigger|Pattern|Struct"; minV=0; maxV=3; }
-      else          { kind=2; label="COMP2 STEP"; opts="TH|SS|LS|4/3"; minV=0; maxV=3; }
+      else          { kind=2; label="COMP2 STEP"; opts="TH|SS|LS|4/3|5/3"; minV=0; maxV=4; }
    }
    else   // FACTOR — same rows as FACTOR card 10 rows 0..6
    {
@@ -3513,8 +3596,9 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else if(row==17) { label="BOTTOM OPACITY"; unit="%"; minV=-1; maxV=100; }
       else             { kind=5; label="LINES"; opts="7"; }              // NAV → unified lines card
    }
-   else if(item==2)   // ATR LABELS — the chart-labels card (incl. High/Low
-                      // pip-distance labels; they are display labels, not pin)
+   else if(item==2)   // ATR LABELS — the chart-labels card (High/Low
+                      // pip-distance labels were retired by P-LBL-11; this
+                      // card keeps the countdown, ATR and trade-plan labels)
    {
       // Rows 0-3 = the countdown tag's OWN settings (independent of the ATR
       // block — turning the ATR labels off keeps the countdown).
@@ -3532,6 +3616,10 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       // (`inpShowPipDistanceLabels`, read by LabelFunctions AND LevelPipeline),
       // which no two-word caption in a corner card can convey. Renamed to say
       // WHERE those labels live; the setting address is untouched.
+      // P-LBL-11 (2026-10-17): the pip labels themselves are retired, so this
+      // row is off the card (see the spec table). The branch stays as the
+      // address stub - `row_arms` counts branches, not displays, and a
+      // renumbered fallthrough below would misland the proof (P-TH3-PB-MAN).
       else if(row==9)  { kind=1; label="H/L PIP LABELS"; }
       // ROW-GAP-OFF is OVER (P-UI-70c): the row was retired because its runtime
       // copy `g_atrLabelRowGap` was dead, and the trade card has consumed that
@@ -3558,7 +3646,7 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else if(row==18) { kind=4; label="SPREAD COLOR"; }
        // P-LEGATR: APPENDED (row 19), so rows 0..18 keep their addresses and the
        // persisted OV_ keys keep their meaning.
-      else             { kind=1; label="LEG ATR"; }
+      else             { kind=1; label="PRE-CP ATR"; }
    }
     else if(item==3)   // TH LABELS
     {
@@ -3576,7 +3664,24 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
        // panel-wiring-audit.py scans the raw text for the whole `if(`+`row`+`==`
        // shape, so a branch spelled here becomes a phantom arm with no caption
        // and the audit reports a blank control. This cost one red run already.)
-       else             { kind=1; label="VOL NORM"; }
+        else             { kind=1; label="VOL NORM"; }
+     }
+    // P-UI-154 (2026-10-13) — THE HOVER CHIP'S ROW HAD NO DEFINITION.
+    // MEASURED: this function carries a branch for every card EXCEPT 4, so the
+    // chip's one row fell through to the opening defaults set at the top of it —
+    // `kind=0` (PNL_K_SL, a slider) and `label=""`. The card the user opens to
+    // configure the chip therefore showed a NAMELESS 0..100 SLIDER where its
+    // single ON/OFF switch belongs («چرا تنظیماتش ناقص هستش»). OFF = «با موس»
+    // (the hover tip, the shipped default), ON = «همیشه فعال» (the banner kept up
+    // at its place). Every OTHER path already knew the setting: `PnlCurrent`
+    // (case 4) reads it, `PnlApply` (case 4) writes it and calls
+    // `CircTipModeChanged`, and `PnlDefValSet` falls through to `return 0` —
+    // which IS that default. Only this descriptor was missing, which is exactly
+    // why nothing else noticed. kind=1 (PNL_K_SW) is the switch the apply path
+    // implements; the icon stays the spec's own "tag" (BiotakPanels_PalA).
+    else if(item==4)   // HOVER CHIP — the chip's MODE (the card's only setting)
+    {
+       if(row==0)       { kind=1; label="ALWAYS SHOWN"; }
     }
     // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
     // P-TH3-PB-MAN (2026-09-21): BASE PIPS is the trailing fallthrough, like
@@ -3645,8 +3750,9 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
    }
    // item==7 retired Tools/Misc rows are gone (were duplicates of CustomPrice,
    // Zones & the STRUCTURE card) — the slot now hosts the LINES card above.
-    else if(item==8)   // CUSTOM PRICE PIN — the pin only (pip-distance labels
-                       // live on the ATR LABELS card)
+    else if(item==8)   // CUSTOM PRICE PIN — the pin only (the pip-distance
+                       // labels that used to live on the ATR LABELS card are
+                       // retired, P-LBL-11)
     {
        if(row==0)       { label="WIDTH"; minV=1; maxV=5; }
        else if(row==1)  { kind=4; label="COLOR"; }
@@ -4242,7 +4348,9 @@ double PnlDefValSet(const int item,const int row)
 //|   COUNTDOWN        → LiveCountdownEnabled()                          |
 //|   ATR LABELS       → SetATRLabelsVisibility (`shouldShow`)           |
 //|   TRADE LABELS     → SetATRLabelsVisibility (`cardOn`, P-UI-84)      |
-//|   H/L PIP LABELS   → LevelPipeline:1102                              |
+//|   H/L PIP LABELS   → retired (P-LBL-11): the address keeps its read  |
+//|                      branch and its mute term for shape stability,    |
+//|                      but no display row reaches it                    |
 //|   TH LABELS        → SetTHLabelsVisibility (`shouldShow`)            |
 //|   STRUCTURE L1-L5  → LevelPipeline:802 (`visible && !hidden`)        |
 //+------------------------------------------------------------------+
@@ -4311,8 +4419,9 @@ double PnlCurrentSet(const int item,const int row)
               if(row==6) return PnlMuteGatedValue(g_showATRTradeLabels);
               if(row==7) return g_showATRTradeSLLabels?1.0:0.0;
               if(row==8) return g_showATRTradeTPLabels?1.0:0.0;
-              // H/L pip labels are their own family (LevelPipeline:1102 writes the
-              // mask with the mute as one of its two terms), so this row answers it.
+              // H/L pip labels are retired (P-LBL-11, 2026-10-17) and their
+              // display row is off the card; this read branch stays as the
+              // address stub, reading the persisted-and-inert setting.
               if(row==9) return PnlMuteGatedValue(g_showPipDistanceLabels);
               if(row==10) return g_atrLabelRowGap;
               if(row==11) return g_atrTradeFontSize;
@@ -4961,6 +5070,7 @@ static string s_pnlSeatNm[PNL_SEAT_MAX];
 static int    s_pnlSeatX[PNL_SEAT_MAX];
 static int    s_pnlSeatY[PNL_SEAT_MAX];
 static int    s_pnlSeatN = 0;
+static bool   s_pnlSeatFullSaid = false;   // P-UI-145c: the FULL state is said ONCE, never per paint
 //--- called by every painter that writes a control's seat (the factory below,
 //--- and PnlMoveOne when the card carries its family). One entry per name;
 //--- a re-paint re-teaches the same seat.
@@ -4969,7 +5079,20 @@ void PnlSeatRemember(const string n,const int x,const int y)
    if(n == "") return;
    for(int i = 0; i < s_pnlSeatN; i++)
       if(s_pnlSeatNm[i] == n) { s_pnlSeatX[i] = x; s_pnlSeatY[i] = y; return; }
-   if(s_pnlSeatN >= PNL_SEAT_MAX) return;   // full: one card + one palette cannot reach 192
+   if(s_pnlSeatN >= PNL_SEAT_MAX)
+   {
+      // P-UI-145c (2026-10-13): a FULL registry is a real state, and it used to be a
+      // silent one — the guard returned and every later control lost its revert with
+      // nothing said. The slots are handed back by `PnlSeatForget` now, so reaching
+      // 192 LIVE names is the only way here; say so ONCE and stay bounded.
+      if(!s_pnlSeatFullSaid)
+      {
+         s_pnlSeatFullSaid = true;
+         Print("[P-UI-145] seat registry FULL at ", PNL_SEAT_MAX,
+               " live control(s) — a natively dragged control past this point is not reverted");
+      }
+      return;
+   }
    s_pnlSeatNm[s_pnlSeatN] = n; s_pnlSeatX[s_pnlSeatN] = x; s_pnlSeatY[s_pnlSeatN] = y;
    s_pnlSeatN++;
 }
@@ -4996,12 +5119,42 @@ bool PnlSeatRevert(const string n)
 //--- a family is gone (its card closed, the palette shut): its seats are
 //--- meaningless and must not fill the registry — a name a future card reuses
 //--- must be taught by its OWN paint, never answered by a dead entry.
+//---
+//--- P-UI-145c (2026-10-13) — AND THE SLOT IS HANDED BACK. This used to blank the
+//--- NAME and keep the entry, while the counter above only ever grew: the ceiling
+//--- `PNL_SEAT_MAX` was therefore a bound on the number of DISTINCT NAMES ever
+//--- painted in one indicator lifetime, not on the number of LIVE controls. A card
+//--- with 24 rows teaches more than a hundred names on its own, so two cards were
+//--- enough to reach 192 and from then on `PnlSeatRemember` returned early for
+//--- EVERY later card and palette — the P-UI-145 revert died silently, and the
+//--- comment on the ceiling ("one card + one palette cannot reach 192") was
+//--- counting a quantity the registry never measured.
+//---
+//--- MEASURED by reading the writers, not by guessing: `s_pnlSeatN++` above is the
+//--- ONLY writer of the counter and `PnlSeatForget` was its only would-be releaser,
+//--- so nothing ever decremented it. Every reader matches by NAME and none reads
+//--- the index, so the tail is compacted down over the dropped entries and the
+//--- slots become reusable. Cost: one pass over <=192 entries per family teardown,
+//--- i.e. per USER ACTION, never per paint.
 void PnlSeatForget(const string prefix)
 {
    const int len = StringLen(prefix);
    if(len == 0) return;
+   int w = 0;
    for(int i = 0; i < s_pnlSeatN; i++)
-      if(StringFind(s_pnlSeatNm[i], prefix) == 0) s_pnlSeatNm[i] = "";
+   {
+      if(StringFind(s_pnlSeatNm[i], prefix) == 0) continue;   // this family's — dropped
+      if(w != i)
+      {
+         s_pnlSeatNm[w] = s_pnlSeatNm[i];
+         s_pnlSeatX[w]  = s_pnlSeatX[i];
+         s_pnlSeatY[w]  = s_pnlSeatY[i];
+      }
+      w++;
+   }
+   for(int i = w; i < s_pnlSeatN; i++) s_pnlSeatNm[i] = "";   // no dead name past the new end
+   s_pnlSeatN = w;
+   s_pnlSeatFullSaid = false;   // the pool has room again — a later FULL is a new fact
 }
 
 //+------------------------------------------------------------------+
@@ -7638,7 +7791,7 @@ void ChartPointerFinalizeOnUps()
      if(s_palMoveArmed) PalMoveDisarm();   // spot already parked on the proven move
      //--- mirror the move-path release: the travelled spot becomes home (saved),
      //--- the release click is spent, and the frozen layout may re-derive.
-     if(orbDragged) { CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates(); UISuppressNextClick(); }
+     if(orbDragged) { GVHomeAnswerNew("ORB"); CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates(); UISuppressNextClick(); }
      if(orbLive) SubRelayoutIfNeeded();
      ChartScrollReconcile();
 }
@@ -7727,6 +7880,15 @@ void PnlCloseAll()
    // the chart's own objects share none of it.
    //
    // Cost: ONE scan, one time, instead of 28 scans and ~560 absent-name probes.
+   //
+   // P-PERF-99 (2026-10-16): the 2026-10 teardown readings pinned the seconds
+   // NOT on this call but on the compatibility wrapper's tokenize walk that
+   // preceded it (MT5Compat/MQL5Compat.mqh, CompatTokenizeDeleteAll) - one
+   // ObjectName() per chart object, whose first full pass inside a shutdown
+   // teardown costs 3-7 s on the live 594-883-object charts. The wrapper now
+   // skips that walk once OnDeinit has begun (its tokens have no consumer in a
+   // dying instance), so this line is the free built-in call again and the
+   // source text stays IDENTICAL TO MT4. Do not "optimize" the line itself.
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Pnl", -1, -1);
    // The two popovers still go through their own closers because they reset
    // STATE as well as objects (g_PnlDdItem / g_BkDd), and both are guarded by

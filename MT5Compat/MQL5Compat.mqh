@@ -22,13 +22,13 @@
 //| whole ledger back on. The counters AND their GetTickCount pairs   |
 //| compile away, which is the minimum-load build the user asked for. |
 //+------------------------------------------------------------------+
-//#define COMPAT_LEDGER 1
+#define COMPAT_LEDGER 1
 
 struct CompatLedger {
    long refreshCalls, refreshMs;     // CompatRefreshChartData, whole
    long seriesFull, seriesShift;     // full CopyRates vs in-memory shift
    long seriesBars;                  // bars touched by the shift
-   long atrCalls, atrMs, atrFallback;// iATR -> handle / rates fallback
+   long atrCalls, atrMs, atrFallback;// iATR -> rates sync engine (P-ATR-SYNC)
    long atrMemoHit, atrMemoMiss;     // the same bar priced again, or not
    long barShiftCalls, barShiftMs;   // iBarShift
    long periodCalls;                 // Period()
@@ -44,6 +44,14 @@ string CL(const string tag, const long n, const long ms)
 
 void CompatLedgerReport(const string tag)
 {
+   // P-PERF-96 (BUG-13, 2026-10-13) — A RELEASE BUILD PRINTS NOTHING.
+   // With COMPAT_LEDGER off every counter above is a constant zero, so the line
+   // below would report "refresh=0/0ms iATR=0/0ms ..." on every deinit: noise
+   // that reads as a measurement and is not one. The call site is unconditional
+   // so a measurement build needs no edit; this guard is what makes that safe.
+#ifndef COMPAT_LEDGER
+   return;
+#else
    Print("[MT5-COMPAT] ", tag,
          " | refresh=", CL("r", g_cl.refreshCalls, g_cl.refreshMs),
          " (full=", IntegerToString(g_cl.seriesFull),
@@ -62,6 +70,7 @@ void CompatLedgerReport(const string tag)
    g_cl.atrMemoHit = 0; g_cl.atrMemoMiss = 0;
    g_cl.barShiftCalls = 0; g_cl.barShiftMs = 0;
    g_cl.periodCalls = 0; g_cl.marketInfoCalls = 0; g_cl.bidAskCalls = 0;
+#endif
 }
 
 // Bid / Ask were plain macro expansions of SymbolInfoDouble. They are now
@@ -292,6 +301,20 @@ int TimeDayOfWeek(datetime time) { TimeToStruct(time, g_tempDt); return g_tempDt
 int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT)
 {
     if(tf == PERIOD_CURRENT || tf == 0) tf = CompatRawPeriod();
+    // P-PERF-93 (BUG-16, 2026-10-13) — THE MONTHLY BAR IS NOMINAL, NOT CALENDAR.
+    //
+    // PeriodSeconds(PERIOD_MN1) counts down to the start of NEXT month, so a
+    // 31-day month answers 44640 where the project's minute ladder says 43200.
+    // This is the same unit bug that stopped Weekly/Monthly levels drawing
+    // (R-TF-UNIT, commit 4ad14af) — it was pinned in CompatPeriodMinutes()
+    // (Biotak/BuildConfig.mqh) but NOT here, so the two readers of "the current
+    // period in minutes" disagreed on exactly one timeframe.
+    //
+    // Today this function has NO caller in the shared source, so the wrong
+    // answer is dormant. Pinned anyway: the next caller must not have to
+    // rediscover why a monthly chart reports 44640.
+    if(tf == PERIOD_W1)  return 10080;
+    if(tf == PERIOD_MN1) return 43200;
     int seconds = PeriodSeconds(tf);
     if(seconds > 0) return seconds / 60;
 
@@ -301,48 +324,58 @@ int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT)
     return 0;
 }
 
-// MQL4-style iATR(symbol, timeframe, period, shift) bridge for MQL5 handles.
-// 64 slots hold every (period x timeframe) combo the multi-TF label/scaling
-// path uses (6 periods x 9 TFs = 54), so handles warm up once and persist
-// instead of being evicted and restarted on every poll.
-#define ATR_HANDLE_CACHE_SIZE 64
-
-struct ATRHandleCacheEntry {
-    int handle;
-    string symbol;
-    ENUM_TIMEFRAMES timeframe;
-    int period;
-};
-
-static ATRHandleCacheEntry g_atrHandleCache[];
-static int  g_atrHandleCacheCount = 0;
-static bool g_atrHandleCacheInitialized = false;
+// MQL4-style iATR(symbol, timeframe, period, shift).
+//
+// P-ATR-SYNC (2026-10-17) — THE RATES ENGINE IS THE ENGINE.
+//
+// The report this closes: «ATR در متاتریدر 4 خیلی سریع است، در متاتریدر 5 چرا
+// کند؟» — and the "why" behind it: MQL5's iATR is a HANDLE, and a handle's
+// value is served asynchronously (BarsCalculated -> CopyBuffer). The old
+// bridge created up to 54 handles per pass, RELEASED every one of them in the
+// teardown (ReleaseATRHandleCache OnDeinit), and recreated the whole herd at
+// every reattach — so every TF switch re-queued async ATR calculations for
+// its heaviest TFs (MN1/W1/D1 are synthesized from M1 on demand and take
+// seconds to become BarsCalculated>0). Until then every answer came from
+// iATRRatesFallback, was stamped provisional by P-PERF-94, the adaptive
+// scaling seed refused to latch, and the seedWait gate held the first paint —
+// the "MT5 answers, MT4 is instant" gap in one chain.
+// Worse: the moment a handle DID warm up, the answer flipped from the rates
+// value to the terminal's — a mid-bar step the chart could see.
+//
+// The new model is MT4's own model: ONE synchronous engine. Ask -> compute
+// from a CopyRates window NOW -> answer:
+//   * window = ATRFallbackWindow() (3000+ bars or every bar the tf has) and
+//     the Wilder recursion in CalculateATRFallbackFromRates() — the exact
+//     function this bridge used as its fallback, already proven
+//     MT4-equality-grade (<1e-5 residual vs a whole-history recursion for
+//     every period this project uses, including MN1's 264);
+//   * the one-bar value memo below stays the front door (memo hits are
+//     bit-identical and cost nothing);
+//   * NO handles, NO BarsCalculated, NO CopyBuffer, NO IndicatorRelease.
+//
+// "Provisional" now means exactly one thing: the CopyRates answer came back
+// with FEWER bars than both the wanted window AND the tf's bar count — the
+// terminal is still synthesizing or downloading that timeframe. A complete
+// read (all wanted bars, or all bars the tf has — MT4's own short-history
+// case) is FINAL for this bar, exactly like MT4, and seeds immediately.
+//
+// Per-call cost: a CopyRates of the shared window (cached per tf+shift+bar,
+// so a six-period batch copies ONCE) plus one Wilder pass per period — tens
+// of microseconds, no wait states, and zero terminal-side indicator work to
+// undo on the way out.
 static string g_atrSelectedSymbol = "";
-
-void InitATRHandleCache()
-{
-    if(g_atrHandleCacheInitialized) return;
-    ArrayResize(g_atrHandleCache, ATR_HANDLE_CACHE_SIZE);
-    for(int i = 0; i < ATR_HANDLE_CACHE_SIZE; i++) {
-        g_atrHandleCache[i].handle = INVALID_HANDLE;
-        g_atrHandleCache[i].symbol = "";
-        g_atrHandleCache[i].timeframe = PERIOD_CURRENT;
-        g_atrHandleCache[i].period = 0;
-    }
-    g_atrHandleCacheCount = 0;
-    g_atrHandleCacheInitialized = true;
-}
 
 // Forward declaration: implemented below iATRMQL4 (MQL5 needs prototypes
 // before use).
 double iATRRatesFallback(string symbol, ENUM_TIMEFRAMES tf, int atrPeriod, int shift);
 
-// Fallback history cache. During MT5 handle warm-up, one weighted ATR needs
-// six periods for the same timeframe. Re-reading the same CopyRates block for
-// every period was the main startup cost (especially for W1/MN1). Keep one
-// shared history block and the already-computed period values; the cache is
-// invalidated when the source timeframe advances. Its window is the MT4-equal
-// one from ATRFallbackWindow() - see the note above that function.
+// Fallback history cache. Under P-ATR-SYNC this block is the ENGINE'S window:
+// one weighted ATR needs six periods for the same timeframe, and re-reading
+// the same CopyRates block for every period was the main batch cost
+// (especially for W1/MN1). Keep one shared history block and the
+// already-computed period values; the cache is invalidated whenever the
+// source tf advances. Its window is the MT4-equal one from
+// ATRFallbackWindow() - see the note above that function.
 #define ATR_FALLBACK_CACHE_BASE_PERIOD 264
 #define ATR_FALLBACK_VALUE_SLOTS       8
 static MqlRates g_atrFallbackRates[];
@@ -357,6 +390,35 @@ static int g_atrFallbackPeriods[ATR_FALLBACK_VALUE_SLOTS];
 static double g_atrFallbackValues[ATR_FALLBACK_VALUE_SLOTS];
 static bool g_atrFallbackValueValid[ATR_FALLBACK_VALUE_SLOTS];
 static int g_atrFallbackValueCount = 0;
+
+//----------------------------------------------------------------------------
+// P-PERF-94 (BUG-02, 2026-10-13) — IS THIS ATR THE TERMINAL'S OWN, OR OURS?
+//
+// The rates-based fallback is MT4-equal only when it can see the same history
+// MT4 sees. While a timeframe is still being built, CopyRates returns fewer
+// bars than both the wanted window and the tf's bar count, so the Wilder seed
+// sits on a TRUNCATED window and the number is provisional — it WILL move
+// once the terminal finishes synthesizing/downloading. THE ONE REMAINING
+// MOVER: P-ATR-SYNC removed the handle path entirely (no BarsCalculated case
+// left), and a COMPLETE read — all wanted bars, or all bars the tf has — is
+// now as final as MT4's answer on the same data, so the seed latches on the
+// first frame instead of waiting out an async indicator.
+//
+// The adaptive-scaling seed keys its "the first paint waits for the real ATR"
+// gate on g_scalingInitialized. A provisional value used to satisfy that gate,
+// so the first frame painted at one fractal shift, the real ATR landed a
+// moment later, the shift moved, and the user watched the levels appear, get
+// deleted and be rebuilt — «سطوح یکبار رسم میشه و بعد حذف میشه بعد فراکتال
+// جامپ اعمال میشه».
+//
+// This flag is the honest signal that the value can still change. It is set by
+// every iATRRatesFallback() call, cleared at the top of iATRMQL4Impl(), and
+// read by the two consumers that must not treat a provisional value as final:
+// the value memo below (never store it) and AdaptiveScaling (never seed from
+// it).
+static bool g_atrLastProvisional = false;
+
+bool CompatATRLastProvisional() { return g_atrLastProvisional; }
 
 //----------------------------------------------------------------------------
 // ATR fallback window - MT4-EQUALITY FIX (2026-10-03)
@@ -451,6 +513,10 @@ void ResetATRFallbackCache()
 
 double iATRMQL4Impl(string symbol, int timeframe, int atrPeriod, int shift)
 {
+    // P-ATR-SYNC: a miss starts "final, the engine answered". Only an
+    // incomplete CopyRates read inside iATRRatesFallback() may flip it back
+    // to provisional — never a handle state, there are no handles anymore.
+    g_atrLastProvisional = false;
     if(symbol == NULL || symbol == "") symbol = _Symbol;
     // `timeframe` arrives in EITHER unit: the shared ATR modules pass minutes
     // (the MQL4 model - ATRCalculations' own ladders are built on it) while
@@ -476,90 +542,37 @@ double iATRMQL4Impl(string symbol, int timeframe, int atrPeriod, int shift)
     // required bars > atrPeriod + shift, which for MN1 (period 264) meant
     // ~22 years of monthly history that most terminals never have loaded.
     // Now we only require enough bars to read at the requested shift; if the
-    // period exceeds available bars, iATR returns empty/0 and the caller
-    // falls back to a rates-based ATR computed from whatever history exists.
+    // period exceeds available bars, the rates engine answers from whatever
+    // history the terminal has — the short-history case MT4 itself computes
+    // through with the same finality.
     if(bars <= shift) return 0.0;
 
-    InitATRHandleCache();
-
-    int handle = INVALID_HANDLE;
-    int cacheIndex = -1;
-    for(int i = 0; i < g_atrHandleCacheCount; i++) {
-        if(g_atrHandleCache[i].symbol == symbol &&
-           g_atrHandleCache[i].timeframe == CompatTF(timeframe) &&
-           g_atrHandleCache[i].period == atrPeriod) {
-            handle = g_atrHandleCache[i].handle;
-            cacheIndex = i;
-            break;
-        }
-    }
-
-    // NOTE: a handle with BarsCalculated()<=0 must NOT be released. Releasing
-    // it restarts the terminal's async calculation from scratch on every call
-    // (the label retry polls each second), so slow-to-build timeframes (MN1,
-    // W1, D1 - synthesized from M1 on demand) never finish calculating. Keep
-    // the handle and serve instant rates-based values until it is ready.
-    if(handle == INVALID_HANDLE) {
-        handle = iATR(symbol, CompatTF(timeframe), atrPeriod);
-        if(handle == INVALID_HANDLE) {
-            LOG_E(LOG_CAT_ATR, "iATRMQL4: failed ATR handle " + symbol + "/" + EnumToString(CompatTF(timeframe)));
-            return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
-        }
-
-        static int s_atrEvictSlot = 0;
-        int slot = g_atrHandleCacheCount;
-        if(slot >= ATR_HANDLE_CACHE_SIZE) {
-            slot = s_atrEvictSlot;
-            if(g_atrHandleCache[slot].handle != INVALID_HANDLE)
-                IndicatorRelease(g_atrHandleCache[slot].handle);
-            s_atrEvictSlot = (s_atrEvictSlot + 1) % ATR_HANDLE_CACHE_SIZE;
-        } else {
-            g_atrHandleCacheCount++;
-        }
-
-        g_atrHandleCache[slot].handle = handle;
-        g_atrHandleCache[slot].symbol = symbol;
-        g_atrHandleCache[slot].timeframe = CompatTF(timeframe);
-        g_atrHandleCache[slot].period = atrPeriod;
-    }
-
-    // While the handle is still calculating, return an identical value
-    // computed directly from CopyRates (instant, MT4-like) instead of 0.
-    if(BarsCalculated(handle) <= 0) {
-        return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
-    }
-
-    static double s_atrBuffer[];
-    static bool s_bufferReady = false;
-    if(!s_bufferReady) {
-        ArrayResize(s_atrBuffer, 1);
-        ArraySetAsSeries(s_atrBuffer, true);
-        s_bufferReady = true;
-    }
-
-    ResetLastError();
-    if(CopyBuffer(handle, 0, shift, 1, s_atrBuffer) <= 0) {
-        #ifdef ENABLE_DEBUG_LOGS
-        Print("iATRMQL4: CopyBuffer failed for ", symbol, "/", EnumToString(CompatTF(timeframe)),
-              " period=", atrPeriod, " shift=", shift, " error=", GetLastError());
-        #endif
-        // Transient data rebuild - serve the rates-based value meanwhile.
-        return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
-    }
-    return s_atrBuffer[0];
+    // P-ATR-SYNC: one engine, synchronous, the MT4 model. The window
+    // (ATRFallbackWindow: 3000+ bars or every bar the tf has) is shared
+    // across the callers' multi-period batches and persisted on
+    // (symbol, tf, shift, latest bar), so a six-period batch copies ONCE and
+    // each period costs one Wilder pass. There is no second (handle-backed)
+    // implementation to flip to mid-bar anymore, so a finished value stays
+    // finished until the next bar.
+    return iATRRatesFallback(symbol, CompatTF(timeframe), atrPeriod, shift);
 }
 
 //+------------------------------------------------------------------+
-//| Manual Wilder's ATR fallback (MT4-like instant values)           |
+//| Manual Wilder's ATR — THE engine (MT4-like instant values).      |
 //|                                                                  |
-//| MT5 iATR handles calculate asynchronously: after creation,       |
-//| BarsCalculated() stays 0/-1 until the terminal has built the     |
-//| timeframe's history AND run the indicator over all of it. For    |
-//| timeframes synthesized from M1 on demand (MN1/W1/D1...) this can |
-//| take seconds. CopyRates returns the bars as soon as they exist,  |
-//| so computing Wilder's ATR directly from them yields the same     |
-//| value instantly - no handle warmup wait. Used only while the     |
-//| handle is not ready; once ready, the handle path takes over.     |
+//| P-ATR-SYNC: this used to be a stop-gap while a terminal ATR      |
+//| handle warmed up asynchronously (BarsCalculated 0/-1 for         |
+//| synthesized-from-M1 TFs: seconds of provisional values). It is   |
+//| now the ONLY implementation, which removes that wait state       |
+//| entirely: CopyRates returns the bars as they exist, and the      |
+//| Wilder recursion below answers in the same call frame.           |
+//|                                                                  |
+//| Provisional now tracks exactly what can still move: the copy     |
+//| came back with FEWER bars than both the wanted window and the    |
+//| tf's bar count (the terminal is still building that history).    |
+//| A complete read — all wanted bars, or all bars the tf has, the   |
+//| short-history case — is FINAL and seeds immediately, exactly as  |
+//| MT4's own iATR behaves on the same data.                         |
 //+------------------------------------------------------------------+
 double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrPeriod, const int shift)
 {
@@ -572,10 +585,16 @@ double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrP
     // Shift 0 includes the forming candle and therefore must remain live.
     // The weighted ATR path requests shift 1, which is stable until a new bar.
     if(shift != 1) {
-        int needBars = ATRFallbackWindow(atrPeriod, shift, iBars(symbol, tf));
+        int sourceBars = iBars(symbol, tf);
+        int needBars = ATRFallbackWindow(atrPeriod, shift, sourceBars);
         MqlRates rates[];
         ArraySetAsSeries(rates, true);
         int copied = CopyRates(symbol, tf, 0, needBars, rates);
+        if(copied <= 0) { g_atrLastProvisional = true; return 0.0; }
+        // P-ATR-SYNC: incomplete = the history grew between CopyRates and
+        // iBars (build in flight). copied == needBars or == sourceBars is
+        // everything there is for this bar — final.
+        g_atrLastProvisional = (copied < needBars && copied < sourceBars);
         return CalculateATRFallbackFromRates(rates, copied, atrPeriod, shift);
     }
 
@@ -599,6 +618,7 @@ double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrP
         int copied = CopyRates(symbol, tf, 0, requiredForCache, g_atrFallbackRates);
         if(copied <= 0) {
             ResetATRFallbackCache();
+            g_atrLastProvisional = true;
             return 0.0;
         }
 
@@ -610,6 +630,15 @@ double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrP
         g_atrFallbackCopied = copied;
         g_atrFallbackRatesValid = true;
         g_atrFallbackValueCount = 0;
+        // P-ATR-SYNC: the one provisional sentence — a copy shorter than the
+        // window AND shorter than the tf's own bar count can still grow.
+        g_atrLastProvisional = (copied < requiredForCache && copied < sourceBars);
+    } else {
+        // A warm cache replays the same sentence from the stored window. The
+        // cache is invalid whenever sourceBars changes, so a cache hit with
+        // a growing history cannot happen — the replay is exact.
+        g_atrLastProvisional = (g_atrFallbackCopied < requiredForCache &&
+                                g_atrFallbackCopied < sourceBars);
     }
 
     int slot = FindATRFallbackValueSlot(atrPeriod);
@@ -628,13 +657,11 @@ double iATRRatesFallback(string symbol, const ENUM_TIMEFRAMES tf, const int atrP
 
 void ReleaseATRHandleCache()
 {
-    for(int i = 0; i < g_atrHandleCacheCount; i++) {
-        if(g_atrHandleCache[i].handle != INVALID_HANDLE) {
-            IndicatorRelease(g_atrHandleCache[i].handle);
-            g_atrHandleCache[i].handle = INVALID_HANDLE;
-        }
-    }
-    g_atrHandleCacheCount = 0;
+    // P-ATR-SYNC: no handles exist anymore, so the teardown releases nothing
+    // and the terminal runs no indicator calculations to unwind on the way
+    // out — the TF-switch handle herd (create ~54 maps, wait async, release)
+    // cannot come back. The rates window is per-instance state anyway; this
+    // reset keeps a mid-session caller honest.
     g_atrSelectedSymbol = "";
     ResetATRFallbackCache();
 #ifdef COMPAT_LEDGER
@@ -690,9 +717,10 @@ int ATRMemoSlot(const string symbol, const ENUM_TIMEFRAMES tf, const int period,
 }
 
 // The measured front door. MT4's iATR is one terminal call that returns the
-// value; on MT5 it is a handle lookup + BarsCalculated + CopyBuffer, and it is
-// called from inside a 400-bar scan. The ledger is what makes that gap a number
-// instead of a feeling.
+// value; on MT5 the sync engine answers from its CopyRates window + Wilder
+// pass (or bit-identically from this memo), and it is called from inside a
+// 400-bar scan. The ledger is what makes that gap a number instead of a
+// feeling.
 double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
 {
    if(symbol == NULL || symbol == "") symbol = _Symbol;
@@ -719,6 +747,15 @@ double iATRMQL4(string symbol, int timeframe, int atrPeriod, int shift)
    g_cl.atrMemoMiss++;
 #endif
    const double _v = iATRMQL4Impl(symbol, timeframe, atrPeriod, shift);
+   // P-PERF-94: a provisional value must NOT enter the memo. The memo's whole
+   // contract is "bit-identical data to a miss, valid until the next bar" —
+   // a rates-based fallback value breaks the second half of that: it changes
+   // while the SAME bar is still forming (history loading, handle warming), so
+   // storing it would hand the caller a stale provisional number for the rest
+   // of the bar and defeat every downstream "wait for the real ATR" guard.
+   // The slot was only probed, never marked used, so skipping the write leaves
+   // it free for the next call.
+   if(CompatATRLastProvisional()) return _v;
    if(!g_atrMemoReady)
    {
       for(int i = 0; i < ATR_MEMO_SLOTS; i++) { g_atrMemo[i].used = false; g_atrMemo[i].value = 0.0; }
@@ -1446,35 +1483,122 @@ bool CompatTokenRead(CompatObjToken &tab[], const string nm, const uint now)
 
 // Called from the entry's OnChartEvent BEFORE any dispatch. True = this
 // event was queued by our own create/delete call: MT4 would never have
-// seen it, so the entry returns without dispatching.
-bool CompatConsumeObjEvent(const int id, const string nm)
+// seen it, so the entry returns without dispatching. (P-PERF-112: the body
+// lives after the prefix-record machinery below - it consults both tables.)
+
+// ObjectsDeleteAll removes a WHOLE set whose names the caller does not
+// enumerate. P-PERF-112 (2026-10-17) - THE WALK IS GONE; A SWEEP RECORDS
+// ITS PREFIX INSTEAD.
+//
+// P-PERF-99 measured the walk and skipped it in deinit context only; every
+// LIVE-operation sweep (PnlCloseAll on user actions, family wipes during
+// rendering, the init purges, ghost sweeps - the whole product) still paid
+// one ObjectName() per chart object, on every call: the "deletes and redraws
+// for nothing" the user lives with. The walk existed because the built-in
+// does not say WHICH names it removed - but no consumer ever needed names:
+// CompatConsumeObjEvent only asks "did OUR sweep queue this delete?", and
+// the prefix the sweep ran under answers that by itself. So a sweep drops a
+// (prefix, deadline) record; a delete event matching ANY live record is
+// swallowed. The walk and its per-name token writes are deleted.
+//
+// A sweep with no prefix (the no-prefix overload purges the whole scoped
+// set) records the WILDCARD "", which matches every name - exactly the set
+// that call deleted. Name-exact tokens above remain the first line for
+// every single delete; the bounded record band below covers the bulks.
+//
+// Bounded exactly like the name table: 64 records, 10 s TTL, refreshed when
+// the same prefix sweeps again. The recorded prefixes name PROGRAM-OWNED
+// namespaces (level/UI/HTF families), so swallowing a user delete inside
+// the TTL band would take a rename into one of those families first.
+#define COMPAT_OBJT_PREFIX_SLOTS 64
+
+struct CompatDelPrefixRec { string prefix; uint stamp; };
+static CompatDelPrefixRec g_objTokDelPrefixes[];
+static bool g_objTokPrefixInit = false;
+
+void CompatInitObjPrefixes()
 {
-   if(!g_objTokInit || nm == "") return false;
-   if(id == CHARTEVENT_OBJECT_CREATE)
-      return CompatTokenRead(g_objTokCreate, nm, GetTickCount());
-   if(id == CHARTEVENT_OBJECT_DELETE)
-      return CompatTokenRead(g_objTokDelete, nm, GetTickCount());
+   if(g_objTokPrefixInit) return;
+   ArrayResize(g_objTokDelPrefixes, COMPAT_OBJT_PREFIX_SLOTS);
+   for(int i = 0; i < COMPAT_OBJT_PREFIX_SLOTS; i++)
+   {
+      g_objTokDelPrefixes[i].prefix = "";
+      g_objTokDelPrefixes[i].stamp = 0;
+   }
+   g_objTokPrefixInit = true;
+}
+
+void CompatNoteDeleteAllPrefix(const string prefix)
+{
+   CompatInitObjPrefixes();
+   const uint now = GetTickCount();
+   int freeSlot = -1, oldest = 0;
+   uint oldestAge = 0;
+   for(int i = 0; i < COMPAT_OBJT_PREFIX_SLOTS; i++)
+   {
+      const uint stampAge = now - g_objTokDelPrefixes[i].stamp;   // stamp 0 -> giant age
+      const bool empty = (g_objTokDelPrefixes[i].stamp == 0) ||
+                         (stampAge > COMPAT_OBJT_TTL_MS);
+      if(empty) { if(freeSlot < 0) freeSlot = i; continue; }
+      if(g_objTokDelPrefixes[i].prefix == prefix)
+      { g_objTokDelPrefixes[i].stamp = now; return; }            // refresh
+      if(stampAge >= oldestAge) { oldestAge = stampAge; oldest = i; }
+   }
+   const int slot = (freeSlot >= 0) ? freeSlot : oldest;
+   g_objTokDelPrefixes[slot].prefix = prefix;
+   g_objTokDelPrefixes[slot].stamp = now;
+}
+
+bool CompatDeleteMatchesPrefix(const string nm, const uint now)
+{
+   if(!g_objTokPrefixInit) return false;
+   for(int i = 0; i < COMPAT_OBJT_PREFIX_SLOTS; i++)
+   {
+      const uint stamp = g_objTokDelPrefixes[i].stamp;
+      if(stamp == 0 || (now - stamp) > COMPAT_OBJT_TTL_MS) continue;
+      const string p = g_objTokDelPrefixes[i].prefix;
+      if(p == "") return true;                                   // wildcard purge
+      const int pl = StringLen(p);
+      if(StringLen(nm) >= pl && StringSubstr(nm, 0, pl) == p) return true;
+   }
    return false;
 }
 
-// ObjectsDeleteAll removes a WHOLE set whose names the caller does not
-// enumerate. Token them here - same O(objects) walk the built-in itself
-// performs - so every delete event the bulk queues carries a token.
+// Called from the entry's OnChartEvent BEFORE any dispatch. True = this
+// event was queued by our own create/delete call: MT4 would never have
+// seen it, so the entry returns without dispatching.
+bool CompatConsumeObjEvent(const int id, const string nm)
+{
+   if(nm == "") return false;
+   const uint now = GetTickCount();
+   if(id == CHARTEVENT_OBJECT_CREATE)
+      return g_objTokInit && CompatTokenRead(g_objTokCreate, nm, now);
+   if(id == CHARTEVENT_OBJECT_DELETE)
+   {
+      if(g_objTokInit && CompatTokenRead(g_objTokDelete, nm, now)) return true;
+      return CompatDeleteMatchesPrefix(nm, now);
+   }
+   return false;
+}
+
+// P-PERF-99 (2026-10-16): the deinit gate stays - tokens/records have no
+// consumer in a dying instance, so the teardown path writes none. Live
+// operations keep their records: there the events DO reach this instance
+// and MT4 semantics demand they stay invisible.
+bool g_compatDeinitActive = false;
+
+void CompatDeinitBegin() { g_compatDeinitActive = true; }
+
 void CompatTokenizeDeleteAll(const long chart_id, const string prefix,
                              const int sub_window, const int type)
 {
-   const int total = ObjectsTotalReal(chart_id, sub_window, type);
-   if(total <= 0) return;
-   CompatInitObjTokens();
-   const uint now = GetTickCount();
-   const int plen = StringLen(prefix);
-   for(int i = 0; i < total; i++)
-   {
-      const string nm = ObjectNameReal(chart_id, i, sub_window, type);
-      if(nm == "") continue;
-      if(plen > 0 && StringSubstr(nm, 0, plen) != prefix) continue;
-      CompatTokenWrite(g_objTokDelete, nm, now);
-   }
+   if(g_compatDeinitActive) return;   // P-PERF-99: no consumer, no record
+   // P-PERF-112: no walk, no per-name tokens - one prefix record answers the
+   // whole sweep. A sub-window/type-SCOPED sweep is recorded family-wide too;
+   // every scoped call site in the product sweeps its own program-owned names
+   // in window 0, so a user delete inside the TTL band cannot carry one of
+   // these prefixes without a rename into the family.
+   CompatNoteDeleteAllPrefix(prefix);
 }
 
 bool ObjectCreateReal6(const long chart_id, const string name, const ENUM_OBJECT type,

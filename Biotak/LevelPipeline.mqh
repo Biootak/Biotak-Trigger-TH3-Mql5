@@ -73,7 +73,6 @@ struct SLevelClassified {
     ENUM_LINE_STYLE levelStyle;
     int    levelWidth;
     color  zoneColor;       // Color for zone touching this level
-    string labelText;
 };
 
 //+------------------------------------------------------------------+
@@ -99,7 +98,6 @@ struct SZoneDefinition {
     //   FILLED   -> band, no edge      EMPTY -> edge, no band      OUTLINED -> both
     bool   filled;          // draw the band (filled rectangle)
     bool   outline;         // draw the edge (three border segments)
-    bool   inViewport;      // false = skip render, geometry is valid
 };
 
 //+------------------------------------------------------------------+
@@ -118,10 +116,6 @@ struct STriggerLine {
     int    lineWidth;
     string tooltip;
     color  clr;
-    string labelText;
-    bool   isTrigger;       // P-UI-131j: this line's LEVEL is a trigger subdivision,
-                            // so its pip label wears the TRIGGER LABEL surface
-    bool   inViewport;      // false = skip render
     bool   isMidpoint;
     bool   setBack;         // OBJPROP_BACK value (mode-specific)
     int    zOrder;          // OBJPROP_ZORDER value (mode-specific)
@@ -340,21 +334,11 @@ int CalculateLevels(
     return count;
 }
 
-//+------------------------------------------------------------------+
-//| HELPER: Get descriptive label text for a level                   |
-//+------------------------------------------------------------------+
-string GetLabelTextForLevel(const SLevelClassified &level, const int baseMultiplier) {
-    if(level.isMidpoint) return "Midpoint";
-    
-    string direction = (level.direction > 0) ? "+" : "-";
-    
-    if(level.structureLevel > 0) {
-        return StringFormat("L%d %s%d", level.structureLevel, direction, level.logicalStep);
-    }
-    
-    // For trigger subdivisions, show distance in base multiplier units if possible
-    return StringFormat("%s%d", direction, level.logicalStep);
-}
+// P-LBL-11 (2026-10-17): GetLabelTextForLevel stood here. It derived the
+// per-level text ("L1 +3" / "+3", "Midpoint") for the pip-distance labels
+// only, and the labels themselves are retired — nothing reads the text now,
+// so the whole derivation is gone rather than left computing into a dead
+// field on every build.
 
 //+------------------------------------------------------------------+
 //| P-UI-131m: A BAND'S INK IS ONE PAIR, FADED EXACTLY ONCE.         |
@@ -418,7 +402,6 @@ int ClassifyLevels(
         classified[i].levelStyle = config.fallbackStyle;
         classified[i].levelWidth = config.fallbackWidth;
         classified[i].zoneColor = clrNONE;
-        classified[i].labelText = "";
         
         int step = rawLevels[i].logicalStep;
         
@@ -434,7 +417,6 @@ int ClassifyLevels(
                 classified[i].levelStyle = config.midpointStyle;
                 classified[i].levelWidth = config.midpointWidth;
             }
-            classified[i].labelText = GetLabelTextForLevel(classified[i], baseMultiplier);
             continue;
         }
         
@@ -462,9 +444,6 @@ int ClassifyLevels(
         // Zone color from level (zones keep their family identity). RAW - the
         // fade belongs to the row that owns it, and CreateZone does it once.
         classified[i].zoneColor = PipelineBandBaseColor(step, triggerEnabled, baseMultiplier);
-        
-        // Populate label text
-        classified[i].labelText = GetLabelTextForLevel(classified[i], baseMultiplier);
     }
     
     return rawCount;
@@ -573,8 +552,6 @@ void BuildZonesAndLines(
     const SLevelClassified &classified[],
     const int classifiedCount,
     const SModeConfig &config,
-    const double vpTop,
-    const double vpBottom,
     const double fixedZoneStepSize,
     SZoneDefinition &zones[],
     int &zoneCount,
@@ -645,8 +622,9 @@ void BuildZonesAndLines(
             neighborDist = midLevel.price - s_belowLevels[0].price;
         }
         // Edge case fix: no neighbors - use 100 points as fallback height
-        if(neighborDist <= 0) {
-            neighborDist = GetCachedPoint() * 100;
+        if(neighborDist <= 0) {   // P-BE-02: the point size is 0 until the contract data loads
+            double p = GetCachedPoint();
+            neighborDist = p > 0 ? p * 100 : midLevel.price * 0.001;   // ...so the product was 0 -> an invisible zone
         }
         double zoneStepSize = (fixedZoneStepSize > 0) ? fixedZoneStepSize : neighborDist;
         // P-UI-58/59: `neighborDist` IS the nearer of the two neighbour intervals,
@@ -669,8 +647,6 @@ void BuildZonesAndLines(
         zones[zIdx].style = config.zoneStyle;
         zones[zIdx].filled  = (config.zoneStyle != ZONE_STYLE_BOX_EMPTY);     // P-UI-62
         zones[zIdx].outline = (config.zoneStyle != ZONE_STYLE_BOX_FILLED);    // P-UI-62
-        zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                       zones[zIdx].renderBottom <= vpTop);
         zIdx++;
     }
     
@@ -698,14 +674,11 @@ void BuildZonesAndLines(
         lines[lIdx].lineStyle = s_aboveLevels[i].levelStyle;
         lines[lIdx].lineWidth = s_aboveLevels[i].levelWidth;
         lines[lIdx].clr = s_aboveLevels[i].levelColor;
-        lines[lIdx].labelText = s_aboveLevels[i].labelText;
-        lines[lIdx].isTrigger = s_aboveLevels[i].isTrigger;   // P-UI-131j
         lines[lIdx].tooltip = "Midpoint +" + IntegerToString(s_aboveLevels[i].logicalStep) + 
             " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
         lines[lIdx].setBack = config.useObjPropBack;
         lines[lIdx].zOrder = config.zOrder;
-        lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
         lIdx++;
         
         // Zone centered on this level
@@ -731,8 +704,6 @@ void BuildZonesAndLines(
             zones[zIdx].style = config.zoneStyle;
             zones[zIdx].filled  = (config.zoneStyle != ZONE_STYLE_BOX_EMPTY);     // P-UI-62
             zones[zIdx].outline = (config.zoneStyle != ZONE_STYLE_BOX_FILLED);    // P-UI-62
-            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                                      zones[zIdx].renderBottom <= vpTop);
             zIdx++;
         }
         
@@ -761,14 +732,11 @@ void BuildZonesAndLines(
         lines[lIdx].lineStyle = s_belowLevels[i].levelStyle;
         lines[lIdx].lineWidth = s_belowLevels[i].levelWidth;
         lines[lIdx].clr = s_belowLevels[i].levelColor;
-        lines[lIdx].labelText = s_belowLevels[i].labelText;
-        lines[lIdx].isTrigger = s_belowLevels[i].isTrigger;   // P-UI-131j
         lines[lIdx].tooltip = "Midpoint -" + IntegerToString(s_belowLevels[i].logicalStep) + 
             " (" + DoubleToString(lineMidPrice, GetCachedDigits()) + ")";
         lines[lIdx].isMidpoint = false;
         lines[lIdx].setBack = config.useObjPropBack;
         lines[lIdx].zOrder = config.zOrder;
-        lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
         lIdx++;
         
         // Zone centered on this level
@@ -794,8 +762,6 @@ void BuildZonesAndLines(
             zones[zIdx].style = config.zoneStyle;
             zones[zIdx].filled  = (config.zoneStyle != ZONE_STYLE_BOX_EMPTY);     // P-UI-62
             zones[zIdx].outline = (config.zoneStyle != ZONE_STYLE_BOX_FILLED);    // P-UI-62
-            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
-                                      zones[zIdx].renderBottom <= vpTop);
             zIdx++;
         }
         
@@ -876,9 +842,7 @@ int SetPipelineZoneVisibility(const string zoneName, const bool visible)
 void RenderZones(
     const SZoneDefinition &zones[],
     const int zoneCount,
-    const SModeConfig &config,
-    const double vpTop,
-    const double vpBottom)
+    const SModeConfig &config)
 {
     // P-PERF-41: THE FAMILY SWITCH IS A MASK, NOT A DESTRUCTION.
     //
@@ -894,9 +858,60 @@ void RenderZones(
     // zone object the cache knows, with zero index assumptions and zero
     // ObjectFind probes. The owner lives in VisibilityManager because the F show
     // path writes the same masks and the two must agree (P-PERF-41 there).
-    if(!config.zonesEnabled) { HideAllZoneFamilyObjects(); return; }
+    if(!config.zonesEnabled)
+    {
+#ifdef BIOTAK_RENDER_ENGINE
+        // MT5-ONLY (R-RENDER-ENGINE): the canvas family hides as ONE layer
+        // mask - the object path's per-object walk has nothing to walk here.
+        if(RBridgeActive()) { RBridgeZoneFamilyMask(false); return; }
+#endif
+        HideAllZoneFamilyObjects(); return;
+    }
 
     bool triggerEnabled = IsTriggerLevelsEnabled();
+
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): the zone family stages onto the canvas's
+    // BACK layer. The object path's own decisions are mirrored one for one:
+    //   * the thin-zone pixel guard SKIPS the zone (the object path masks the
+    //     whole family) - re-decided by the next render that sees the scale;
+    //   * the trigger overlay is the rec's `visible` (never a stale masked
+    //     object - the rec always carries the build's live geometry);
+    //   * the `_B_Left` vertical edge is not drawn (documented divergence:
+    //     it stands at the oldest bar, off-screen until the user scrolls to
+    //     the start of history).
+    // The ink (fill + edge tones) is computed by the bridge through the same
+    // helpers CreateZone multiplies, so the two paths cannot bake two pictures.
+    if(RBridgeActive())
+    {
+        RBridgeZoneFamilyMask(true);
+        RBridgeZonesBegin();
+
+        double rbPxPerPrice = 0.0;
+        {
+            int    rbH    = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+            double rbPmax = ChartGetDouble(0, CHART_PRICE_MAX);
+            double rbPmin = ChartGetDouble(0, CHART_PRICE_MIN);
+            if(rbH > 0 && rbPmax > 0 && rbPmin > 0 && rbPmax > rbPmin)
+                rbPxPerPrice = (double)rbH / (rbPmax - rbPmin);
+        }
+
+        for(int i = 0; i < zoneCount; i++)
+        {
+            if(rbPxPerPrice > 0.0 &&
+               (zones[i].renderTop - zones[i].renderBottom) * rbPxPerPrice < P_P4_MIN_ZONE_PX)
+                continue;
+            if(zones[i].renderTop <= zones[i].renderBottom) continue;
+            if(zones[i].renderTop <= 0 || zones[i].renderBottom <= 0) continue;
+            bool triggerHidden = (zones[i].isTrigger && !triggerEnabled);
+            RBridgeZone(zones[i].name, zones[i].renderTop, zones[i].renderBottom,
+                        zones[i].zoneColor, zones[i].isTrigger, !triggerHidden,
+                        zones[i].filled, zones[i].outline);
+        }
+        RBridgeZonesCommit();
+        return;
+    }
+#endif
 
     // P-PERF-04 PIXEL AWARENESS: a zone is a full-chart-width FILL, the most
     // expensive thing this indicator paints and the reason a zoomed-out chart
@@ -919,9 +934,9 @@ void RenderZones(
         // VISIBILITY. It used to write `SetPipelineZoneVisibility(name,false)` here,
         // i.e. the window HID the band — and a hidden object is only shown again by
         // the frame that re-decides it. Measured: the cull window is allowed to lag
-        // the chart by P_P4_VP_HYSTERESIS_PCT 0.20 of the visible range
-        // (ExtDraw_A.mqh 105-125) and the window is a term of the geometry signature
-        // (EventHandlers_Calc.mqh 1329), so a band the price walked up to stayed
+        // the chart by P_P4_VP_HYSTERESIS_PCT 0.20 of the visible range (the macro,
+        // the function and the window-as-key-term were all retired by P-VIEW-05,
+        // 2026-10-16), so a band the price walked up to stayed
         // HIDDEN until some other input forced a rebuild — the report «سطوح حذف
         // میشه ولی دیگه نمیاد تا یک تکونی به چارت بدم». Now the band is asserted with
         // the SAME mask the in-window path asserts (F/L alone own it, read-guarded by
@@ -1095,6 +1110,11 @@ int StructureZoneStepFromName(const string nm)
 // Returns the number of colour writes issued.
 int StructureRecolourWalk()
 {
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): object-free recolour - the bridge reads the
+    // same switches and re-bakes the recs' ink through the same helpers.
+    if(RBridgeActive()) return RBridgeZoneRecolour();
+#endif
     // Same inputs ClassifyLevels (lines 395-400) reads: the walk repaints
     // exactly what a recompute would have stored.
     bool trigOn = IsTriggerLevelsEnabled();
@@ -1151,8 +1171,9 @@ int StructureRecolourWalk()
 //| own drag moves them), they sit at a z-order above the zone fills  |
 //| (a zone rectangle under the cursor would otherwise eat the grab — |
 //| the reported «الان step اول قابل درگ کردن نیستش»), and ONE small  |
-//| red dot at the chart's right edge (time 0 — the pip labels' own   |
-//| anchoring, so it follows the market with no per-bar write) marks  |
+//| red dot at the chart's right edge (time 0 — the anchoring the pip  |
+//| labels used before their retirement, so it follows the market with |
+//| no per-bar write) marks                                             |
 //| them. The user's marker order: «خط کاستوم پرایس ... نشانه سبز و   |
 //| step اول ... نشانه قرمز ... یک نشانه باشه که خیلی مزاحم هم نباشه» |
 //| and «وقتی لاین ها رو خاموش میکنم نشان ها هم نباشه» — the dot      |
@@ -1291,42 +1312,19 @@ void Step1HandlePick(const STriggerLine &lines[], const int lineCount,
     }
 }
 
-//+------------------------------------------------------------------+
-//| P-UI-131j - THE TRIGGER LABEL'S OWN COLOUR + OPACITY.            |
-//|                                                                  |
-//| The trigger card has carried a LABEL COLOR row since the first   |
-//| card layout and nothing ever read it: the pip label took the     |
-//| unified line colour. The row is now live, with an opacity beside |
-//| it (the LABEL OPACITY row), and BOTH ends of both are AUTO -     |
-//| which is the shipped picture, so an untouched chart cannot move. |
-//|                                                                  |
-//| Lives here, not in RuntimeSettings (which owns the two mirrors), |
-//| because the generic blender `GetZoneRenderColor` is defined in   |
-//| ZoneFactory, a LATER file than RuntimeSettings - same include      |
-//| order that made the two effective-colour getters there duplicate |
-//| the blend inline. Cost: the AUTO/AUTO call is one cached         |
-//| getter, and a pinned one blends once per render pass.            |
-//+------------------------------------------------------------------+
-color GetTriggerLabelRenderColor()
-{
-    if(g_triggerLabelColor == clrNONE && g_triggerLabelTransparency < 0)
-        return GetLineRenderColor();   // AUTO/AUTO = P-UI-66's shipped look
-    color base = (g_triggerLabelColor == clrNONE) ? g_lineColor : g_triggerLabelColor;
-    int   tr   = (g_triggerLabelTransparency >= 0) ? g_triggerLabelTransparency
-                                                   : g_lineTransparency;
-    return GetZoneRenderColor(base, tr);
-}
+// P-LBL-11 (2026-10-17): P-UI-131j's `GetTriggerLabelRenderColor` stood here
+// - the AUTO-aware blend feeding the trigger lines' pip labels. The labels
+// are retired, so the getter had no reader; `g_triggerLabelColor` and
+// `g_triggerLabelTransparency` stay persisted and inert, exactly like the
+// MIDPOINT setting before them (P-UI-47), and their card rows are off the
+// display (see BiotakPanels PnlSpec).
 
 void RenderTriggerLines(
     const STriggerLine &lines[],
     const int lineCount,
     const SModeConfig &config,
-    const bool makeLines,
-    const bool makeLabels,
-    const double vpTop,
-    const double vpBottom)
-{    double currentPrice = GetCurrentPriceForLabels();
-
+    const bool makeLines)
+{
     // P-UI-98f: the step-1 handle is picked by GEOMETRY once per render (the
     // line one step from the custom price on each side - see Step1HandlePick),
     // so the face owner below is reached by the same pair the click and drag
@@ -1349,11 +1347,22 @@ void RenderTriggerLines(
     // (`CreateOrUpdateHLine` compares colour/style/width before it writes), so a
     // steady frame still costs zero terminal calls for an unchanged look.
     color           lineClr   = GetLineRenderColor();
-    // P-UI-131j: read once per pass - the trigger label's own surface. In the shipped
-    // AUTO state this is the line colour again (one cached getter, three compares).
-    color           lblClr    = GetTriggerLabelRenderColor();
     ENUM_LINE_STYLE lineStyle = inpLineStyle;
     int             lineWidth = inpLineWidth;
+
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): the canvas staging prelude. When the engine
+    // owns the ladder, this pass is diff-committed to the scene instead of the
+    // terminal; pins (the step-1 handle pair + a live drag) stay object-owned.
+    // See Engine\RenderBridge.mqh. P-LBL-11 (2026-10-17): the second flag is a
+    // fixed false — the product stages no label texts since the pip-distance
+    // labels retired, so the bridge's text family stays empty by construction.
+    if(RBridgeActive())
+    {
+        RBridgePinsBegin(s1AboveName, s1BelowName, g_s1DragLive ? g_s1DragName : "");
+        RBridgeBegin(makeLines, false);
+    }
+#endif
 
     // P-PERF-03: record the level prices in the pass that already has them in
     // hand. CheckAlerts() then scans this array instead of walking the chart
@@ -1364,8 +1373,6 @@ void RenderTriggerLines(
 
     for(int i = 0; i < lineCount; i++)
     {
-        string labelName = lines[i].name + "_Label";
-
         AlertCacheAdd(lines[i].name, lines[i].price, lines[i].logicalStep,
                       lines[i].direction > 0);
 
@@ -1389,10 +1396,10 @@ void RenderTriggerLines(
         // VISIBILITY. This branch used to write OBJ_NO_PERIODS on the line AND its
         // label, i.e. the window HID them, and only the frame that re-evaluated
         // `inViewport` could bring them back. Measured on this machine: the cull
-        // window is deliberately allowed to lag P_P4_VP_HYSTERESIS_PCT = 0.20 of the
-        // visible range (ExtDraw_A.mqh 105-125) while the geometry signature that
-        // decides whether a render runs AT ALL carries that same window
-        // (EventHandlers_Calc.mqh 1329-1330). So a level the price walked to could sit
+        // window was deliberately allowed to lag P_P4_VP_HYSTERESIS_PCT = 0.20 of the
+        // visible range while the geometry signature that decided whether a render
+        // runs AT ALL carried that same window (both retired by P-VIEW-05,
+        // 2026-10-16). So a level the price walked to could sit
         // hidden through any number of frames — exactly the report «سطوح حذف میشه
         // ولی دیگه نمیاد تا یک تکونی به چارت بدم» — and every window re-derivation
         // flipped the mask on hundreds of objects in ONE frame, which is the flicker
@@ -1406,7 +1413,6 @@ void RenderTriggerLines(
         // MT4 draws it from its own state at its own paint time: nothing to wait for,
         // nothing to flip, no cost on this side (that is the "قبل از کاربر" order).
         long lineTf  = (IsIndicatorHidden() || !g_linesVisible) ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
-        long labelTf = IsIndicatorHidden() ? OBJ_NO_PERIODS : OBJ_ALL_PERIODS;
         // P-VIEW-03 (2026-09-29) — THE WINDOW IS NOT AN OWNER OF THE OBJECT, AND A
         // FRAME THAT SKIPS A PAINT IS A LEVEL THAT CAN STAY MISSING.
         //
@@ -1443,6 +1449,19 @@ void RenderTriggerLines(
 
         // Use the individual line color instead of config.triggerColor
         if(makeLines) {
+            // MT5-ONLY (R-RENDER-ENGINE): a canvas-owned line stages instead of
+            // creating/updating its object. A pinned line (step-1 handle pair,
+            // live drag) keeps the untouched object path below.
+            bool rbCanvasStage = false;
+#ifdef BIOTAK_RENDER_ENGINE
+            if(RBridgeActive() && !RBridgePinned(lines[i].name))
+            {
+                rbCanvasStage = true;
+                RBridgeLevelLine(lines[i].name, lines[i].price, lineClr,
+                                 (int)lineStyle, lineWidth);
+            }
+#endif
+            if(!rbCanvasStage) {
             bool isNew = CreateOrUpdateHLine(lines[i].name, lines[i].price,
                                               lineClr, lineStyle, lineWidth,
                                               lines[i].tooltip);
@@ -1464,42 +1483,34 @@ void RenderTriggerLines(
             if(lines[i].name == s1AboveName || lines[i].name == s1BelowName)
                 Step1HandleOwnFace(lines[i].name, lines[i].price, lines[i].direction,
                                    lineTf, lines[i].tooltip);
+            }
         }
 
-        // Render Pip Distance Label
-        if(makeLabels && inpShowPipDistanceLabels) {
-            // P-UI-52: the pip has ONE owner - `GetCachedPipSize()`, which reads the
-            // symbol's own digits (metals 2-digit -> 10 points, JPY 3-digit -> 10,
-            // FX 4/5-digit -> 10, and everything else -> 1 POINT). `point * 10` was a
-            // hard-coded assumption that quietly disagrees with that owner on a
-            // 2-digit index or crypto symbol, where one pip is one point: the label
-            // then read 10x smaller than every other pip figure the indicator shows
-            // for the same symbol (ATR scaling, combo, the Base/Knot box). One cached
-            // getter replaces the constant, so the cost is unchanged - the guard keeps
-            // the old value as the fallback, never a division by a zero pip.
-            double pipNow = GetCachedPipSize();
-            double pips = (pipNow > 0) ? MathAbs(lines[i].price - currentPrice) / pipNow
-                                       : MathAbs(lines[i].price - currentPrice) / GetCachedPoint() / 10.0;
-            // P-UI-66: the pip label wears the same live look as its line -
-            // `lines[i].clr` is the BUILD's copy, so a colour edit would have
-            // gone stale on the label in exactly the frames the line was fixed
-            // up in (`CreatePipDistanceLabel` is change-guarded too).
-            // P-UI-131j: ... unless the level is the TRIGGER's, whose label is a
-            // surface of its own (`lblClr` == `lineClr` while both its ends are AUTO).
-            CreatePipDistanceLabel(labelName, lines[i].price, pips,
-                                   lines[i].isTrigger ? lblClr : lineClr,
-                                   lines[i].labelText, PipDistanceLabelLift());
-            SetPipelineObjectTimeframesIfExists(labelName, labelTf);   // P-VIEW-01: hoisted, one owner
-        }
+        // P-LBL-11 (2026-10-17): THE PIP-DISTANCE LABEL BLOCK STOOD HERE.
+        //
+        // The user's screenshot pointed at the "+7 | 4161.4" texts and the
+        // order was to remove them («این پیپ لیبل ها رو کامل حذف کن») - they
+        // were an extra surface per level, and the feature cost one object
+        // (or one canvas text) per rung plus its own lift/tofu machinery.
+        // Both feeders are gone: the object path (CreatePipDistanceLabel,
+        // deleted from ObjectFunctions) and the canvas path
+        // (RBridgeLevelLabel stays in the engine, dormant - nothing feeds
+        // it). The build no longer derives per-level label text either (see
+        // GetLabelTextForLevel's seat). And the names are out of the ladder
+        // sweep's produced set, so the ONE handoff sweep (P-PERF-107) deletes
+        // every legacy `<line>_Label` object a previous build left on the
+        // chart - the upgrade cleans itself, once.
     }
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): close the pass - sweep the staged families,
+    // diff-commit the changed ones, paint if anything moved.
+    if(RBridgeActive()) RBridgeEnd();
+#endif
 }
 
-//+------------------------------------------------------------------+
-//| HELPER: Get current price for distance labels                    |
-//+------------------------------------------------------------------+
-double GetCurrentPriceForLabels() {
-    return (g_currentPrice > 0) ? g_currentPrice : Bid;
-}
+// P-LBL-11 (2026-10-17): GetCurrentPriceForLabels stood here — it priced the
+// pip-distance labels' distance to the live price. With the labels retired
+// it had no reader.
 
 //+------------------------------------------------------------------+
 //| STAGE 5c: Cleanup surplus objects from previous render           |
@@ -1508,6 +1519,27 @@ void CleanupSurplusPipeline(
     const SModeConfig &config,
     const int maxLogicalStep)
 {
+    // ══════════════════════════════════════════════════════════════════════
+    // P-PERF-108 (2026-10-16) — NO SURPLUS DELETE AGAINST A TRANSIENT BUILD.
+    //
+    // `maxLogicalStep` arrives from the build that just ran, and on the first
+    // frame after a timeframe switch that build can be SYNTHETIC: history has
+    // not landed yet, so RedrawAllObjects stands in a ±1% band around the base
+    // price (EventHandlers, the `!g_initialized` fallback) and the ladder that
+    // comes out is a fraction of the real one. This walk then deleted every
+    // adopted object above that fraction — names the REAL build produces and
+    // the very next frame re-creates — which is the delete-and-reappear blink
+    // the user reported («حذف و ظاهر میشه مثل چشم زدن»), on EVERY switch.
+    //
+    // `!g_initialized` is the exact name of "history is not trustworthy yet":
+    // it is false from attach/switch until UpdateHistoricalValues succeeds,
+    // and RedrawAllObjects retries it every heavy frame (the pump owes one
+    // every 250 ms on a tick-less chart), so the moment it flips, the next
+    // frame's cleanup runs against the real ladder. Nothing accumulates: the
+    // real build's own frame deletes the true surplus in one pass.
+    // ══════════════════════════════════════════════════════════════════════
+    if(!g_initialized) return;
+
     // During a hand-set drag (custom-price or step-1), do lightweight throttled
     // cleanup instead of skipping entirely. P-UI-98i: the step-1 drag re-steps
     // the ladder live like the line's drag, so it owns the same throttle - a
@@ -1656,7 +1688,7 @@ void LevelSplitCounts(const int Nin, int &above, int &below)
     if(above < 1) above = 1;
     if(below < 1) below = 1;
     static int s_wA = -1, s_wB = -1;
-    if(above != s_wA || below != s_wB) { s_wA = above; s_wB = below; Print("[LVL] split N=", N, " above=", above, " below=", below); }
+    if(above != s_wA || below != s_wB) { s_wA = above; s_wB = below; _LOG_GATE_D Print("[LVL] split N=", N, " above=", above, " below=", below); }
 }
 
 //+------------------------------------------------------------------+
@@ -1683,8 +1715,6 @@ string PipelineGeometryKey(const SModeConfig &config,
                            const bool lsFirst,
                            const int maxLevelsAbove,
                            const int maxLevelsBelow,
-                           const double vpTop,
-                           const double vpBottom,
                            const int baseMultiplier)
 {
     string key = config.modeName + "|" + config.objectPrefix;
@@ -1693,7 +1723,15 @@ string PipelineGeometryKey(const SModeConfig &config,
     for(int s = 0; s < stepSizeCount; s++) key += "," + DoubleToString(stepSizes[s], 8);
     key += "|" + IntegerToString((int)classifyMode) + IntegerToString(lsFirst ? 1 : 0);
     key += "|" + IntegerToString(maxLevelsAbove) + "," + IntegerToString(maxLevelsBelow);
-    key += "|" + DoubleToString(vpTop, 8) + "," + DoubleToString(vpBottom, 8);
+    // P-VIEW-05 (2026-10-16): `vpTop|vpBottom` stood here and they were the
+    // last live term of the cull window inside the engine. The window never
+    // decided what is built or painted (the P-VIEW-01 law: the render takes
+    // the window and never lets it write a mask; the build's `inViewport`
+    // flags are written and read by no one), so a pan past the hysteresis
+    // could only change this key and throw away a valid geometry — a full
+    // re-derive and re-assert for pixels that had not changed. The key is
+    // the REAL geometry now: centre, steps, classification, counts, colours,
+    // bounds. A pan changes none of them.
     // P-PERF-21: `triggerEnabled` used to sit here, and it was a FALSE
     // dependency. The trigger overlay owns exactly ONE family - the trigger
     // zones - and that decision lives in RenderZones (`zones[i].isTrigger &&
@@ -1866,20 +1904,22 @@ int SweepForeignLevelObjects(const SModeConfig &config,
        // handle stays missing until an unrelated rebuild. The above handle
        // never blinks because it is deleted AND re-created in the same
        // frame; only the dragged one (here: the below handle) vanishes.
-       bool s1SkipSweep = (g_s1DragLive && g_s1DragName != "" &&
-                           lines[i].name == g_s1DragName);
-       // The line and its pip-distance label share one price and one owner.
-       for(int pass = 0; pass < 2; pass++)
-       {
-          if(s1SkipSweep) continue;
-          string nm = (pass == 0) ? lines[i].name : (lines[i].name + "_Label");
-         SObjectCacheEntry e;
-         if(!CacheGetObject(nm, e)) continue;   // cold cache: nothing to compare
-         if(!e.exists) continue;                // dead slot: no object under this name
-         if(MathAbs(e.lastPrice - lines[i].price) <= tol) continue;   // ours
-         if(DeleteIndicatorObjectManaged(nm, true)) removed++;
-      }
-   }
+        bool s1SkipSweep = (g_s1DragLive && g_s1DragName != "" &&
+                            lines[i].name == g_s1DragName);
+        // P-LBL-11 (2026-10-17): this pass used to probe the line's
+        // pip-distance label too (pass 0/1 over `<name>` and `<name>_Label`).
+        // The labels are retired and nothing produces the name, so the second
+        // probe could only ever miss; the sweep is line-only now.
+        {
+           if(s1SkipSweep) continue;
+           string nm = lines[i].name;
+          SObjectCacheEntry e;
+          if(!CacheGetObject(nm, e)) continue;   // cold cache: nothing to compare
+          if(!e.exists) continue;                // dead slot: no object under this name
+          if(MathAbs(e.lastPrice - lines[i].price) <= tol) continue;   // ours
+          if(DeleteIndicatorObjectManaged(nm, true)) removed++;
+       }
+    }
 
    for(int i = 0; i < zoneCount; i++)
    {
@@ -1954,6 +1994,77 @@ bool ProducedLadderName(const string nm, const string &produced[], const int pro
     return false;
 }
 
+//+------------------------------------------------------------------+
+//| P-PERF-55 (2026-10-13) — THE SWEEP'S MEMBERSHIP TEST IS A SET.    |
+//|                                                                   |
+//| The note above calls `produced[]` "small (tens of entries)". That |
+//| is the assumption, and the LIVE CHART contradicts it: `produced`  |
+//| is sized `lineCount * 2 + zoneCount` (the caller below), and the  |
+//| same session measured lineCount=450 / zoneCount=289 — i.e. ~1,189 |
+//| names — while the walk visits every chart object (~1,200). So the |
+//| frame paid ~1.4M string compares, all of it inside ONE sweep:     |
+//|                                                                   |
+//|   [P-LEVEL-FOREIGN-02: deleted 450 ladder object(s)]              |
+//|   [W][PERF] coop job=heavy-frame ran=125ms                        |
+//|   [E][GEN] [CRIT] CRITICAL CPU: OnCalculate took 453ms!           |
+//|            [base=0 atr=0 hist=0 levels=453 ...]                   |
+//|                                                                   |
+//| The fix is the SHAPE of the question, not its answer: build the   |
+//| set once (O(pc)) and answer each name with one FNV-1a probe. The  |
+//| predicate is unchanged — a name is doomed iff it is NOT one this  |
+//| build produced — so the output is byte-identical and the caller   |
+//| set is untouched (`ProducedLadderName` above stays, as the exact  |
+//| fallback for a table that cannot hold the list).                  |
+//|                                                                   |
+//| COST, stated: was one linear scan per family name, up to          |
+//| pc × familyObjects ≈ 1.4M compares on the measured chart; now     |
+//| pc inserts + one probe per family name (≈ 1,189 + 1,200 probes)   |
+//| plus one 4096-slot clear. A list too big for the table (pc × 2 >  |
+//| LADDER_SET_SIZE) falls back to the old scan rather than growing.  |
+//+------------------------------------------------------------------+
+#define LADDER_SET_SIZE 4096
+static string s_ladderSetNm[LADDER_SET_SIZE];
+static bool   s_ladderSetOn[LADDER_SET_SIZE];
+
+uint LadderSetHash(const string s)
+{
+    uint h = 2166136261;                     // FNV-1a, 32-bit, uint only (no ULL: the build rejects it)
+    const int n = StringLen(s);
+    for(int i = 0; i < n; i++)
+        h = (h ^ (uint)StringGetCharacter(s, i)) * 16777619;
+    return h;
+}
+
+// Returns false when the list does not fit the table — the caller then keeps the
+// exact linear scan, so a very deep ladder is slower, never wrong.
+bool LadderSetBuild(const string &produced[], const int pc)
+{
+    for(int i = 0; i < LADDER_SET_SIZE; i++) { s_ladderSetOn[i] = false; s_ladderSetNm[i] = ""; }
+    if(pc <= 0 || pc * 2 > LADDER_SET_SIZE) return false;
+    for(int i = 0; i < pc; i++)
+    {
+        const uint h = LadderSetHash(produced[i]);
+        for(int probe = 0; probe < LADDER_SET_SIZE; probe++)
+        {
+            const int at = (int)((h + (uint)probe) % (uint)LADDER_SET_SIZE);
+            if(!s_ladderSetOn[at]) { s_ladderSetOn[at] = true; s_ladderSetNm[at] = produced[i]; break; }
+        }
+    }
+    return true;
+}
+
+bool LadderSetHas(const string nm)
+{
+    const uint h = LadderSetHash(nm);
+    for(int probe = 0; probe < LADDER_SET_SIZE; probe++)
+    {
+        const int at = (int)((h + (uint)probe) % (uint)LADDER_SET_SIZE);
+        if(!s_ladderSetOn[at]) return false;   // an empty slot ends the probe chain
+        if(s_ladderSetNm[at] == nm) return true;
+    }
+    return false;
+}
+
 // Only a name that looks like OUR family is judged. `_BK_` is the user's
 // Base/Knot layer (P-BK-01: it has no expiry whichever build made it).
 bool LadderFamilyName(const string nm, const string fam)
@@ -2004,6 +2115,11 @@ bool LadderNameIsZoneBand(const string nm)
 //+------------------------------------------------------------------+
 int TriggerFamilyWalk(const bool on, int &seen)
 {
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): the canvas overlay is per-zone visibility
+    // inside one layer - a rec flip, counted with the same `seen` contract.
+    if(RBridgeActive()) return RBridgeTriggerWalk(on, seen);
+#endif
     seen = 0;
     int written = 0;
     int visited = 0;
@@ -2057,75 +2173,156 @@ int TriggerFamilyWalk(const bool on, int &seen)
 //|     existing object) - which is what makes the handoff cheaper      |
 //|     than the wipe it replaced.                                     |
 //|                                                                  |
-//| NOTHING is deleted when the window is not usable (`vpTop >         |
-//| vpBottom > 0`) or the build produced nothing: an unusable window   |
-//| means the produced set is not trustworthy, and the next real pass  |
-//| re-derives it and re-creates whatever is missing. A delete-every-  |
-//| thing-then-rebuild flash on an attach is exactly the class of bug  |
-//| this project refuses to trade a flicker for.                        |
+//| NOTHING is deleted when the build is not trustworthy — either it |
+//| produced nothing, or history has not landed yet (`!g_initialized` |
+//| means the ladder standing here is the synthetic transient, so the |
+//| produced set must not be used to judge survivors — P-PERF-108).   |
+//| The next real pass re-derives it and re-creates what is missing.  |
+//| A delete-everything-then-rebuild flash on an attach is exactly the |
+//| class of bug this project refuses to trade a flicker for.          |
 //+------------------------------------------------------------------+
+// P-PERF-107 (2026-10-16) — THE HANDOFF SWEEP IS RESUMABLE.
+//
+// MEASURED (2026-10-16 tour): the whole-chart walk below cost 1016-1062 ms
+// (H1 rest=1016, D1 rest=1062) and ran BEFORE the first render of the
+// handoff frame — the chart the user switched to stayed EMPTY for a full
+// second on top of the ~1 s OnInit walk. The walk is ~1200 ObjectName
+// calls at ~0.85 ms each; the object count is the terminal's, not ours.
+//
+// So the walk is CHUNKED: each call examines at most SWEEP_FOREIGN_CHUNK
+// objects and returns -1 ("still running"); the caller latches the handoff
+// only when it returns >= 0. The first render waits ONE chunk (~200 ms),
+// and the deletions are chunked the same way afterwards.
+//
+// State carried between calls (statics, per instance): the produced
+// snapshot, the family prefix, the doomed list, and a DESCENDING chart
+// cursor. Descending is what makes a cursor legal across frames: the
+// render only APPENDS objects (above the cursor — not visited), and a
+// deletion below the cursor costs at most one re-examined neighbour. A
+// stale object missed this way is swept by the next handoff.
+//
+// SWEEP_FOREIGN_CHUNK = objects examined/deleted per frame (P-PERF-107).
+// The sweep's statics carry the state between calls; their comments live on
+// their own lines (the parity chunker keys file-scope declarations by their
+// own line, and a trailing comment makes the line read as an anonymous block).
+const int SWEEP_FOREIGN_CHUNK = 250;
+static bool   s_fsActive  = false;
+static int    s_fsPhase   = 0;
+static int    s_fsCursor  = 0;
+static string s_fsFam     = "";
+static string s_fsProduced[];
+static int    s_fsPc      = 0;
+static bool   s_fsSet     = false;
+static string s_fsDoomed[];
+static int    s_fsNd      = 0;
+static int    s_fsRemoved = 0;
+
 int SweepForeignLadderObjects(const SModeConfig &config,
                               const STriggerLine &lines[],
                               const int lineCount,
                               const SZoneDefinition &zones[],
-                              const int zoneCount,
-                              const double vpTop,
-                              const double vpBottom)
+                              const int zoneCount)
 {
-    if(!(vpTop > vpBottom) || vpBottom <= 0) return 0;   // unusable window: no judgement
-    if(lineCount <= 0) return 0;                        // nothing produced: nothing to say
-
-    // What this build owns, by NAME (labels included: a line and its pip label
-    // are one decision, and RenderTriggerLines writes both).
-    string produced[];
-    int pc = 0;
-    ArrayResize(produced, lineCount * 2 + zoneCount);
-    for(int l = 0; l < lineCount; l++)
+    if(!s_fsActive)
     {
-        produced[pc++] = lines[l].name;
-        produced[pc++] = lines[l].name + "_Label";
+        // P-PERF-107b (2026-10-16): "cannot judge yet" is NOT a verdict. The
+        // hoisted caller runs on EVERY frame - including the first frames
+        // after a handoff, where there is no base price yet (centerPrice<=0
+        // above leaves lineCount at 0). Returning 0 there made the caller
+        // latch `s_foreignSweepDone` before the real build ever landed, so
+        // the previous timeframe's ladder was never swept (no FOREIGN print
+        // in the whole 15:20-15:28 tour). -1 = "retry next frame".
+        // P-VIEW-05 (2026-10-16): the old gate here asked whether the CULL
+        // WINDOW was usable — a proxy for "the build is real". It is the
+        // readiness flag itself now: the window never decided what this
+        // sweep may delete, and `g_initialized` names the fact the proxy
+        // was standing in for (history landed, the ladder is final).
+        if(!g_initialized) return -1;                        // transient ladder: not judged
+        if(lineCount <= 0) return -1;                        // nothing produced yet: not judged
+
+        // What this build owns, by NAME. P-LBL-11 (2026-10-17): the pip-distance
+        // labels used to be part of this set ("a line and its label are one
+        // decision"). They are retired, so the `<line>_Label` names are NOT
+        // produced - which is exactly what arms this sweep as the upgrade net:
+        // the one handoff walk deletes every legacy label object a previous
+        // build left on the chart, alongside the ladder names it always swept.
+        s_fsPc = lineCount + zoneCount;
+        ArrayResize(s_fsProduced, s_fsPc);
+        int pc = 0;
+        for(int l = 0; l < lineCount; l++)
+            s_fsProduced[pc++] = lines[l].name;
+        for(int z = 0; z < zoneCount; z++)
+            s_fsProduced[pc++] = zones[z].name;
+
+        s_fsFam = config.objectPrefix + config.modeName + "_";
+        // P-PERF-55: the membership question is asked once per family name, so
+        // the list is turned into a SET here — one O(pc) build, one probe per
+        // name. `false` = the list is too big for the table: every test below
+        // then uses the original exact scan, so the verdict cannot change.
+        // The set is NOT rebuilt per chunk: nothing else calls LadderSetBuild
+        // while a sweep is active.
+        s_fsSet = LadderSetBuild(s_fsProduced, s_fsPc);
+
+        // P-PERF-97 (BUG-10, 2026-10-13): ONE ALLOCATION FOR THE WHOLE WALK —
+        // `total` is the exact upper bound on the names the walk can collect.
+        const int total = ObjectsTotal(0, -1, -1);
+        s_fsNd = 0;
+        if(total > 0) ArrayResize(s_fsDoomed, total);
+        s_fsCursor = total - 1;
+        s_fsRemoved = 0;
+        s_fsPhase = 0;
+        s_fsActive = true;
     }
-    for(int z = 0; z < zoneCount; z++)
-        produced[pc++] = zones[z].name;
 
-    const string fam = config.objectPrefix + config.modeName + "_";
-    const int total = ObjectsTotal(0, -1, -1);
-    string doomed[];
-    int nd = 0;
-
-    for(int i = total - 1; i >= 0; i--)
+    if(s_fsPhase == 0)
     {
-        const string nm = ObjectName(0, i, -1, -1);
-        if(!LadderFamilyName(nm, fam)) continue;
-
-        if(LadderNameIsZoneBand(nm))
+        // Phase 0: walk, SWEEP_FOREIGN_CHUNK objects this frame.
+        int examined = 0;
+        while(s_fsCursor >= 0 && examined < SWEEP_FOREIGN_CHUNK)
         {
-            if(ProducedLadderName(nm, produced, pc)) continue;
-            ArrayResize(doomed, nd + 1);
-            doomed[nd++] = nm;
-            continue;
-        }
-        if(StringFind(nm, "_Zone_") >= 0) continue;   // a border sub-object: its band decides
+            const string nm = ObjectName(0, s_fsCursor, -1, -1);
+            s_fsCursor--;
+            examined++;
+            if(!LadderFamilyName(nm, s_fsFam)) continue;
 
-        if(ProducedLadderName(nm, produced, pc)) continue;
-        ArrayResize(doomed, nd + 1);
-        doomed[nd++] = nm;
+            if(LadderNameIsZoneBand(nm))
+            {
+                if(s_fsSet ? LadderSetHas(nm) : ProducedLadderName(nm, s_fsProduced, s_fsPc)) continue;
+                if(s_fsNd >= ArraySize(s_fsDoomed)) ArrayResize(s_fsDoomed, s_fsNd + 1);
+                s_fsDoomed[s_fsNd++] = nm;
+                continue;
+            }
+            if(StringFind(nm, "_Zone_") >= 0) continue;   // a border sub-object: its band decides
+
+            if(s_fsSet ? LadderSetHas(nm) : ProducedLadderName(nm, s_fsProduced, s_fsPc)) continue;
+            if(s_fsNd >= ArraySize(s_fsDoomed)) ArrayResize(s_fsDoomed, s_fsNd + 1);
+            s_fsDoomed[s_fsNd++] = nm;
+        }
+        if(s_fsCursor >= 0) return -1;   // more to walk — the caller must not latch
+        if(s_fsNd == 0) { s_fsActive = false; return 0; }
+        s_fsPhase = 1;
     }
 
-    if(nd == 0) return 0;
-
+    // Phase 1: delete, SWEEP_FOREIGN_CHUNK names this frame (popped from the
+    // end of the doomed list — the order never mattered).
     g_suppressDeleteEvents = true;
-    int removed = 0;
-    for(int d = 0; d < nd; d++)
+    int deleted = 0;
+    while(s_fsNd > 0 && deleted < SWEEP_FOREIGN_CHUNK)
     {
-        if(StringFind(doomed[d], "_Zone_") >= 0)
+        const string nm = s_fsDoomed[s_fsNd - 1];
+        s_fsNd--;
+        deleted++;
+        if(StringFind(nm, "_Zone_") >= 0)
         {
-            if(DeleteManagedZoneObjects(doomed[d], true)) removed++;
+            if(DeleteManagedZoneObjects(nm, true)) s_fsRemoved++;
         }
-        else if(DeleteIndicatorObjectManaged(doomed[d], true)) removed++;
+        else if(DeleteIndicatorObjectManaged(nm, true)) s_fsRemoved++;
     }
     g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
     g_suppressDeleteEvents = false;
+    if(s_fsNd > 0) return -1;   // more to delete — the caller must not latch
+    const int removed = s_fsRemoved;
+    s_fsActive = false;
     return removed;
 }
 
@@ -2139,8 +2336,6 @@ SPipelineResult ExecutePipeline(
     const bool lsFirst,
     const int maxLevelsAbove,
     const int maxLevelsBelow,
-    const double vpTop,
-    const double vpBottom,
     const int buildStage)
 {
     SPipelineResult result;
@@ -2188,13 +2383,16 @@ SPipelineResult ExecutePipeline(
     // staged frames are by construction "same geometry, another          
     // family", so the built lists are remembered under a key made of    
     // every input the three stages read. A tick that moves the base     
-    // price, a scroll that moves the cull window, an input edit, or a   
-    // mode switch changes the key and the math runs again - the cache   
-    // can only ever answer for an unchanged geometry.                   
+    // price, an input edit, or a mode switch changes the key and the    
+    // math runs again - the cache can only ever answer for an unchanged
+    // geometry. P-VIEW-05 (2026-10-16): the cull window used to be one
+    // of those terms; it is gone from the key because nothing that is
+    // BUILT or PAINTED ever read it (the build's `inViewport` flags had
+    // no consumer), so a pan could only throw away a valid cache.
     //                                                                
     string geoKey = PipelineGeometryKey(config, centerPrice, stepSizes, stepSizeCount,
                                        stepMode, classifyMode, lsFirst, maxLevelsAbove,
-                                       maxLevelsBelow, vpTop, vpBottom,
+                                       maxLevelsBelow,
                                        baseMultiplier);
     static string s_geoKey = "";
     static bool   s_geoValid = false;
@@ -2256,7 +2454,7 @@ SPipelineResult ExecutePipeline(
         }
 
         // Stages 3+4: Build zones and lines (merged   single pass)
-        BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
+        BuildZonesAndLines(classified, classifiedCount, config,
                            fixedZoneStepSize, zones, result.zoneCount, lines, result.lineCount);
 
         // Remember the result for the other families of this same rebuild.
@@ -2314,7 +2512,13 @@ SPipelineResult ExecutePipeline(
             // - the frame that can afford it. This also retires the P-UI-98k hazard
             // at its source: the pass that could delete the very line under the hand
             // no longer runs under the hand at all.
-            if(stepSig != s_lastStepSig && !g_s1DragLive && !g_customPriceLineDragging)
+            // P-PERF-108 (2026-10-16): the SAME deferral covers the transient
+            // history window — a sweep against the synthetic ±1% ladder would
+            // delete names the real build is about to re-assert. The latch is
+            // taken only when `g_initialized` (the real ladder), so the sweep
+            // runs once, against the pitch that actually stays.
+            if(stepSig != s_lastStepSig && g_initialized
+               && !g_s1DragLive && !g_customPriceLineDragging)
             {
                 s_lastStepSig = stepSig;
                 int swept = SweepForeignLevelObjects(config, lines, result.lineCount,
@@ -2322,45 +2526,73 @@ SPipelineResult ExecutePipeline(
                 if(swept > 0)
                     _LOG_GATE_I Print("[I][GEN] P-LEVEL-FOREIGN-01: swept ", swept,
                                       " level object(s) left by a previous step geometry");
-                // P-LEVEL-FOREIGN-02: and the names that sweep cannot reach - the
-                // ones the new ladder does not produce AT ALL, which its own lists
-                // can never name. This is what lets a timeframe switch UPDATE the
-                // family in place (the render re-asserts every produced name, this
-                // deletes the rest) instead of wiping and rebuilding it, and it is
-                // only meaningful after a HANDOFF: a wiped chart holds nothing to
-                // find, and this is a whole-chart walk.
-                if(g_adoptPreviousTopology && !s_foreignSweepDone)
-                {
-                    s_foreignSweepDone = true;   // this frame IS the handoff
-                    int stale = SweepForeignLadderObjects(config, lines, result.lineCount,
-                                                          zones, result.zoneCount,
-                                                          vpTop, vpBottom);
-                    if(stale > 0)
-                        _LOG_GATE_W Print("[W][GEN] P-LEVEL-FOREIGN-02: deleted ", stale,
-                                          " ladder object(s) this build does not produce ",
-                                          "(handoff, family=", config.modeName, ")");
-                }
+                // P-PERF-107 (2026-10-16): the P-LEVEL-FOREIGN-02 sweep that
+                // stood here MOVED OUT of this block — it is resumable now and
+                // must advance on every frame, not only on the frame the pitch
+                // changed. See the hoisted caller before Stage 5 below.
             }
         }
     }
     
+    // P-PERF-107 (2026-10-16) — THE HANDOFF SWEEP IS RESUMABLE, SO IT RUNS
+    // OUTSIDE THE stepSig BLOCK.
+    //
+    // The sweep's walk is ~1 s of ObjectName calls on the user's chart and it
+    // used to block the FIRST RENDER of the handoff frame (measured 2026-10-16:
+    // H1 rest=1016 ms / D1 rest=1062 ms, with the chart empty until it ended).
+    // It is chunked now (SweepForeignLadderObjects returns -1 while it is still
+    // walking), so it has to advance on EVERY frame — not only on the frame the
+    // ladder pitch changed — and s_foreignSweepDone is latched only when the
+    // sweep RETURNS (>= 0).
+    //
+    // The semantics are unchanged from P-LEVEL-FOREIGN-02: only after a HANDOFF
+    // (g_adoptPreviousTopology), only once per instance, and the names it can
+    // reach are the ones the new ladder does not produce AT ALL — which is what
+    // lets a timeframe switch UPDATE the family in place (the render re-asserts
+    // every produced name, this deletes the rest) instead of wiping it.
+    // P-PERF-107b: the drag guards the old stepSig block carried are kept here
+    // - the sweep must not delete the level under the hand (P-UI-98k); it
+    // simply pauses and resumes, the statics carry the chunk state across.
+    // P-PERF-108 (2026-10-16): and it does not START against a transient
+    // build — the produced set it walks against must be the REAL ladder, or
+    // its deletes land on names the next frame re-creates (the same blink the
+    // cleanup gate above kills; this is the ladder-sweep half of it).
+    if(g_adoptPreviousTopology && g_initialized && !s_foreignSweepDone
+       && !g_s1DragLive && !g_customPriceLineDragging)
+    {
+        int stale = SweepForeignLadderObjects(config, lines, result.lineCount,
+                                              zones, result.zoneCount);
+        if(stale >= 0)
+        {
+            s_foreignSweepDone = true;   // the handoff's sweep has finished
+            if(stale > 0)
+                _LOG_GATE_W Print("[W][GEN] P-LEVEL-FOREIGN-02: deleted ", stale,
+                                  " ladder object(s) this build does not produce ",
+                                  "(handoff, family=", config.modeName, ")");
+        }
+    }
+
     // Stage 5: Render and cleanup.
     // P-PERF-06 STAGED RENDER: the math above (Calculate/Classify/Build) is
     // pure CPU (~ms) and re-runs every stage; only ONE object family is
-    // materialised per frame, so a post-wipe build lands as four ~2k-call
+    // materialised per frame, so a post-wipe build lands as a few ~2k-call
     // frames instead of one ~8k-call freeze. buildStage 0 (or anything
     // unexpected) is the full legacy render — steady frames always take it.
+    // P-LBL-11 (2026-10-17): there were FOUR rungs (1=lines, 2=zones, 3=pip
+    // labels, 4=labels block). The pip labels are retired, so stage 3 is gone;
+    // the surplus cleanup it used to carry (a full family re-assert had just
+    // run in that frame) now rides the ZONES rung, which is the last family
+    // frame before the labels block seals the rebuild.
     if(buildStage == BUILD_STAGE_LINES) {
-        RenderTriggerLines(lines, result.lineCount, config, true, false, vpTop, vpBottom);
+        RenderTriggerLines(lines, result.lineCount, config, true);
     } else if(buildStage == BUILD_STAGE_ZONES) {
-        RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
-    } else if(buildStage == BUILD_STAGE_LABELS) {
-        RenderTriggerLines(lines, result.lineCount, config, false, true, vpTop, vpBottom);
+        RenderZones(zones, result.zoneCount, config);
+
         // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
         CleanupSurplusPipeline(config, maxStep);
     } else {
-        RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
-        RenderTriggerLines(lines, result.lineCount, config, true, true, vpTop, vpBottom);
+        RenderZones(zones, result.zoneCount, config);
+        RenderTriggerLines(lines, result.lineCount, config, true);
 
         // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
         CleanupSurplusPipeline(config, maxStep);
@@ -2385,10 +2617,11 @@ SPipelineResult ExecutePipeline(
     //                 writer owns it (F / L / a per-TF rule).
     // A still picture prints nothing: the guard is the shape itself, so this costs
     // one string compare per rebuild and one line of log per SHAPE change.
+    // P-VIEW-05 (2026-10-16): the window is out of the shape too — a pan is not
+    // a change of the built family and must not make the census speak.
     {
         static string s_lastViewCensus = "";
-        string shape = IntegerToString(result.lineCount) + ":" + IntegerToString(result.zoneCount) + ":" +
-                       DoubleToString(vpTop - vpBottom, GetCachedDigits());
+        string shape = IntegerToString(result.lineCount) + ":" + IntegerToString(result.zoneCount);
         if(shape != s_lastViewCensus)
         {
             s_lastViewCensus = shape;
@@ -2434,7 +2667,6 @@ SPipelineResult ExecutePipeline(
                   " nearBelow=", DoubleToString(nearBelow, GetCachedDigits()),
                   " span=", DoubleToString(lo, GetCachedDigits()), "..", DoubleToString(hi, GetCachedDigits()),
                   " absent=", absent, " mask=", (int)maskMin, "..", (int)maskMax,
-                  " win=", DoubleToString(vpBottom, GetCachedDigits()), "..", DoubleToString(vpTop, GetCachedDigits()),
                   " stage=", buildStage);
         }
     }

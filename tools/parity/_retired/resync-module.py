@@ -151,7 +151,7 @@ MODULE_PATCHES = {
          '   const uint _m3 = GetTickCount();\n'
          '   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
          '   g_suppressDeleteEvents = false;\n'
-         '   Print("[W][PERF] DeleteMenu phases: n=", _n0,\n'
+         '   _LOG_GATE_D Print("[W][PERF] DeleteMenu phases: n=", _n0,\n'
          '         " circ=", (int)(_m1 - _m0), "ms tools=", (int)(_m2 - _m1),\n'
          '         "ms sub=", (int)(_m3 - _m2), "ms");\n'
          '   // second pass: catches any objects the first sweep missed (same guard)\n'
@@ -178,27 +178,162 @@ MODULE_PATCHES = {
          '// P-PERF-13 (2026-10-12) - THE CENSUS CHANNEL IS SILENT BY DEFAULT.\n'
          '// Measured: thousands of Print-per-object/per-move lines on the live\n'
          '// log, synchronous journal writes on the path they measure.\n'
-         'void DrawStripDiagEmit(const string line) { }',
+         'void DrawStripDiagEmit(const string line) { }\n'
+         '// P-PERF-95: nothing was opened, so nothing is closed — the call site below\n'
+         '// stays one line on both builds.\n'
+         'void DrawStripDiagClose() { }',
          "the diag channel prints nothing unless DSTRIP_DIAG is set"),
-        # P-PERF-DSC1 (2026-10-12) - MT5 fires a CHARTEVENT_OBJECT_DELETE for
-        # every programmatic delete (MT4 fires none). A teardown that issues
-        # ~60 ObjectDelete calls runs the DrawStrip delete handler ~60 times
-        # over; the project's own suppression flag makes those events exit
-        # early. The flag exists in MT4 too - only the event storm is MT5's.
+        # P-PERF-95 (BUG-11, 2026-10-13): the census handle is opened once
+        # (`static int dh`) and was never closed, so every attach/teardown
+        # cycle leaked one file handle until `FileOpen` answered
+        # INVALID_HANDLE. MT5-only: MT4's own batch never carried the release.
+        # The whole emit is re-emitted with the handle renamed to
+        # `s_dsDiagFh` and hoisted to file scope: the close function must see
+        # it, and neither the function-static form (unreachable, error 256)
+        # nor a plain file-scope `dh` (shadowed by BiotakPanels locals —
+        # warning 62) compiles clean.
         (re.compile(
-            r'void DrawStripClose\(\)\n\{\n   DrawStripColorHoverClear\(\);'),
+            r'void DrawStripDiagEmit\(const string line\)\n'
+            r'\{\n'
+            r'   Print\(line\);\n'
+            r'   static int dh = INVALID_HANDLE;\n'
+            r'   if\(dh == INVALID_HANDLE\)\n'
+            r'      dh = FileOpen\("biotak_diag_" \+ Symbol\(\) \+ "_" \+ IntegerToString\(ChartID\(\)\) \+ "\.txt",\n'
+            r'                    FILE_WRITE \| FILE_TXT \| FILE_ANSI \| FILE_SHARE_READ\);\n'
+            r'   if\(dh == INVALID_HANDLE\) return;\n'
+            r'   FileWrite\(dh, line\);\n'
+            r'   FileFlush\(dh\);\n'
+            r'\}\n#else'),
+         '// MT5-ONLY P-PERF-95 (BUG-11): the census handle lives at FILE scope under a\n'
+         '// name no shared module uses — the release below must see what the emit\n'
+         '// opened, and `dh` cannot be reused there: as a function-static it is\n'
+         '// unreachable (error 256), as a file-scope `dh` the shared BiotakPanels\n'
+         '// locals shadow it (warning 62).\n'
+         'static int s_dsDiagFh = INVALID_HANDLE;\n'
+         'void DrawStripDiagEmit(const string line)\n'
+         '{\n'
+         '   Print(line);\n'
+         '   if(s_dsDiagFh == INVALID_HANDLE)\n'
+         '      s_dsDiagFh = FileOpen("biotak_diag_" + Symbol() + "_" + IntegerToString(ChartID()) + ".txt",\n'
+         '                    FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_SHARE_READ);\n'
+         '   if(s_dsDiagFh == INVALID_HANDLE) return;\n'
+         '   FileWrite(s_dsDiagFh, line);\n'
+         '   FileFlush(s_dsDiagFh);\n'
+         '}\n'
+         '// P-PERF-95 (BUG-11, 2026-10-13) — THE HANDLE IS RELEASED WITH THE STRIP.\n'
+         '// `s_dsDiagFh` above is opened once and, before this, never closed: every\n'
+         '// attach/teardown cycle leaked one file handle until the terminal hit its\n'
+         '// per-program limit and `FileOpen` started answering INVALID_HANDLE — the\n'
+         '// census would then go silently quiet instead of failing loudly. The owner of\n'
+         '// the handle is the strip, so the release lives beside the strip\'s own close.\n'
+         'void DrawStripDiagClose()\n'
+         '{\n'
+         '   if(s_dsDiagFh != INVALID_HANDLE) { FileClose(s_dsDiagFh); s_dsDiagFh = INVALID_HANDLE; }\n'
+         '}\n'
+         '#else',
+         "P-PERF-95 BUG-11: release the census handle with the strip"),
+        # P-PERF-DSC1 (2026-10-12) -> P-PERF-100 (2026-10-16). DSC1 armed the
+        # suppression flag over the old ~530 single ObjectDelete calls (MT5 fires
+        # a CHARTEVENT_OBJECT_DELETE per programmatic delete; MT4 fires none).
+        # P-PERF-100 replaced that whole delete block with ONE
+        # `ObjectsDeleteAll(0, "PnlDrawS_")` sweep: every name the close owns
+        # carries that prefix by construction (faces/icons :1578-1594, grip/
+        # badge/bg :1645, separators :5428, the three nine-piece skins :6266-6315,
+        # the gear family via DrawStripGearObjectsPurge's own prefix wipe :4628),
+        # and DrawStripSweepStale already takes the same family in one call. The
+        # suppression flag stays: the sweep still fires one MT5 delete event per
+        # removed object. Measured on the live log (2026.10.16 12:31, TF switch):
+        # `OnDeinit reason=3 took 1063ms` with `pnl=0 menu=1031 handler=32` and
+        # `DeleteMenu phases circ=0 tools=0 sub=0` — the whole second sat here.
+        # P-PERF-TMP (2026-10-16): the phase stamps in the replacement below are
+        # TEMPORARY attribution probes — they print only when the close clears
+        # 100 ms, and they come OUT once the slow-teardown owner is named.
+        (re.compile(
+            r'void DrawStripClose\(\)\n'
+            r'\{\n'
+            r'   DrawStripColorHoverClear\(\);.*?\n'
+            r'   DrawSelClear\(\);\n'
+            r'\}\n',
+            re.DOTALL),
          'void DrawStripClose()\n'
          '{\n'
-         '   // P-PERF-DSC1 (2026-10-12) - SUPPRESS DELETE EVENTS DURING BULK SLOT TEARDOWN.\n'
+         '   // P-PERF-100 (2026-10-16) - ONE PREFIX SWEEP, NOT ~530 SINGLE DELETES.\n'
+         '   uint p101t = GetTickCount();   // P-PERF-TMP (remove after attribution)\n'
          '   g_suppressDeleteEvents = true;\n'
-         '   DrawStripColorHoverClear();\n',
-         "arm the delete-event suppression across the bulk slot teardown"),
-        (re.compile(
-            r'   DrawStripSkinPurge\(\);'),
-         '   DrawStripSkinPurge();\n'
+         '   DrawStripColorHoverClear();\n'
+         '   uint p101h = GetTickCount();\n'
+         '   DrawStripDiagClose();   // P-PERF-95 (BUG-11): the census handle leaves with the strip\n'
+         '   uint p101d = GetTickCount();\n'
+         '   DrawStripSweepStale();\n'
+         '   uint p101s = GetTickCount();\n'
+         '   DrawStripGearClose();\n'
+         '   uint p101g = GetTickCount();\n'
+         '   uint p101k = p101g;   // P-PERF-103: no skin phase left to time\n'
          '   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;\n'
-         '   g_suppressDeleteEvents = false;\n',
-         "close the suppression window with the 250 ms re-arm"),
+         '   g_suppressDeleteEvents = false;\n'
+         '   s_dsOpen = false;\n'
+         '   s_dsObj = "";\n'
+         '   s_dsKind = DK_NONE;\n'
+         '   s_dsN = 0;\n'
+         '   DrawStripPublishRect();   // P-DRAW-31: a closed strip occupies no pixels\n'
+         '   DrawStripSurfaceClear();  // P-PAL-20: owns no popup pixels either\n'
+         '   s_dsPicker = DSTRIP_PICK_NONE;\n'
+         '   s_dsPN = 0;\n'
+         '   s_dsPHexY = -1;\n'
+         '   s_dsPHeadY = -1;\n'
+         '   s_dsPOpY = -1;\n'
+         '   s_dsOpGrab = false;\n'
+         '   s_dsHexFocus = false;\n'
+         '   s_dsGearManual = false;\n'
+         '   s_dsPinned = false;\n'
+         '   DrawStripGripRelease();   // P-UI-113d: a close never leaves the view locked\n'
+         '   DrawStripOpenerDisarm();  // P-UI-113c: nor the opener guard armed\n'
+         '   DrawStripHoldSelectionDisarm();  // P-UI-113g: no close outlives a selection repair\n'
+         '   DrawSelClear();\n'
+         '   uint p101e = GetTickCount();   // P-PERF-TMP\n'
+         '   if((p101e - p101t) >= 100)\n'
+         '      Print("[W][PERF-TMP] stripclose hover=", (int)(p101h - p101t),\n'
+         '            " diag=", (int)(p101d - p101h), " sweep=", (int)(p101s - p101d),\n'
+         '            " gear=", (int)(p101g - p101s), " skin=", (int)(p101k - p101g),\n'
+         '            " tail=", (int)(p101e - p101k), " total=", (int)(p101e - p101t));\n'
+         '}\n',
+         "P-PERF-100: one prefix sweep instead of ~530 single deletes (live TF-switch teardown)"),
+        # P-PERF-101 (2026-10-16) - ONE PREFIX WIPE, NOT ~330 MISSING-NAME PROBES.
+        # The fallback chain this replaces probed ~330 names one at a time with
+        # ObjectFind; on a chart that holds no gear family at all each probe is a
+        # table walk with nothing to find, and the live log priced one such close
+        # at `menu=1015ms` with every other phase 16ms - against 20ms for the same
+        # teardown beside it, whose guard returned before the chain. Every name the
+        # chain could reach starts with "PnlDrawS_G" (new spellings and the retired
+        # GT/GU/GTrack set alike - the grip is _H, the badge _B, the popover _P*,
+        # no non-gear name collides), so one prefix sweep IS the whole contract.
+        (re.compile(
+            r'bool DrawStripGearObjectsPurge\(\)\n'
+            r'\{\n'
+            r'   bool dirty = false;.*?\n'
+            r'   return dirty;\n'
+            r'\}\n',
+            re.DOTALL),
+         'bool DrawStripGearObjectsPurge()\n'
+         '{\n'
+         '   // P-PERF-101 (2026-10-16) - ONE PREFIX WIPE, NOT ~330 MISSING-NAME PROBES.\n'
+         '   ObjectsDeleteAll(0, "PnlDrawS_G", -1, -1);\n'
+         '   return true;\n'
+         '}\n',
+         "P-PERF-101: one prefix wipe instead of ~330 missing-name probes"),
+        # P-PERF-103 (2026-10-16) - THE SKIN PURGE CALL IS GONE FROM
+        # DrawStripClose, so there is nothing left to instrument here. The TMP
+        # round that decided it measured d0=0 d1=0 d2=0 on every teardown: the
+        # sweep above already took the whole PnlDrawS_ family, and the ~270
+        # ObjectFind misses were themselves the 1.0-7.0s. DrawStripSkinPurge()
+        # keeps its plain body (it is dead code now, but shared with MT4, and
+        # deleting it would buy parity nothing).
+        (re.compile(r'    Print\("\[drawstrip\] press named at ", mx, ",", my, " hit=\\"", named,'),
+         '    _LOG_GATE_D Print("[drawstrip] press named at ", mx, ",", my, " hit=\\"", named,',
+         "the press-name diagnostic is DEBUG, not production"),
+        (re.compile(r'         if\(!s_dsOpen\) Print\("\[drawstrip\] press edge at ", tmx, ",", tmy, " bit=", \(tleft \? 1 : 0\)\);'),
+         '         if(!s_dsOpen) _LOG_GATE_D Print("[drawstrip] press edge at ", tmx, ",", tmy, " bit=", (tleft ? 1 : 0));',
+         "the press-edge diagnostic is DEBUG, not production"),
         # P-PERF-DSH1 (2026-10-12) - the queued delete events of a bulk sweep
         # (777 objects ~ 7 s) outrun the 250 ms window on MT5, so indicator-
         # owned objects must never be read as a user gesture. Name-prefix check
@@ -253,6 +388,43 @@ MODULE_PATCHES = {
          '    }\n'
          '}',
          "arm the suppression window across the whole surplus sweep"),
+        # P-PERF-91 (BUG-05, 2026-10-13): the steady update path pays nothing.
+        # The existence probe was the only terminal call left on it, and on MT5
+        # that call is a KERNEL ROUND TRIP (MT4's ObjectFind is direct); a
+        # ~300-level render paid ~300 probes, all answering "still there" with
+        # zero writes to guard. The probe now runs only when a write would; a
+        # level whose price/colour/style/width all match costs one cache lookup
+        # and one mask check. Correctness untouched: whenever the cache could be
+        # stale AND something would be written, the probe still runs first.
+        (re.compile(
+            r'bool CreateOrUpdateHLine\(const string name, double price,[^\n]*\n'
+            r'[^\n]*color clr, ENUM_LINE_STYLE style, int width,\n'
+            r'[^\n]*const string tooltip,\n'
+            r'[^\n]*const bool visibilityAsLine = true\) \{\n'
+            r'    SObjectCacheEntry cachedEntry;\n'
+            r'    bool hasCached = CacheGetObject\(name, cachedEntry\);\n'
+            r'    bool objectExists = false;\n'
+            r'    if\(hasCached && cachedEntry\.exists\) \{\n'
+            r'        objectExists = \(ObjectFind\(0, name\) >= 0\);\n'),
+         'bool CreateOrUpdateHLine(const string name, double price, \n'
+         '                          color clr, ENUM_LINE_STYLE style, int width,\n'
+         '                          const string tooltip,\n'
+         '                          const bool visibilityAsLine = true) {\n'
+         '    SObjectCacheEntry cachedEntry;\n'
+         '    bool hasCached = CacheGetObject(name, cachedEntry);\n'
+         '    bool objectExists = false;\n'
+         '    if(hasCached && cachedEntry.exists) {\n'
+         '        double normPriceNow = NormalizeDouble(price, Digits);\n'
+         '        bool priceChanged = (MathAbs(cachedEntry.lastPrice - normPriceNow) > GetCachedPoint() * 0.1);\n'
+         '        bool lookChanged  = (cachedEntry.lastColor != clr) ||\n'
+         '                            (cachedEntry.lastStyle != (int)style) ||\n'
+         '                            (cachedEntry.lastWidth != width);\n'
+         '        if(!priceChanged && !lookChanged) {\n'
+         '            ApplyVisibilityStateIfUnchangedSkip(name, visibilityAsLine);\n'
+         '            return false;\n'
+         '        }\n'
+         '        objectExists = (ObjectFind(0, name) >= 0);\n',
+         "the steady HLine path skips the terminal probe entirely (BUG-05)"),
     ],
     "ObjectCache.mqh": [
         # P-PERF-DIOM1 (2026-10-12) - respect a caller-owned suppression window.
@@ -308,6 +480,27 @@ MODULE_PATCHES = {
          'int CompatPeriodMinutes() { g_cl.periodCalls++; return PeriodSeconds(PERIOD_CURRENT) / 60; }',
          "count Period() reads so the compat ledger can price the emulation"),
     ],
+    # --- P-PERF-102 (2026-10-16) — THE LOG-SPAM DIET, module keys added with it:
+    # three per-attach echoes that only served the startup verification and had
+    # no business in a trading session's journal. MT5-only; MT4 keeps them.
+    "InputValidator.mqh": [
+        (re.compile(r'        Print\("  Structure Base Multiplier: ", baseMultiplier\);'),
+         '        _LOG_GATE_D Print("  Structure Base Multiplier: ", baseMultiplier);',
+         "the validated-input echo is DEBUG, not production"),
+    ],
+    "BasePriceManager.mqh": [
+        (re.compile(
+            r'    Print\("  Created new state for symbol: ", currentSymbol, " \(Index: ", newIndex, "\)"\);\n'),
+         '    _LOG_GATE_D Print("  Created new state for symbol: ", currentSymbol, " (Index: ", newIndex, ")");\n',
+         "the state-creation echo is DEBUG, not production"),
+    ],
+    "HistoricalDataFunctions.mqh": [
+        (re.compile(
+            r'            Print\("UpdateHistoricalValues: Waiting for historical data \(", EnumToString\(effectiveTimeframe\), "\)\.\.\."\);\n'),
+         '            _LOG_GATE_D Print("UpdateHistoricalValues: Waiting for historical data (", EnumToString(effectiveTimeframe), ")...");\n',
+         "the waiting-for-history notice is DEBUG, not production (the retry "
+         "itself is by design, P-MT5-01b)"),
+    ],
     "ATRCalculations.mqh": [
         (re.compile(
             r'    // In MT4, iATR uses direct function calls without handles\n'
@@ -323,6 +516,76 @@ MODULE_PATCHES = {
          '    ReleaseATRHandleCache();\n'
          '#endif\n',
          "MQL5 iATR is handle-based: release the cached handles on deinit"),
+        # P-PERF-94 (BUG-02, 2026-10-13): the composite's provisional state.
+        # MT5's iATR() serves a rates-based stand-in while the timeframe is
+        # still being built; MT4's iATR is a direct call and never is - so the
+        # "was that value provisional?" question only EXISTS on this side. A
+        # provisional composite must not be cached (the cache would pin a
+        # stand-in for a whole TTL AND hide the state from the next caller),
+        # and the adaptive-scaling seed must not latch on it. MT4-equal the
+        # moment the value is real; the flag is bookkeeping, not logic.
+        (re.compile(
+            r'(static bool g_multiTFCacheInitialized = false;\n)'),
+         r'\1'
+         '// P-PERF-94 (BUG-02, 2026-10-13) - was the last CalculateWeightedATR()\n'
+         '// the terminal\'s own ATR, or the compat layer\'s rates-based stand-in?\n'
+         '// Read through WeightedATRWasProvisional() by the adaptive-scaling\n'
+         '// seed, which must not latch on a value that can still move.\n'
+         'static bool g_lastCompositeProvisional = false;\n',
+         "the composite's provisional state (MT5-only iATR fallback)"),
+        (re.compile(
+            r'double CalculateWeightedATR\(ENUM_TIMEFRAMES tf = PERIOD_CURRENT\) \{'),
+         'double CalculateWeightedATR(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {\n'
+         '    g_lastCompositeProvisional = false;\n'
+         '\n',
+         "every composite starts by clearing the provisional flag"),
+        (re.compile(
+            r'        UpdateMultiTFCache\(tf, result, currentBars\);\n'),
+         '        if(!g_lastCompositeProvisional) UpdateMultiTFCache(tf, result, currentBars);\n',
+         "a provisional composite is not cached (BUG-02)"),
+        (re.compile(r'//\| P-BK-79'),
+         'bool WeightedATRWasProvisional() { return g_lastCompositeProvisional; }\n'
+         '\n'
+         '//| P-BK-79',
+         "the provisional flag, readable by the adaptive-scaling seed"),
+    ],
+    "AdaptiveScaling.mqh": [
+        # P-PERF-94 (BUG-02, 2026-10-13): the EMA seed must not latch on a
+        # provisional ATR. The seed is what the first paint is drawn from and
+        # a re-seed is a full redraw; MT5's stand-in ATR can still move, MT4's
+        # iATR cannot. The guard returns "not updated yet", which is exactly
+        # what the pre-seed state already answers.
+        (re.compile(r'    double weightedATR = CalculateWeightedATR_Locked\(\);\n'),
+         '    double weightedATR = CalculateWeightedATR_Locked();\n'
+         '    bool atrProvisional = WeightedATRWasProvisional();\n'
+         '\n',
+         "read the composite's provisional state once per call"),
+        (re.compile(
+            r'    if\(!g_scalingInitialized\) \{\n'
+            r'        // First time: seed EMA with current raw value\n'),
+         '    if(!g_scalingInitialized) {\n'
+         '        if(atrProvisional) return false;\n'
+         '        // First time: seed EMA with current raw value\n',
+         "a provisional value must not become the EMA's seed (BUG-02)"),
+    ],
+    "PerformanceOptimizations.mqh": [
+        # P-PERF-94 (BUG-03, 2026-10-13): GetCachedPeriod() must answer the
+        # LOCKED period on a locked chart. The lock's state lives in
+        # GlobalVariables.mqh, which the entry includes AFTER this file, so the
+        # two accessors are declared here and defined there - beside the state
+        # they read. MT4's tree still answers the chart's period on this path
+        # (it resolves the lock at its other call sites), so this one line
+        # differs BY DESIGN: it is the MT5 side of BUG-03, where a locked
+        # chart was served two different periods by two sibling paths.
+        (re.compile(r'int GetCachedPeriod\(\) \{'),
+         'bool CompatTimeframeLockActive();\n'
+         'int  CompatLockedPeriod();\n'
+         '\n'
+         'int GetCachedPeriod() {',
+         "the lock accessors the cached period reads through (BUG-03)"),
+        (re.compile(r'    int currentPeriod = Period\(\);\n'),
+         '    int currentPeriod = CompatTimeframeLockActive() ? CompatLockedPeriod() : Period();\n',
+         "the cached period must respect the timeframe lock (BUG-03)"),
     ],
     "EventHandlers.mqh": [
         # (1) INIT: enabling CHART_EVENT_MOUSE_MOVE turns the terminal's own
@@ -375,8 +638,11 @@ MODULE_PATCHES = {
          "the gesture census prints per mouse-move; off unless GESTURE_CENSUS"),
         # The P-* diagnostics below are standalone statements (verified: none sits
         # in an unbraced if/else chain, so prefixing the DEBUG gate cannot rebind
-        # an else). The two sites marked "ungated on purpose" in MT4 (the 1079
-        # wipe-author line, the adopt probe) are deliberately NOT in this list.
+        # an else). Of the two sites marked "ungated on purpose" in MT4 (the
+        # 1079 wipe-author line, the adopt probe), the WIPE-AUTHOR line is still
+        # deliberately not in this list — but the ADOPT PROBE now is (P-PERF-102,
+        # 2026-10-16): its verification is complete and the user runs this for
+        # trading, so MT5 gates it to DEBUG while MT4 keeps the ungated line.
         (re.compile(r'Print\("\[P-VIEW\] probe=handoff'),
          '_LOG_GATE_D Print("[P-VIEW] probe=handoff',
          "the handoff probe is DEBUG, not production"),
@@ -386,6 +652,320 @@ MODULE_PATCHES = {
         (re.compile(r'Print\("\[P-DEL\]'),
          '_LOG_GATE_D Print("[P-DEL]',
          "the delete diagnostic is DEBUG, not production"),
+        # P-PERF-95 (BUG-04, 2026-10-13): THE WITNESS THAT SURVIVES THE RELOAD.
+        # On MT5 a timeframe switch UNLOADS the indicator, so the frame's own
+        # static (`s_lastPeriod`) is re-initialised and the first frame after
+        # the switch reads -1 - the old test called that "no change" and the
+        # CACHE_INV_TIMEFRAME arm was unreachable on the one event it was
+        # written for. MT4 keeps its instance state across the switch, so the
+        # stamp has no MT4 twin: one GlobalVariable, written by the teardown
+        # that is unloading and read once by the new instance.
+        (re.compile(
+            r'string CustomPriceGVName\(\) \{ return "Biotak_CustomPrice_" \+ GetCachedChartIdStr\(\); \}\n'),
+         '//==============================================================================\n'
+         '// P-PERF-95 (BUG-04, 2026-10-13) - the period stamp.\n'
+         '//\n'
+         '// `s_lastPeriod` cannot survive an MT5 timeframe switch: the terminal\n'
+         '// unloads the indicator and every static is re-initialised, so the first\n'
+         '// frame sees -1 and `(currentPeriod != s_lastPeriod && s_lastPeriod != -1)`\n'
+         '// answers "no change" EVERY time - the arm written for the switch never\n'
+         '// ran. The stamp is carried across the reload the same way the topology\n'
+         '// stamp is (P-VIEW-05): written by the teardown that is unloading (the\n'
+         '// same branch that already writes the topology stamp) and read once by\n'
+         '// the new instance. One write per switch, one read per attach - no\n'
+         '// per-frame cost, and no dependence on a static that MT5 guarantees is\n'
+         '// gone. A first-ever attach has no stamp (`stored == 0`): not a change.\n'
+         '//==============================================================================\n'
+         'string LastPeriodStampName() { return "Biotak_LastPeriod_" + GetCachedChartIdStr(); }\n'
+         '\n'
+         'void SavePeriodStamp()\n'
+         '{\n'
+         '   GlobalVariableSet(LastPeriodStampName(), (double)Period());\n'
+         '}\n'
+         '\n'
+         'void ResolvePeriodChangeAttach()\n'
+         '{\n'
+         '   int live = Period();\n'
+         '   string n = LastPeriodStampName();\n'
+         '   bool haveStamp = GlobalVariableCheck(n);\n'
+         '   int stored = haveStamp ? (int)GlobalVariableGet(n) : 0;\n'
+         '   g_periodChangedOnAttach = (haveStamp && stored > 0 && stored != live);\n'
+         '   GlobalVariableSet(n, (double)live);\n'
+         '   _LOG_GATE_D Print("[P-PERF] probe=period stored=", stored, " live=", live,\n'
+         '         " changed=", (g_periodChangedOnAttach ? 1 : 0), " reason=", UninitializeReason());\n'
+         '}\n'
+         '\n'
+         'string CustomPriceGVName() { return "Biotak_CustomPrice_" + GetCachedChartIdStr(); }\n',
+         "the cross-reload period stamp (MT5 reloads the indicator on a switch)"),
+        # --- P-PERF-106 (2026-10-16) — THE RESOLUTIONS MOVED TO THE ENTRIES.
+        # Inside OnInitHandler the topology fingerprint read the 144 seed
+        # (`inpMaxLevels` is `g_maxLevels` there) while the instance that died
+        # for the chart change had written the OV_ override's 352 - so EVERY
+        # attach printed a stamp mismatch and adoption fell back to a
+        # whole-chart family walk (measured 344-1344 ms per attach). Both
+        # entries now call the two resolutions LAST, after the OV_ overrides
+        # load; the family walk is skipped when the stamp already answered.
+        (re.compile(r'    ResolveTopologyAdoption\(\);\n'),
+         '    // P-PERF-106 (2026-10-16) — the two cross-reload resolutions moved\n'
+         '    // to the entries, after the OV_ runtime overrides load.\n',
+         "P-PERF-106: the cross-reload resolutions run in the entries"),
+        (re.compile(r'   int preexist = LevelFamilyObjectsOnChart\(\);\n'),
+         '   int preexist = stampOk ? -1 : LevelFamilyObjectsOnChart();\n',
+         "P-PERF-106: the stamp answers, so the family walk is skipped"),
+        (re.compile(r'        SaveTopologyAdoptionStamp\(\);\n'),
+         '        SaveTopologyAdoptionStamp();\n'
+         '        SavePeriodStamp();\n',
+         "write the period stamp on the branch that unloads for a chart change"),
+        (re.compile(
+            r'    bool timeframeChanged = \(currentPeriod != s_lastPeriod && s_lastPeriod != -1\);\n'),
+         '    bool timeframeChanged = (s_lastPeriod == -1)\n'
+         '                            ? g_periodChangedOnAttach\n'
+         '                            : (currentPeriod != s_lastPeriod);\n',
+         "the first frame of an instance asks the cross-reload stamp (BUG-04)"),
+        # --- P-PERF-102 (2026-10-16) — THE LOG-SPAM DIET. The user runs this
+        # indicator for trading; the per-attach wall (banner + build lines +
+        # probes + deferral notices) is DEBUG material, not production output.
+        # Every entry here is MT5-only: MT4 keeps its ungated lines (its tree is
+        # the logic reference). NOTE for the author: the replacement text must
+        # reproduce the gated line VERBATIM (the module-report matches it after
+        # comment-stripping - a truncated line reads as drift).
+        (re.compile(r'   Print\("\[P-VIEW\] probe=adopt'),
+         '   _LOG_GATE_D Print("[P-VIEW] probe=adopt stamp=", (haveStamp ? 1 : 0), " stored=", stored,',
+         "the adoption probe is DEBUG after its verification (P-PERF-102)"),
+        (re.compile(
+            r'    Print\("\[BUILD\] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " LITE compiled=",\n'),
+         '    _LOG_GATE_D Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " LITE compiled=",\n',
+         "the LITE build stamp is DEBUG, not production"),
+        (re.compile(
+            r'    Print\("\[BUILD\] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " FULL compiled=",\n'),
+         '    _LOG_GATE_D Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " FULL compiled=",\n',
+         "the FULL build stamp is DEBUG, not production"),
+        (re.compile(r'    Print\("\[BUILD\] ramp t0=", \(int\)BioCardTone\(0\.0\),\n'),
+         '    _LOG_GATE_D Print("[BUILD] ramp t0=", (int)BioCardTone(0.0),\n',
+         "the ramp probe line is DEBUG, not production"),
+        (re.compile(r'    PrintBuildInfo\(\);\n'),
+         '    _LOG_GATE_D PrintBuildInfo();\n',
+         "the 10-line version banner is DEBUG, not production (gate at the call "
+         "site: BuildConfig is included before Logger, so the macro does not "
+         "exist where the printer lives)"),
+        (re.compile(
+            r'_LOG_GATE_W Print\("\[W\]\[GEN\] OnInit: historical data not ready \(err ",\n'),
+         '_LOG_GATE_D Print("[W][GEN] OnInit: historical data not ready (err ",\n',
+         "the history-deferral notice printed every attach; DEBUG (P-PERF-102)"),
+        (re.compile(
+            r'_LOG_GATE_W Print\("\[W\]\[GEN\] OnInit: previous-day prices not ready \(D1 series still loading\) - deferring"\);\n'),
+         '_LOG_GATE_D Print("[W][GEN] OnInit: previous-day prices not ready (D1 series still loading) - deferring");\n',
+         "the prev-day-deferral notice printed every attach; DEBUG (P-PERF-102)"),
+        (re.compile(
+            r'_LOG_GATE_W Print\("\[W\]\[GEN\] RedrawAllObjects: UpdateHistoricalValues failed, retrying later\.\.\."\);\n'),
+         '_LOG_GATE_D Print("[W][GEN] RedrawAllObjects: UpdateHistoricalValues failed, retrying later...");\n',
+         "the redraw-retry notice printed every attach; DEBUG (P-PERF-102)"),
+        # P-PERF-TMP (2026-10-16): the two stamps and the threshold print measure
+        # the CHART_CHANGE branch PART the phase ledger does not cover (the ride +
+        # the pre-throttle head). Remove with the strip-close probes once the
+        # slow-event owner is named.
+        (re.compile(
+            r'        if\(IsIndicatorHidden\(\)\) return;\n'
+            r'        HandsetMarkersRide\(\);[^\n]*\n'),
+         '        if(IsIndicatorHidden()) return;\n'
+         '        uint p_tmpCc0 = GetTickCount();   // P-PERF-TMP (remove after attribution)\n'
+         '        HandsetMarkersRide();   // P-UI-98d v2: the handles ride every layout change\n'
+         '        uint p_tmpCc1 = GetTickCount();   // P-PERF-TMP\n',
+         "P-PERF-TMP: chart-change pre-ledger head stamps"),
+        (re.compile(r'        uint p28t = GetTickCount\(\);\n'),
+         '        uint p28t = GetTickCount();\n'
+         '        // P-PERF-TMP (remove after attribution): the part of the branch the\n'
+         '        // phase ledger below does not cover \u2014 the ride and the pre-throttle head\n'
+         '        // (throttle read, chart reads, the prime). The TF-switch event that took\n'
+         '        // 1141 ms showed a 78 ms phase sum, so its owner is in here.\n'
+         '        if((p28t - p_tmpCc0) >= 100)\n'
+         '           Print("[W][PERF-TMP] cc pre: ride=", (int)(p_tmpCc1 - p_tmpCc0),\n'
+         '                 "ms head=", (int)(p28t - p_tmpCc1), "ms total=", (int)(p28t - p_tmpCc0), "ms");\n',
+         "P-PERF-TMP: chart-change pre-ledger threshold probe"),
+        # P-PERF-105 (2026-10-16) - THE FIRST INTERVAL AFTER ATTACH SEEDS THE
+        # CLEANUP BASELINE. `g_objectCountLast` is 0 on every fresh instance, so
+        # the growth test was true on the first coop tick of EVERY attach and
+        # the emergency walk spent up to 300 per-call object reads on a chart
+        # that had not grown at all: `coop job=obj-cleanup ran=890ms` on the
+        # live D1 attach. The seed is one ObjectsTotal call; the net arms from
+        # the second interval.
+        (re.compile(
+            r'void RunIncrementalObjectCleanup\(\)\n\{\n'
+            r'    if\(g_customPriceLineDragging\) return;\n'
+            r'    datetime currentTime = TimeGMT\(\);\n'
+            r'    if\(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS\) return;\n'),
+         'void RunIncrementalObjectCleanup()\n'
+         '{\n'
+         '    if(g_customPriceLineDragging) return;\n'
+         '    datetime currentTime = TimeGMT();\n'
+         '    if(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS) return;\n'
+         '    if(g_lastObjectCleanup == 0)\n'
+         '    {\n'
+         '        g_objectCountLast = ObjectsTotal(0, -1, -1);\n'
+         '        g_lastObjectCleanup = currentTime;\n'
+         '        return;\n'
+         '    }\n',
+         "P-PERF-105: the first interval after attach seeds the baseline, no walk"),
+        # --- P-PERF-108 / P-VIEW-05 (2026-10-16) - THE PAINT WAITS FOR REAL
+        # HISTORY, AND THE VIEWPORT WINDOW IS GONE FROM THE STAGE PIPELINE.
+        # R1-R2: the wrapper and its pipeline call no longer carry vpTop/vpBottom
+        # (P-VIEW-05). R3: the viewport fetch + stage-1 freeze became the
+        # history-hold (P-PERF-108). R4-R5: the render decision and the flag
+        # clears consult the hold. R6: the hold bound, a const so it groups
+        # with the #decls chunk instead of reading as an MT5-only symbol.
+        (re.compile(re.escape(r"""void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice,
+                           const double vpTop, const double vpBottom, const int buildStage)""")),
+         r"""void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice,
+                           const int buildStage)""",
+         "P-VIEW-05: the wrapper no longer takes a cull window"),
+        (re.compile(re.escape(r"""        ExecutePipeline(def.config, data.midpointPrice, sizes, def.stepSizeCount,
+                       def.stepMode, def.classifyMode, def.lsFirst,
+                       data.maxLevelsAbove, data.maxLevelsBelow,
+                       vpTop, vpBottom, buildStage);""")),
+         r"""        ExecutePipeline(def.config, data.midpointPrice, sizes, def.stepSizeCount,
+                       def.stepMode, def.classifyMode, def.lsFirst,
+                       data.maxLevelsAbove, data.maxLevelsBelow,
+                       buildStage);""",
+         "P-VIEW-05: the pipeline call no longer passes a cull window"),
+        (re.compile(re.escape(r"""        double vpTop = 0, vpBottom = 0;
+        GetViewportBounds(vpTop, vpBottom);
+        // P-PERF-06: freeze the cull window for the whole staging sequence —
+        // stages 2-4 render against the stage-1 snapshot so a pan mid-staging
+        // cannot split families across two viewports.
+        if(g_buildStage == BUILD_STAGE_LINES) {
+            g_stageVpTop = vpTop;
+            g_stageVpBottom = vpBottom;
+        } else if(g_buildStage > BUILD_STAGE_LINES) {
+            vpTop = g_stageVpTop;
+            vpBottom = g_stageVpBottom;""")),
+         r"""        static uint s_historyHoldStartMs = 0;
+        bool historyHold = false;
+        if(g_adoptPreviousTopology && !g_initialized) {
+            if(s_historyHoldStartMs == 0) s_historyHoldStartMs = nowMs;
+            historyHold = ((nowMs - s_historyHoldStartMs) < P_HISTORY_HOLD_MAX_MS);
+        } else {
+            s_historyHoldStartMs = 0;""",
+         "P-PERF-108: the stage-1 viewport freeze became the history-hold"),
+        # P-PERF-108a (2026-10-16): the hold moved ABOVE the wipe and the wipe
+        # itself is gated on it, so a held frame touches nothing; the same edit
+        # added the first-frame / wipe witnesses. Both MT4 wipe blocks
+        # (`if(shouldClearLevels) {` x2) are consumed by the pattern.
+        (re.compile(re.escape(r"""        if(shouldClearLevels) {
+            TH3_PROF_START(LevelsClear);
+            ClearAllLevels(objectPrefix, !skipZones);
+            TH3_PROF_END(LevelsClear);
+        }
+
+        // P-PERF-06: ANY wipe rebuilds in stages (attach, TF switch, topology
+        // toggle, custom-price re-anchor — all of them materialise ~900
+        // objects). Unconditional restart: a toggle that wipes mid-staging
+        // must rebuild from stage 1, or the wiped families never come back.
+        if(shouldClearLevels) {
+            g_buildStage = BUILD_STAGE_LINES;
+        }""")),
+         r"""        static uint s_historyHoldStartMs = 0;
+        bool historyHold = false;
+        if(g_adoptPreviousTopology && !g_initialized) {
+            if(s_historyHoldStartMs == 0) s_historyHoldStartMs = nowMs;
+            historyHold = ((nowMs - s_historyHoldStartMs) < P_HISTORY_HOLD_MAX_MS);
+        } else {
+            s_historyHoldStartMs = 0;
+        }
+
+        bool shouldClearLevels = g_forceClearOnNextDraw || levelTopologyChanged;
+
+        static bool s_f1WitnessLogged = false;
+        if(!s_f1WitnessLogged) {
+            s_f1WitnessLogged = true;
+            _LOG_GATE_W Print("[W][PERF] f1 adopt=", (g_adoptPreviousTopology ? 1 : 0),
+                  " init=", (g_initialized ? 1 : 0),
+                  " clear=", (shouldClearLevels ? 1 : 0),
+                  " topo=", (levelTopologyChanged ? 1 : 0),
+                  " hold=", (historyHold ? 1 : 0),
+                  " stg=", (int)g_buildStage,
+                  " base=", DoubleToString(g_dailyClosePriceForTH, Digits));
+        }
+
+        if(shouldClearLevels && !historyHold) {
+            static uint s_lastWipeWitnessMs = 0;
+            if(nowMs - s_lastWipeWitnessMs > 2000) {
+                s_lastWipeWitnessMs = nowMs;
+                _LOG_GATE_W Print("[W][PERF] levels WIPE: force=", (g_forceClearOnNextDraw ? 1 : 0),
+                      " topo=", (levelTopologyChanged ? 1 : 0),
+                      " adopt=", (g_adoptPreviousTopology ? 1 : 0),
+                      " init=", (g_initialized ? 1 : 0),
+                      " objs=", ObjectsTotal(0, -1, -1));
+            }
+            TH3_PROF_START(LevelsClear);
+            ClearAllLevels(objectPrefix, !skipZones);
+            TH3_PROF_END(LevelsClear);
+        }
+
+        // P-PERF-06: ANY wipe rebuilds in stages (attach, TF switch, topology
+        // toggle, custom-price re-anchor — all of them materialise ~900
+        // objects). Unconditional restart: a toggle that wipes mid-staging
+        // must rebuild from stage 1, or the wiped families never come back.
+        if(shouldClearLevels && !historyHold) {
+            g_buildStage = BUILD_STAGE_LINES;
+        }""",
+         "P-PERF-108a: the hold gates the wipe too + first-frame/wipe witnesses"),
+        (re.compile(re.escape(r"""            if(!g_initialized && thBasePrice > 0) {
+                // We have a base price, so we can at least try to draw something
+                g_highestHigh = thBasePrice * 1.01;""")),
+         r"""            if(!g_initialized && thBasePrice > 0) {
+                static uint s_lastSyntheticWitnessMs = 0;
+                if(nowMs - s_lastSyntheticWitnessMs > 2000) {
+                    s_lastSyntheticWitnessMs = nowMs;
+                    _LOG_GATE_W Print("[W][PERF] synthetic band: history not ready base=",
+                          DoubleToString(thBasePrice, Digits),
+                          " adopt=", (g_adoptPreviousTopology ? 1 : 0));
+                }
+                // We have a base price, so we can at least try to draw something
+                g_highestHigh = thBasePrice * 1.01;""",
+         "P-PERF-108a: witness when the ±1% synthetic band stands in for history"),
+        (re.compile(re.escape(r"""        bool mustRender = (shouldClearLevels || geometryChanged ||
+                           (g_renderAllNeeded && !visOnly));
+        if(mustRender && g_buildStage != BUILD_STAGE_BLOCK && !visOnly)
+        {
+            TH3_PROF_START(LevelsDrawByMode);
+            DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH, vpTop, vpBottom, g_buildStage);""")),
+         r"""        bool mustRender = (shouldClearLevels || geometryChanged ||
+                           (g_renderAllNeeded && !visOnly)) && !historyHold;
+        if(mustRender && g_buildStage != BUILD_STAGE_BLOCK && !visOnly)
+        {
+            TH3_PROF_START(LevelsDrawByMode);
+            DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH, g_buildStage);""",
+         "P-PERF-108: a held frame must not paint (or seal) the transient ladder"),
+        (re.compile(re.escape(r"""        g_p3MsLevels += GetTickCount() - g_p3MsLastTick;
+        g_p3MsLastTick = GetTickCount();
+        g_forceClearOnNextDraw = false;
+        g_redrawTHLevelsNeeded = false;""")),
+         r"""        g_p3MsLevels += GetTickCount() - g_p3MsLastTick;
+        g_p3MsLastTick = GetTickCount();
+        // P-PERF-108: a HELD frame consumed nothing - the debt and the wipe
+        // request must survive it, or the release frame would find no reason
+        // to run and the picture would stay on the adopted family forever.
+        if(!historyHold) {
+            g_forceClearOnNextDraw = false;
+            g_redrawTHLevelsNeeded = false;
+        }""",
+         "P-PERF-108: a held frame consumes nothing, so it clears nothing"),
+        (re.compile(re.escape(r"""#define BUILD_STAGE_GATE_MS 60   // P-PERF-34b: spacing between staged rebuild frames""")),
+         r"""#define BUILD_STAGE_GATE_MS 60   // P-PERF-34b: spacing between staged rebuild frames
+
+// P-PERF-108 (2026-10-16) — HOW LONG AN ADOPTED FAMILY MAY HOLD THE PAINT WHILE
+// HISTORY IS STILL SYNTHETIC. `!g_initialized` means RedrawAllObjects is
+// standing in a ±1% band around the base price (its own fallback) and any
+// ladder built from it is a fraction of the real one. On a handoff the chart
+// already carries the previous instance's family (g_adoptPreviousTopology),
+// which is a REAL ladder — so the paint waits for real history instead of
+// overwriting it with the synthetic rungs and swapping again a frame later.
+// The pump owes a frame every 250 ms while `!g_initialized`, so the normal
+// wait is one or two frames; the bound exists only for a symbol whose history
+// genuinely never lands — after it, the synthetic ladder paints (as it always
+// did) and the cleanup/sweep gates keep it from deleting anything.
+const uint P_HISTORY_HOLD_MAX_MS = 2000;""",
+         "P-PERF-108: how long an adopted family may hold the paint"),
     ],
     "GlobalVariables.mqh": [
         # (2) RESTORE: the MT4 comment is right for MT4 (the write is refused
@@ -407,6 +987,46 @@ MODULE_PATCHES = {
          '    if((ChartGetInteger(0, CHART_CONTEXT_MENU) != 0) != s_viewCtxUser)\n'
          '        ChartSetInteger(0, CHART_CONTEXT_MENU, s_viewCtxUser);\n',
          "MT5 accepts the CHART_CONTEXT_MENU write, so the menu must be restored"),
+        # P-PERF-95 (BUG-04, 2026-10-13): the cross-reload period-change flag,
+        # declared here because EventHandlers is included after this file (an
+        # MQL4 file has no forward reference for a global). See the period-stamp
+        # patches in EventHandlers.mqh: on MT5 the witness static is wiped by
+        # the reload a timeframe switch performs, so the answer must be carried
+        # in a GlobalVariable. MT4 keeps its instance state and has no flag.
+        (re.compile(r'bool g_adoptPreviousTopology = false;\n'),
+         'bool g_adoptPreviousTopology = false;\n'
+         '// P-PERF-95 (BUG-04, 2026-10-13) - "the chart period is not what the\n'
+         '// instance before me was showing", resolved ONCE per instance at the end\n'
+         '// of OnInitHandler (ResolvePeriodChangeAttach, EventHandlers) from the\n'
+         '// stamp the teardown wrote.\n'
+         'bool g_periodChangedOnAttach = false;\n',
+         "the cross-reload period-change flag (BUG-04)"),
+        # P-PERF-94 (BUG-03, 2026-10-13): the timeframe-lock accessors, defined
+        # beside the state they read (PerformanceOptimizations.mqh, included
+        # before this file, forward-declares them). MT4 resolves the lock at its
+        # call sites instead, so the pair is MT5-only.
+        (re.compile(r'static int g_lockedPeriod = 0;\n'),
+         'static int g_lockedPeriod = 0;\n'
+         'bool CompatTimeframeLockActive() { return (g_timeframeLocked && g_lockedPeriod > 0); }\n'
+         'int  CompatLockedPeriod()        { return g_lockedPeriod; }\n',
+         "the timeframe-lock accessors the cached period reads through (BUG-03)"),
+        # --- P-VIEW-05 (2026-10-16) - THE STAGE VIEWPORT SNAPSHOT IS GONE.
+        # The window never decided what the stages paint (the build's
+        # inViewport flags had no consumer), so the freeze could only split a
+        # family across a window nothing read. P-PERF-108's history-hold
+        # guards the transient-build window instead.
+        (re.compile(re.escape(r"""// Viewport snapshot taken on the stage-1 frame: stages 2-4 cull against the
+// SAME window so a pan mid-staging cannot split families across viewports.
+// Stale at most ~1 s by construction; the next viewport-driven render heals it.
+static double g_stageVpTop = 0.0;
+static double g_stageVpBottom = 0.0;""")),
+         r"""// P-VIEW-05 (2026-10-16): `g_stageVpTop`/`g_stageVpBottom` stood here — the
+// window snapshot that froze stages 2-4 to the stage-1 frame's viewport. The
+// window never decided what the stages paint (the build's `inViewport` flags
+// had no consumer), so the freeze could only split a family across a window
+// nothing read. The stages now share the build lists alone (PipelineGeometryKey),
+// and P-PERF-108's history-hold guards the transient-build window instead.""",
+         "P-VIEW-05: the stage viewport snapshot has no consumer"),
     ],
     "ObjectFunctions.mqh": [
         # (1) signature: an optional pre-computed lift, so the per-level caller
@@ -467,6 +1087,25 @@ MODULE_PATCHES = {
          '    }\n'
          '    }\n',
          "skip the 3 chart reads per label when the render pass already has them"),
+        # P-PERF-92 (BUG-08, 2026-10-13): the BACK re-ownership probe rides
+        # the text gate. The probe ran on EVERY pass - one kernel round trip
+        # per label per render, all answering "false" on a healthy chart,
+        # because the create branch above sets BACK=false at birth. The state
+        # it repairs (a stale label left with BACK=true) can exist only while
+        # the label is being REWRITTEN, so it is asked exactly then. MT4 keeps
+        # the unguarded form; the verdict cannot change (a repair pass still
+        # repairs, and a skipped pass had nothing to repair).
+        (re.compile(
+            r'        if\(!hasCachedLabel \|\| cachedText != labelText\)\n'
+            r'            ObjectSetString\(0, name, OBJPROP_TEXT, labelText\);\n'),
+         '        bool labelTextChanged = (!hasCachedLabel || cachedText != labelText);\n'
+         '        if(labelTextChanged)\n'
+         '            ObjectSetString(0, name, OBJPROP_TEXT, labelText);\n',
+         "name the text-changed condition once; the BACK probe rides it"),
+        (re.compile(
+            r'        if\(\(bool\)ObjectGetInteger\(0, name, OBJPROP_BACK\)\)\n'),
+         '        if(labelTextChanged && (bool)ObjectGetInteger(0, name, OBJPROP_BACK))\n',
+         "the BACK probe only when the text was just rewritten"),
     ],
     "HTFCandles.mqh": [
         # 3 per-pass diagnostics (178 lines measured). All standalone statements;
@@ -513,6 +1152,10 @@ MODULE_PATCHES = {
          '_LOG_GATE_D Print("[P-VIEW] stage=census',
          "the census diagnostic is DEBUG, not production"),
         (re.compile(
+            r'if\(above != s_wA \|\| below != s_wB\) \{ s_wA = above; s_wB = below; Print\("\[LVL\] split N=", N, " above=", above, " below=", below\); \}'),
+         'if(above != s_wA || below != s_wB) { s_wA = above; s_wB = below; _LOG_GATE_D Print("[LVL] split N=", N, " above=", above, " below=", below); }',
+         "the split-count witness is DEBUG, not production (P-PERF-102)"),
+        (re.compile(
             r'            CreatePipDistanceLabel\(labelName, lines\[i\]\.price, pips,\n'
             r'                                   lines\[i\]\.isTrigger \? lblClr : lineClr,\n'
             r'                                   lines\[i\]\.labelText\);\n'),
@@ -520,6 +1163,457 @@ MODULE_PATCHES = {
          '                                   lines[i].isTrigger ? lblClr : lineClr,\n'
          '                                   lines[i].labelText, PipDistanceLabelLift());\n',
          "one lift per render pass, not three chart reads per level"),
+        # P-PERF-97 (BUG-10, 2026-10-13): one reservation for the whole walk.
+        # The sweep visits every chart object and can collect nearly all of
+        # them, and `doomed[]` was grown ONE ELEMENT AT A TIME - up to ~1000
+        # reallocations of a growing string array inside the walk that already
+        # pays an ObjectName per object. `total` is the exact upper bound, so
+        # it is reserved once and the growth calls below stay only as guards.
+        (re.compile(r'    string doomed\[\];\n    int nd = 0;\n'),
+         '    string doomed[];\n'
+         '    int nd = 0;\n'
+         '    if(total > 0) ArrayResize(doomed, total);\n'
+         '\n',
+         "reserve the whole walk's doomed[] once (BUG-10)"),
+        (re.compile(r'ArrayResize\(doomed, nd \+ 1\);'),
+         'if(nd >= ArraySize(doomed)) ArrayResize(doomed, nd + 1);',
+         "guarded growth; the reservation above is the normal path"),
+        # --- P-PERF-107 (2026-10-16) - THE HANDOFF SWEEP IS RESUMABLE.
+        # The whole-chart walk cost 1016-1062 ms on the user's chart and blocked
+        # the FIRST RENDER of the handoff frame (the new chart stayed empty for
+        # a full second on top of the ~1 s OnInit walk). The walk and the
+        # deletions now run SWEEP_FOREIGN_CHUNK objects per frame and return -1
+        # while still running; the caller latches the handoff only when the
+        # sweep returns >= 0, and it runs OUTSIDE the stepSig block so it can
+        # advance on every frame. Same deletion set as P-LEVEL-FOREIGN-02.
+        # P-PERF-107b: the "cannot judge yet" early-outs return -1, not 0 - the
+        # first post-handoff frames have no base price yet, and a 0 there let
+        # the caller latch before the real build landed (nothing swept).
+        # P-PERF-108 adds `g_initialized` to that readiness question (the old
+        # window test was a proxy for it), and gates the whole sweep entry.
+        (re.compile(re.escape(r"""int SweepForeignLadderObjects(const SModeConfig &config,
+                              const STriggerLine &lines[],
+                              const int lineCount,
+                              const SZoneDefinition &zones[],
+                              const int zoneCount,
+                              const double vpTop,
+                              const double vpBottom)
+{
+    if(!(vpTop > vpBottom) || vpBottom <= 0) return 0;   // unusable window: no judgement
+    if(lineCount <= 0) return 0;                        // nothing produced: nothing to say
+
+    // What this build owns, by NAME (labels included: a line and its pip label
+    // are one decision, and RenderTriggerLines writes both).
+    string produced[];
+    int pc = 0;
+    ArrayResize(produced, lineCount * 2 + zoneCount);
+    for(int l = 0; l < lineCount; l++)
+    {
+        produced[pc++] = lines[l].name;
+        produced[pc++] = lines[l].name + "_Label";
+    }
+    for(int z = 0; z < zoneCount; z++)
+        produced[pc++] = zones[z].name;
+
+    const string fam = config.objectPrefix + config.modeName + "_";
+    const int total = ObjectsTotal(0, -1, -1);
+    string doomed[];
+    int nd = 0;
+
+    // P-PERF-55: the membership question is asked once per family name below, so
+    // the list is turned into a SET here — one O(pc) build, one probe per name.
+    // `false` = the list is too big for the table: every test below then uses the
+    // original exact scan, so the verdict cannot change with the shape.
+    const bool producedSet = LadderSetBuild(produced, pc);
+
+    for(int i = total - 1; i >= 0; i--)
+    {
+        const string nm = ObjectName(0, i, -1, -1);
+        if(!LadderFamilyName(nm, fam)) continue;
+
+        if(LadderNameIsZoneBand(nm))
+        {
+            if(producedSet ? LadderSetHas(nm) : ProducedLadderName(nm, produced, pc)) continue;
+            ArrayResize(doomed, nd + 1);
+            doomed[nd++] = nm;
+            continue;
+        }
+        if(StringFind(nm, "_Zone_") >= 0) continue;   // a border sub-object: its band decides
+
+        if(producedSet ? LadderSetHas(nm) : ProducedLadderName(nm, produced, pc)) continue;
+        ArrayResize(doomed, nd + 1);
+        doomed[nd++] = nm;
+    }
+
+    if(nd == 0) return 0;
+
+    g_suppressDeleteEvents = true;
+    int removed = 0;
+    for(int d = 0; d < nd; d++)
+    {
+        if(StringFind(doomed[d], "_Zone_") >= 0)
+        {
+            if(DeleteManagedZoneObjects(doomed[d], true)) removed++;
+        }
+        else if(DeleteIndicatorObjectManaged(doomed[d], true)) removed++;
+    }
+    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+    g_suppressDeleteEvents = false;
+    return removed;
+}""")),
+         r"""const int SWEEP_FOREIGN_CHUNK = 250;
+static bool   s_fsActive  = false;
+static int    s_fsPhase   = 0;
+static int    s_fsCursor  = 0;
+static string s_fsFam     = "";
+static string s_fsProduced[];
+static int    s_fsPc      = 0;
+static bool   s_fsSet     = false;
+static string s_fsDoomed[];
+static int    s_fsNd      = 0;
+static int    s_fsRemoved = 0;
+
+int SweepForeignLadderObjects(const SModeConfig &config,
+                              const STriggerLine &lines[],
+                              const int lineCount,
+                              const SZoneDefinition &zones[],
+                              const int zoneCount)
+{
+    if(!s_fsActive)
+    {
+        // P-PERF-107b (2026-10-16): "cannot judge yet" is NOT a verdict. The
+        // hoisted caller runs on EVERY frame - including the first frames
+        // after a handoff, where there is no base price yet (centerPrice<=0
+        // above leaves lineCount at 0). Returning 0 there made the caller
+        // latch `s_foreignSweepDone` before the real build ever landed, so
+        // the previous timeframe's ladder was never swept (no FOREIGN print
+        // in the whole 15:20-15:28 tour). -1 = "retry next frame".
+        // P-VIEW-05 (2026-10-16): the old gate here asked whether the CULL
+        // WINDOW was usable — a proxy for "the build is real". It is the
+        // readiness flag itself now: the window never decided what this
+        // sweep may delete, and `g_initialized` names the fact the proxy
+        // was standing in for (history landed, the ladder is final).
+        if(!g_initialized) return -1;                        // transient ladder: not judged
+        if(lineCount <= 0) return -1;                        // nothing produced yet: not judged
+
+        // What this build owns, by NAME (labels included: a line and its pip
+        // label are one decision, and RenderTriggerLines writes both).
+        s_fsPc = lineCount * 2 + zoneCount;
+        ArrayResize(s_fsProduced, s_fsPc);
+        int pc = 0;
+        for(int l = 0; l < lineCount; l++)
+        {
+            s_fsProduced[pc++] = lines[l].name;
+            s_fsProduced[pc++] = lines[l].name + "_Label";
+        }
+        for(int z = 0; z < zoneCount; z++)
+            s_fsProduced[pc++] = zones[z].name;
+
+        s_fsFam = config.objectPrefix + config.modeName + "_";
+        // P-PERF-55: the membership question is asked once per family name, so
+        // the list is turned into a SET here — one O(pc) build, one probe per
+        // name. `false` = the list is too big for the table: every test below
+        // then uses the original exact scan, so the verdict cannot change.
+        // The set is NOT rebuilt per chunk: nothing else calls LadderSetBuild
+        // while a sweep is active.
+        s_fsSet = LadderSetBuild(s_fsProduced, s_fsPc);
+
+        // P-PERF-97 (BUG-10, 2026-10-13): ONE ALLOCATION FOR THE WHOLE WALK —
+        // `total` is the exact upper bound on the names the walk can collect.
+        const int total = ObjectsTotal(0, -1, -1);
+        s_fsNd = 0;
+        if(total > 0) ArrayResize(s_fsDoomed, total);
+        s_fsCursor = total - 1;
+        s_fsRemoved = 0;
+        s_fsPhase = 0;
+        s_fsActive = true;
+    }
+
+    if(s_fsPhase == 0)
+    {
+        // Phase 0: walk, SWEEP_FOREIGN_CHUNK objects this frame.
+        int examined = 0;
+        while(s_fsCursor >= 0 && examined < SWEEP_FOREIGN_CHUNK)
+        {
+            const string nm = ObjectName(0, s_fsCursor, -1, -1);
+            s_fsCursor--;
+            examined++;
+            if(!LadderFamilyName(nm, s_fsFam)) continue;
+
+            if(LadderNameIsZoneBand(nm))
+            {
+                if(s_fsSet ? LadderSetHas(nm) : ProducedLadderName(nm, s_fsProduced, s_fsPc)) continue;
+                if(s_fsNd >= ArraySize(s_fsDoomed)) ArrayResize(s_fsDoomed, s_fsNd + 1);
+                s_fsDoomed[s_fsNd++] = nm;
+                continue;
+            }
+            if(StringFind(nm, "_Zone_") >= 0) continue;   // a border sub-object: its band decides
+
+            if(s_fsSet ? LadderSetHas(nm) : ProducedLadderName(nm, s_fsProduced, s_fsPc)) continue;
+            if(s_fsNd >= ArraySize(s_fsDoomed)) ArrayResize(s_fsDoomed, s_fsNd + 1);
+            s_fsDoomed[s_fsNd++] = nm;
+        }
+        if(s_fsCursor >= 0) return -1;   // more to walk — the caller must not latch
+        if(s_fsNd == 0) { s_fsActive = false; return 0; }
+        s_fsPhase = 1;
+    }
+
+    // Phase 1: delete, SWEEP_FOREIGN_CHUNK names this frame (popped from the
+    // end of the doomed list — the order never mattered).
+    g_suppressDeleteEvents = true;
+    int deleted = 0;
+    while(s_fsNd > 0 && deleted < SWEEP_FOREIGN_CHUNK)
+    {
+        const string nm = s_fsDoomed[s_fsNd - 1];
+        s_fsNd--;
+        deleted++;
+        if(StringFind(nm, "_Zone_") >= 0)
+        {
+            if(DeleteManagedZoneObjects(nm, true)) s_fsRemoved++;
+        }
+        else if(DeleteIndicatorObjectManaged(nm, true)) s_fsRemoved++;
+    }
+    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+    g_suppressDeleteEvents = false;
+    if(s_fsNd > 0) return -1;   // more to delete — the caller must not latch
+    const int removed = s_fsRemoved;
+    s_fsActive = false;
+    return removed;
+}""",
+         "P-PERF-107: the handoff sweep walks/deletes in resumable chunks"),
+        (re.compile(re.escape(r"""                if(g_adoptPreviousTopology && !s_foreignSweepDone)
+                {
+                    s_foreignSweepDone = true;   // this frame IS the handoff
+                    int stale = SweepForeignLadderObjects(config, lines, result.lineCount,
+                                                          zones, result.zoneCount,
+                                                          vpTop, vpBottom);
+                    if(stale > 0)
+                        _LOG_GATE_W Print("[W][GEN] P-LEVEL-FOREIGN-02: deleted ", stale,
+                                          " ladder object(s) this build does not produce ",
+                                          "(handoff, family=", config.modeName, ")");
+                }""")),
+         r"""    if(g_adoptPreviousTopology && g_initialized && !s_foreignSweepDone
+       && !g_s1DragLive && !g_customPriceLineDragging)
+    {
+        int stale = SweepForeignLadderObjects(config, lines, result.lineCount,
+                                              zones, result.zoneCount);
+        if(stale >= 0)
+        {
+            s_foreignSweepDone = true;   // the handoff's sweep has finished
+            if(stale > 0)
+                _LOG_GATE_W Print("[W][GEN] P-LEVEL-FOREIGN-02: deleted ", stale,
+                                  " ladder object(s) this build does not produce ",
+                                  "(handoff, family=", config.modeName, ")");
+        }
+    }""",
+         "P-PERF-107: the handoff sweep runs outside the stepSig block"),
+        # --- P-VIEW-05 (2026-10-16) - THE VIEWPORT WINDOW IS GONE FROM THE
+        # PIPELINE. The window never decided what the pipeline paints: the
+        # inViewport flags it set had no consumer (the render does its own
+        # mask), and the geometry key never read it either - it could only
+        # re-key a rebuild that the build itself would produce identically.
+        # Every vpTop/vpBottom parameter, field, assignment and census term is
+        # removed here; the build's readiness is named by g_initialized alone
+        # (P-PERF-108).
+        (re.compile(re.escape(r"""    bool   outline;         // draw the edge (three border segments)
+    bool   inViewport;      // false = skip render, geometry is valid""")),
+         r"""    bool   outline;         // draw the edge (three border segments)
+""",
+         "P-VIEW-05: the zone's inViewport flag had no consumer"),
+        (re.compile(re.escape(r"""                            // so its pip label wears the TRIGGER LABEL surface
+    bool   inViewport;      // false = skip render
+    bool   isMidpoint;""")),
+         r"""                            // so its pip label wears the TRIGGER LABEL surface
+    bool   isMidpoint;
+""",
+         "P-VIEW-05: the line's inViewport flag had no consumer"),
+        (re.compile(re.escape(r"""void BuildZonesAndLines(
+    const SLevelClassified &classified[],
+    const int classifiedCount,
+    const SModeConfig &config,
+    const double vpTop,
+    const double vpBottom,
+    const double fixedZoneStepSize,""")),
+         r"""void BuildZonesAndLines(
+    const SLevelClassified &classified[],
+    const int classifiedCount,
+    const SModeConfig &config,
+    const double fixedZoneStepSize,""",
+         "P-VIEW-05: the build no longer takes a cull window"),
+        (re.compile(re.escape(r"""        zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                       zones[zIdx].renderBottom <= vpTop);""")),
+         "",
+         "P-VIEW-05: the center zone no longer computes an inViewport flag"),
+        (re.compile(re.escape(r"""            zones[zIdx].inViewport = (zones[zIdx].renderTop >= vpBottom && 
+                                      zones[zIdx].renderBottom <= vpTop);""")),
+         "",
+         "P-VIEW-05: the above/below zones no longer compute inViewport flags"),
+        (re.compile(re.escape(r"""        lines[lIdx].inViewport = (lineMidPrice >= vpBottom && lineMidPrice <= vpTop);
+""")),
+         "",
+         "P-VIEW-05: the above/below lines no longer compute inViewport flags"),
+        (re.compile(re.escape(r"""void RenderZones(
+    const SZoneDefinition &zones[],
+    const int zoneCount,
+    const SModeConfig &config,
+    const double vpTop,
+    const double vpBottom)""")),
+         r"""void RenderZones(
+    const SZoneDefinition &zones[],
+    const int zoneCount,
+    const SModeConfig &config)""",
+         "P-VIEW-05: RenderZones no longer takes a cull window"),
+        (re.compile(re.escape(r"""void RenderTriggerLines(
+    const STriggerLine &lines[],
+    const int lineCount,
+    const SModeConfig &config,
+    const bool makeLines,
+    const bool makeLabels,
+    const double vpTop,
+    const double vpBottom)""")),
+         r"""void RenderTriggerLines(
+    const STriggerLine &lines[],
+    const int lineCount,
+    const SModeConfig &config,
+    const bool makeLines,
+    const bool makeLabels)""",
+         "P-VIEW-05: RenderTriggerLines no longer takes a cull window"),
+        (re.compile(re.escape(r"""void CleanupSurplusPipeline(
+    const SModeConfig &config,
+    const int maxLogicalStep){
+""")),
+         r"""void CleanupSurplusPipeline(
+    const SModeConfig &config,
+    const int maxLogicalStep)
+{
+    // ══════════════════════════════════════════════════════════════════════
+    // P-PERF-108 (2026-10-16) — NO SURPLUS DELETE AGAINST A TRANSIENT BUILD.
+    //
+    // `maxLogicalStep` arrives from the build that just ran, and on the first
+    // frame after a timeframe switch that build can be SYNTHETIC: history has
+    // not landed yet, so RedrawAllObjects stands in a ±1% band around the base
+    // price (EventHandlers, the `!g_initialized` fallback) and the ladder that
+    // comes out is a fraction of the real one. This walk then deleted every
+    // adopted object above that fraction — names the REAL build produces and
+    // the very next frame re-creates — which is the delete-and-reappear blink
+    // the user reported («حذف و ظاهر میشه مثل چشم زدن»), on EVERY switch.
+    //
+    // `!g_initialized` is the exact name of "history is not trustworthy yet":
+    // it is false from attach/switch until UpdateHistoricalValues succeeds,
+    // and RedrawAllObjects retries it every heavy frame (the pump owes one
+    // every 250 ms on a tick-less chart), so the moment it flips, the next
+    // frame's cleanup runs against the real ladder. Nothing accumulates: the
+    // real build's own frame deletes the true surplus in one pass.
+    // ══════════════════════════════════════════════════════════════════════
+    if(!g_initialized) return;""",
+         "P-PERF-108: cleanup must not judge a transient ladder"),
+        (re.compile(re.escape(r"""string PipelineGeometryKey(const SModeConfig &config,
+                           const double centerPrice,
+                           const double &stepSizes[],
+                           const int stepSizeCount,
+                           const ENUM_LEVEL_STEP_MODE stepMode,
+                           const ENUM_CLASSIFY_MODE classifyMode,
+                           const bool lsFirst,
+                           const int maxLevelsAbove,
+                           const int maxLevelsBelow,
+                           const double vpTop,
+                           const double vpBottom,
+                           const int baseMultiplier)""")),
+         r"""string PipelineGeometryKey(const SModeConfig &config,
+                           const double centerPrice,
+                           const double &stepSizes[],
+                           const int stepSizeCount,
+                           const ENUM_LEVEL_STEP_MODE stepMode,
+                           const ENUM_CLASSIFY_MODE classifyMode,
+                           const bool lsFirst,
+                           const int maxLevelsAbove,
+                           const int maxLevelsBelow,
+                           const int baseMultiplier)""",
+         "P-VIEW-05: the geometry key no longer reads the cull window"),
+        (re.compile(re.escape(r"""    key += "|" + DoubleToString(vpTop, 8) + "," + DoubleToString(vpBottom, 8);
+""")),
+         "",
+         "P-VIEW-05: the key line for the cull window is gone"),
+        (re.compile(re.escape(r"""                                       maxLevelsBelow, vpTop, vpBottom,
+""")),
+         r"""                                       maxLevelsBelow,
+""",
+         "P-VIEW-05: the key call no longer passes the cull window"),
+        (re.compile(re.escape(r"""SPipelineResult ExecutePipeline(
+    const SModeConfig &config,
+    const double centerPrice,
+    const double &stepSizes[],
+    const int stepSizeCount,
+    const ENUM_LEVEL_STEP_MODE stepMode,
+    const ENUM_CLASSIFY_MODE classifyMode,
+    const bool lsFirst,
+    const int maxLevelsAbove,
+    const int maxLevelsBelow,
+    const double vpTop,
+    const double vpBottom,
+    const int buildStage)""")),
+         r"""SPipelineResult ExecutePipeline(
+    const SModeConfig &config,
+    const double centerPrice,
+    const double &stepSizes[],
+    const int stepSizeCount,
+    const ENUM_LEVEL_STEP_MODE stepMode,
+    const ENUM_CLASSIFY_MODE classifyMode,
+    const bool lsFirst,
+    const int maxLevelsAbove,
+    const int maxLevelsBelow,
+    const int buildStage)""",
+         "P-VIEW-05: ExecutePipeline no longer takes a cull window"),
+        (re.compile(re.escape(r"""        BuildZonesAndLines(classified, classifiedCount, config, vpTop, vpBottom,
+""")),
+         r"""        BuildZonesAndLines(classified, classifiedCount, config,
+""",
+         "P-VIEW-05: the build call no longer passes the cull window"),
+        (re.compile(re.escape(r"""    if(buildStage == BUILD_STAGE_LINES) {
+        RenderTriggerLines(lines, result.lineCount, config, true, false, vpTop, vpBottom);
+    } else if(buildStage == BUILD_STAGE_ZONES) {
+        RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
+    } else if(buildStage == BUILD_STAGE_LABELS) {
+        RenderTriggerLines(lines, result.lineCount, config, false, true, vpTop, vpBottom);
+        // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
+        CleanupSurplusPipeline(config, maxStep);
+    } else {
+        RenderZones(zones, result.zoneCount, config, vpTop, vpBottom);
+        RenderTriggerLines(lines, result.lineCount, config, true, true, vpTop, vpBottom);
+
+        // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
+        CleanupSurplusPipeline(config, maxStep);
+    }""")),
+         r"""    if(buildStage == BUILD_STAGE_LINES) {
+        RenderTriggerLines(lines, result.lineCount, config, true, false);
+    } else if(buildStage == BUILD_STAGE_ZONES) {
+        RenderZones(zones, result.zoneCount, config);
+    } else if(buildStage == BUILD_STAGE_LABELS) {
+        RenderTriggerLines(lines, result.lineCount, config, false, true);
+        // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
+        CleanupSurplusPipeline(config, maxStep);
+    } else {
+        RenderZones(zones, result.zoneCount, config);
+        RenderTriggerLines(lines, result.lineCount, config, true, true);
+
+        // PERF: maxStep already known from CalculateLevels output (no extra O(n) scan needed)
+        CleanupSurplusPipeline(config, maxStep);
+    }""",
+         "P-VIEW-05: the stage renders no longer pass the cull window"),
+        (re.compile(re.escape(r"""        string shape = IntegerToString(result.lineCount) + ":" + IntegerToString(result.zoneCount) + ":" +
+                       DoubleToString(vpTop - vpBottom, GetCachedDigits());""")),
+         r"""        string shape = IntegerToString(result.lineCount) + ":" + IntegerToString(result.zoneCount);
+""",
+         "P-VIEW-05: the view census no longer keys on the window height"),
+        (re.compile(re.escape(r"""                  " win=", DoubleToString(vpBottom, GetCachedDigits()), "..", DoubleToString(vpTop, GetCachedDigits()),
+""")),
+         "",
+         "P-VIEW-05: the view census no longer prints the window"),
+        (re.compile(re.escape(r"""            if(stepSig != s_lastStepSig && !g_s1DragLive && !g_customPriceLineDragging)
+""")),
+         r"""            if(stepSig != s_lastStepSig && g_initialized
+               && !g_s1DragLive && !g_customPriceLineDragging)""",
+         "P-PERF-108: the foreign-step latch must not fire on a transient ladder"),
     ],
     "TH3Renderer.mqh": [
         (re.compile(
@@ -548,6 +1642,25 @@ MODULE_PATCHES = {
          '    s_lastSweptTotal = totalNow;\n'
          '    for(int i = totalNow - 1; i >= 0; i--)\n',
          "the chart-wide orphan sweep runs per frame, not per chart change"),
+        # P-PERF-104 (2026-10-16) - THE RETIRED MARKER NAMESPACE IS ONE PREFIX
+        # WIPE. The old loop walked every chart object by index (~1200 calls at
+        # ~3ms on the live terminal) to find a namespace nothing recreates
+        # (P-TH3-DISC), twice per timeframe switch - the ledger charged the
+        # teardown side `knot=687ms`. The delete set is identical: the loop's
+        # `StringFind(nm, prefix) == 0` IS ObjectsDeleteAll's documented match.
+        (re.compile(
+            r'void TH3PivotMarkersClear\(\)\n\{\n'
+            r'    for\(int i = ObjectsTotal\(0, -1, -1\) - 1; i >= 0; i--\)\n'
+            r'    \{\n'
+            r'        string nm = ObjectName\(0, i, -1, -1\);\n'
+            r'        if\(StringFind\(nm, TH3_P6_PREFIX\) == 0\) ObjectDelete\(0, nm\);\n'
+            r'    \}\n'
+            r'\}\n'),
+         'void TH3PivotMarkersClear()\n'
+         '{\n'
+         '    ObjectsDeleteAll(0, TH3_P6_PREFIX, -1, -1);\n'
+         '}\n',
+         "P-PERF-104: the retired marker namespace is one prefix wipe"),
     ],
     "TH3Tool.mqh": [
         (re.compile(

@@ -186,6 +186,14 @@ JUSTIFY = [
     # --- seeds; it adds no drawing, only orders it.
     (r'\bseedWait\b|s_seedWaitStartMs',
      "first paint waits for the async ATR seed (MT5 iATR handle)", "mt5"),
+    # --- MT5-ONLY P-PERF-106 (2026-10-16): the two cross-reload resolutions
+    # --- moved OUT of OnInitHandler into the entries, after the OV_ runtime
+    # --- overrides load (inside OnInitHandler the topology fingerprint read
+    # --- the 144 seed while the dying instance had written the OV_'s 352, so
+    # --- every attach stamped a mismatch and walked the chart). MT4 resolves
+    # --- inside its OnInitHandler, so the entry call lines are MT5-only.
+    (r'^\s*Resolve(TopologyAdoption|PeriodChangeAttach)\(\);\s*$',
+     "the cross-reload resolutions run at the end of OnInit (P-PERF-106)", "mt5"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*

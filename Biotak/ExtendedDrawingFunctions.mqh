@@ -71,7 +71,31 @@ bool CreateOrUpdateHLine(const string name, double price,
     SObjectCacheEntry cachedEntry;
     bool hasCached = CacheGetObject(name, cachedEntry);
     bool objectExists = false;
+    // P-PERF-91 (BUG-05, 2026-10-13) — THE STEADY PATH PAYS NOTHING.
+    //
+    // The existence probe below is the only terminal call left on the update
+    // path, and on MT5 that call is a KERNEL ROUND TRIP (MT4's ObjectFind was
+    // in-process, which is why the same line costs nothing there). It ran on
+    // EVERY call — including the steady one, where every property already
+    // matches and the answer cannot change what happens. MEASURED shape: a
+    // ~300-level render paid ~300 probes, all of them answering "yes, it is
+    // still there", and the writes they guarded were zero.
+    //
+    // The probe is now asked ONLY when there is a write to justify it. A level
+    // whose price, colour, style and width all already match costs one cache
+    // lookup, one mask check (`ApplyTfMaskGuarded`, itself cache-guarded) and
+    // NOTHING ELSE. Correctness is untouched: whenever the cache could be stale
+    // AND something would be written, the probe still runs exactly as before.
     if(hasCached && cachedEntry.exists) {
+        double normPriceNow = NormalizeDouble(price, Digits);
+        bool priceChanged = (MathAbs(cachedEntry.lastPrice - normPriceNow) > GetCachedPoint() * 0.1);
+        bool lookChanged  = (cachedEntry.lastColor != clr) ||
+                            (cachedEntry.lastStyle != (int)style) ||
+                            (cachedEntry.lastWidth != width);
+        if(!priceChanged && !lookChanged) {
+            ApplyVisibilityStateIfUnchangedSkip(name, visibilityAsLine);
+            return false;
+        }
         objectExists = (ObjectFind(0, name) >= 0);
         if(!objectExists) {
             CacheRemoveObject(name);
@@ -115,6 +139,13 @@ bool CreateOrUpdateHLine(const string name, double price,
 }
 
 // P-PERF-04: viewport cull geometry. MARGIN must be > HYSTERESIS (see below).
+// P-VIEW-05 (2026-10-16): THIS FUNCTION IS NOW UNCALLED. The window it derives
+// never decided what the levels build or paint — the build's `inViewport` flags
+// had no consumer, the geometry key's window term is gone, and the staging
+// freeze that re-read it was replaced by P-PERF-108's history-hold. It stays in
+// the tree on purpose: it is MT4's symbol and the parity law ("nothing less")
+// treats a deleted MT4 symbol as lost logic — the removal of its USES is the
+// declared MT5-only change (MODULE_PATCHES), not the removal of the code.
 #define P_P4_VP_MARGIN_PCT     0.25
 #define P_P4_VP_HYSTERESIS_PCT 0.20
 #define P_P4_FALLBACK_RANGE_PCT 0.02   // +-2% around price when no range is known
@@ -643,7 +674,7 @@ double GetStepSizeForBasisTypeFromTH(const double basePrice, const double multip
         return 0;
     }
     
-    // Apply multiplier (1.0=TH, 1.333333=4/3, 1.5=SS, 1.75=Control, 2.0=LS)
+    // Apply multiplier (1.0=TH, 1.333333=4/3, 1.5=SS, 1.666666=5/3, 1.75=Control, 2.0=LS)
     double stepSize = thPriceUnits * multiplier;
     
     // GOLD FIX: Comprehensive validation
@@ -932,7 +963,7 @@ ENUM_TIMEFRAMES GetTimeframeByType(const ENUM_COMBO_TIMEFRAME_TYPE tfType) {
 //+------------------------------------------------------------------+
 double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
     // CRITICAL: Validate input
-    if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_RATIO_4_3) {
+    if(stepType < COMBO_STEP_TH || stepType > COMBO_STEP_RATIO_5_3) {
         #ifdef ENABLE_DEBUG_LOGS
         Print("  GetStepMultiplier: Invalid stepType=", stepType, ", using 1.0 (TH)");
         #endif
@@ -953,6 +984,9 @@ double GetStepMultiplier(const ENUM_COMBO_STEP_TYPE stepType) {
             break;
         case COMBO_STEP_RATIO_4_3:
             multiplier = 4.0 / 3.0; // LS / SS ratio
+            break;
+        case COMBO_STEP_RATIO_5_3:
+            multiplier = 5.0 / 3.0;
             break;
         default:
             #ifdef ENABLE_DEBUG_LOGS

@@ -2480,11 +2480,22 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 #define TH3_P6_PREFIX      "TH3_P6_"
 void TH3PivotMarkersClear()
 {
-    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
-    {
-        string nm = ObjectName(0, i, -1, -1);
-        if(StringFind(nm, TH3_P6_PREFIX) == 0) ObjectDelete(0, nm);
-    }
+    // P-PERF-104 (2026-10-16) — ONE PREFIX WIPE, NOT A WHOLE-CHART WALK.
+    //
+    // The loop this replaces asked the terminal for every chart object by
+    // INDEX (`ObjectsTotal` + one `ObjectName` per index) to find a namespace
+    // that is RETIRED (P-TH3-DISC: nothing recreates `TH3_P6_*`), so on a
+    // chart at ~1200 objects it paid ~1200 MQL calls — ~3 ms each on this
+    // terminal, the per-call law P-PERF-100/101/103 all measured — to find
+    // nothing. It runs twice per timeframe switch (once at teardown, inside
+    // `knot=`, and once at attach from TH3PivotMarkersUpdate), and the live
+    // ledger charged the teardown side `knot=687ms`.
+    //
+    // The delete set is IDENTICAL: `StringFind(nm, prefix) == 0` is exactly
+    // the prefix match `ObjectsDeleteAll` documents, so the terminal walks
+    // the same list inside ONE call — the shape P-PERF-100 gave the strip
+    // sweep and P-PERF-101 the gear family.
+    ObjectsDeleteAll(0, TH3_P6_PREFIX, -1, -1);
 }
 
 #endif // TH3_RENDERER_B_MQH

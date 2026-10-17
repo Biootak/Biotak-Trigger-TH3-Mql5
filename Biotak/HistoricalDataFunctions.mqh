@@ -66,7 +66,7 @@ bool UpdateHistoricalValues() {
         static uint s_lastBarsWarningMs = 0;
         uint _nowMs = GetTickCount();
         if(_nowMs - s_lastBarsWarningMs > 30000) {
-            Print("UpdateHistoricalValues: Waiting for historical data (", EnumToString(effectiveTimeframe), ")...");
+            _LOG_GATE_D Print("UpdateHistoricalValues: Waiting for historical data (", EnumToString(effectiveTimeframe), ")...");
             s_lastBarsWarningMs = _nowMs;
         }
         return false;

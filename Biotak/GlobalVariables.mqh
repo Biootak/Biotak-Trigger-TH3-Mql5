@@ -63,6 +63,23 @@ bool g_forceClearOnNextDraw = false;
 // is included before EventHandlers.mqh (entry lines 93 and 99) and MQL4 has no
 // forward reference for a global.
 bool g_adoptPreviousTopology = false;
+// P-PERF-95 (BUG-04, 2026-10-13) — "the chart period is not what the instance
+// before me was showing", resolved ONCE per instance at the end of
+// OnInitHandler (ResolvePeriodChangeAttach, EventHandlers) from the stamp the
+// teardown wrote.
+//
+// The frame's own witness is a function-local static (`s_lastPeriod`), and on
+// MT5 that witness cannot survive a timeframe switch: the terminal unloads the
+// indicator, so every static is re-initialised and the first frame after the
+// switch sees `-1` — which the old test read as "no change", every time. The
+// whole CACHE_INV_TIMEFRAME arm was therefore unreachable on the one event it
+// was written for, and the switch was handled by paths that were never
+// designed for it. This flag is that witness, carried across the reload the
+// same way the topology stamp is (P-VIEW-05).
+//
+// Declared HERE, not beside its resolver: EventHandlers is included after
+// GlobalVariables and MQL4 has no forward reference for a global.
+bool g_periodChangedOnAttach = false;
 // g_viewportOnlyRedraw removed   scroll no longer triggers level redraw
 int g_currentLabelYOffset = 0;       // Cumulative Y offset for stacking top label sections (ATR)
 int g_currentLabelYOffsetBottom = 0;  // Cumulative Y offset for stacking bottom label sections (TH)
@@ -147,7 +164,7 @@ bool UIPointerOverSurface(const int mx,const int my)
 static bool g_waitingForCustomPriceClick = false;
 static string g_customPriceHorizontalLineName = "CustomPriceHorizontalLine";
 // P-UI-98d: the line's ONE small marker — a green dot at the chart's right edge
-// (time 0, the same anchoring the pip labels use) that shows the line is ARMED.
+// (time 0 — the anchoring the retired pip labels also used) that shows the line is ARMED.
 static string g_cpMarkerName = "CustomPriceHorizontalLine_Mark";
 // P-UI-98: the step-1 handles' markers — red, one per armed rung-1 line. The
 // names carry "_Above_"/"_Below_" so the L-switch visibility walk covers them
@@ -502,6 +519,24 @@ static string g_lastAlertLevel = "";
 // Timeframe Lock (keyboard-only since 2026-09-04: no menu item, no card)
 static bool g_timeframeLocked = false;
 static int g_lockedPeriod = 0;
+
+// P-PERF-94 (BUG-03, 2026-10-13) — THE LOCK'S ONE READER FOR THE PERIOD CACHE.
+//
+// `GetCachedPeriod()` lives in Biotak/PerformanceOptimizations.mqh, which the
+// entry includes BEFORE this file, so it cannot see the two statics above. It
+// therefore answered the CHART's period even on a LOCKED chart — while
+// `GetEffectiveTimeframe()` (Biotak/ATRCalculations.mqh) and
+// `GetCurrentTimeframe()` (Biotak/TimeframeFunctions.mqh) both honour the lock.
+// On a locked chart that mix meant half the code measured in the locked
+// timeframe and half in the chart's: a trend line's span, a label's price and
+// the object-timeframe mask were derived from two different bars.
+//
+// These two are the forward-declared accessors `GetCachedPeriod()` calls. They
+// live HERE, beside the state they read, so there is exactly one owner of "is
+// the lock on, and what period does it pin" — the rule every other reader of
+// the lock already follows.
+bool CompatTimeframeLockActive() { return (g_timeframeLocked && g_lockedPeriod > 0); }
+int  CompatLockedPeriod()        { return g_lockedPeriod; }
 // VIEWLOCK-OFF (2026-09-05, user decision): View Lock retired — the state +
 // core fns below are kept compiling DORMANT (same pattern as TH3TOOL-OFF
 // remnants) so the feature restores by uncommenting the VIEWLOCK-OFF call
@@ -557,27 +592,32 @@ void MarkDrawGeneration()
     if(g_drawGeneration <= 0) g_drawGeneration = 1;   // overflow guard
 }
 
-// P-PERF-06 STAGED REBUILD: a post-wipe level build materialises ~900 chart
-// objects (289 zones + 288 lines + 288 pip labels at inpMaxLevels=144). Doing
-// it in ONE frame freezes a weak PC for seconds on every attach, TF switch
+// P-PERF-06 STAGED REBUILD: a post-wipe level build materialises ~600 chart
+// objects (289 zones + 288 lines at inpMaxLevels=144; a third family of pip
+// labels sat in the count before P-LBL-11 retired them). Doing it in ONE
+// frame freezes a weak PC for seconds on every attach, TF switch
 // and topology toggle. While g_buildStage != 0 the wipe is rebuilt one family
-// per frame (1=lines, 2=zones, 3=pip labels, 4=labels block): every gate
+// per frame (1=lines, 2=zones, 4=the labels block): every gate
 // treats a staging frame as pending work, the geometry signature is stored
 // only when the last stage lands, and heavy neighbours (HTF history bulk)
 // wait for stage 0. The 250 ms timer pumps RedrawAllObjects while staging so
-// a tick-less chart still settles in ~1 s. State lives HERE (not in
+// a tickless chart still settles in ~1 s. State lives HERE (not in
 // EventHandlers statics) so HTFCandles — included LATER — can see it
 // (P-ARCH-02: an earlier-included module can never see a later one).
 #define BUILD_STAGE_LINES  1
 #define BUILD_STAGE_ZONES  2
-#define BUILD_STAGE_LABELS 3
+// P-LBL-11 (2026-10-17): BUILD_STAGE_LABELS stood here (3, the pip-label
+// family frame). The labels are retired and the advance/paint rungs that used
+// the value are gone — the number is skipped, not reused, so every remaining
+// stage keeps its name.
 #define BUILD_STAGE_BLOCK  4
 static int g_buildStage = 0;
-// Viewport snapshot taken on the stage-1 frame: stages 2-4 cull against the
-// SAME window so a pan mid-staging cannot split families across viewports.
-// Stale at most ~1 s by construction; the next viewport-driven render heals it.
-static double g_stageVpTop = 0.0;
-static double g_stageVpBottom = 0.0;
+// P-VIEW-05 (2026-10-16): `g_stageVpTop`/`g_stageVpBottom` stood here — the
+// window snapshot that froze stages 2-4 to the stage-1 frame's viewport. The
+// window never decided what the stages paint (the build's `inViewport` flags
+// had no consumer), so the freeze could only split a family across a window
+// nothing read. The stages now share the build lists alone (PipelineGeometryKey),
+// and P-PERF-108's history-hold guards the transient-build window instead.
 
 // P-PERF-03 ALERT LEVEL CACHE: the level prices the render just put on the
 // chart, recorded ONCE while the pipeline is already iterating them.
@@ -647,6 +687,24 @@ static uint g_pInitMsBase     = 0;   // base-price subsystem (history FILE load)
 static uint g_pInitMsAtr      = 0;   // ATR cache init + warmup step
 static uint g_pInitMsInd      = 0;   // whole OnInitHandler half
 static uint g_pInitMsUI       = 0;   // UI kit / menu / HTF half
+// P-PERF-110 (2026-10-17) — THE SWITCH COST STOPPED BEING OPAQUE. Today's log
+// showed switches at ind=1344 / ui=1266 with EVERY named field at ~0: the
+// seconds were in code no ledger bracketed (the same lesson P-PERF-10 was cut
+// for). These six name the remaining chunks; each is written at its own site
+// and read only when the budget line prints:
+static uint g_pInitMsStates   = 0;   // InitializeUIStates (Full entry)
+static uint g_pInitMsKit      = 0;   // InitializeBiotakKit (Full entry)
+static uint g_pInitMsHTF      = 0;   // InitializeHTFCandles (Full entry)
+static uint g_pInitMsMenu     = 0;   // CreateMenu (Full entry)
+static uint g_pInitMsAdopt    = 0;   // ResolveTopologyAdoption + ResolvePeriodChangeAttach
+static uint g_pInitMsTail     = 0;   // OnInitHandler tail: locks, TH3/leg restores, draw-ink memo
+static uint g_pInitMsFront    = 0;   // sibling probe + one-time migration (the ONLY code before the settings timer)
+static uint g_pInitMsTailLeg  = 0;   // LegMeasureUpgradeLegacy (inside the tail)
+static uint g_pInitMsTailTh3  = 0;   // TH3RestorePatternsFromChart + the update flag (inside the tail)
+static uint g_pInitMsInk      = 0;   // P-PERF-115: DrawInkMemoInit (the attach walk)
+// P-PERF-110c: a true (a recent TF switch) defers the legacy tool restores to the
+// first 250 ms timer frame — the ladder paints first, the tools follow invisibly.
+static bool g_attachTailPending = false;
 // P-PERF-11b: the base-price phase is the one that owns seconds, so it is
 // split four ways and reported only when it overruns. "rebuild" must stay 0
 // on a stamped history file - that is the proof the per-init rebuild is gone.
@@ -796,6 +854,14 @@ string GestureTakeWhy() { return g_gestureTakeWhy; }
 //--- only question no amount of reading can: does a native draw started ON our own
 //--- drawing speak at all, and does it arrive BEFORE or AFTER our first write? It also
 //--- keeps the writer honest — a tool can only be refused by a signal that exists.
+//--- The census answers an ORDER question: does a native draw speak at all, and does it
+//--- arrive BEFORE or AFTER our first write? Every EDGE still prints unconditionally — a
+//--- foreign drag, a foreign create, and the press — and so does the first move after a
+//--- gap. Only the repeated moves inside a live window are coalesced, to 10 Hz.
+#define GEST_CENSUS_MIN_MS 100
+static uint g_gestCensusMs = 0;
+static bool g_gestCensusDown = false;
+
 //--- Returns TRUE when the caller should print one line (the caller owns the flushed
 //--- channel: the arbiter is compiled before it). Bounded by design: a press, a move
 //--- while the button is down or the heartbeat is live, a foreign drag, a foreign create.
@@ -813,8 +879,27 @@ bool GestureCensusWanted(const int id, const string sparam)
    //--- asymmetry is the whole basis of the free discriminator — so it is printed too,
    //--- for as long as a press could still belong to it (three seconds: the longest
    //--- deliberate stroke a hand makes before the terminal reports anything).
-   return (down || GestureGrabBlocked()
-           || (st == 0 && g_gesturePressMs != 0 && TickDeadlinePending(g_gesturePressMs + 3000)));
+   bool wanted = (down || GestureGrabBlocked()
+                  || (st == 0 && g_gesturePressMs != 0 && TickDeadlinePending(g_gesturePressMs + 3000)));
+   if(!wanted)
+   {
+      g_gestCensusDown = false;   // a refusal ends the stroke, so the next press is an edge
+      return false;
+   }
+   //--- P-PERF-40: the press edge and the first move after a gap always print; the
+   //--- repeated moves inside the window are coalesced. `g_gestCensusDown` is the edge
+   //--- detector, and every refusal above clears it, so a stale `true` can never swallow
+   //--- the next press. `g_gestCensusMs` is only advanced when a line IS printed, which
+   //--- is what makes "the first move after a gap" fall out for free.
+   uint now = GetTickCount();
+   bool pressEdge = (down && !g_gestCensusDown);
+   g_gestCensusDown = down;
+   if(pressEdge || (now - g_gestCensusMs) >= GEST_CENSUS_MIN_MS)
+   {
+      g_gestCensusMs = now;
+      return true;
+   }
+   return false;
 }
 
 #ifndef BUILD_LITE

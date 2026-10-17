@@ -8,6 +8,7 @@
 //
 // MT5-only changes this file already carries:
 //   * MQL5 iATR is handle-based: release the cached handles on deinit  (1 substitution)
+//   * a provisional composite is never cached — P-PERF-94 / BUG-02     (1 substitution)
 // ============================================================================
   //+------------------------------------------------------------------+
 //|                                            ATRCalculations.mqh   |
@@ -109,6 +110,12 @@ static bool g_atrCacheInitialized = false;
 static ATRMultiTFCache g_multiTFCache[MAX_TF_CACHE_SIZE];
 static int g_multiTFCacheCount = 0;
 static bool g_multiTFCacheInitialized = false;
+
+// P-PERF-94 (BUG-02, 2026-10-13) — was the last CalculateWeightedATR() the
+// terminal's own ATR, or the compat layer's rates-based stand-in? Read through
+// WeightedATRWasProvisional() by the adaptive-scaling seed, which must not
+// latch g_scalingInitialized on a value that can still move.
+static bool g_lastCompositeProvisional = false;
 
 //+------------------------------------------------------------------+
 //| Initialize ATR Cache                                             |
@@ -1186,6 +1193,13 @@ double ATRWeightedComposite(const ENUM_TIMEFRAMES tf, const int shift)
 }
 
 double CalculateWeightedATR(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
+    // P-PERF-94 (BUG-02, 2026-10-13) — the composite's provisional state, so
+    // the caller can tell "the terminal's own ATR" from "our rates-based
+    // stand-in while the timeframe is still being built". Cleared here, set by
+    // the compat layer's fallback, read by the cache guard below and by
+    // WeightedATRWasProvisional() at the end of this function.
+    g_lastCompositeProvisional = false;
+
     // If tf is PERIOD_CURRENT, use effective timeframe (respects lock)
     if(tf == PERIOD_CURRENT) {
         tf = CompatTF(GetEffectiveTimeframe());
@@ -1222,14 +1236,35 @@ double CalculateWeightedATR(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
     }
     
     double result = ATRWeightedComposite(tf, 1);
-    
+
+    // P-PERF-94: a provisional composite is not cached. The multi-TF cache
+    // holds a value for up to GetTriggerDurationSeconds(tf) (>= 60 s) with no
+    // re-read, so caching a stand-in would pin it for the whole warm-up AND
+    // hide the provisional state from the very next call - which is exactly
+    // how a provisional value reached the adaptive-scaling seed before this.
+    // Recomputing is cheap while it matters: every leg is a rates-fallback
+    // cache hit, and the moment the terminal's ATR is ready the value is real
+    // and cached as before.
+    g_lastCompositeProvisional = CompatATRLastProvisional();
+
     if(IsValidPrice(result, EPSILON_PRICE)) {
-        UpdateMultiTFCache(tf, result, currentBars);
+        if(!g_lastCompositeProvisional) UpdateMultiTFCache(tf, result, currentBars);
         return result;
     }
     
     return 0.0;
 }
+
+//+------------------------------------------------------------------+
+//| P-PERF-94 — did the LAST CalculateWeightedATR() come from the    |
+//| terminal, or from the compat layer's rates-based stand-in?       |
+//|                                                                  |
+//| A provisional value is still a good MT4-equal approximation of   |
+//| the ATR — it is simply not FINAL while the timeframe is being    |
+//| built, so a consumer that latches state on it (the adaptive      |
+//| scaling seed) must wait for the real one instead.                |
+//+------------------------------------------------------------------+
+bool WeightedATRWasProvisional() { return g_lastCompositeProvisional; }
 
 //+------------------------------------------------------------------+
 //| P-BK-79 — THE AS-OF READ: the composite at a bar in the PAST.    |

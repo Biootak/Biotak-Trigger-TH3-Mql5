@@ -113,6 +113,8 @@ static int g_bkVAlign = 1;                                     // [08.5] inpBKVA
 // whatever the row said. AUTO (`clrNONE` / `-1`) is the shipped picture — the label
 // wears its own line's live look (P-UI-66) — so an untouched chart is pixel-identical
 // and a pinned value is the trigger family's own.
+// P-LBL-11 (2026-10-17): the labels are retired and the two rows are off the card;
+// both values stay persisted and inert (MIDPOINT precedent).
 static color g_triggerLabelColor = clrNONE;                      // [09.3] inpTriggerLabelColor (clrNONE = AUTO)
 static int g_triggerLabelTransparency = -1;                      // P-UI-131j (-1 = AUTO: follow the Lines TR)
 static int g_triggerTransparency = 50;                           // [09.3] inpTriggerTransparency
@@ -1385,13 +1387,13 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "FY"))  g_factorLevelStyle = (ENUM_LINE_STYLE)ClampSettingInt((int)GlobalVariableGet(p + "FY"), 0, 4);
    if(GlobalVariableCheck(p + "FW"))  g_factorLevelWidth = ClampSettingInt((int)GlobalVariableGet(p + "FW"), 1, 5);
    if(GlobalVariableCheck(p + "CM"))  g_comboMode = (ENUM_COMBO_MODE)ClampSettingInt((int)GlobalVariableGet(p + "CM"), 0, 1);
-   if(GlobalVariableCheck(p + "CP"))  g_comboPreset = (ENUM_COMBO_PRESET)ClampSettingInt((int)GlobalVariableGet(p + "CP"), 0, 7);
+   if(GlobalVariableCheck(p + "CP"))  g_comboPreset = (ENUM_COMBO_PRESET)ClampSettingInt((int)GlobalVariableGet(p + "CP"), 0, 8);
    if(GlobalVariableCheck(p + "C1T")) g_comboComp1TF = (ENUM_COMBO_TIMEFRAME_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C1T"), 0, 3);
-   if(GlobalVariableCheck(p + "C1S")) g_comboComp1Step = (ENUM_COMBO_STEP_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C1S"), 0, 3);
+   if(GlobalVariableCheck(p + "C1S")) g_comboComp1Step = (ENUM_COMBO_STEP_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C1S"), 0, 4);
    if(GlobalVariableCheck(p + "CO1")) g_comboOp1 = (ENUM_COMBO_OPERATION)ClampSettingInt((int)GlobalVariableGet(p + "CO1"), 0, 6);
    if(GlobalVariableCheck(p + "C2E")) g_comboComp2Enabled = (GlobalVariableGet(p + "C2E") > 0.5);
    if(GlobalVariableCheck(p + "C2T")) g_comboComp2TF = (ENUM_COMBO_TIMEFRAME_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C2T"), 0, 3);
-   if(GlobalVariableCheck(p + "C2S")) g_comboComp2Step = (ENUM_COMBO_STEP_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C2S"), 0, 3);
+   if(GlobalVariableCheck(p + "C2S")) g_comboComp2Step = (ENUM_COMBO_STEP_TYPE)ClampSettingInt((int)GlobalVariableGet(p + "C2S"), 0, 4);
    // P-UI-131: the label grid's own two knobs. Each bound is the SAME number the
    // panel row's slider reads, so a saved value is one the control can reproduce.
    if(GlobalVariableCheck(p + "LFS")) g_labelFontSize = ClampSettingInt((int)GlobalVariableGet(p + "LFS"), 4, 24);

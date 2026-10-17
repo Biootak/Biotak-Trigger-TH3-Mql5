@@ -81,8 +81,17 @@ string GetCachedSymbol() {
 //| Get Cached Period (use instead of Period())                      |
 //|           (    Period()                    |
 //+------------------------------------------------------------------+
+// P-PERF-94 (BUG-03, 2026-10-13): forward declarations. The timeframe lock's
+// state (`g_timeframeLocked` / `g_lockedPeriod`) is declared in
+// Biotak/GlobalVariables.mqh, which the entry includes AFTER this file, so the
+// two accessors are declared here and defined there — beside the state they
+// read. Before this, the lock was invisible on this path and the function
+// answered the chart's period on a LOCKED chart.
+bool CompatTimeframeLockActive();
+int  CompatLockedPeriod();
+
 int GetCachedPeriod() {
-    int currentPeriod = Period();
+    int currentPeriod = CompatTimeframeLockActive() ? CompatLockedPeriod() : Period();
     if(g_cachedPeriod <= 0 || g_cachedPeriod != currentPeriod)
         g_cachedPeriod = currentPeriod;
     return g_cachedPeriod;
@@ -290,6 +299,15 @@ static int g_cacheRingHead = 0;   // Points to oldest slot for O(1) eviction
 //| PERF: O(n) search retained; typical cache is tiny (< 20 items). |
 //| The critical fix is removing ArrayResize on every insert.        |
 //+------------------------------------------------------------------+
+// P-PERF-98 (BUG-12, 2026-10-13) — DEAD. NO CALLER. DO NOT REACH FOR IT.
+// Audited across Biotak/*.mqh and both entries: ZERO call sites, so
+// `g_functionCache` is never populated and this whole block is unreachable.
+// It is also the WRONG shape if anyone revives it: the search below is a linear
+// scan over FUNC_CACHE_CAPACITY (100) slots, and the key is a built string
+// (`functionName + "_" + params`), so every call would pay a string build plus a
+// scan — on the MT5 hot path that is exactly the pattern this project forbids.
+// Kept for parity with MT4; the live caches are ObjectCache (hash, O(1)) and the
+// render signatures in EventHandlers.
 double GetCachedResult(const string functionName, const string params,
                        double computedValue, int ttl = 60) {
     string cacheKey = functionName + "_" + params;

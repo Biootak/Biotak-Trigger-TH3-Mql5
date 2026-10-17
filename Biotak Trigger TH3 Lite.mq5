@@ -20,6 +20,19 @@
 #property description "Biotak Trigger TH3 Lite v3.12 - Freeware, not for sale."
 #property description "Light edition: core levels and hand drawings. By Biotak."
 
+// MT5-ONLY (R-RENDER-ENGINE, 2026-10-17): the ladder's trigger lines and pip
+// labels are painted by the canvas engine (Engine\RenderBridge.mqh) instead of
+// one chart object per element. Comment this ONE line out to return to the
+// object path for A/B — every call site on both sides is guarded by the flag.
+#define BIOTAK_RENDER_ENGINE
+
+// MT5-ONLY DIAGNOSTIC (R-RENDER-ENGINE): uncomment to compile the scene dump
+// (RBridgeDumpCsv in RenderBridge.mqh). With that build running, set the global
+// variable BTRS_DUMP=1 in the terminal and the next frames write the drawn
+// family to MQL5\Files\BTRS_scene_MT5.csv; tools/mt4-scene-dump.mq4 writes the
+// same rows from the MT4 chart and tools/parity/scene-diff.py diffs the two.
+//#define BTRS_SCENE_DUMP
+
 //                                                                    
 // LITE MODE ACTIVATION
 //                                                                    
@@ -119,6 +132,12 @@
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\ComboEngine.mqh"
 #include "Biotak\FactorMode.mqh"
+// MT5-ONLY (R-RENDER-ENGINE): the canvas bridge. Must precede its only call
+// site (LevelPipeline) and follow ObjectCache (pin retirement removes cache
+// slots). Compiled away entirely when BIOTAK_RENDER_ENGINE is undefined.
+#ifdef BIOTAK_RENDER_ENGINE
+#include "Engine\RenderBridge.mqh"
+#endif
 #include "Biotak\LevelPipeline.mqh"
 #include "Biotak\ModeDefinitions.mqh"
 
@@ -146,6 +165,17 @@ int OnInit()
     // (settings / history / base-price file load / ATR) in the report.
     uint p4i = GetTickCount();
     int result = OnInitHandler();
+    // P-PERF-106 (2026-10-16) — THE CROSS-RELOAD RESOLUTIONS RUN LAST.
+    // Same position as the Full entry (after every input is final — Lite has
+    // no UI kit, so OnInitHandler is that point). See the Full entry for the
+    // 144-vs-352 stamp mismatch they used to read from inside OnInitHandler.
+    ResolveTopologyAdoption();
+    ResolvePeriodChangeAttach();
+    // MT5-ONLY (R-RENDER-ENGINE): arm the canvas layers (created on the
+    // first pump if the chart window is not mapped yet).
+#ifdef BIOTAK_RENDER_ENGINE
+    RBridgeInit();
+#endif
     uint p4ind = GetTickCount() - p4i;
     P4ReportSlow("OnInit (" + (result == INIT_SUCCEEDED ? "ok" : "fail") + ")" +
                  P4InitLedgerTag(p4ind, 0),
@@ -158,7 +188,11 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+    CompatDeinitBegin();   // MT5-ONLY P-PERF-99: no event can be consumed after this
     uint p4d = GetTickCount();
+#ifdef BIOTAK_RENDER_ENGINE
+    RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance
+#endif
     OnDeinitHandler(reason);
     // P-UI-142: Lite owns no surfaces, but it shares the GV table (boxes,
     // custom price, recorder) — save its overrides and flush, like the Full
@@ -248,6 +282,14 @@ void OnChartEvent(const int id,
   p4t = GetTickCount();
   CoopPump();
   uint p4c = GetTickCount() - p4t;
+#ifdef BIOTAK_RENDER_ENGINE
+  // MT5-ONLY (R-RENDER-ENGINE): the repaint/mask channel — scroll, zoom and
+  // resize re-map the canvas; KEYDOWN/OBJECT_CLICK carry the F/L hide and the
+  // menu toggles so a hidden family masks in the same event, not a timer tick
+  // later. frameKey-guarded, so an unchanged chart costs two chart reads.
+  if(id == CHARTEVENT_CHART_CHANGE || id == CHARTEVENT_KEYDOWN || id == CHARTEVENT_OBJECT_CLICK)
+     RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
+#endif
   // P-PERF-26: name + id (see EventHandlers: id=1 is OBJECT_CLICK, not the cursor).
   // `settle=` is in the budget check on purpose — a drain must not hide its cost.
    // P-PERF-50: same gate as the Full entry — the ledger message is string
@@ -277,6 +319,8 @@ void OnTimer()
     uint _clNow = GetTickCount();
     if(_clNow - _clMs >= 60000) { _clMs = _clNow; CompatLedgerReport("60s"); }
 #endif
+    // P-PERF-110c: the TF-switch defer's no-op path in Lite (no tool family).
+    TailRestoreDeferred();
     // FIX: If indicator is not yet fully initialized (e.g. waiting for history),
     // retry drawing periodically even without new ticks.
     // P-PERF-06: a staged post-wipe rebuild (attach / TF switch / topology
@@ -288,6 +332,13 @@ void OnTimer()
     CoopOwe(COOP_JOB_LABEL_EXPIRY);
     CoopOwe(COOP_JOB_STATUS_TEXT);
     CoopPump();
+
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): the net under the CHART_CHANGE channel —
+    // family masks (L / hide-all) and any repaint a missed notification left
+    // owed. Two chart reads when nothing moved.
+    RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
+#endif
 
     // P-UI-100 (2026-09-22): the selection net of the two hand-set lines — the
     // custom price line and the step-1 pair exist in this entry too, so the law

@@ -1258,6 +1258,42 @@ void DeleteHTFCandles()
    g_HTFDrawnCount = 0;   // nothing of ours is on the chart any more
 }
 
+//+------------------------------------------------------------------+
+//| P-PERF-116 (2026-10-17) — THE KEPT-FAMILY HANDOFF (MT5-ONLY).  |
+//|                                                                  |
+//| On a timeframe switch the Full entry no longer deletes the HTF   |
+//| family (MT5 keeps chart objects; the teardown ledger measured    |
+//| htf=187 ms per switch deleting what the next instance was about  |
+//| to draw again). What the next instance cannot know by itself is  |
+//| the OLD drawn count: its `s_prevCount` starts at 0 and the first |
+//| draw would rewrite [0,count) over the kept boxes while leaving   |
+//| the indices the new view no longer reaches standing as ghosts -  |
+//| the very prune `HTFDeleteIndices(count, s_prevCount)` exists     |
+//| for. One chart-keyed key carries exactly that number across the  |
+//| reload; the next instance consumes it ONCE and seeds the first   |
+//| draw (the seed block in DrawHTFCandles). A chart id is handed    |
+//| out per session, so a terminal restart never leaves a readable   |
+//| stamp, and an unconsumed key is only the same terminal-lifetime  |
+//| residue every handoff stamp here already accepts.                |
+//+------------------------------------------------------------------+
+string HTFKeptStampName() { return "Biotak_HTFKept_" + GetCachedChartIdStr(); }
+const int HTF_KEPT_NONE = -1;
+static int s_HTFKeptCount = HTF_KEPT_NONE;   // >= 0: the kept family's count, consumed by the first draw
+
+void SaveHTFHandoffStamp()
+{
+   if(g_HTFDrawnCount > 0)
+      GlobalVariableSet(HTFKeptStampName(), (double)g_HTFDrawnCount);
+}
+
+void HTFAdoptKeptFamily()
+{
+   const string st = HTFKeptStampName();
+   if(!GlobalVariableCheck(st)) return;
+   s_HTFKeptCount = (int)GlobalVariableGet(st);
+   GlobalVariableDel(st);
+}
+
 // P-PERF-47: the SINGLE definition of HTFDeleteIndices now lives ABOVE this
 // function (beside HTFAnyBoxesExist), because DeleteHTFCandles calls it and MQL4
 // has no clean forward declaration — a bare prototype compiles as warning 46, the
@@ -1549,6 +1585,19 @@ int DrawHTFCandles()
 
    static int s_lastBoxMode = -1;
    static bool s_lastShowBodyBox = false;
+   // P-PERF-116: an adopted (kept-across-switch) family was drawn by this very
+   // build's PERSISTED settings and its boxes still stand on the chart - so the
+   // box-mode flip below must not fire its delete for it, and the prune diff at
+   // the tail needs the OLD count. Seed both from the handoff, once (the seed
+   // lives here, not at the function top, so an early-out that wipes the family
+   // - HTF off, a rung below the chart TF - can never waste it for a real draw).
+   if(s_HTFKeptCount >= 0)
+   {
+      s_prevCount = s_HTFKeptCount;
+      s_lastBoxMode = g_HTFBoxMode;
+      s_lastShowBodyBox = g_HTFShowBody;
+      s_HTFKeptCount = HTF_KEPT_NONE;
+   }
    if(s_lastBoxMode != g_HTFBoxMode || s_lastShowBodyBox != g_HTFShowBody)
    {
       DeleteHTFCandles();
@@ -1874,6 +1923,10 @@ void InitializeHTFCandles()
    // again on every timeframe switch even when the card had never been opened.
    HTFPrimeCandleSettings();
    HTFProbeSettings("init");   // P-HTF-PROBE: what this attach RESOLVED (inputs + GVs)
+   // P-PERF-116: an outgoing instance that KEPT its family (a timeframe switch)
+   // leaves its drawn count behind; consume it ONCE so the first draw adopts the
+   // kept boxes in place and prunes only the surplus (the seed in DrawHTFCandles).
+   HTFAdoptKeptFamily();
 }
 
 //+------------------------------------------------------------------+

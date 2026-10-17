@@ -153,6 +153,30 @@ bool GVHomeFracKnown(const string id)
 {
    return GlobalVariableCheck(GVHomeFracName(id,false)) && GlobalVariableCheck(GVHomeFracName(id,true));
 }
+//--- P-UI-158 — THE CLAIM. One flag per surface, because an answer is about a SURFACE,
+//--- not a moment. It is set where a place is really decided (a release, a first
+//--- measurement, a migration) and consumed by the one write that publishes it.
+static bool s_homeAnsOrb = false, s_homeAnsStrip = false, s_homeAnsChip = false;
+void GVHomeAnswerNew(const string id)
+{
+   if(id == "ORB")        s_homeAnsOrb   = true;
+   else if(id == "STRIP") s_homeAnsStrip = true;
+   else if(id == "CHIP")  s_homeAnsChip  = true;
+}
+bool GVHomeAnswerAny() { return (s_homeAnsOrb || s_homeAnsStrip || s_homeAnsChip); }
+//--- spent when the homes were really evaluated (a box was measurable), NOT on every
+//--- pass: a claim made while the terminal reports no window must survive to the first
+//--- save that can measure one, or the hand's own drag would be lost at teardown.
+void GVHomeAnswerClear() { s_homeAnsOrb = false; s_homeAnsStrip = false; s_homeAnsChip = false; }
+//--- MQL4 forbids `static` on a global function (error 350), so this is a plain one; the
+//--- door below is still the only caller, and the flag names are the private state.
+bool GVHomeAnswerTake(const string id)
+{
+   if(id == "ORB")   { const bool had = s_homeAnsOrb;   s_homeAnsOrb   = false; return had; }
+   if(id == "STRIP") { const bool had = s_homeAnsStrip; s_homeAnsStrip = false; return had; }
+   if(id == "CHIP")  { const bool had = s_homeAnsChip;  s_homeAnsChip  = false; return had; }
+   return false;
+}
 //--- ONE place a pixel becomes a fraction, so the writer and the slot guards in
 //--- `SaveUIStates` can never disagree about what was stored.
 double HomeFracOf(const int v, const int span)
@@ -191,32 +215,124 @@ double HomeFracClamp(const double f)
 bool GVHomeFracRead(const string id, int &x, int &y)
 {
    if(!GVHomeFracKnown(id)) return false;
+   //--- P-UI-156 (2026-10-13) — A READER WITH NO BOX DERIVES NOTHING.
+   //--- Report: «این هنوز جابجا میشه بعد اینکه متاتریدر باز و بسته میکنم ... راه حل
+   //--- متفاوت که کار بکنه». The reader used to fall back to 1920x1080 whenever the
+   //--- terminal reported 0 for the chart box — and at attach and during a
+   //--- CHART_CHANGE it does. That fallback is a DENOMINATOR THE PIXELS DID NOT COME
+   //--- FROM, so the pair it produced was not a place, it was the same place said
+   //--- with the wrong divisor. `CircHomesRefresh` then handed that pair to
+   //--- `CircOrbHomeSet`/`CircTipHomeSet` — the in-memory HOME — and the next
+   //--- `SaveUIStates` persisted `HomeFracOf(thatPair, the REAL box)`.
+   //--- MEASURED, and still in the store: `BIOMENU_HOME_STRIP_FX` = **1.000000**
+   //--- exactly, which is `HomeFracClamp` saturating a value that had gone past the
+   //--- right edge; the same block already recorded `CHIP_FX = 1.1075` and
+   //--- `ORB_FY = 1.613` on 2026-10-05. Every one of those is this read.
+   //--- The writer has always refused this (`HomeChartSizeRaw`: «a writer that cannot
+   //--- measure the box stores nothing»). The reader had no such rule, and THAT
+   //--- ASYMMETRY was the ratchet: it could not save a bad place itself, but it could
+   //--- manufacture one for the writer to save.
+   //--- Refusing is also what makes the reader self-correcting: an absent answer
+   //--- leaves the home as it was, and the first pass that CAN measure the box
+   //--- derives the right pair — `CircHomesRefresh` runs again on every box change.
+   int cw = 0, ch = 0;
+   if(!HomeChartSizeRaw(cw, ch)) { x = -1; y = -1; return false; }
+   //--- P-UI-158: nothing about this read is remembered. What it produces is a
+   //--- DERIVATION, and the store refuses to accept one — only a claim may write — so
+   //--- there is no second piece of state that has to stay in step with the writer.
    const double fx = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false)));
    const double fy = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true)));
-   int cw = 0, ch = 0; HomeChartSize(cw, ch);
    x = (int)MathRound(fx * cw);
    y = (int)MathRound(fy * ch);
    return true;
 }
-void GVHomeSaveFrac(const string id, const int x, const int y)
+//--- P-UI-158 — THE RAW DOOR, and the only place a fraction is ever written. Two rules,
+//--- both about the DENOMINATOR, and neither about who is calling:
+//---   * no measured box, no write — a fraction divided by a window that is not the one
+//---     the pixels came from is the poisoned store, and at teardown the terminal can
+//---     report 0 for a window it is destroying (`HomeChartSizeRaw`);
+//---   * a pair outside the box is not a place — it is two numbers measured against
+//---     different windows — so the last good home is the better answer. The clamp below
+//---     used to saturate such a pair into the store, which is how `STRIP_FX` became a
+//---     permanent 1.0: the place the user chose was replaced by "as far right as
+//---     possible" and every later read re-derived THAT (P-UI-156).
+void GVHomeWriteFrac(const string id, const int x, const int y)
 {
    if(x < 0 || y < 0) return;
    int rcw = 0, rch = 0;
    if(!HomeChartSizeRaw(rcw, rch)) return;   // unknown denominator: store nothing,
                                             // and keep the pixel keys (no data loss)
+   if(x > rcw || y > rch) return;
    GlobalVariableSet(GVHomeFracName(id,false), HomeFracClamp(HomeFracOf(x, rcw)));
    GlobalVariableSet(GVHomeFracName(id,true), HomeFracClamp(HomeFracOf(y, rch)));
    //--- the pixel keys are dead on arrival: a reader that adopts a window-sized
    //--- number as a place is the bug this block exists to end.
    GlobalVariableDel(GVHomeName(id,false)); GlobalVariableDel(GVHomeName(id,true));
 }
+//--- P-UI-158 — THE AUTOMATIC DOOR, the one `SaveUIStates` uses. It writes ONLY when a
+//--- new answer is waiting, and the claim is consumed by the write — so the derivation
+//--- `SaveUIStates` performs on every attach and teardown can never reach the store.
+//--- That is the whole fix: before this, `SaveUIStates` re-derived all three homes and
+//--- wrote them, so a derivation made in one window and saved in another REWROTE the
+//--- fraction (CHIP_FX 0.942731 -> 0.618392, the 589 px jump). The ring never had this
+//--- shape — it stores no place of its own — and this makes the three surfaces match it.
+void GVHomeSaveFrac(const string id, const int x, const int y)
+{
+   if(!GVHomeAnswerTake(id)) return;
+   GVHomeWriteFrac(id, x, y);
+}
+//--- and the HAND's door: a release, the strip's first measured placement, a legacy
+//--- migration. Same write, but it makes its own claim and spends it, so a caller that
+//--- IS the answer never has to remember a second call or a second flag.
+void GVHomeSaveFracHand(const string id, const int x, const int y)
+{
+   GVHomeAnswerNew(id);
+   GVHomeWriteFrac(id, x, y);
+   GVHomeAnswerTake(id);
+}
 bool GVHomeLoadFrac(const string id, const string legacyInfix, int &x, int &y)
 {
    if(GVHomeFracRead(id, x, y)) return true;
    int px = 0, py = 0;
    if(!GVHomeLoad(id, legacyInfix, px, py)) { x = -1; y = -1; return false; }
-   GVHomeSaveFrac(id, px, py);          // migration, once, in the reading window
+   //--- P-UI-157: a migration is a WRITE, so it refuses to run at all without a
+   //--- measured box. Migrating in the fallback window would store a fraction of
+   //--- 1920x1080, which is the very creep this block ends.
+   int cw = 0, ch = 0;
+   if(!HomeChartSizeRaw(cw, ch))      // P-UI-157: no window, no migration
+   { x = -1; y = -1; return false; }
+   GVHomeSaveFracHand(id, px, py);      // migration, once, in the reading window
    x = px; y = py;
+   return true;
+}
+//+------------------------------------------------------------------+
+//| P-UI-157/158 — A HOME THE WINDOW IS TOO YOUNG TO RESOLVE IS STILL |
+//| A PLACE.                                                          |
+//|                                                                   |
+//| `GVHomeFracRead` refuses to derive pixels without a measured box  |
+//| (P-UI-156), and at `OnInit` the terminal routinely reports 0 — so  |
+//| a stored fraction came back as «no home» and the surface was       |
+//| seeded at a DEFAULT: the orb and the chip at the chart's CENTRE,   |
+//| the strip by a fresh measurement. The first 250 ms pass then       |
+//| corrected it, which is the visible JUMP the report describes, and  |
+//| whether it happened at all depended on which timer tick first saw  |
+//| a real box.                                                        |
+//|                                                                   |
+//| Seeding from the fraction itself — against the fallback window,    |
+//| i.e. the same place said relatively — lands the FIRST paint in     |
+//| the right spot and leaves the refresh nothing but a refinement.    |
+//|                                                                   |
+//| It is a SEED and never a home. Nothing writes it: the automatic    |
+//| door refuses without a claim (P-UI-158), and the callers below     |
+//| deliberately do not call the home setters with it. So a pair       |
+//| measured in the fallback window can never reach the store.         |
+//+------------------------------------------------------------------+
+bool GVHomeFracSeed(const string id, int &x, int &y)
+{
+   if(!GVHomeFracKnown(id)) return false;
+   int scw = 0, sch = 0; HomeChartSize(scw, sch);
+   x = (int)MathRound(HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false))) * scw);
+   y = (int)MathRound(HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true))) * sch);
    return true;
 }
 
@@ -1031,6 +1147,20 @@ void LoadUIPlaces()
    //--- fractional home needs no such test, because (0.5,0.5) IS every centre.
    if(haveOrbHome && !orbHadFrac && ohx == defX && ohy == defY) haveOrbHome = false;
    if(haveOrbHome) CircOrbHomeSet(ohx, ohy);     // the home outlives the SESSION, not the reset
+   //--- P-UI-157/158 — A HOME THE WINDOW IS TOO YOUNG TO RESOLVE IS STILL A PLACE, and
+   //--- `GVHomeFracSeed` (BiotakHomes) is its ONE owner for all three surfaces.
+   //--- `GVHomeLoadFrac` refuses to derive pixels without a measured box (P-UI-156) and at
+   //--- `OnInit` the terminal routinely reports 0 — so a stored fraction came back as «no
+   //--- home» and the surface was seeded at a DEFAULT: the orb and the chip at the chart's
+   //--- CENTRE. The first 250 ms pass then corrected it, which is the visible JUMP the
+   //--- report describes, and whether it happened at all depended on which timer tick
+   //--- first saw a real box. The seed is the same place said RELATIVELY, so the FIRST
+   //--- paint already lands in the right spot and the refresh has nothing left to correct.
+   //--- A SEED, never a home: `CircOrbHomeSet`/`CircTipHomeSet` are deliberately NOT called
+   //--- with it, and the store refuses every automatic write (P-UI-158) — so a pair
+   //--- measured in the fallback window can never be persisted.
+   if(!haveOrbHome && orbHadFrac && GVHomeFracSeed("ORB", ohx, ohy))
+      haveOrbHome = true;      // "there are pixels to paint", NOT "there is a home"
    g_UI.menuX = haveOrbHome ? ohx : defX;
    g_UI.menuY = haveOrbHome ? ohy : defY;
    //--- P-DRAW-41: THE STRIP'S HOME — the plate comes back where it was left, instead of
@@ -1038,12 +1168,17 @@ void LoadUIPlaces()
    //--- the user's own work). Absent key = no home: the first open measures one.
    //--- P-UI-142: fractional like the orb and the chip (pixel keys migrate once, on read).
    int hx = -1, hy = -1;
-   GVHomeLoadFrac("STRIP", "HOME", hx, hy);
+   if(!GVHomeLoadFrac("STRIP", "HOME", hx, hy)) GVHomeFracSeed("STRIP", hx, hy);
    DrawStripHomeSet(hx, hy);
    //--- P-UI-126: the chip's own place. An absent pair means the hand has never placed it —
    //--- a state, not a reset: a fresh chart starts in hover mode with no place of its own.
+   //--- P-UI-158: and it takes the SAME seed as the orb. The chip was the one surface the
+   //--- orb's P-UI-157 seed missed, so at every attach it painted at the chart's middle and
+   //--- the first 250 ms pass jumped it to its real home — the report's «هنوز جابجا میشه»,
+   //--- seen on the chip alone because the orb had already been seeded.
    int tx = -1, ty = -1;
-   if(GVHomeLoadFrac("CHIP", "TIP", tx, ty)) CircTipHomeSet(tx, ty);
+   if(!GVHomeLoadFrac("CHIP", "TIP", tx, ty)) GVHomeFracSeed("CHIP", tx, ty);
+   CircTipHomeSet(tx, ty);
 }
 
 void LoadUIState()
@@ -1064,23 +1199,19 @@ void LoadUIState()
 
 void DeleteLegacyMenuObjects()
 {
-   string legacy = "BiotakMenu_" + IntegerToString(ChartID()) + "_";
-   for(int i = 0; i < RING_COUNT; i++)
-   {
-      ObjectDelete(0, legacy + "CircIcon" + IntegerToString(i));
-      ObjectDelete(0, legacy + "CircBg" + IntegerToString(i));
-      ObjectDelete(0, legacy + "CircBadge" + IntegerToString(i));
-      ObjectDelete(0, legacy + "CircBadgeTxt" + IntegerToString(i));
-   }
-   for(int t = 0; t < TOOL_COUNT; t++)
-   {
-      ObjectDelete(0, legacy + "ToolsBg" + IntegerToString(t));
-      ObjectDelete(0, legacy + "ToolsIcon" + IntegerToString(t));
-      ObjectDelete(0, legacy + "ToolsBadge" + IntegerToString(t));
-      ObjectDelete(0, legacy + "ToolsBadgeTxt" + IntegerToString(t));
-   }
-   ObjectDelete(0, legacy + "CircOrbBg");
-   ObjectDelete(0, legacy + "CircOrbIcon");
+   // P-PERF-113 (2026-10-17) - ONE PREFIX SWEEP, NOT 150 SINGLE DELETES.
+   // The old body spelled every V1 name (~150) and paid one native
+   // ObjectDelete per name; the terminal charges O(chart objects) for each
+   // single delete (P-PERF-11b measured ~13 ms apiece at ~1000 objects), and
+   // the live field data of 2026-10-17 proved it: states=1219 ms on the M15
+   // chart against 187-235 ms on the lighter TFs - the SAME 150 calls, priced
+   // by each chart's object count. Every name the loop spelled starts with
+   // `BiotakMenu_<today's chartId>_` (V1 spelled its whole family that way),
+   // so one bulk sweep removes the identical set in ONE terminal call - and
+   // any V1 straggler the name list had missed rides along: the sweep is
+   // complete by construction (the P-PERF-47 rule). Cross-session V1
+   // spellings stay BiotakMenuGhostSweep's job.
+   ObjectsDeleteAll(0, "BiotakMenu_" + IntegerToString(ChartID()) + "_");
 }
 
 //--- P-UI-131e — THE ONE LEGACY READ. A pre-131e build keyed this block by _Symbol AND
@@ -1143,23 +1274,39 @@ void InitializeUIStates()
    // are NOT deleted on REASON_CHARTCHANGE) while our open-state statics
    // reset — without this a dead, unresponsive panel haunts the chart.
    // Runs once per init; steady state untouched.
-   ObjectsDeleteAll(0, g_UI.btnPrefix + "Pnl");
-   ObjectsDeleteAll(0, g_UI.btnPrefix + "Pal_");
-   // The sub-menu panel (backdrop, header, pager, dots) shares the same fate: it
-   // survives a TF switch (chart objects are NOT deleted on REASON_CHARTCHANGE)
-   // while g_ToolsOpen resets to false, leaving an orphan panel that no longer
-   // answers anything. One sweep, once per init.
-   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
-   // P-UI-144: THE GHOST SWEEP — the same orphan class one level up: objects this
-   // family painted in a PREVIOUS session carry that session's chart id in their
-   // name (measured: `BiotakMenuV2_134342075006101685_CircOrbBg` sitting in
-   // `profiles/default/chart03.chr` at x=70,y=79). MT4 restores them at their
-   // stale absolute pixels on every restart/reopen, and no purge below can see
-   // them because each one only knows the LIVE prefix. Our own family was
-   // already deleted by the paired teardown (or never existed), so one prefix
-   // walk here removes exactly the foreign spellings. Same shape, same owner
-   // law as `DrawStripSweepStale` beside it in the entry's OnInit.
-   BiotakMenuGhostSweep();
+   //
+   // P-PERF-111 (2026-10-17) - BUT NOT ON A SWITCH THE TEARDOWN ALREADY
+   // SWEPT. The Full entry's teardown runs PnlCloseAll (Pnl/Pal_/SW*),
+   // DeleteMenu (Circ/Tools/Sub) and DrawStripClose moments before the
+   // relaunch, then STAMPS its own completion; the stamp is keyed by chart
+   // id, and a chart id is handed out per session, so the consumed stamp can
+   // only ever come from THIS session's own teardown - a terminal restart
+   // or a crash never leaves one and the four sweeps below run exactly as
+   // before (the P-UI-144 ghost path stays covered). On a switch the purge
+   // paid four full-chart scans for objects that provably no longer exist -
+   // the delete-and-redraw the user saw. No consumer outside this block;
+   // the stamp is one-shot.
+   const bool uiFamiliesClean = ConsumeCleanUITeardownStamp();
+   if(!uiFamiliesClean)
+   {
+      ObjectsDeleteAll(0, g_UI.btnPrefix + "Pnl");
+      ObjectsDeleteAll(0, g_UI.btnPrefix + "Pal_");
+      // The sub-menu panel (backdrop, header, pager, dots) shares the same fate: it
+      // survives a TF switch (chart objects are NOT deleted on REASON_CHARTCHANGE)
+      // while g_ToolsOpen resets to false, leaving an orphan panel that no longer
+      // answers anything. One sweep, once per init.
+      ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
+      // P-UI-144: THE GHOST SWEEP — the same orphan class one level up: objects this
+      // family painted in a PREVIOUS session carry that session's chart id in their
+      // name (measured: `BiotakMenuV2_134342075006101685_CircOrbBg` sitting in
+      // `profiles/default/chart03.chr` at x=70,y=79). MT4 restores them at their
+      // stale absolute pixels on every restart/reopen, and no purge below can see
+      // them because each one only knows the LIVE prefix. Our own family was
+      // already deleted by the paired teardown (or never existed), so one prefix
+      // walk here removes exactly the foreign spellings. Same shape, same owner
+      // law as `DrawStripSweepStale` beside it in the entry's OnInit.
+      BiotakMenuGhostSweep();
+   }
 
    bool versionOk = false;
    if(GlobalVariableCheck(GetGVName("VER")))
@@ -1262,6 +1409,15 @@ void SaveUIStates(const bool flushNow = false)
       { if(haveTipHome) GVHomeSaveFrac("CHIP", thx, thy); uiChanged++; }
    if(haveBox && GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 10, haveTipHome ? HomeFracOf(thy, hch) : -1.0))
       { if(haveTipHome) GVHomeSaveFrac("CHIP", thx, thy); uiChanged++; }
+   //--- P-UI-158 — THE CLAIM IS SPENT ONLY WHERE IT COULD HAVE BEEN HONOURED. Every home
+   //--- slot above asks `GVHomeSaveFrac`, and that door writes ONLY for a pending answer
+   //--- (P-UI-158); a claim that reached no write is spent here, so it can never authorise
+   //--- a LATER save — a resize, a TF switch, the teardown — to store a DERIVED pair. That
+   //--- is precisely the creep this block ends. Guarded by `haveBox`, because a pass with
+   //--- no measurable window never reached the slots at all: a hand's drag made while the
+   //--- terminal reports no box must survive to the first save that CAN measure one, or the
+   //--- user's own answer would be dropped instead of stored.
+   if(haveBox) GVHomeAnswerClear();
    if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 11, g_UI.tipPin ? 1.0 : 0.0))
       { GlobalVariableSet(GetGVName("TIPPIN"), g_UI.tipPin ? 1.0 : 0.0); uiChanged++; }
    // P-PERF-44 (3): report BEFORE the early return. A skip count that survives a
@@ -2043,14 +2199,20 @@ bool CircTipGrabStart(const int mx, const int my)
 void CircTipDragTo(const int mx, const int my)
 {
    if(!s_TipDrag) return;
-   int cw, ch;
-   CircUIMetrics(cw, ch);
+   //--- P-UI-158: the hand's own place is measured against the LIVE window, not the
+   //--- cached metrics — the cache is a paint-time optimisation, and a HOME clamped
+   //--- against a stale box is a place the plate is not in. One raw read per real pointer
+   //--- move, and the claim below is what lets the release's save reach the store: this
+   //--- IS the hand, and P-UI-158 accepts no other writer of a home.
+   int cw = 0, ch = 0;
+   if(!HomeChartSizeRaw(cw, ch)) return;   // no window: nothing to measure, nothing to store
    const int hw = CIRC_TIP_FACE_W / 2, hh = CIRC_TIP_FACE_H / 2;
    int cx = ClampInt(mx + s_TipGrabDX, CIRC_TIP_EDGE + hw, MathMax(CIRC_TIP_EDGE + hw, cw - CIRC_TIP_EDGE - hw));
    int cy = ClampInt(my + s_TipGrabDY, CIRC_TIP_EDGE + hh, MathMax(CIRC_TIP_EDGE + hh, ch - CIRC_TIP_EDGE - hh));
    int hx = 0, hy = 0;
    if(CircTipHomeGet(hx, hy) && hx == cx && hy == cy) return;   // same spot: no write at all
    CircTipHomeSet(cx, cy);
+   GVHomeAnswerNew("CHIP");   // P-UI-158: a real move is the hand's answer, re-claimed per move
    int x = 0, y = 0, w = 0, h = 0;
    CircTipHomeBox(cw, ch, x, y, w, h);
    if(x == s_TipBoxX && y == s_TipBoxY) return;
@@ -2928,6 +3090,43 @@ void SubPagerGeom(const int px, const int py, const int pw, const int ph,
    nextX = px + pw - SUB_GRID_PAD - bw;
 }
 
+//+------------------------------------------------------------------+
+//| P-UI-151 (2026-10-13) — THE PAGER'S COORDINATE DOOR.              |
+//|                                                                  |
+//| The chevrons are OBJ_BUTTONs born `OBJPROP_SELECTABLE = false`    |
+//| (SubSetPagerBtn, `OBJPROP_SELECTABLE, false`), and this project's |
+//| own MEASURED law says what that costs: «MT4 never emits           |
+//| OBJECT_CLICK for a non-selectable object» — it is why the gear    |
+//| panel had to grow `DrawStripGearHit` after every tab, row, switch |
+//| and foot button shipped dead on a green compile (P-DRAW-84,       |
+//| DrawStrip_Base.mqh:859), and why the cards work at all (they give |
+//| coordinates first refusal through `PnlClickFallback`, P-UI-74).   |
+//|                                                                  |
+//| The pager had ONLY the name route, and its own note two functions |
+//| up records that the hit test it promised — `SubPagerAt` — «was     |
+//| never written: no commit contains it». So the one control on this |
+//| surface with no coordinate door was the one control whose door the |
+//| name route may not be able to open.                              |
+//|                                                                  |
+//| This IS that reader, and it reads `SubPagerGeom` — the ONE owner  |
+//| `SubChromeCreate` draws from and `SubChromeMove` translates — so  |
+//| it can never become a second grid (P-DRAW-77's law). `dir` is     |
+//| -1 (prev) / +1 (next) / 0 (neither).                             |
+//+------------------------------------------------------------------+
+bool SubPagerAt(const int mx, const int my, int &dir)
+{
+   dir = 0;
+   if(!g_ToolsOpen || !SubIsPanelMode()) return false;
+   int px = 0, py = 0, pw = 0, ph = 0;
+   SubPanelRect(px, py, pw, ph);
+   int by = 0, bh = 0, bw = 0, prevX = 0, nextX = 0;
+   SubPagerGeom(px, py, pw, ph, by, bh, bw, prevX, nextX);
+   if(my < by || my > by + bh) return false;
+   if(mx >= prevX && mx <= prevX + bw) { dir = -1; return true; }
+   if(mx >= nextX && mx <= nextX + bw) { dir = +1; return true; }
+   return false;
+}
+
 // P-UI-34: the readout captions' own x - MEASURED, never guessed. `5 * StringLen(s)` was
 // the estimate at FOUR sites (create + move, counter + pager text); 8pt Arial Bold runs
 // ~5.8px/char at 96dpi, so the counter drifted toward the panel edge and the "n/N" pager
@@ -3633,16 +3832,17 @@ void DeleteMenu()
    const uint _m3 = GetTickCount();
    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
    g_suppressDeleteEvents = false;
-   Print("[W][PERF] DeleteMenu phases: n=", _n0,
-         " circ=", (int)(_m1 - _m0), "ms tools=", (int)(_m2 - _m1),
-         "ms sub=", (int)(_m3 - _m2), "ms");
-   // second pass: catches any objects the first sweep missed (same guard)
-   g_suppressDeleteEvents = true;
-   ObjectsDeleteAll(0, g_UI.btnPrefix + "Circ");
-   ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");
-   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
-   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
-   g_suppressDeleteEvents = false;
+    _LOG_GATE_D Print("[W][PERF] DeleteMenu phases: n=", _n0,
+          " circ=", (int)(_m1 - _m0), "ms tools=", (int)(_m2 - _m1),
+          "ms sub=", (int)(_m3 - _m2), "ms");
+   // P-PERF-113c (2026-10-17): THE SECOND PASS IS GONE. It re-ran the same
+   // three sweeps "to catch any objects the first sweep missed" - but
+   // ObjectsDeleteAll is complete by construction (P-PERF-47), the delete-
+   // event channel is suppressed while it runs (P-PERF-11d), and nothing in
+   // this program creates menu objects between two sweeps of one teardown.
+   // It could only ever find what the first pass left, and the first pass
+   // leaves nothing: three more full-chart scans on every menu teardown
+   // (hide or deinit), ~40 ms each on the live chart.
    s_CircTipFeat = -2;   // tooltip objects share the prefix pattern
    s_TipPendFeat = -2;
    g_ToolsOpen = false;  // DeleteToolsMenu(false) used to carry these
@@ -3821,7 +4021,8 @@ void UpdateCircularMenuPosition()
 //+------------------------------------------------------------------+
 void CircHomesRefresh()
 {
-   int cw = 0, ch = 0; HomeChartSize(cw, ch);
+   int cw = 0, ch = 0;
+   if(!HomeChartSizeRaw(cw, ch)) return;
    static int s_cw = 0, s_ch = 0;
    if(cw == s_cw && ch == s_ch) return;
    s_cw = cw; s_ch = ch;
@@ -3829,7 +4030,7 @@ void CircHomesRefresh()
    if(!g_OrbDragging && GVHomeFracRead("ORB", x, y))
    {
       CircOrbHomeSet(x, y);                              // the home is the truth
-      if(g_UI.menuVisible) UpdateCircularMenuPosition();  // ...and the pair follows it
+      UpdateCircularMenuPosition();                      // ...and the pair follows it
    }
    if(!CircTipDragging() && GVHomeFracRead("CHIP", x, y))
    {
@@ -3931,6 +4132,7 @@ void CircReapStaleRingClaims()
    // a press that already reaps; the steady state pays nothing.
    if(g_OrbMoved || g_OrbWasDragged)
    {
+      GVHomeAnswerNew("ORB");   // P-UI-158: the hand's own answer — the one write the store takes
       CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates();
       g_OrbMoved = false;   // consumed (WasDragged stays the click-eater's own)
    }
@@ -4107,6 +4309,7 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
       // click that ate `g_OrbWasDragged` can no longer cost the user their drag.
       if(g_OrbMoved)
       {
+         GVHomeAnswerNew("ORB");   // P-UI-158: the release is the hand's answer
          CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates(); g_OrbMoved = false;
       }
       // The mode was FROZEN for the whole drag (rebuilding geometry under the
@@ -4556,13 +4759,28 @@ int HandleButtonClick(const string clickedObject)
    // --- Tools sub-menu panel: pager first, then dead space ---
    if(g_ToolsOpen)
    {
-      if(clickedObject == SubPagerPrev() || clickedObject == SubPagerNext())
+      // P-UI-151: the chevrons are OBJ_BUTTONs born SELECTABLE=false, so MT4
+      // may never emit OBJECT_CLICK for them (P-DRAW-84). Keep the name route,
+      // but when it did not match, ask the coordinates — the same door the
+      // cards use (P-UI-74). `SubPagerAt` reads `SubPagerGeom`, the one owner
+      // the paint already uses, so this is not a second grid.
+      string pagerName = clickedObject;
+      if(pagerName != SubPagerPrev() && pagerName != SubPagerNext())
+      {
+         int pdir = 0;
+         if(SubPagerAt(g_LastUIX, g_LastUIY, pdir))
+            pagerName = (pdir > 0) ? SubPagerNext() : SubPagerPrev();
+      }
+      if(pagerName == SubPagerPrev() || pagerName == SubPagerNext())
       {
          // MT4 LATCHES an OBJ_BUTTON after a click (STATE stays true → the
-         // chevron looks stuck down). Clear it on every pager click.
-         ObjectSetInteger(0, clickedObject, OBJPROP_STATE, false);
+         // chevron looks stuck down). Clear it on every pager click — but only
+         // if the object exists: the coordinate door can name a chevron that
+         // this page's chrome did not create.
+         if(ObjectFind(0, pagerName) >= 0)
+            ObjectSetInteger(0, pagerName, OBJPROP_STATE, false);
          int pages = SubPageCount();
-         int np = g_ToolsPage + ((clickedObject == SubPagerNext()) ? 1 : -1);
+         int np = g_ToolsPage + ((pagerName == SubPagerNext()) ? 1 : -1);
           if(np >= 0 && np < pages)
           {
              g_ToolsPage = np;

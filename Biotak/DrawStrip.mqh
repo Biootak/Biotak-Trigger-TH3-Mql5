@@ -308,7 +308,10 @@
 //--- `DSTRIP_GEAR_FOOT_H` 4/3 · `DSTRIP_GEAR_LBL_PT` 4/3 · `DSTRIP_SKIN_M` 35/6 —
 //--- every one of them keeps its name and its value; only the number's owner changed.
 #define DSTRIP_GEAR_W   PNL_WEL
-#define DSTRIP_GEAR_PAD  PNL_PAD_X
+#define DSTRIP_GEAR_PAD PNL_PAD_X
+//--- the close X's own seat width: the strip keeps its own NAME for its own seat, so
+//--- one name reads once (`PNL_XBTN_VIS`, the cards' own .x).
+#define DSTRIP_GEAR_XW  26   // = PNL_XBTN_VIS, the cards' own .x
 #define DSTRIP_GEAR_HEAD_H PNL_HEAD_H
 #define DSTRIP_GEAR_ROW_H  PNL_ROW_H
 #define DSTRIP_GEAR_TB_H   7   // the head's own top bar, at the head's top edge
@@ -897,16 +900,31 @@ bool DSNameMatches(const double packed, const string s)
 //--- frames the screen was showing were nowhere in it. `ChartID()` is what
 //--- separates two charts of one symbol, so the name carries it.
 #ifdef DSTRIP_DIAG
+// MT5-ONLY P-PERF-95 (BUG-11): the census handle lives at FILE scope under a
+// name no shared module uses — the release below must see what the emit
+// opened, and `dh` cannot be reused there: as a function-static it is
+// unreachable (error 256), as a file-scope `dh` the shared BiotakPanels
+// locals shadow it (warning 62).
+static int s_dsDiagFh = INVALID_HANDLE;
 void DrawStripDiagEmit(const string line)
 {
    Print(line);
-   static int dh = INVALID_HANDLE;
-   if(dh == INVALID_HANDLE)
-      dh = FileOpen("biotak_diag_" + Symbol() + "_" + IntegerToString(ChartID()) + ".txt",
+   if(s_dsDiagFh == INVALID_HANDLE)
+      s_dsDiagFh = FileOpen("biotak_diag_" + Symbol() + "_" + IntegerToString(ChartID()) + ".txt",
                     FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_SHARE_READ);
-   if(dh == INVALID_HANDLE) return;
-   FileWrite(dh, line);
-   FileFlush(dh);
+   if(s_dsDiagFh == INVALID_HANDLE) return;
+   FileWrite(s_dsDiagFh, line);
+   FileFlush(s_dsDiagFh);
+}
+// P-PERF-95 (BUG-11, 2026-10-13) — THE HANDLE IS RELEASED WITH THE STRIP.
+// `s_dsDiagFh` above is opened once and, before this, never closed: every
+// attach/teardown cycle leaked one file handle until the terminal hit its
+// per-program limit and `FileOpen` started answering INVALID_HANDLE — the
+// census would then go silently quiet instead of failing loudly. The owner of
+// the handle is the strip, so the release lives beside the strip's own close.
+void DrawStripDiagClose()
+{
+   if(s_dsDiagFh != INVALID_HANDLE) { FileClose(s_dsDiagFh); s_dsDiagFh = INVALID_HANDLE; }
 }
 #else
 // P-UI-136 (2026-10-02): the symbol stays DEFINED when the switch is 0, because
@@ -918,6 +936,9 @@ void DrawStripDiagEmit(const string line)
 // Measured: thousands of Print-per-object/per-move lines on the live
 // log, synchronous journal writes on the path they measure.
 void DrawStripDiagEmit(const string line) { }
+// P-PERF-95: nothing was opened, so nothing is closed — the call site below
+// stays one line on both builds.
+void DrawStripDiagClose() { }
 #endif
 
 #ifdef DSTRIP_DIAG
@@ -1235,7 +1256,10 @@ color DrawStripPalTargetColor()
    }
    return DrawStripColorRead(s_dsPalObj, s_dsPalSlot);
 }
-int DrawStripPalTargetApply(const color c)
+//--- P-DRAW-129/130 (2026-10-13): THE RING TAKES A PICK, NOT A PREVIEW — and the flag
+//--- rides into the writer, because a preview must not learn the kind's memory either
+//--- (the object still wears the colour live: P-UI-131k, untouched here).
+int DrawStripPalTargetApply(const color c, const bool remember=true)
 {
    if(!DrawStripPalTargetLive()) return 0;
    //--- P-LVL-COLOR: one stored level re-inks (undoable — the level set snapshot
@@ -1248,7 +1272,7 @@ int DrawStripPalTargetApply(const color c)
       DrawStripUndoPush();
       ObjectSetInteger(0, s_dsPalObj, OBJPROP_LEVELCOLOR, s_dsPalLevel, c);
       FibPenSync(s_dsPalObj, false);
-      DrawStripRecentPush(c);
+      if(remember) DrawStripRecentPush(c);
       int gotL = (int)ObjectGetInteger(0, s_dsPalObj, OBJPROP_LEVELCOLOR, s_dsPalLevel);
       DrawStripDiagEmit("[drawstrip] PALAPPLY live=1 obj=\"" + s_dsPalObj + "\" slot=" +
                         IntegerToString(s_dsPalSlot) + " level=" + IntegerToString(s_dsPalLevel) +
@@ -1257,8 +1281,8 @@ int DrawStripPalTargetApply(const color c)
       s_dsPalRepaint = true;
       return 1;
    }
-   DrawStripColorCommit(s_dsPalSlot, c);
-   DrawStripRecentPush(c);
+   DrawStripColorCommit(s_dsPalSlot, c, remember);
+   if(remember) DrawStripRecentPush(c);
    //--- P-PAL-19d (2026-10-02) — THE SECOND PICK IS A SEPARATE CASE, and the report
    //--- is «یک بار که یک رنگی رو انتخاب میکنم بقیه رنگ‌ها اعمال نمیشه». The MODEL
    //--- says the target is a static that outlives the pick, so the second click
@@ -1784,7 +1808,7 @@ bool DrawStripGearHit(const int mx, const int my)
       int hy = gy + s_dsGearHeadY;
       if(my >= hy && my < hy + DSTRIP_GEAR_HEAD_H)
       {
-         const int xbtn = 26, xpad = 3;
+         const int xbtn = DSTRIP_GEAR_XW, xpad = 3;
          int cx0 = gx + s_dsGearW0 - DSTRIP_GEAR_PAD - xbtn;
          int cy0 = hy + 17;
          if(mx >= cx0 - xpad && mx < cx0 + xbtn + xpad &&
@@ -4590,96 +4614,29 @@ void DrawStripClosePicker()
 //--- instead of ~300 ObjectDelete calls.
 bool DrawStripGearObjectsPurge()
 {
-   bool dirty = false;
-   //--- One prefix wipe when the panel owned anything: the plate rebuilds on the
-   //--- next paint while the panel is open, and stays gone when it is shut.
-   //--- P-DRAW-117: the probe is the FAMILY, not one spelling — a chart painted by
-   //--- the tab build carries `GT0..GT4`, the `GTrack` bed and the `GU` underline,
-   //--- and none of the three is painted by this build any more, so the owner that
-   //--- takes the panel down must recognise the OLD names as evidence the family is
-   //--- on the chart (Touch rule 2: the rename ships with the sweep).
-   if(ObjectFind(0, DrawStripRowName(0)) >= 0 || ObjectFind(0, DrawStripGearBgName()) >= 0
-      || ObjectFind(0, "PnlDrawS_Gtop") >= 0 || ObjectFind(0, "PnlDrawS_GT0") >= 0
-      || ObjectFind(0, "PnlDrawS_GTrack") >= 0 || ObjectFind(0, "PnlDrawS_GU") >= 0)
-   { ObjectsDeleteAll(0, "PnlDrawS_G", -1, -1); dirty = true; return dirty; }
-   //--- the requested-tab-room of a chart that predates the accordion: the group
-   //--- row is a ROW now (`DrawStripRowName`), so these five are orphans by the same
-   //--- ruling as their bed and underline — deleted here so a half-upgraded chart
-   //--- cannot keep a second nav under the new one.
-   for(int t = 0; t < DSTRIP_GEAR_GRP_MAX; t++)
-   {
-      string tn = "PnlDrawS_GT" + IntegerToString(t);
-      if(ObjectFind(0, tn) >= 0) { ObjectDelete(0, tn); dirty = true; }
-   }
-   if(ObjectFind(0, "PnlDrawS_GTrack") >= 0)
-   { ObjectDelete(0, "PnlDrawS_GTrack"); dirty = true; }
-   if(ObjectFind(0, "PnlDrawS_GU") >= 0)
-   { ObjectDelete(0, "PnlDrawS_GU"); dirty = true; }
-   string hn = DrawStripGearHeadName("TB"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("HR"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("MK"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("MG"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("TT"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("ST"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("VB"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("VT"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("X"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("XB"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   hn = DrawStripGearHeadName("XI"); if(ObjectFind(0, hn) >= 0) { ObjectDelete(0, hn); dirty = true; }
-   for(int s = 0; s < DSTRIP_GEAR_SECTION_MAX; s++)
-   {
-      string sn = DrawStripGearSectionName(s);
-      if(ObjectFind(0, sn) >= 0) { ObjectDelete(0, sn); dirty = true; }
-      if(ObjectFind(0, sn + "D") >= 0) { ObjectDelete(0, sn + "D"); dirty = true; }
-      if(ObjectFind(0, sn + "T") >= 0) { ObjectDelete(0, sn + "T"); dirty = true; }
-      if(ObjectFind(0, DrawStripGearSectionLineName(s)) >= 0)
-      { ObjectDelete(0, DrawStripGearSectionLineName(s)); dirty = true; }
-   }
-   for(int g = 0; g < DSTRIP_GRID_MAX; g++)
-   {
-      if(ObjectFind(0, DrawStripGridName(g)) >= 0)
-      { ObjectDelete(0, DrawStripGridName(g)); dirty = true; }
-      if(ObjectFind(0, DrawStripGridIconName(g)) >= 0)
-      { ObjectDelete(0, DrawStripGridIconName(g)); dirty = true; }
-      if(ObjectFind(0, DrawStripGridGlassName(g)) >= 0)
-      { ObjectDelete(0, DrawStripGridGlassName(g)); dirty = true; }   // P-DRAW-33
-   }
-   for(int r = 0; r < DSTRIP_GLIST_MAX; r++)
-   {
-      if(ObjectFind(0, DrawStripRowName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowName(r)); dirty = true; }
-      if(ObjectFind(0, DrawStripRowIconName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowIconName(r)); dirty = true; }
-      if(ObjectFind(0, DrawStripRowLabelName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowLabelName(r)); dirty = true; }
-      if(ObjectFind(0, DrawStripRowChipName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowChipName(r)); dirty = true; }
-      if(ObjectFind(0, DrawStripRowRailName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowRailName(r)); dirty = true; }
-      if(ObjectFind(0, DrawStripRowStateName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowStateName(r)); dirty = true; }
-      if(ObjectFind(0, DrawStripRowSepName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowSepName(r)); dirty = true; }
-      //--- P-DRAW-117: and the group row's own DIGEST — the value its name does not
-      //--- carry. A member of the row family, so it is deleted by the row's owner.
-      if(ObjectFind(0, DrawStripRowDigestName(r)) >= 0)
-      { ObjectDelete(0, DrawStripRowDigestName(r)); dirty = true; }
-   }
-    for(int f = 0; f < DSTRIP_GEAR_FOOT_N; f++)
-    {
-      if(ObjectFind(0, DrawStripFootName(f)) >= 0)
-      { ObjectDelete(0, DrawStripFootName(f)); dirty = true; }
-      if(ObjectFind(0, DrawStripFootSkinName(f)) >= 0)
-      { ObjectDelete(0, DrawStripFootSkinName(f)); dirty = true; }
-      if(ObjectFind(0, DrawStripFootGlyphName(f)) >= 0)
-      { ObjectDelete(0, DrawStripFootGlyphName(f)); dirty = true; }
-      if(ObjectFind(0, DrawStripFootLabelName(f)) >= 0)
-      { ObjectDelete(0, DrawStripFootLabelName(f)); dirty = true; }
-   }
-   for(int e = 0; e < 5; e++)
-      if(ObjectFind(0, DrawStripEditName(e)) >= 0)
-      { ObjectDelete(0, DrawStripEditName(e)); dirty = true; }
-   return dirty;
+   //--- P-PERF-101 (2026-10-16) — ONE PREFIX WIPE, NOT ~330 MISSING-NAME PROBES.
+   //---
+   //--- The chain that stood here spent ~330 `ObjectFind` calls on a chart that
+   //--- holds NO gear family at all: `ObjectFind` on a MISSING name walks the
+   //--- terminal's object table, and on a live chart (~600 objects) that walk is
+   //--- exactly what the live log charged inside one close:
+   //---   [W][PERF] OnDeinit breakdown: pnl=16ms menu=1015ms
+   //--- while the SAME teardown beside it (a chart with no gear state, where the
+   //--- close's own guard returns early) cost 20 ms — one second of the switch
+   //--- was this probe chain finding nothing, ~330 times.
+   //---
+   //--- Every name the chain probed — the grid/row/foot/edit families, the head
+   //--- set, the section bands and the retired `GT0..GT4`/`GTrack`/`GU` spellings
+   //--- (P-DRAW-117) — starts with `PnlDrawS_G` by construction: the grip is
+   //--- `_H`, the badge `_B`, the popover `_P*`, the faces `_A/_HI/...`, the
+   //--- separators `_SEP` — no non-gear name collides with the prefix. ONE prefix
+   //--- sweep therefore reaches everything the probes could (present or absent,
+   //--- old spelling or new) in a SINGLE table walk, and on a clean chart the
+   //--- non-matching sweep is the same one walk the probe chain should have been.
+   //--- The answer keeps its old meaning for callers: "the panel's surface is
+   //--- gone" (the plate rebuilds on the next paint while the panel is open).
+   ObjectsDeleteAll(0, "PnlDrawS_G", -1, -1);
+   return true;
 }
 //--- P-DRAW-85 (2026-09-29) — A FRESH ATTACH OWNS A CLEAN CHART.
 //--- Reported: «جابجا بین تب‌ها می‌شم این‌طوری می‌شه» with a screenshot of ONE card
@@ -4901,50 +4858,52 @@ void DrawStripGearClose()
 
 void DrawStripClose()
 {
-   // P-PERF-DSC1 (2026-10-12) — SUPPRESS DELETE EVENTS DURING BULK SLOT TEARDOWN.
-   // DrawStripClose issues ~60+ individual ObjectDelete calls across the slot loop,
-   // action buttons, and picker rows. Without the suppression flag every one fires
-   // CHARTEVENT_OBJECT_DELETE → the DrawStrip handler runs CHARTEVENT_OBJECT_DELETE
-   // again → DELFLUSH path → ChartRedraw() per object. On a chart with ~1000
-   // objects that is ~60 × ~10ms = ~600ms of wasted work inside the teardown of a
-   // strip that is already being closed. The suppression flag is the same bool every
-   // other bulk-delete path sets (LabelFunctions, EventHandlers, LevelPipeline,
-   // ObjectCache, DeleteMenu) — the DrawStrip handler exits early on it, skipping
-   // all family-heal work for events that are provably not user gestures.
+   // P-PERF-100 (2026-10-16) — ONE PREFIX SWEEP, NOT ~530 SINGLE DELETES.
+   //
+   // Measured on the live log (2026.10.16 12:31, a live TF switch):
+   // `OnDeinit reason=3 took 1063ms` with `pnl=0 menu=1031 handler=32`, and
+   // DeleteMenu's own phases printed `circ=0 tools=0 sub=0` — the whole second
+   // sat inside THIS function. The body used to issue one unguarded
+   // `ObjectDelete` per seat: 12 slots × 6 + 5 actions × 3 + 72 picker rows × 6
+   // + the singles ≈ 530 calls, each paying the terminal's per-call object-table
+   // work (~2ms on this chart — the same per-call law P-PERF-11b measured at
+   // ~13ms/call on a busier table, which P-PERF-DSC1 could only hide the EVENT
+   // side of). Every name this close owns is `PnlDrawS_*` by construction
+   // (faces/icons :1578-1594, grip/badge/bg :1645, separators :5428, the three
+   // nine-piece skins :6266-6315, the gear family via its own prefix wipe in
+   // DrawStripGearObjectsPurge :4628) — the SAME family `DrawStripSweepStale`
+   // already takes in ONE `ObjectsDeleteAll`, and the purge law ("delete one
+   // skin family by prefix family, 100%") says exactly that: the whole family
+   // dies with the strip. So the sweep IS this close's delete half; the gear
+   // close and the statics below are unchanged. (This first cut claimed the
+   // trailing skin purge's miss-probes cost nothing. It was wrong; see
+   // P-PERF-103.)
+   //
+   // P-PERF-103 (2026-10-16) — THE MISS-PROBES DO NOT COST NOTHING, AND THE
+   // SKIN PURGE DIES WITH THIS LINE. The TMP stamps beneath the sweep priced the
+   // two trailing closes on the live log: `gear=0` every time (its guard returns
+   // first on a closed gear), but `skin=1031..1078ms` on reason=3 and 2.5-7.0s on
+   // reason=9 — the whole teardown second. An instrumented `DrawStripSkinPurge`
+   // then answered its own dirty flags across that window: `d0=0 d1=0 d2=0` on
+   // EVERY sample, f0/f1 eating the seconds and f2=0ms once the queue drained.
+   // Nothing was ever found — the sweep above had already taken every
+   // `PnlDrawS_` name these families can spell (faces :6194, gear skins :6212,
+   // board skins :6235, bodies/seams :6346/:6354, all through
+   // `DrawStripSkinPiece` :6423) — and the ~270 `ObjectFind` miss-calls were
+   // themselves the cost, each paying the terminal's per-call object-table walk
+   // (~4ms at this chart's ~1200 objects; the SAME per-call law the comment above
+   // cites for deletes, P-PERF-11b). So the call goes; the sweep IS the purge.
+   uint p101t = GetTickCount();   // P-PERF-TMP (remove after attribution)
    g_suppressDeleteEvents = true;
    DrawStripColorHoverClear();
-   for(int i = 0; i < DSTRIP_MAX_SLOTS; i++)
-
-   {        ObjectDelete(0, DrawStripObjName(i));
-        ObjectDelete(0, DrawStripIconName(i));
-        ObjectDelete(0, DrawStripIconName(i) + "C");
-        ObjectDelete(0, DrawStripIconName(i) + "S");    // P-DRAW-64a: the colour seat's centre
-        ObjectDelete(0, DrawStripIconName(i) + "C2");   // ...and its swatch skin
-        ObjectDelete(0, DrawStripIconName(i) + "R");    // P-DRAW-64a2: ...and the merged seat's BORDER bar
-   }
-   ObjectDelete(0, DrawStripGripName());
-   ObjectDelete(0, DrawStripGripIconName());
-   ObjectDelete(0, DrawStripGripIconName() + "C");
-   ObjectDelete(0, DrawStripBadgeName());
-   for(int g = 0; g < 2; g++) ObjectDelete(0, DrawStripSepName(g));   // P-DRAW-66
-   for(int a = 0; a < DSTRIP_ACT_N; a++)
-   {
-      ObjectDelete(0, DrawStripActName(a));
-      ObjectDelete(0, DrawStripActIconName(a));
-      ObjectDelete(0, DrawStripActIconName(a) + "C");
-   }
-   for(int r = 0; r < DSTRIP_PICK_MAX; r++)
-   {
-      ObjectDelete(0, DrawStripPickName(r));
-      ObjectDelete(0, DrawStripPickIconName(r));
-      ObjectDelete(0, DrawStripPickLabelName(r));
-      ObjectDelete(0, DrawStripPickChipName(r));
-      ObjectDelete(0, DrawStripPickRailName(r));
-      ObjectDelete(0, DrawStripPickGlassName(r));   // P-DRAW-33: the glass sheen
-   }
+   uint p101h = GetTickCount();
+   DrawStripDiagClose();   // P-PERF-95 (BUG-11): the census handle leaves with the strip
+   uint p101d = GetTickCount();
+   DrawStripSweepStale();
+   uint p101s = GetTickCount();
    DrawStripGearClose();
-   ObjectDelete(0, DrawStripBgName());
-   DrawStripSkinPurge();   // P-DRAW-29: the skin family dies with the strip
+   uint p101g = GetTickCount();
+   uint p101k = p101g;   // P-PERF-103: no skin phase left to time
    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
    g_suppressDeleteEvents = false;
    s_dsOpen = false;
@@ -4972,6 +4931,15 @@ void DrawStripClose()
    // P-DRAW-09b: the group belongs to the OPEN strip — a new one takes its own
    // snapshot (the selection may have changed on the chart in between).
    DrawSelClear();
+   // P-PERF-TMP (remove after attribution): which phase owns the teardown second.
+   // Prints only when the total clears the close's own budget, so a healthy
+   // teardown stays silent and the slow one names its owner.
+   uint p101e = GetTickCount();
+   if((p101e - p101t) >= 100)
+      Print("[W][PERF-TMP] stripclose hover=", (int)(p101h - p101t),
+            " diag=", (int)(p101d - p101h), " sweep=", (int)(p101s - p101d),
+            " gear=", (int)(p101g - p101s), " skin=", (int)(p101k - p101g),
+            " tail=", (int)(p101e - p101k), " total=", (int)(p101e - p101t));
 }
 
 //--- P-DRAW-09d: GUARDED WRITES. In MT4 every `ObjectSet*` marks the chart dirty
@@ -5706,7 +5674,7 @@ bool DrawStripGearHeadPaint()
    dirty |= DrawStripSetInt(DrawStripGearHeadName("VB"), OBJPROP_FONTSIZE, PnlPt(6));
    if(ObjectFind(0, DrawStripGearHeadName("VT")) >= 0)      // the retired label
    { ObjectDelete(0, DrawStripGearHeadName("VT")); dirty = true; }
-   int closeX = gx + s_dsGearW0 - DSTRIP_GEAR_PAD - 26;
+   int closeX = gx + s_dsGearW0 - DSTRIP_GEAR_PAD - DSTRIP_GEAR_XW;
    dirty |= DrawStripBtn(DrawStripGearCloseName(), closeX, hy + 17, 26, 26,
                          DSTRIP_CLR_FOOT, DSTRIP_CLR_FOOT, DSTRIP_CLR_LINE, "", "Close settings");
    dirty |= DrawStripFace(DrawStripGearCloseSkinName(), closeX, hy + 17, 26, 26,
@@ -7811,6 +7779,7 @@ void DrawStripPlaceFresh(const string name, const int mx, const int my, int &x, 
 bool DrawStripOpenAt(const string name, const int mx, const int my)
 {
    if(name == "" || ObjectFind(0, name) < 0) return false;
+   if(DrawIsHTFObject(name)) return false;   // HTF candles never open the strip
    EDrawKind k = DrawKindOf(name);
    if(k == DK_NONE) return false;
    // P-DRAW-41 (2026-09-25): the SAME object again is a re-state, not a move — the
@@ -7861,8 +7830,18 @@ bool DrawStripOpenAt(const string name, const int mx, const int my)
    s_dsPinned = keepPin;
    s_dsN = DrawStripQuickCount(k);
    DrawStripLayout();
-   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0); if(cw <= 0) cw = 1920;
-   int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0); if(ch <= 0) ch = 1080;
+   //--- P-UI-157 (2026-10-13): the placement is measured in the LIVE window, and a
+   //--- FRESH home is written only from a window that was really measured. The
+   //--- 1920x1080 substitution below is kept for PAINTING — a frame must paint — but it
+   //--- is never a denominator: a home measured in that window is a fraction of a box
+   //--- the pixels did not come from, which is the creep P-UI-140/P-UI-142 ended for
+   //--- the orb and the chip. This is the strip's half of the same law, and it was the
+   //--- one still live: `gvariables.dat` moved STRIP_FX 0.296806 -> 0.606828 -> 0.504956
+   //--- across two attach cycles on 2026-10-13 while the orb's and the chip's X
+   //--- recovered (their reader was fixed in P-UI-156; the strip had no reader).
+   int cw = 0, ch = 0;
+   const bool dsBox = HomeChartSizeRaw(cw, ch);
+   if(!dsBox) { cw = 1920; ch = 1080; }   // paint-time only — never a stored denominator
    // P-DRAW-41 (2026-09-25): the HOME is the placement, and the first open on a
    // chart is the only one without one — it measures the drawing through the
    // P-DRAW-20 placer once (the drawing's own corner, never the cursor under the
@@ -7879,7 +7858,13 @@ bool DrawStripOpenAt(const string name, const int mx, const int my)
    if(s_dsY < 4) s_dsY = 4;
    if(s_dsX > cw - s_dsW - 4) s_dsX = cw - s_dsW - 4;
    if(s_dsY > ch - s_dsH - 4) s_dsY = ch - s_dsH - 4;
-   if(dsFreshHome) DrawStripHomeSet(s_dsX, s_dsY);   // P-DRAW-41: what a FRESH placement measured IS the home
+   //--- P-DRAW-41 + P-UI-157/158: what a FRESH placement measured IS the home — but only
+   //--- when the window it measured in is the one the fraction will be divided by. With no
+   //--- measured box the plate still paints here; it just keeps no home, so the first open
+   //--- that CAN measure one is the one that stores it. The write is the HAND's door: a
+   //--- first measurement is a new answer like a release is, and P-UI-158 lets nothing else
+   //--- through — which is why a later re-open (a derivation) can never move it.
+   if(dsFreshHome && dsBox) { DrawStripHomeSet(s_dsX, s_dsY); GVHomeSaveFracHand("STRIP", s_dsX, s_dsY); }
    if(k == DK_RECT) BoxMidSync(name);   // P-DRAW-21: the drag/zoom ride moves the mid too
    FibPenSync(name, false);   // P-DRAW-74b: an open re-converges the pair with the drawing
    DrawStripPaint();
@@ -7900,7 +7885,10 @@ bool DrawStripOpen(const string name)
 //--- on one fibo land on the other is gone from every write path that came through
 //--- here. The learning half lives in `DrawSlotWrite` (P-DRAW-01c).
 //--- Every caller pushes undo FIRST (single-step looks).
-int DrawStripWriteValue(const int slot, const double v)
+//--- P-DRAW-130 (2026-10-13): `remember=false` (a hover preview) rides through to
+//--- the slot writer, which then writes the drawing and learns nothing. Every other
+//--- caller is a real pick and keeps the default.
+int DrawStripWriteValue(const int slot, const double v, const bool remember=true)
 {
    //--- P-DRAW-64a: the box's own 50 % needs no "show the interior" rule — it moves
    //--- the DRAWING's far anchor, so it is visible with the fill off, on, or never
@@ -7910,14 +7898,14 @@ int DrawStripWriteValue(const int slot, const double v)
    if(n <= 0)
    {
       if(s_dsObj == "" || ObjectFind(0, s_dsObj) < 0) return 0;
-      return (DrawSlotWrite(s_dsObj, slot, v) ? 1 : 0);
+      return (DrawSlotWrite(s_dsObj, slot, v, remember) ? 1 : 0);
    }
    int done = 0;
    for(int i = 0; i < n; i++)
    {
       string nm = DrawSelAt(i);
       if(nm == "" || ObjectFind(0, nm) < 0) continue;
-      if(DrawSlotWrite(nm, slot, v)) done++;
+      if(DrawSlotWrite(nm, slot, v, remember)) done++;
    }
    // DIAG-141 (2026-10-03) — THE GROUP LEAVES ITS NUMBER. One tap fanning out
    // to several drawings («رنگ یکی را عوض میکنم روی دیگری هم اعمال میشه») is
@@ -8116,7 +8104,13 @@ void DrawStripLearnCurrent()
 //--- panel's quick swatch and the board's HEX field all end in this write: RECENT,
 //--- undo, the fill's own show group, the value, and the level's border sync. One
 //--- place, so a new face for a colour cannot miss a step the old one took.
-bool DrawStripColorCommit(const int slot, const color c)
+//--- P-DRAW-130 (2026-10-13): `remember=false` is a HOVER PREVIEW (the popup's
+//--- PalHoverPreview applies this way). The drawing still wears the colour live —
+//--- that is the point of a preview — but the look must not be LEARNED as the
+//--- kind's last change, or the next drawing of the kind is born wearing a colour
+//--- the hand only passed over (and every crossing persisted it to disk). A click
+//--- keeps the default; only the preview asks for the write-without-learn half.
+bool DrawStripColorCommit(const int slot, const color c, const bool remember=true)
 {
    if(!DrawStripIsColorSlot(slot)) return false;
    if(c == clrNONE) return false;
@@ -8125,7 +8119,7 @@ bool DrawStripColorCommit(const int slot, const color c)
    //--- it any more); the cards' palette keeps the history this product shares.
    DrawStripUndoPush();
    if(slot == DRAW_SLOT_FILLCLR) DrawStripFillShowGroup();   // P-DRAW-64: a colour is a fill
-   DrawStripWriteValue(slot, (double)(int)c);
+   DrawStripWriteValue(slot, (double)(int)c, remember);
    if(slot == DRAW_SLOT_COLOR) BoxMidSyncGroup();   // P-DRAW-64a: the level wears the border
    return true;
 }
@@ -9158,7 +9152,7 @@ bool DrawStripGearGripAt(const int mx, const int my)
       my <= s_dsGEY + s_dsGearHeadY + DSTRIP_GEAR_HEAD_H &&
       // P-DRAW-36: the handle spans the head's own width (s_dsGearW0) minus the
       // close button's corner — the same corner rule, measured off the plate.
-      mx >= hx && mx <= hx + s_dsGearW0 - DSTRIP_GEAR_PAD - 26 - DSTRIP_GEAR_PAD) return true;
+      mx >= hx && mx <= hx + s_dsGearW0 - DSTRIP_GEAR_PAD - DSTRIP_GEAR_XW - DSTRIP_GEAR_PAD) return true;
    return false;
 }
 //--- P-DRAW-113 (2026-10-01) — THE PANEL'S OWN PLATE IS NOT THE CHART, EVEN WHERE NO
@@ -9303,6 +9297,7 @@ void DrawStripGripMove(const int mx, const int my, const bool left)
    if(ny > ch - s_dsH - gm) ny = ch - s_dsH - gm;
    if(nx == s_dsX && ny == s_dsY) return;
    s_dsX = nx; s_dsY = ny;
+   GVHomeAnswerNew("STRIP");         // P-UI-158: the hand just moved it — re-claimed per move
    DrawStripHomeSet(s_dsX, s_dsY);   // P-DRAW-41: the hand just moved the home
    DrawStripPaint();
 }
@@ -9417,7 +9412,7 @@ void DrawStripHoldLatch(const int mx, const int my)
     if(s_dsOpen) return;   // an open strip owns no press cycle - the press is only NAMED
     // DIAG-113 (temporary): one line per named press so the log proves whether the
     // press reached us, what the hit test saw, and what the live probe reads.
-    Print("[drawstrip] press named at ", mx, ",", my, " hit=\"", named,
+    _LOG_GATE_D Print("[drawstrip] press named at ", mx, ",", my, " hit=\"", named,
           "\" lbtn=", (UILeftButtonDown() ? 1 : 0));
 }
 //--- P-UI-113f (2026-09-24): THE CLICK LEAVES THE DRAWING NATIVELY SELECTED.
@@ -9489,6 +9484,7 @@ void DrawStripHoldSelectPoll()
 bool DrawStripClickToggle(const string nm, const bool wasDrag)
 {
     if(nm == "" || ObjectFind(0, nm) < 0) return false;
+    if(DrawIsHTFObject(nm)) return false;   // HTF candles never toggle or open the strip
     if(wasDrag) return false;               // P-UI-113d: a drag-release never toggles
     if(DrawStripDragLive()) return false;   // P-UI-130: the terminal is still moving it
     if(g_PnlOpen >= 0) return false;        // modal card/mini owns clicks
@@ -9592,6 +9588,15 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       //--- net for gestures that fire no event at all.
       BoxMidSync(sparam);
       FibPenSync(sparam, false);   // P-DRAW-74b: the pair rides the same event (reads on a still frame)
+      //--- P-DRAW-128 (2026-10-13) — AND THE NATIVE SURFACE'S COLOUR IS LEARNED.
+      //--- The terminal's own properties dialog and floating toolbar write
+      //--- OBJPROP_COLOR directly and land HERE as OBJECT_CHANGE — the one channel
+      //--- that reports a colour the hand picked outside every surface we own
+      //--- («اگر از جای غیره به جز نوار استرینگ تغییر بکنه»). The learner is
+      //--- compare-first and event-path only (a move-drop teaches nothing), so a
+      //--- still frame pays zero. OBJECT_DRAG is skipped on purpose: a drag cannot
+      //--- change a colour, and skipping it keeps the per-move gesture cost as it was.
+      if(id == CHARTEVENT_OBJECT_CHANGE) DrawInkLearnNative(sparam);
       // P-DRAGF: arm the chase — the drag event names the hand's object, the moves
       // do the following (FibPen.mqh). Drag-rate cost: kind + existence reads.
       if(id == CHARTEVENT_OBJECT_DRAG) FibPenDragArm(sparam);
@@ -9646,7 +9651,7 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
           //--- 2026-09-29 log after the 13:35 reload (no line of any kind). Gated to
           //--- the shut strip: a toggle only opens from there, and an open strip's
           //--- presses are the panel's own. One line per press edge.
-         if(!s_dsOpen) Print("[drawstrip] press edge at ", tmx, ",", tmy, " bit=", (tleft ? 1 : 0));
+         if(!s_dsOpen) _LOG_GATE_D Print("[drawstrip] press edge at ", tmx, ",", tmy, " bit=", (tleft ? 1 : 0));
           // P-UI-113j: the latch names this press (a flapping bit re-reports ONE
           // press as many). Its owner, its press point and the opening window
           // survive untouched - re-declaring them here is what let a mid-press

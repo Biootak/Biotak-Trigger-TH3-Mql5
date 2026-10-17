@@ -38,7 +38,10 @@ bool DrawMainLevels(const string prefix) {
     // Skip drawing High/Low lines when Custom Price mode is active
     // In Custom Price mode, user defines their own reference point
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
-        // Delete existing High/Low lines if they exist
+        // Delete existing High/Low lines if they exist. P-LBL-11 (2026-10-17):
+        // the two `_PipsLabel` purges stay although nothing creates them any
+        // more - a chart that ran an older build still carries the objects, and
+        // this is one of the sweeps that clears them.
         ObjectDelete(0, prefix + "High");
         ObjectDelete(0, prefix + "High_PipsLabel");
         ObjectDelete(0, prefix + "Low");
@@ -64,10 +67,9 @@ bool DrawMainLevels(const string prefix) {
         highTooltip = s_cachedHighTooltip;
     }
     if(!CreateTHLineObject(prefix+"High",g_highestHigh,inpHighColor,inpHighStyle,inpHighWidth,highTooltip, inpTHLineObjectType, false)) return false;
-    if(inpShowPipDistanceLabels) {
-        double pipsToHigh = CalculatePipsDistance(g_highestHigh, g_currentPrice);
-        CreatePipDistanceLabel(prefix+"High_PipsLabel", g_highestHigh, pipsToHigh, inpHighColor);
-    }
+    // P-LBL-11 (2026-10-17): the High line's pip-distance label block stood
+    // here (`inpShowPipDistanceLabels` -> CreatePipDistanceLabel). The labels
+    // are retired; nothing replaces it - the line is the whole surface.
     
     // Low line
     string lowTooltip;
@@ -81,10 +83,8 @@ bool DrawMainLevels(const string prefix) {
         lowTooltip = s_cachedLowTooltip;
     }
     if(!CreateTHLineObject(prefix+"Low",g_lowestLow,inpLowColor,inpLowStyle,inpLowWidth,lowTooltip, inpTHLineObjectType, false)) return false;
-    if(inpShowPipDistanceLabels) {
-        double pipsToLow = CalculatePipsDistance(g_lowestLow, g_currentPrice);
-        CreatePipDistanceLabel(prefix+"Low_PipsLabel", g_lowestLow, pipsToLow, inpLowColor);
-    }
+    // P-LBL-11 (2026-10-17): the Low line's pip-distance label block stood
+    // here, twin of the High one above - retired with it.
     return true;
 }
 
@@ -287,10 +287,11 @@ bool CreateATRLabelSimple(const string objectPrefix, const string timeframeName,
 //|                                                                    |
 //| Two fences, both deliberate:                              |
 //|  * `LblMark` outside an open window is DROPPED, so a label built   |
-//|    by a path that is not this pass (the level render's pip labels, |
-//|    `CreatePipDistanceLabel`) can never enter either registry, and  |
-//|    is therefore never deleted by this sweep. Those keep their own  |
-//|    owner: the ladder sweep treats `<line>_Label` as produced.      |
+//|    by a path that is not this pass can never enter either registry,|
+//|    and is therefore never deleted by this sweep. The fence's own   |
+//|    example used to be the level render's pip labels              |
+//|    (`CreatePipDistanceLabel`, retired by P-LBL-11, 2026-10-17) —  |
+//|    the guarantee is what mattered and it is unchanged.            |
 //|  * a nested `LblSweepBegin` (a display function that clears on its |
 //|    own way out) does NOT rotate again and does NOT drop the marks  |
 //|    already made this pass.                                        |
@@ -734,6 +735,7 @@ void TRexTradeCardLayout(const STradePlan &plan, STrexCardLayout &L)
    int fs = (inpATRTradeLabelFontSize > 0) ? inpATRTradeLabelFontSize : inpFontSize;
    if(fs < 1) fs = 1;                     // a 0/negative input has no em box
    int brandSize = fs + 6;
+   int atrSize   = fs + 2;                // P-UI-148: ONE owner — the height budget below and the paint both read it
    int em      = PnlRawLineH(fs);        if(em < 1) em = 1;
    int brandEm = PnlRawLineH(brandSize); if(brandEm < 1) brandEm = 1;
    // The card's OWN seam (P-LBL-09): `inpATRTradeLabelRowGap` is the input that
@@ -778,11 +780,14 @@ void TRexTradeCardLayout(const STradePlan &plan, STrexCardLayout &L)
    int bottom = LabelFloorMargin();
    // The card is 1 (brand) + 0..2 (the two optional rows) tall, so the height
    // budget counts exactly what is drawn: rows <= room/pitch - (drawn - 1).
+   // P-UI-148: the card's TOP is the superscript line, not the wordmark — reserve
+   // what is really drawn (the raised line is the part that reaches the ceiling).
+   int cardTop = brandEm + TREX_BRAND_GAP_SUPER_TOP + PnlRawLineH(atrSize);
    int drawn = 1 + (L.showTP ? 1 : 0) + (L.showSL ? 1 : 0);
    int chartH = GetCachedChartHeight();          // 100 ms cache; <= 0 = unknown
    if(chartH > 0)
    {
-      int maxRows = (chartH - TREX_CARD_TOP_PAD - brandEm - bottom) / pitch - (drawn - 1);
+      int maxRows = (chartH - TREX_CARD_TOP_PAD - cardTop - bottom) / pitch - (drawn - 1);
       if(maxRows < 0) maxRows = 0;
       if(rows > maxRows) rows = maxRows;
    }
@@ -811,15 +816,21 @@ void TRexTradeCardLayout(const STradePlan &plan, STrexCardLayout &L)
    L.xBrand  = rightEdge + (cardW - wBrand) / 2;
    L.xEx     = L.xBrand;                 // the pair's right end is the row's edge
    L.xTR     = L.xEx + wEx;              // measured: exactly 0 px of overlap
-   L.xSp     = L.xTR + wTR + 4;        // spread moves to the left of `TR`
-   L.ySp     = L.yBrand + brandEm - 4;   // ... just under the brand's cap line
-   L.atrSize = fs + 2;                  // ATR superscript: 2 pt above the row font, below brandSize
-   L.xATR    = L.xEx + 6;              // ATR rides over the `ex` (where spread used to be)
+   L.xSp     = L.xTR + wTR + TREX_BRAND_GAP_SPREAD;   // spread moves to the left of `TR`
+   // P-UI-147/148: the brand band's own AIR, both axes. The two superscripts clear
+   // the wordmark by named gaps (ConstantsAndEnums) and the line stands
+   // TREX_BRAND_GAP_SUPER_TOP above the wordmark's box — it used to sit 4 px
+   // INSIDE it (`yBrand + brandEm - 4`), which is the glue the user drew a line under.
+   L.ySp     = L.yBrand + brandEm + TREX_BRAND_GAP_SUPER_TOP;
+   L.atrSize = atrSize;                 // ATR superscript: 2 pt above the row font, below brandSize
+   L.xATR    = L.xEx - TREX_BRAND_GAP_ATR;            // ATR clears the wordmark's right edge
    L.yATR    = L.ySp;                    // same cap-line height as the spread
    // P-BK-58 — and the BASE NOTE's row is stacked on TOP of the brand: the row's slot is pushed
    // in here, while the card's own top row is known, so the shared column keeps ONE order (the
    // note, then the brand, then the two trade rows) whatever the switches do.
-   LabelPushBaseNoteSlot(L.yBrand, brandEm);
+   // P-UI-148: off the CARD's top (`cardTop`), not the wordmark's — a note parked one brand-em
+   // above the brand would land on the numbers.
+   LabelPushBaseNoteSlot(L.yBrand + cardTop, 0);
 }
 
 bool CreateATRTradeLabel(const string objectPrefix, const STradePlan &plan,

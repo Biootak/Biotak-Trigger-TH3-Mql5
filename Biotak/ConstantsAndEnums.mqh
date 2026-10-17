@@ -240,6 +240,18 @@
 // comment, and so the same number is never typed twice.
 #define TREX_CARD_MAX_GAP_ROWS 20
 #define TREX_CARD_TOP_PAD      8    // the card may not touch the chart ceiling
+// P-UI-147/148 PORT (2026-10-13) — THE BRAND BAND'S AIR, both axes. These three
+// names existed in the MT4 tree (Biotak/ConstantsAndEnums.mqh) and were LOST when
+// this file was forked: `TRexTradeCardLayout` in LabelFunctions.mqh hardcoded the
+// old numbers (4 / -4 / +6) instead, so the MT5 card's spread superscript sat 4 px
+// from `TR`, the ATR superscript rode 6 px INSIDE the `ex` box, and the raised line
+// stood 4 px inside the wordmark's own box. tools/parity/module-report.py reported
+// this as the tree's only two RED modules (LabelFunctions.mqh + ConstantsAndEnums.mqh)
+// — one root, restored here. The MT4 measurement that produced them:
+//   «این وسطش خلی چسبیده یکم از هم فاصله بگیره» / «از بالا به trex چسبیده»
+#define TREX_BRAND_GAP_SPREAD    10   // air between the spread superscript and `TR`
+#define TREX_BRAND_GAP_ATR        8   // air between the ATR superscript and the wordmark's right edge
+#define TREX_BRAND_GAP_SUPER_TOP  5   // air between the superscript line and the wordmark's top
 // The card's SEAM is its own input (`inpATRTradeLabelRowGap`, "compact gap
 // between ATR trade rows"), not the shared column `inpLabelRowGap`: the card is
 // three rows in a corner and the columns are grids, so one number for both is
@@ -579,7 +591,7 @@ enum ENUM_COMBO_OPERATION {
 //|                                                                  |
 //| TWO INDEPENDENT MODES - Simplified and user-friendly             |
 //|                                                                  |
-//| PRESET: Quick select from the 8 ready-to-use combinations        |
+//| PRESET: Quick select from the 9 ready-to-use combinations        |
 //|   Uses: inpComboPreset                                           |
 //|                                                                  |
 //| ADVANCED: Manual control - two components (TF + Step each) and   |
@@ -603,17 +615,18 @@ enum ENUM_COMBO_TIMEFRAME_TYPE {
 };
 
 //+------------------------------------------------------------------+
-//| Step Size Type (TH, SS, LS, 4/3 ratio)                            |
+//| Step Size Type (TH, SS, LS, 4/3, 5/3 ratio)                         |
 //+------------------------------------------------------------------+
 enum ENUM_COMBO_STEP_TYPE {
     COMBO_STEP_TH = 0,          // TH: Base step (1.0  )
     COMBO_STEP_SS = 1,          // SS: Short step (1.5  )
     COMBO_STEP_LS = 2,          // LS: Long step (2.0  )
-    COMBO_STEP_RATIO_4_3 = 3    // 4/3 ratio: TH * 1.333333...
+    COMBO_STEP_RATIO_4_3 = 3,   // 4/3 ratio: TH * 1.333333...
+    COMBO_STEP_RATIO_5_3 = 4    // 5/3 ratio: TH * 1.666666...
 };
 
 //+------------------------------------------------------------------+
-//| Preset Combinations - practical daily-use set (8 presets)        |
+//| Preset Combinations - practical daily-use set (9 presets)        |
 //|                                                                  |
 //| DESIGN PRINCIPLE: keep only the commonly used combinations;      |
 //| anything else can be built with Advanced Mode.                  |
@@ -626,7 +639,8 @@ enum ENUM_COMBO_PRESET {
     COMBO_PRESET_AGGRESSIVE = 4,        // min(Trigger, Sub)
     COMBO_PRESET_TREND_FILTER = 5,      // Structure - Sub
     COMBO_PRESET_SS = 6,                 // Pattern / SS = same spacing as Short Step mode
-    COMBO_PRESET_RATIO_4_3 = 7           // Pattern / (TH * 4/3) = TH * 1.333333...
+    COMBO_PRESET_RATIO_4_3 = 7,          // Pattern / (TH * 4/3) = TH * 1.333333...
+    COMBO_PRESET_RATIO_5_3 = 8           // Pattern / (TH * 5/3) = TH * 1.666666...
 };
 
 // TH3 Label Position

@@ -28,10 +28,24 @@ the file, diff it, rebuild both MT5 entries, and say so in the commit message.
   (`#define BUILD_LITE` inside it). Both mirror their `.mq4` twin line for line:
   same include order, same five handlers, same `P4Report*` ledgers, same UI-kit
   half (`InitializeUIStates` / `InitializeBiotakKit` / `InitializeHTFCandles` /
-  `CreateMenu`, and the matching teardown).
+  `CreateMenu`, and the matching teardown). Both carry
+  `#define BIOTAK_RENDER_ENGINE` (R-RENDER-ENGINE, 2026-10-17): the ladder's
+  trigger lines and the ZONE family (fill band + edge segments on a
+  dedicated BACK layer) are painted by the canvas engine instead of one chart
+  object per element — comment that ONE line out for the object-path A/B.
+  (The pip-distance labels the engine also painted in phase 1 were removed
+  outright in P-LBL-11, same day; the engine's text family stayed, dormant.)
 - `Biotak/` — owned product modules (68 `.mqh`). MT5-only fixes live here;
   they must stay behaviour-identical to MT4 on MT4-equivalent inputs, and any
   MT5-only divergence is marked `MT5-ONLY` or `R-TF-UNIT`.
+- `Engine/` — MT5-only canvas render engine (not product modules):
+  `RenderPlatform.mqh` (bitmap layers, resources, layer masks),
+  `RenderCore.mqh` (scene, price mapper, painters, Law 0), and
+  `RenderBridge.mqh` (the product seam — staging/diff-commit for lines, labels
+  and zones, the mask/paint pump; zones reuse the trigger-ink helpers, edge
+  segments are stroked as thin rects and the band painters honour `filled`).
+  `LevelPipeline.mqh` calls the bridge behind `BIOTAK_RENDER_ENGINE`; spec and
+  laws in `docs/ENGINE-ARCH-FA.md`.
 - `MT5Compat/MQL5Compat.mqh` — the **only** MT5-specific source. Every MQL4 API
   the shared modules use is bridged here. Included immediately after
   `Logger.mqh` and before every shared module.
@@ -93,9 +107,11 @@ there at compile time; the bytes are then embedded in the `.ex5`).
   and require `ENUM_TIMEFRAMES` / `ENUM_OBJECT` in MQL5. Cast at the call site
   so both compilers accept the same line.
 - **MT5 additions to the entries are unavoidable and are marked `MT5-ONLY`:**
-  `ArraySetAsSeries` on the `OnCalculate` arrays, and `CompatRefreshChartData()`
-  in `OnCalculate`/`OnTimer` to feed the `Time[]/Open[]/…/Bars` emulation.
-  Nothing else in the entries is platform-specific.
+  `ArraySetAsSeries` on the `OnCalculate` arrays, `CompatRefreshChartData()`
+  in `OnCalculate`/`OnTimer`, and the R-RENDER-ENGINE block
+  (`#define BIOTAK_RENDER_ENGINE`, the `Engine\RenderBridge.mqh` include, the
+  `RBridgeInit`/`RBridgeShutdown` calls and the `RBridgePump` calls in
+  `OnChartEvent`/`OnTimer`). Nothing else in the entries is platform-specific.
 
 ## Working rules
 

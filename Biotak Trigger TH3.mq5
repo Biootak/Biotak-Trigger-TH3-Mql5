@@ -20,6 +20,19 @@
 #property description "Biotak Trigger TH3 v3.12 - Freeware, not for sale."
 #property description "Trigger/TH/TH3 levels, HTF candles, hand drawings. By Biotak."
 
+// MT5-ONLY (R-RENDER-ENGINE, 2026-10-17): the ladder's trigger lines and pip
+// labels are painted by the canvas engine (Engine\RenderBridge.mqh) instead of
+// one chart object per element. Comment this ONE line out to return to the
+// object path for A/B — every call site on both sides is guarded by the flag.
+#define BIOTAK_RENDER_ENGINE
+
+// MT5-ONLY DIAGNOSTIC (R-RENDER-ENGINE): uncomment to compile the scene dump
+// (RBridgeDumpCsv in RenderBridge.mqh). With that build running, set the global
+// variable BTRS_DUMP=1 in the terminal and the next frames write the drawn
+// family to MQL5\Files\BTRS_scene_MT5.csv; tools/mt4-scene-dump.mq4 writes the
+// same rows from the MT4 chart and tools/parity/scene-diff.py diffs the two.
+//#define BTRS_SCENE_DUMP
+
 //                                                                    
 // BUILD CONFIG - Must be first include!
 //                      BuildConfig.mqh               
@@ -125,6 +138,12 @@
 #include "Biotak\ExtendedDrawingFunctions.mqh"
 #include "Biotak\ComboEngine.mqh"
 #include "Biotak\FactorMode.mqh"
+// MT5-ONLY (R-RENDER-ENGINE): the canvas bridge. Must precede its only call
+// site (LevelPipeline) and follow ObjectCache (pin retirement removes cache
+// slots). Compiled away entirely when BIOTAK_RENDER_ENGINE is undefined.
+#ifdef BIOTAK_RENDER_ENGINE
+#include "Engine\RenderBridge.mqh"
+#endif
 #include "Biotak\LevelPipeline.mqh"
 #include "Biotak\ModeDefinitions.mqh"
 
@@ -167,7 +186,7 @@ int OnInit()
     // teardown's own `DrawStripClose()`" — but `git grep SweepStale HEAD` finds the
     // definition and NO call site: the sweep was never wired, so the promise the rule
     // makes has never been delivered. What that costs was measured on 2026-10-01
-    // (EURUSD,M5, report «روی stroke که کلیک می‌کنم متن‌ها این‌طوری ناقص هست»): the
+    // (EURUSD,M5, report «روی stroke که کلیک‌می‌کنم متن‌ها این‌طوری ناقص هست»): the
     // terminal holds every object of the open Stroke tab at its own seat with its own
     // ink (`TABCENSUS GR2T "50 % line":14865611 z=1442`, `GS0T "STROKE"` in
     // `MQL4\Logs\20261001.log`), while the screen paints 31 of those 104 objects — and
@@ -190,10 +209,35 @@ int OnInit()
     if(result == INIT_SUCCEEDED)
     {
         // --- Circular menu / settings panels / HTF candles ---
+        // P-PERF-110: each UI quarter is timed AT ITS CALL SITE so a ui=1266
+        // names its owner (menu / kit / htf / states) instead of one opaque total.
+        uint p4q = GetTickCount();
         InitializeUIStates();      // menu + UI globals
+        g_pInitMsStates = GetTickCount() - p4q;  p4q = GetTickCount();
         InitializeBiotakKit();   // panel state, colors, boxes, custom lines
+        g_pInitMsKit = GetTickCount() - p4q;  p4q = GetTickCount();
         InitializeHTFCandles();    // HTF candle engine
+        g_pInitMsHTF = GetTickCount() - p4q;  p4q = GetTickCount();
         CreateMenu();              // orb + ring + tools
+        g_pInitMsMenu = GetTickCount() - p4q;
+        // P-PERF-106 (2026-10-16) — THE CROSS-RELOAD RESOLUTIONS RUN LAST.
+        //
+        // ResolveTopologyAdoption/ResolvePeriodChangeAttach must read every
+        // fingerprint input FINAL: InitializeUIStates set the OV_ persist
+        // prefix (BiotakMenu) and InitializeBiotakKit loaded the runtime
+        // overrides (inpMaxLevels is `g_maxLevels` there) — so this is the
+        // first point where the fingerprint the dying instance wrote and the
+        // one computed here agree. Inside OnInitHandler they read the 144
+        // seed against a stored 352: every attach printed a stamp mismatch
+        // and the adoption fell back to a ~1 s whole-chart walk (measured
+        // 2026-10-16, M5 ind=1344 ms). Both entries place them here.
+        ResolveTopologyAdoption();
+        ResolvePeriodChangeAttach();
+        // MT5-ONLY (R-RENDER-ENGINE): arm the canvas layers (created on the
+        // first pump if the chart window is not mapped yet).
+#ifdef BIOTAK_RENDER_ENGINE
+        RBridgeInit();
+#endif
         // P-UI-114: right-click era deleted — terminal menu untouched, strip on
         // LEFT hold (DrawStrip.mqh).
         ChartRedraw();
@@ -210,7 +254,22 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+    CompatDeinitBegin();   // MT5-ONLY P-PERF-99: no event can be consumed after this
     uint p4d = GetTickCount();   // P-PERF-04: teardown budget (timeframe switch)
+#ifdef BIOTAK_RENDER_ENGINE
+    RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance
+#endif
+    // P-PERF-96 (BUG-13, 2026-10-13) — THE COMPAT LEDGER IS READ, NOT JUST WRITTEN.
+    //
+    // Every counter in MT5Compat/MQL5Compat.mqh (Period(), MarketInfo(), Bid/Ask,
+    // the ATR rates sync engine (P-ATR-SYNC: memo hits/misses, engine calls),
+    // iBarShift, the series full-copy vs in-memory
+    // shift) was incremented and NEVER printed: the measurement existed and no
+    // report read it, so "MT5 lags" could not be attributed to a call site.
+    // One call here closes that loop for a MEASUREMENT build (uncomment
+    // `#define COMPAT_LEDGER 1` in the shim). In a release build the shim's own
+    // guard returns immediately and this line costs one call and prints nothing.
+    CompatLedgerReport("OnDeinit reason=" + IntegerToString(reason));
     // P-PERF-44: the ledger is read by the breakdown line below, so it is cleared
     // HERE - at the start of the transaction it describes, never inside a saver
     // (a saver that returns early would leave the previous teardown's numbers).
@@ -225,6 +284,28 @@ void OnDeinit(const int reason)
     uint p15t = p4d;
     uint p15Pnl, p15Menu, p15Htf, p15Save, p15Cleanup, p15Handler;
     SnapshotOpenSurfaces();   // P-UI-142: record open panel/tools BEFORE the closes below clear them
+    // P-PERF-116 (2026-10-17) — A TIMEFRAME SWITCH KEEPS WHAT A RELOAD CAN ADOPT (MT5-ONLY).
+    //
+    // MT5 does not delete chart objects when the chart's period changes (the
+    // P-PERF-38b note in OnDeinitHandler and the orphan-purge note in
+    // InitializeUIStates both ride that fact). The teardown until now deleted
+    // the whole UI anyway and the init rebuilt it from scratch - the live log
+    // priced it at ~450 ms per switch, htf=187 ms of it deleting the HTF
+    // family the next instance was about to draw again.
+    //
+    // So on REASON_CHARTCHANGE the two families whose state is PERSISTED are
+    // kept, not deleted:
+    //   * the MENU - menuVisible / ToolsOpen / the homes all restore from GVs
+    //     (LoadUIState), and CreateMenu re-asserts ring and orb in place
+    //     through their own ObjectFind-guarded creators;
+    //   * the HTF CANDLES - a pure function of persisted settings + history;
+    //     the drawn COUNT crosses the reload as a one-shot handoff key so the
+    //     first draw rewrites [0,count) in place and prunes the surplus.
+    // What CANNOT survive stays deleted: the panels, the palette and the
+    // strip reset their open-state with the instance - a kept panel would be
+    // a dead surface (the orphan purge's own law) - so PnlCloseAll and
+    // DrawStripClose still run in every direction.
+    const bool p116keep = (reason == REASON_CHARTCHANGE);
     PnlCloseAll();
     p15Pnl = GetTickCount() - p15t; p15t = GetTickCount();
     // P-DRAW-08: the drawing strip's own objects die with the instance — the
@@ -232,14 +313,24 @@ void OnDeinit(const int reason)
     // (the name was `Biotak_DS_*` in the note that first said this; the objects
     // have been `PnlDrawS_*` since birth — P-DRAW-73, catalogue 24).
     DrawStripClose();
-    DeleteMenu();
+    if(!p116keep)
+       DeleteMenu();          // P-PERF-116: kept on a switch - CreateMenu adopts it back
     p15Menu = GetTickCount() - p15t; p15t = GetTickCount();
-    DeleteHTFCandles();
+    if(!p116keep)
+       DeleteHTFCandles();    // P-PERF-116: kept on a switch - the first draw re-adopts and prunes
+    else
+       SaveHTFHandoffStamp(); // P-PERF-116: ...and the count crosses the reload with it
     p15Htf = GetTickCount() - p15t; p15t = GetTickCount();
     SaveBiotakKit();
     p15Save = GetTickCount() - p15t; p15t = GetTickCount();
     CleanupUIStates(reason);
     p15Cleanup = GetTickCount() - p15t; p15t = GetTickCount();
+    // P-PERF-111 (2026-10-17): every UI family is swept by now (Pnl/Pal_/SW*,
+    // Circ/Tools/Sub, the strip) - stamp it so the next instance's orphan
+    // purge + ghost sweeps stand down (they never see this session's IDs from
+    // an older session, so a restart still purges). One-shot, consumed in
+    // InitializeUIStates; see UITearStampName in EventHandlers.
+    StampCleanUITeardown();
     OnDeinitHandler(reason);
     p15Handler = GetTickCount() - p15t;
     uint p15total = GetTickCount() - p4d;
@@ -262,7 +353,7 @@ void OnDeinit(const int reason)
     if(p15total > P_P4_INIT_WARN_MS)
         _LOG_GATE_W Print("[W][PERF] OnDeinit breakdown: pnl=", (int)p15Pnl, "ms menu=", (int)p15Menu,
               "ms htf=", (int)p15Htf, "ms save=", (int)p15Save, "ms cleanup=", (int)p15Cleanup,
-              "ms handler=", (int)p15Handler, "ms | ovr w=", RSSaveWrites(), "/",
+              "ms handler=", (int)p15Handler, "ms keep=", (p116keep ? 1 : 0), " | ovr w=", RSSaveWrites(), "/",
               (RSSaveWrites() + RSSaveSkipped()),
               " pal w=", GVLedgerWrites(GV_BLOCK_PALETTE), "/",
               (GVLedgerWrites(GV_BLOCK_PALETTE) + GVLedgerSkipped(GV_BLOCK_PALETTE)),
@@ -344,6 +435,20 @@ void OnChartEvent(const int id,
   // MT5Compat\MQL5Compat.mqh, "THE PROGRAMMATIC OBJECT EVENT STORM".
   if((id == CHARTEVENT_OBJECT_CREATE || id == CHARTEVENT_OBJECT_DELETE) &&
      CompatConsumeObjEvent(id, sparam)) return;
+  // BUG-15 (2026-10-13, resolved 2026-10-16) — NO LEAVE EVENT EXISTS ON EITHER
+  // PLATFORM, SO THERE IS NOTHING TO FILTER HERE.
+  //
+  // The staged attempt watched CHARTEVENT_MOUSE_LEAVE, which is not an MQL4 or
+  // MQL5 identifier (proven by compiling it: error 256). MQL5 documents that
+  // mouse events simply STOP when the cursor leaves the chart's client area;
+  // the exit is never reported under any id. If the terminal ever delivers a
+  // displaced MOUSE_MOVE, the coordinates fall outside the chart rect — the
+  // same shape MT4 reports — and the shared hover drivers already read that as
+  // "no cell" (`PalHoverPreview`'s `if(reg < 0) PalHoverRestore()` and
+  // `DrawStripColorHoverCellAt`'s -1), restoring exactly as MT4 does. Only a
+  // GetCursorPos+timer (user32 import, needs "Allow DLL imports") could see a
+  // no-button exit, and that price is not worth a hover rim. The shared
+  // modules therefore stay pristine and the filter stays absent.
   // P-PERF-04: name the phase behind an interaction hitch (indicator half vs
   // menu/panel half). Logs only when the pair blows the 40 ms budget.
   // P-PERF-34: scope the frame deferral to this window. A forced frame inside
@@ -423,6 +528,14 @@ void OnChartEvent(const int id,
   p4t = GetTickCount();
   CoopPump();
   uint p4c = GetTickCount() - p4t;
+#ifdef BIOTAK_RENDER_ENGINE
+  // MT5-ONLY (R-RENDER-ENGINE): the repaint/mask channel — scroll, zoom and
+  // resize re-map the canvas; KEYDOWN/OBJECT_CLICK carry the F/L hide and the
+  // menu toggles so a hidden family masks in the same event, not a timer tick
+  // later. frameKey-guarded, so an unchanged chart costs two chart reads.
+  if(id == CHARTEVENT_CHART_CHANGE || id == CHARTEVENT_KEYDOWN || id == CHARTEVENT_OBJECT_CLICK)
+     RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
+#endif
   // P-UI-40: AND THE PANEL FOLLOWS WHAT IT DOES NOT OWN.
   //
   // A hotkey changes state that an OPEN card displays, but the hotkeys live in
@@ -474,6 +587,10 @@ void OnTimer()
     uint _clNow = GetTickCount();
     if(_clNow - _clMs >= 60000) { _clMs = _clNow; CompatLedgerReport("60s"); }
 #endif
+    // P-PERF-110c (2026-10-17): a TF-switch attach defers the legacy tool
+    // restores (leg upgrade + TH3 pattern restore) to this first 250 ms frame,
+    // so the ladder family paints at ~100 ms and the tools follow invisibly.
+    TailRestoreDeferred();
     // P-UI-113-OFF (2026-09-23): no fast window — every tick is housekeeping.
 
     // P-TH3-REC-04 (2026-10-05): age out the recorder's one-second receipt. The
@@ -513,6 +630,13 @@ void OnTimer()
     CoopOwe(COOP_JOB_STATUS_TEXT);
     CoopPump();
 
+#ifdef BIOTAK_RENDER_ENGINE
+    // MT5-ONLY (R-RENDER-ENGINE): the net under the CHART_CHANGE channel —
+    // family masks (L / hide-all) and any repaint a missed notification left
+    // owed. Two chart reads when nothing moved.
+    RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
+#endif
+
     // --- UI kit: HTF forming candle + new-bar redraw + chart-lock watchdog ---
     // (P-UI-40's UISyncDrain rides inside RefreshKitOnBar — one drain owner.)
     RefreshKitOnBar();
@@ -538,7 +662,7 @@ void OnTimer()
     // one owner that does not depend on any event reaching us. A selection that
     // outlived the gesture that made it is what lets MT4 drag the custom price
     // line (and the whole ladder derived from its price) along with somebody
-    // else's fib or box («وقتی فیو یا باکس از همون محل میکشم کاستوم پرایس
+    // else's fib or box («وقتی فیو یا باکس از همون محل می‌کشم کاستوم پرایس
     // جابجا میشه»). The 250 ms clock is the net under the layers whose events
     // are consumed whole (the box tool's draw session); the gesture starts
     // themselves clear it in their own event, so this is a floor, not the path.

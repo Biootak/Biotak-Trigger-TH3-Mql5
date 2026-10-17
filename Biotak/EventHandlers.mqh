@@ -1054,14 +1054,22 @@ int LevelFamilyObjectsOnChart()
 
 void ResolveTopologyAdoption()
 {
+   uint _adoptT = GetTickCount();   // P-PERF-110: the adopt= field owns this walk
    g_adoptPreviousTopology = false;
    string n = AdoptionStampName();
    bool haveStamp = GlobalVariableCheck(n);
    int stored = haveStamp ? (int)GlobalVariableGet(n) : 0;
    int live = AdoptionFingerprint();
    bool stampOk = (haveStamp && stored == live);
-   // The chart's own answer, independent of every GlobalVariable above.
-   int preexist = LevelFamilyObjectsOnChart();
+   // P-PERF-106 (2026-10-16) — THE STAMP ALREADY ANSWERED: DO NOT WALK.
+   //
+   // LevelFamilyObjectsOnChart() is a whole-chart walk (~1200 ObjectName
+   // calls, measured 344-1344 ms on the user's chart, 2026-10-16) and it
+   // exists for ONE case: a stamp that cannot vouch for the chart. When the
+   // stamp matches, `adopt` is already true whatever the walk finds, so the
+   // walk can only delay the first frame. Skipped, `preexist` stays -1,
+   // familyHere is false, and the stamp term alone carries the verdict.
+   int preexist = stampOk ? -1 : LevelFamilyObjectsOnChart();
    // The chart-truth witness is used for the branch the report is about: the
    // levels are SHOWN and the indicator is not hidden, so "the family is on the
    // chart" can only mean "do not delete it". The hidden/levels-off states keep
@@ -1077,11 +1085,68 @@ void ResolveTopologyAdoption()
                         " live fp=", live, " mode=", (int)GetCurrentStepMode(),
                         " maxLv=", inpMaxLevels, " sp=", (int)g_thStartPointType,
                         " lsFirst=", (inpLSFirst ? 1 : 0), ")");
-   // UNGATED on purpose: this line is the author of the wipe, or the proof there
-   // was none. See the block comment above.
-   Print("[P-VIEW] probe=adopt stamp=", (haveStamp ? 1 : 0), " stored=", stored,
+   // P-PERF-102 (2026-10-16): was ungated on purpose while the stamp logic was
+   // under test (it is the author of the wipe, or the proof there was none).
+   // Test over — the user runs this for trading and every attach printed it, so
+   // MT5 gates it to DEBUG. MT4 keeps the ungated line (its tree is the logic
+   // reference and the gate is this platform's hygiene, not a behaviour change).
+   _LOG_GATE_D Print("[P-VIEW] probe=adopt stamp=", (haveStamp ? 1 : 0), " stored=", stored,
          " live=", live, " preexist=", preexist, " adopted=", (g_adoptPreviousTopology ? 1 : 0),
          " total=", ObjectsTotal(0, -1, -1));
+   g_pInitMsAdopt += GetTickCount() - _adoptT;   // P-PERF-110
+}
+
+//==============================================================================
+// P-PERF-95 (BUG-04, 2026-10-13) — THE PERIOD THAT SURVIVES THE RELOAD.
+//
+// The frame decides `timeframeChanged` from a function-local static
+// (`s_lastPeriod`, OnCalculateHandler). That is a correct witness on MT4, where
+// the instance keeps running across a period change, and it is a DEAD one on
+// MT5: the terminal deinitialises the indicator on REASON_CHARTCHANGE and
+// brings a fresh one up, so every static is re-initialised to its declaration
+// value and the first frame after the switch always reads `s_lastPeriod == -1`
+// — which the test below correctly reports as "no change". The
+// CACHE_INV_TIMEFRAME arm was therefore unreachable on the exact event it
+// exists for, and the switch was left to be handled by paths that were never
+// designed for it. (The arm was not 100 % dead: toggling the timeframe LOCK
+// moves `Period()` without a reload. That is the only way it ever fired.)
+//
+// The witness has to cross the reload, so it is stored the way every other
+// cross-reload fact in this file is: one terminal GlobalVariable, written by
+// the teardown that is unloading (the same branch that already writes the
+// topology stamp) and read once by the new instance. One write per switch, one
+// read per attach — no per-frame cost, and no dependence on a static that MT5
+// guarantees will be gone.
+//
+// A first-ever attach has no stamp: `stored == 0` is "no previous instance",
+// which is NOT a period change, and the flag stays false.
+//==============================================================================
+string LastPeriodStampName() { return "Biotak_LastPeriod_" + GetCachedChartIdStr(); }
+
+// Written by the teardown of a chart change, beside the topology stamp: the
+// period this instance was showing is what the next instance must compare
+// itself against to know a switch happened.
+void SavePeriodStamp()
+{
+   GlobalVariableSet(LastPeriodStampName(), (double)Period());
+}
+
+// Resolved ONCE per instance, at the end of OnInitHandler — the period cannot
+// change between OnInit and the first frame, so one read is enough.
+void ResolvePeriodChangeAttach()
+{
+   uint _adoptT2 = GetTickCount();   // P-PERF-110: the adopt= field's second half
+   int live = Period();
+   string n = LastPeriodStampName();
+   bool haveStamp = GlobalVariableCheck(n);
+   int stored = haveStamp ? (int)GlobalVariableGet(n) : 0;
+   g_periodChangedOnAttach = (haveStamp && stored > 0 && stored != live);
+   GlobalVariableSet(n, (double)live);
+   // P-PERF-102 (2026-10-16): gated to DEBUG for the same reason the adoption
+   // probe above is — verification is complete and the line printed every attach.
+   _LOG_GATE_D Print("[P-PERF] probe=period stored=", stored, " live=", live,
+         " changed=", (g_periodChangedOnAttach ? 1 : 0), " reason=", UninitializeReason());
+   g_pInitMsAdopt += GetTickCount() - _adoptT2;   // P-PERF-110
 }
 
 //==============================================================================
@@ -1295,10 +1360,15 @@ int OnInitHandler() {
     // P-ARCH-03: the one-chart-one-unit rule lands before ANY observable work — before
     // the legacy sweep, before the settings seed, before a single object. A refused
     // unit must not have touched the chart it refuses to share.
+    // P-PERF-110 (2026-10-17): this pair was the ONLY code outside every phase
+    // bracket — today's switch log showed ind=578 with all named fields summing
+    // to 157, and only this block could own the missing ~420 ms. front= names it.
+    uint pFrontTick = GetTickCount();
     if(TH3SiblingUnitOnChart()) return INIT_FAILED;
     // P-PERF-38c: the one-time legacy sweep must land before the first render, so
     // a chart drawn by an older build cannot blend two naming schemes.
     MigrateTimeframeNamedObjects();
+    g_pInitMsFront = GetTickCount() - pFrontTick;
     // P-PERF-10: phase ledger for the init path (see g_pInitMs* in GlobalVariables).
     uint pInitTick = GetTickCount();
     // Seed runtime settings from the real MT4 Inputs-dialog values FIRST:
@@ -1348,7 +1418,7 @@ int OnInitHandler() {
     int probeCD   = (int)g_countdownColor;
 #endif
 #ifdef BUILD_LITE
-    Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " LITE compiled=",
+    _LOG_GATE_D Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " LITE compiled=",
           TimeToString(__DATETIME__, TIME_DATE|TIME_SECONDS),
           TH3SourceStampTail());
 #else
@@ -1357,7 +1427,7 @@ int OnInitHandler() {
     //--- strip code under a fresh stamp still shows it here —
     //--- StrapBodyTone(2,96,314)=2892316 = RGB(28,34,44), plateFill=2432023, and
     //--- the five stop/ramp values name WHICH input drifted.
-    Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " FULL compiled=",
+    _LOG_GATE_D Print("[BUILD] TH3 src=", TH3_BUILD_TAG, " files=", TH3_SRC_FILES, " FULL compiled=",
           TimeToString(__DATETIME__, TIME_DATE|TIME_SECONDS),
           TH3SourceStampTail(),
           " tracktone=", probeTone, " plateFill=", probeFill,
@@ -1374,7 +1444,7 @@ int OnInitHandler() {
     //--- be fixed. These seven numbers are that measurement: four points ON the stops
     //--- must come back as the stop itself (t=0 -> cardTop, t=0.52 -> panel,
     //--- t=1 -> foot) and `mid100` must read 52 (BIO_CARD_MID_T x 100).
-    Print("[BUILD] ramp t0=", (int)BioCardTone(0.0),
+    _LOG_GATE_D Print("[BUILD] ramp t0=", (int)BioCardTone(0.0),
           " t26=", (int)BioCardTone(0.26), " t52=", (int)BioCardTone(0.52),
           " t76=", (int)BioCardTone(0.76), " t100=", (int)BioCardTone(1.0),
           " mid100=", (int)(BIO_CARD_MID_T * 100.0));
@@ -1550,7 +1620,7 @@ int OnInitHandler() {
             static uint s_lastHistInitWarnMs = 0;
             uint histInitNowMs = GetTickCount();
             if(histInitNowMs - s_lastHistInitWarnMs > 30000) {
-                _LOG_GATE_W Print("[W][GEN] OnInit: historical data not ready (err ",
+                _LOG_GATE_D Print("[W][GEN] OnInit: historical data not ready (err ",
                                   GetLastError(), ") - deferring; the redraw path retries");
                 s_lastHistInitWarnMs = histInitNowMs;
             }
@@ -1590,7 +1660,7 @@ int OnInitHandler() {
         static uint s_lastPrevDayWarnMs = 0;
         uint prevDayNowMs = GetTickCount();
         if(prevDayNowMs - s_lastPrevDayWarnMs > 30000) {
-            _LOG_GATE_W Print("[W][GEN] OnInit: previous-day prices not ready (D1 series still loading) - deferring");
+            _LOG_GATE_D Print("[W][GEN] OnInit: previous-day prices not ready (D1 series still loading) - deferring");
             s_lastPrevDayWarnMs = prevDayNowMs;
         }
     }
@@ -1816,28 +1886,32 @@ int OnInitHandler() {
     }
 
     g_pInitMsAtr = GetTickCount() - pInitTick;   // P-PERF-10 (ATR cache init + warmup)
+    // P-PERF-110: the tail is the ONE chunk ind= did not name — today's switch
+    // log showed ind=1344 while settings/hist/base/atr summed to ~110. From
+    // here to the return, THIS timer owns the truth: the TH3 banner, the leg and
+    // pattern restores, the TF-lock restores, and the draw-ink memo walk.
+    pInitTick = GetTickCount();
 
-    PrintBuildInfo();
+    // P-PERF-102 (2026-10-16): the whole 10-line banner is DEBUG. It printed on
+    // every attach and the user runs this for trading — the console wanted quiet.
+    // The gate lives at the CALL SITE because BuildConfig.mqh (where the printer
+    // lives) is included before Logger.mqh, so the gate macro does not exist there.
+    _LOG_GATE_D PrintBuildInfo();
 
     // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-#ifndef BUILD_LITE
-    // P-LM-04: a leg measurement drawn by an older build carries loose labels and
-    // no plate; its readout is recomputed into today's box here — the same slot,
-    // and the same rule, as the pattern restore below: legacy chart objects take
-    // the current build's shape before the first render. It runs AFTER the ATR
-    // warmup above on purpose: at attach a TF whose history is not loaded yet gives
-    // no ATR, and the sweep refuses to write a box built on a guessed one.
-    LegMeasureUpgradeLegacy();
-    // P-TH3-D4h: legacy chart objects repaint with the current build first;
-    // only when nothing was restored does the settings-change flag matter.
-    int th3Restored = TH3RestorePatternsFromChart();
-    // Check if TH3 objects need update (after settings change)
-    string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
-    if(GlobalVariableCheck(th3UpdateFlag) && GlobalVariableGet(th3UpdateFlag) > 0) {
-        if(th3Restored <= 0) UpdateAllTH3Objects();
-        GlobalVariableDel(th3UpdateFlag);
+    // P-PERF-110c (2026-10-17) - MT5-ONLY DEFER OF THE TOOL RESTORES. Measured on
+    // today's switch sweep: the M15 attach put tail=1125 ms inside exactly the
+    // two calls below (the chart carries dozens of TH3 tools), while the ladder
+    // itself was already priced at ~100 ms. On a recent TF switch they now ride
+    // the first 250 ms timer frame: the ladder paints immediately, the tools
+    // follow invisibly, and the perceived switch lag drops by the full spike.
+    // A fresh attach keeps the inline order - MT4's shape, legacy shapes exist
+    // before frame one - so this diverges only on the MT5 relaunch path.
+    if(deferHeavyInit) {
+        g_attachTailPending = true;   // the entries' OnTimer -> TailRestoreDeferred()
+    } else {
+        AttachToolRestoreLegacy();
     }
-#endif
 
     #ifdef ENABLE_DEBUG_LOGS
     Print("[D][GEN] OnInit complete: deferred=", deferHeavyInit, " hidden=", shouldBeHidden);
@@ -1854,9 +1928,17 @@ int OnInitHandler() {
     FactorModeSanityCheck();
     #endif
 
-    // P-PERF-38d: LAST thing before the first frame — every fingerprint input
-    // (mode, max levels, start point, LS-first, harmonic) is final by now.
-    ResolveTopologyAdoption();
+    // P-PERF-106 (2026-10-16) — THE TWO CROSS-RELOAD RESOLUTIONS MOVED TO THE
+    // ENTRIES, AFTER THE OV_ OVERRIDES LOAD.
+    //
+    // Here they read the 144 seed: `inpMaxLevels` is `g_maxLevels`
+    // (RuntimeSettings.mqh) and the OV_ runtime overrides (the user's 352)
+    // only load inside InitializeBiotakKit -> RuntimeSettingsLoadOverrides,
+    // which the entries run AFTER OnInitHandler. So the fingerprint the dying
+    // instance wrote (352) and the one computed here (144) could never agree:
+    // every attach printed a stamp mismatch, and the adoption fell back to
+    // the whole-chart walk above. Both entries call them LAST now, where
+    // every fingerprint input is genuinely final (P-PERF-106).
 
     // P-DRAW-01/02 (2026-09-22): the drawing toolbar's own two tables — the
     // per-kind style memory and the preset slots (the built-in suggestions the
@@ -1864,8 +1946,69 @@ int OnInitHandler() {
     DrawStyleInit();
     DrawPresetsInit();
     DrawPresetsLoad();   // P-DRAW-05: the user's own templates survive the session
+    //--- P-DRAW-128 (2026-10-13): every drawing already on the chart is witnessed
+    //--- once, here, so the FIRST native colour change after a reload is recognised
+    //--- as a change rather than mistaken for a move-drop. One bounded walk at attach
+    //--- (the event path stays compare-first and pays nothing on a still frame).
+    uint p4ink = GetTickCount();
+    DrawInkMemoInit();
+    g_pInitMsInk = GetTickCount() - p4ink;   // P-PERF-115: the memo walk's own field
+
+    // P-PERF-110: close the tail field - the next switch log names this chunk.
+    g_pInitMsTail = GetTickCount() - pInitTick;
 
     return INIT_SUCCEEDED;
+}
+
+// P-PERF-110c (2026-10-17) - THE LEGACY TOOL RESTORES, LIFTED FROM THE OnInit
+// TAIL SO THE TF-SWITCH PATH CAN DEFER THEM. A fresh attach calls this inline
+// (MT4's shape: legacy shapes exist before frame one); a recent TF switch sets
+// g_attachTailPending instead and the entries' OnTimer lands it on the first
+// 250 ms frame. In Lite the body compiles away and the defer arm is a no-op -
+// the same file keeps serving both entries.
+// P-LM-04: a leg measurement drawn by an older build carries loose labels and
+// no plate; its readout is recomputed into today's box here - the same slot,
+// and the same rule, as the pattern restore below: legacy chart objects take
+// the current build's shape before the first render. It runs after the ATR
+// warmup on purpose: at attach a TF whose history is not loaded yet gives no
+// ATR, and the sweep refuses to write a box built on a guessed one.
+void AttachToolRestoreLegacy()
+{
+    uint pt = GetTickCount();
+#ifndef BUILD_LITE
+    LegMeasureUpgradeLegacy();
+    g_pInitMsTailLeg = GetTickCount() - pt;
+    // P-TH3-D4h: legacy chart objects repaint with the current build first;
+    // only when nothing was restored does the settings-change flag matter.
+    int th3Restored = TH3RestorePatternsFromChart();
+    // Check if TH3 objects need update (after settings change)
+    string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + GetCachedChartIdStr();
+    if(GlobalVariableCheck(th3UpdateFlag) && GlobalVariableGet(th3UpdateFlag) > 0) {
+        if(th3Restored <= 0) UpdateAllTH3Objects();
+        GlobalVariableDel(th3UpdateFlag);
+    }
+    g_pInitMsTailTh3 = GetTickCount() - pt - g_pInitMsTailLeg;
+#endif
+}
+
+// The one-shot tail-return for a deferred TF-switch attach. The pending latch
+// makes it a no-op unless OnInit actually armed the restore, so it is safe to
+// call from both entries' OnTimer (the first 250 ms frame after the switch).
+// P-PERF-110c: the restore's own price is invisible to the OnInit tag (that
+// tag has already printed), so ONLY a slow deferred run speaks - same spirit
+// as the P4 budget warn, and quiet exactly when nothing is owed.
+void TailRestoreDeferred()
+{
+    if(!g_attachTailPending) return;
+    g_attachTailPending = false;
+    uint p4t = GetTickCount();
+    AttachToolRestoreLegacy();
+    uint p4deferredMs = GetTickCount() - p4t;
+    if(p4deferredMs > 150) {
+        Print("[W][PERF] deferred tail restore took ", IntegerToString((int)p4deferredMs),
+              "ms (leg=", IntegerToString((int)g_pInitMsTailLeg),
+              " th3=", IntegerToString((int)g_pInitMsTailTh3), ")");
+    }
 }
 
 #endif // EVENT_HANDLERS_INIT_MQH
@@ -1962,6 +2105,36 @@ void DeactivateCustomPriceMode(const string src)
 // into one early block this name folds back into COOP_WARN_MS; until then the
 // value is the same number with the meaning written next to it.
 #define P49_DEINIT_WARN_MS 40
+
+// P-PERF-111 (2026-10-17) - THE UI FAMILIES' CLEAN-TEARDOWN STAMP, one owner.
+//
+// The Full entry's teardown deletes every UI family moments before the
+// relaunch (PnlCloseAll -> Pnl/Pal_/SW*, DeleteMenu -> Circ/Tools/Sub,
+// DrawStripClose -> the strip), and the next instance's InitializeUIStates
+// used to re-sweep Pnl/Pal_/Sub plus both ghost sweeps on EVERY attach - four
+// full-chart scans for objects that provably no longer exist. This stamp is
+// the handshake that says so. It is keyed by CHART ID, and a chart id is
+// handed out per session (P-UI-131e): a terminal restart or a crash never
+// leaves a consumable stamp, so the session-start ghost path (P-UI-144)
+// keeps its sweep exactly as before. Written at the END of the Full entry's
+// OnDeinit after CleanupUIStates - the last UI step - and consumed ONCE by
+// InitializeUIStates. Lite never writes or reads it: its teardown owns no UI
+// family, and its entry has no UI init.
+string UITearStampName() { return "Biotak_UITear_" + GetCachedChartIdStr(); }
+
+void StampCleanUITeardown()
+{
+   GlobalVariableSet(UITearStampName(), 1.0);
+}
+
+bool ConsumeCleanUITeardownStamp()
+{
+   const string st = UITearStampName();
+   if(!GlobalVariableCheck(st)) return false;
+   const bool clean = (GlobalVariableGet(st) > 0);
+   GlobalVariableDel(st);
+   return clean;
+}
 
 void OnDeinitHandler(const int reason) {
     DEBUG_PRINT("Starting cleanup");
@@ -2181,6 +2354,10 @@ void OnDeinitHandler(const int reason) {
         // fresh instance's first pass sees an empty stored signature, takes the
         // topology-changed branch, and wipes the family it just kept.
         SaveTopologyAdoptionStamp();
+        // P-PERF-95 (BUG-04): and the period we are leaving behind, so the next
+        // instance's first frame can tell a switch from an ordinary attach. One
+        // write, on the branch that already writes the topology stamp.
+        SavePeriodStamp();
         // P-VIEW-05: the OTHER side of the handshake, ungated. `preexist` here is
         // what the chart still holds the instant we leave; the next instance's
         // `probe=adopt preexist=` is what it holds when we come back. Equal numbers
@@ -2497,7 +2674,7 @@ bool CalculateCommonStepData(const double dailyClosePrice, SCommonStepData &data
 //| REFACTORED: Uses centralized ModeDefinitions factory             |
 //+------------------------------------------------------------------+
 void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePrice,
-                           const double vpTop, const double vpBottom, const int buildStage)
+                           const int buildStage)
 {
     // Draw based on selected mode (respects keyboard override)
     ENUM_STEP_CALCULATION_MODE currentMode = GetCurrentStepMode();
@@ -2533,7 +2710,7 @@ void DrawLevelsBasedOnMode(const string objectPrefix, const double dailyClosePri
         ExecutePipeline(def.config, data.midpointPrice, sizes, def.stepSizeCount,
                        def.stepMode, def.classifyMode, def.lsFirst,
                        data.maxLevelsAbove, data.maxLevelsBelow,
-                       vpTop, vpBottom, buildStage);
+                       buildStage);
         
         ArrayFree(sizes);
     } else {
@@ -2620,6 +2797,19 @@ static bool g_renderAllNeeded = false;
 //==============================================================================
 #define COOP_WARN_MS        40   // a scheduled frame or coop job slower than this is logged
 #define BUILD_STAGE_GATE_MS 60   // P-PERF-34b: spacing between staged rebuild frames
+
+// P-PERF-108 (2026-10-16) — HOW LONG AN ADOPTED FAMILY MAY HOLD THE PAINT WHILE
+// HISTORY IS STILL SYNTHETIC. `!g_initialized` means RedrawAllObjects is
+// standing in a ±1% band around the base price (its own fallback) and any
+// ladder built from it is a fraction of the real one. On a handoff the chart
+// already carries the previous instance's family (g_adoptPreviousTopology),
+// which is a REAL ladder — so the paint waits for real history instead of
+// overwriting it with the synthetic rungs and swapping again a frame later.
+// The pump owes a frame every 250 ms while `!g_initialized`, so the normal
+// wait is one or two frames; the bound exists only for a symbol whose history
+// genuinely never lands — after it, the synthetic ladder paints (as it always
+// did) and the cleanup/sweep gates keep it from deleting anything.
+const uint P_HISTORY_HOLD_MAX_MS = 2000;
 
 #define COOP_JOB_NONE         0
 #define COOP_JOB_HEAVY_FRAME  1
@@ -2909,8 +3099,46 @@ void RedrawAllObjects(bool force_redraw=false)
     static uint s_seedWaitStartMs = 0;
     bool seedWait = (inpAdaptiveMode != ADAPTIVE_FIXED && !inpTHVolNorm && !g_scalingInitialized);
     if(seedWait && s_seedWaitStartMs == 0) s_seedWaitStartMs = nowMs;
-    if(!seedWait && s_seedWaitStartMs != 0) s_seedWaitStartMs = 0;   // re-arm for the next unseeded stretch
-    if(seedWait && nowMs - s_seedWaitStartMs < 20000) { g_redrawTHLevelsNeeded = true; return; }   // the debt survives; the seeded frame pays it
+    // P-PERF-109 (2026-10-17) — THE SEED HOLDS THE WIPE, NOT THE ADOPTED PAINT.
+    //
+    // P-MT5-SEED-01's blank-first-paint was written when a TF switch still
+    // WIPED the family: painting unseeded meant "draw, delete, draw again".
+    // Two later fixes took the delete out of that picture: the adoption branch
+    // no longer wipes on `reason 3` (P-PERF-38b) and P-PERF-108a blocks the
+    // wipe behind the history hold, while the render itself re-prices IN PLACE
+    // (same name set for every factor, so CleanupSurplus cannot delete a rung
+    // of the seeded frame the unseeded frame did not build).
+    //
+    // On an ADOPTED chart the hold had become the defect it was built to kill:
+    // the family stands on the chart, and the report is «تایم که عوض میکنیم
+    // دیگه دیده نمیشه» — an EMPTY future frame reads as missing levels on some
+    // TFs (the ATR handle is served slower the farther the TF is from the
+    // chart's warm ones — the live log's held=1047..1141 ms on MN1). So the
+    // gate now applies in exactly the states where the seed still matters:
+    //   * a fresh layout (no adoption, a wipe pending, a staged rebuild in
+    //     flight) — the drawn-from-zero pass waits for the shift, as asked
+    //     («از همون اول همون سطوح رسم بشه»);
+    //   * an ADOPTED chart — the standing ladder is correct NAMES waiting for
+    //     their real price; paint it NOW at the current factor and let the
+    //     seeded frame re-price it in place (frameCore already carries the
+    //     scaling factor, so the seed arrives as a silent render).
+    bool seedHold   = seedWait && (!g_adoptPreviousTopology ||
+                                   g_buildStage != 0 || g_forceClearOnNextDraw);
+    if(seedHold && nowMs - s_seedWaitStartMs < 20000) { g_redrawTHLevelsNeeded = true; return; }
+    // P-PERF-TMP (2026-10-16): THE GATE'S OWN WITNESS. One line when a held
+    // first paint finally opens (or the 20 s escape fires), naming how long
+    // the chart was empty. This is the evidence for the "levels missing on
+    // some TFs" dependency: if the next tour shows held=1000+ ms here, the
+    // chart was empty because the terminal had not served the real ATR yet —
+    // not because the render failed. Remove with the other TMP probes.
+    if(s_seedWaitStartMs != 0)
+    {
+        const int seedHeld = (int)(nowMs - s_seedWaitStartMs);
+        if(seedHeld >= 500 || seedWait)
+            Print("[W][PERF-TMP] seedWait tf=", GetCurrentTimeframe(),
+                  " held=", seedHeld, "ms escape=", (seedWait ? 1 : 0));
+        s_seedWaitStartMs = 0;   // re-arm for the next unseeded stretch
+    }
     
     static double s_lastDrawnBasePrice = 0.0;
     bool basePriceChanged = (MathAbs(thBasePrice - s_lastDrawnBasePrice) > s_cachedPoint);
@@ -2959,9 +3187,20 @@ void RedrawAllObjects(bool force_redraw=false)
         if(!UpdateHistoricalValues()) {
             // FIX: If historical data is not ready, don't return early if we already have a base price
             // This allows drawing levels even if full history isn't loaded yet
-            _LOG_GATE_W Print("[W][GEN] RedrawAllObjects: UpdateHistoricalValues failed, retrying later...");
+            _LOG_GATE_D Print("[W][GEN] RedrawAllObjects: UpdateHistoricalValues failed, retrying later...");
             // Keep g_initialized = false to trigger retry next frame
             if(!g_initialized && thBasePrice > 0) {
+                // P-PERF-108a — SYNTHETIC WITNESS: the ±1% stand-in is the one
+                // input that can paint a fraction ladder; if the blink ever
+                // comes back, this line says whether it was built from here.
+                // Rate-limited (2 s) like the wipe witness.
+                static uint s_lastSyntheticWitnessMs = 0;
+                if(nowMs - s_lastSyntheticWitnessMs > 2000) {
+                    s_lastSyntheticWitnessMs = nowMs;
+                    _LOG_GATE_W Print("[W][PERF] synthetic band: history not ready base=",
+                          DoubleToString(thBasePrice, Digits),
+                          " adopt=", (g_adoptPreviousTopology ? 1 : 0));
+                }
                 // We have a base price, so we can at least try to draw something
                 g_highestHigh = thBasePrice * 1.01;
                 g_lowestLow = thBasePrice * 0.99;
@@ -3047,8 +3286,11 @@ void RedrawAllObjects(bool force_redraw=false)
         // The fix is therefore a FEATURE, not a line, and it is the same shape the
         // ladder already has: ONE produced-list sweep for the label namespace — the
         // pass records every `LBL_` name it wrote, and the sweep deletes exactly the
-        // names it did not (the ladder's `SweepForeignLadderObjects` already treats
-        // `<line>_Label` as produced, so half of that mechanism exists). Only then may
+        // names it did not (the ladder's `SweepForeignLadderObjects` walks its
+        // family by the same produced set, so half of that mechanism exists; since
+        // P-LBL-11 the produced set names no `<line>_Label`, so that sweep was also
+        // the one-time net that cleared the retired pip labels on the handoff).
+        // Only then may
         // the clear go, and the ledger to prove it is the line above: `clear=` must
         // fall to 0 ms on a switch while `atr`/`th`/`trade` stay put.
         ClearAllLabels(objectPrefix);
@@ -3218,9 +3460,62 @@ void RedrawAllObjects(bool force_redraw=false)
         // empty static) and the family is wiped on every timeframe switch.
         if(s_lastLevelSig == "" && g_adoptPreviousTopology) s_lastLevelSig = levelSig;
         bool levelTopologyChanged = (levelSig != s_lastLevelSig);
+        // ══════════════════════════════════════════════════════════════════
+        // P-PERF-108a (2026-10-16) — THE HOLD COMES FIRST: IT HOLDS THE WIPE TOO.
+        //
+        // P-PERF-108 held the PAINT, but the wipe had already run: ClearAllLevels
+        // sat ABOVE the old hold block, so a held frame still deleted the adopted
+        // family first — the "levels vanish for a moment" half of the blink
+        // survived the fix. The hold now sits above the wipe and the wipe itself
+        // is gated on it: while the hold is up, NOTHING of this frame touches the
+        // family, the request survives in g_forceClearOnNextDraw (kept by the
+        // flag guard below), and the release frame wipes and rebuilds in one
+        // pass. The `!shouldClearLevels` term left the engage condition for the
+        // same reason: a wipe request is exactly when the family must be
+        // protected the most, not the one frame the protection is skipped on.
+        // A fresh attach (no adoption) is untouched: adopt=false engages
+        // nothing, so the wipe and the synthetic ladder run as they always did.
+        // ══════════════════════════════════════════════════════════════════
+        static uint s_historyHoldStartMs = 0;
+        bool historyHold = false;
+        if(g_adoptPreviousTopology && !g_initialized) {
+            if(s_historyHoldStartMs == 0) s_historyHoldStartMs = nowMs;
+            historyHold = ((nowMs - s_historyHoldStartMs) < P_HISTORY_HOLD_MAX_MS);
+        } else {
+            s_historyHoldStartMs = 0;
+        }
+
         bool shouldClearLevels = g_forceClearOnNextDraw || levelTopologyChanged;
 
-        if(shouldClearLevels) {
+        // P-PERF-108a — FIRST-FRAME WITNESS, one line per instance: the exact
+        // facts every "who deleted my levels" report needs (adopt / init /
+        // clear / topo / hold / stage / base). One Print per attach; it is the
+        // line the next live report is read against.
+        static bool s_f1WitnessLogged = false;
+        if(!s_f1WitnessLogged) {
+            s_f1WitnessLogged = true;
+            _LOG_GATE_W Print("[W][PERF] f1 adopt=", (g_adoptPreviousTopology ? 1 : 0),
+                  " init=", (g_initialized ? 1 : 0),
+                  " clear=", (shouldClearLevels ? 1 : 0),
+                  " topo=", (levelTopologyChanged ? 1 : 0),
+                  " hold=", (historyHold ? 1 : 0),
+                  " stg=", (int)g_buildStage,
+                  " base=", DoubleToString(g_dailyClosePriceForTH, Digits));
+        }
+
+        if(shouldClearLevels && !historyHold) {
+            // P-PERF-108a — WIPE WITNESS: the author of every family delete, so
+            // a wipe can never again be a line the log does not name. Rate-limited
+            // (2 s) so a hotkey held down cannot flood Experts.
+            static uint s_lastWipeWitnessMs = 0;
+            if(nowMs - s_lastWipeWitnessMs > 2000) {
+                s_lastWipeWitnessMs = nowMs;
+                _LOG_GATE_W Print("[W][PERF] levels WIPE: force=", (g_forceClearOnNextDraw ? 1 : 0),
+                      " topo=", (levelTopologyChanged ? 1 : 0),
+                      " adopt=", (g_adoptPreviousTopology ? 1 : 0),
+                      " init=", (g_initialized ? 1 : 0),
+                      " objs=", ObjectsTotal(0, -1, -1));
+            }
             TH3_PROF_START(LevelsClear);
             ClearAllLevels(objectPrefix, !skipZones);
             TH3_PROF_END(LevelsClear);
@@ -3230,7 +3525,9 @@ void RedrawAllObjects(bool force_redraw=false)
         // toggle, custom-price re-anchor — all of them materialise ~900
         // objects). Unconditional restart: a toggle that wipes mid-staging
         // must rebuild from stage 1, or the wiped families never come back.
-        if(shouldClearLevels) {
+        // P-PERF-108a: and a HELD frame arms nothing — the wipe it would
+        // rebuild for has not run; the release frame arms and runs both.
+        if(shouldClearLevels && !historyHold) {
             g_buildStage = BUILD_STAGE_LINES;
         }
 
@@ -3243,18 +3540,9 @@ void RedrawAllObjects(bool force_redraw=false)
         // resulting pixels were identical. With the signature the work happens
         // only when the picture really changes; a steady frame is ~15 string
         // compares and zero syscalls.
-        double vpTop = 0, vpBottom = 0;
-        GetViewportBounds(vpTop, vpBottom);
-        // P-PERF-06: freeze the cull window for the whole staging sequence —
-        // stages 2-4 render against the stage-1 snapshot so a pan mid-staging
-        // cannot split families across two viewports.
-        if(g_buildStage == BUILD_STAGE_LINES) {
-            g_stageVpTop = vpTop;
-            g_stageVpBottom = vpBottom;
-        } else if(g_buildStage > BUILD_STAGE_LINES) {
-            vpTop = g_stageVpTop;
-            vpBottom = g_stageVpBottom;
-        }
+        // P-PERF-108/108a: the history hold — and, since 108a, the wipe it
+        // gates — lives ABOVE the shouldClearLevels computation; see the
+        // "THE HOLD COMES FIRST" block there for the full argument.
         // P-PERF-25: the mask term is kept OUT of the core so a line-visibility
         // flip is provably a visibility-only change.
         // Split in frameCore (never levelSig: a drift must re-render, not wipe).
@@ -3294,8 +3582,9 @@ void RedrawAllObjects(bool force_redraw=false)
                           // P-VIEW-02 (2026-09-29) — THE WINDOW IS NOT GEOMETRY, SO A
                           // PAN IS NOT A REBUILD. `vpTop|vpBottom` stood here and they
                           // are the cull window, which re-derives whenever the chart's
-                          // visible range moves by P_P4_VP_HYSTERESIS_PCT (ExtDraw_A
-                          // 105-125) — i.e. on a plain scroll or a live scale drift, with
+                          // visible range moves by P_P4_VP_HYSTERESIS_PCT (the macro and
+                          // the whole window are retired now — P-VIEW-05, 2026-10-16) —
+                          // i.e. on a plain scroll or a live scale drift, with
                           // NO level geometry changing. Measured: one such re-derivation
                           // is a full family rebuild — ~300 levels re-derived, every line
                           // and label mask re-asserted, and ClearAllLabels() deleting and
@@ -3304,15 +3593,21 @@ void RedrawAllObjects(bool force_redraw=false)
                           // the levels, the countdown and the TRex card blink together,
                           // because one window term dragged the whole picture through a
                           // delete-and-recreate pass. The cull is now decided PER FRAME
-                          // in the render (P-VIEW-01: RenderTriggerLines/RenderZones take
-                          // the window and never let it write a mask), so the picture is a
+                          // in the render (P-VIEW-01: RenderTriggerLines/RenderZones never
+                          // let the window write a mask — and P-VIEW-05 later removed the
+                          // window from their signatures entirely), so the picture is a
                           // pure function of the level geometry again — which is what this
                           // signature was for. Cost of the fix: two DoubleToString calls
                           // and two compares gone; steady frames untouched.
                           IntegerToString(IsIndicatorHidden() ? 1 : 0) +
                           IntegerToString(IsTriggerLevelsEnabled() ? 1 : 0) +
-                          IntegerToString(g_customPriceLineDragging ? 1 : 0) +
-                          IntegerToString(inpShowPipDistanceLabels ? 1 : 0);
+                          IntegerToString(g_customPriceLineDragging ? 1 : 0);
+                          // P-LBL-11 (2026-10-17): `inpShowPipDistanceLabels` stood
+                          // here as the last term. The setting lost its last door
+                          // (its card row is off the display) and its consumer, so
+                          // the term could only ever fold a constant - removed the
+                          // way the MIDPOINT setting's term was, when its consumer
+                          // died (P-UI-47).
         frameSig = frameCore + "|" + IntegerToString(g_linesVisible ? 1 : 0);
         bool geometryChanged = (frameSig != s_lastFrameSig);
         // P-PERF-06: staging frames always build — each one owns its family.
@@ -3343,21 +3638,27 @@ void RedrawAllObjects(bool force_redraw=false)
         // P-PERF-30: `geometryChanged` alone is not the whole question - it only
         // knows about the inputs frameSig enumerates, and the paint reads more
         // than that. A user edit (applyRefreshFlags) never rides on it.
+        // P-PERF-108: and while `historyHold` is up, the paint is withheld on
+        // purpose - see the block above. The signature is not sealed and the
+        // redraw flags below are not cleared, so the release frame re-renders
+        // by construction.
         bool mustRender = (shouldClearLevels || geometryChanged ||
-                           (g_renderAllNeeded && !visOnly));
+                           (g_renderAllNeeded && !visOnly)) && !historyHold;
         if(mustRender && g_buildStage != BUILD_STAGE_BLOCK && !visOnly)
         {
             TH3_PROF_START(LevelsDrawByMode);
-            DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH, vpTop, vpBottom, g_buildStage);
+            DrawLevelsBasedOnMode(objectPrefix, g_dailyClosePriceForTH, g_buildStage);
             TH3_PROF_END(LevelsDrawByMode);
             // P-PERF-06: the signature seals ONLY a complete render. A staged
             // frame stores nothing; the BLOCK stage seals it after the labels.
             if(g_buildStage == 0) { s_lastFrameSig = frameSig; s_lastFrameCore = frameCore; g_renderAllNeeded = false; }
             // Advance the rebuild; the LABELS stage only arms the labels block
             // below (it is stage 4 of the same sequence).
+            // P-LBL-11 (2026-10-17): the old stage 3 (pip labels) is retired;
+            // ZONES now hands straight to BLOCK, and the labels-block flag is
+            // armed on that hand-off exactly as the LABELS rung armed it.
             if(g_buildStage == BUILD_STAGE_LINES)            g_buildStage = BUILD_STAGE_ZONES;
-            else if(g_buildStage == BUILD_STAGE_ZONES)       g_buildStage = BUILD_STAGE_LABELS;
-            else if(g_buildStage == BUILD_STAGE_LABELS) { g_buildStage = BUILD_STAGE_BLOCK; g_labelsRelayoutNeeded = true; }
+            else if(g_buildStage == BUILD_STAGE_ZONES) { g_buildStage = BUILD_STAGE_BLOCK; g_labelsRelayoutNeeded = true; }
         }
         else if(visOnly)
         {
@@ -3386,8 +3687,13 @@ void RedrawAllObjects(bool force_redraw=false)
         // counted twice, and the sum can still never exceed the frame.
         g_p3MsLevels += GetTickCount() - g_p3MsLastTick;
         g_p3MsLastTick = GetTickCount();
-        g_forceClearOnNextDraw = false;
-        g_redrawTHLevelsNeeded = false;
+        // P-PERF-108: a HELD frame consumed nothing - the debt and the wipe
+        // request must survive it, or the release frame would find no reason
+        // to run and the picture would stay on the adopted family forever.
+        if(!historyHold) {
+            g_forceClearOnNextDraw = false;
+            g_redrawTHLevelsNeeded = false;
+        }
     }
     else if (!inpShowTHLevels && (g_redrawTHLevelsNeeded || g_buildStage != 0))
     {
@@ -3702,6 +4008,35 @@ string P4EventName(const int id)
     return "UNKNOWN";
 }
 
+// P-PERF-115 (2026-10-17) - WHY THE SAME CODE COSTS 190 ms ON ONE CHART AND
+// 1.2 s ON ANOTHER: the object list's SHAPE. Every scan and walk behind the
+// init ledger is priced by how many objects sit in the types the walk must
+// pass - and the census names that population once, only when a budget
+// warning for the INIT path fires, which is the exact situation the number
+// is for. Cheap: one ObjectsTotal per type, no name calls.
+void P4ObjectCensus()
+{
+   const int    types[] = {(int)OBJ_TREND, (int)OBJ_HLINE, (int)OBJ_VLINE,
+                           (int)OBJ_RECTANGLE, (int)OBJ_RECTANGLE_LABEL,
+                           (int)OBJ_TEXT, (int)OBJ_LABEL, (int)OBJ_ARROW,
+                           (int)OBJ_ARROWED_LINE, (int)OBJ_BITMAP_LABEL,
+                           (int)OBJ_BITMAP, (int)OBJ_TRIANGLE, (int)OBJ_FIBO,
+                           (int)OBJ_EDIT, (int)OBJ_BUTTON};
+   const string tags[]  = {"TREND", "HLINE", "VLINE",
+                           "RECT", "RECTLBL",
+                           "TEXT", "LBL", "ARROW",
+                           "ARRWLINE", "BMPLBL",
+                           "BMP", "TRI", "FIBO",
+                           "EDIT", "BTN"};
+   string line = "";
+   for(int i = 0; i < ArraySize(types); i++)
+   {
+      const int n = ObjectsTotal(0, -1, types[i]);
+      if(n > 0) line += tags[i] + "=" + IntegerToString(n) + " ";
+   }
+   _LOG_GATE_W Print("[W][PERF] obj census: ", line, "total=", ObjectsTotal(0, -1, -1));
+}
+
 void P4ReportSlow(const string what, const uint ms, const uint budget)
 {
     if(ms < budget) return;
@@ -3709,6 +4044,9 @@ void P4ReportSlow(const string what, const uint ms, const uint budget)
     if(s_p4LogGateMs != 0 && now - s_p4LogGateMs < 2000) return;
     s_p4LogGateMs = now;
     _LOG_GATE_W Print("[W][PERF] ", what, " took ", (int)ms, "ms (budget ", (int)budget, "ms)");
+    // P-PERF-115: the population behind the price, exactly when the init path
+    // blows the budget (the heavy-chart case this ledger exists to explain).
+    if(StringFind(what, "OnInit") == 0) P4ObjectCensus();
 }
 
 string P4MsTag(const uint ms) { return IntegerToString((int)ms); }
@@ -3792,11 +4130,15 @@ void StructureSwitchBatchEnd()
 // card's SHOW row (BiotakPanels_Apply, case 0 row 3). They used to keep three
 // copies of the state write; none of them may keep a copy of the walk.
 //
-// `g_redrawTHLevelsNeeded` still goes up, and it is not a leftover: it is what
-// BUILDS the family when the chart carries none yet (a fresh attach starts with
-// the overlay OFF, so the first ON has nothing to un-mask). The frame then
-// re-asserts the same masks through the same writer and changes no pixel —
-// `[P-KEY] T settled … ms=` is that reconciliation, on the record.
+// `g_redrawTHLevelsNeeded` still goes up on the object path, and it is not a
+// leftover: it is what BUILDS the family when the chart carries none yet (a
+// fresh attach starts with the overlay OFF, so the first ON has nothing to
+// un-mask). The frame then re-asserts the same masks through the same writer
+// and changes no pixel — `[P-KEY] T settled … ms=` is that reconciliation, on
+// the record. In canvas mode (P-PERF-116, MT5-ONLY) the press's walk flips the
+// recs and repaints the layer on the spot, so the flag stays down; the one
+// build the press can still owe — the chart carries no band yet — rides the
+// `bands=0` arm below, unchanged.
 //
 // Cost: one bounded cache walk per press (guarded masks; ZERO writes when the
 // family is already right) + one ChartRedraw, both stated by the applied line.
@@ -3808,7 +4150,18 @@ void SetTriggerLevelsVisible(const bool on)
    GlobalVariableSet("Biotak_TriggerLevels_" + GetCachedChartIdStr(), on ? 1.0 : 0.0);
    int seen = 0;
    int written = TriggerFamilyWalk(on, seen);
-   g_redrawTHLevelsNeeded = true;   // P-PERF-21: a re-render, never a clear
+   // P-PERF-116 (2026-10-17) — IN CANVAS MODE THE WALK *IS* THE PAINT.
+   // RBridgeTriggerWalk flips the recs and repaints the overlay layer on the
+   // spot (its own push+paint), and the entry's same-event pump (KEYDOWN /
+   // OBJECT_CLICK) re-asserts the layer masks — so the re-render this flag owes
+   // could only re-derive the ladder and repaint what the press already
+   // painted: the press's whole remaining cost, and the user's report
+   // («روشن و خاموش کردن سطوح کند هست»). The object path keeps P-PERF-21's
+   // contract untouched.
+#ifdef BIOTAK_RENDER_ENGINE
+   if(!RBridgeActive())
+#endif
+      g_redrawTHLevelsNeeded = true;   // P-PERF-21: a re-render, never a clear
    // P-PERF-32b: `bands=0` on the way ON means the chart carries no band to
    // un-mask - a family the render has not materialised (a fresh attach, mid zones
    // were off, a wipe). The walk cannot invent geometry, so the build is OWED here:
@@ -3839,7 +4192,23 @@ string P4InitLedgerTag(const uint indMs, const uint uiMs)
            " settings=" + IntegerToString((int)g_pInitMsSettings) +
            " hist=" + IntegerToString((int)g_pInitMsHistory) +
            " base=" + IntegerToString((int)g_pInitMsBase) +
-           " atr=" + IntegerToString((int)g_pInitMsAtr) + "]";
+           " atr=" + IntegerToString((int)g_pInitMsAtr) +
+           " menu=" + IntegerToString((int)g_pInitMsMenu) +
+           " kit=" + IntegerToString((int)g_pInitMsKit) +
+           " htf=" + IntegerToString((int)g_pInitMsHTF) +
+           " states=" + IntegerToString((int)g_pInitMsStates) +
+           " adopt=" + IntegerToString((int)g_pInitMsAdopt) +
+           " tail=" + IntegerToString((int)g_pInitMsTail) +
+           " front=" + IntegerToString((int)g_pInitMsFront) +
+           " leg=" + IntegerToString((int)g_pInitMsTailLeg) +
+           " th3=" + IntegerToString((int)g_pInitMsTailTh3) +
+           // P-PERF-115: the attach memo walk's own number, so the tail's
+           // remainder can never hide behind leg/th3 again.
+           " ink=" + IntegerToString((int)g_pInitMsInk) +
+           // P-PERF-113d: the chart's object count prices every scan in this
+           // line - one native call, and the number that explains why the
+           // same code costs 190 ms on one chart and 1.2 s on another.
+           " objs=" + IntegerToString(ObjectsTotal(0, -1, -1)) + "]";
 }
 
 //+------------------------------------------------------------------+
@@ -4023,7 +4392,19 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
     bool significantPriceChange = (priceChangePercent > 0.1);
     bool barsChanged = (currentBarTime != s_lastBarTime && s_lastBarTime != 0);
     bool isNewBar = barsChanged;
-    bool timeframeChanged = (currentPeriod != s_lastPeriod && s_lastPeriod != -1);
+    // P-PERF-95 (BUG-04, 2026-10-13) — THE WITNESS THAT SURVIVES THE RELOAD.
+    //
+    // `s_lastPeriod` is a function-local static, so on MT5 the very reload a
+    // timeframe switch performs re-initialises it: the first frame after the
+    // switch read -1, this test called it "no change", and the
+    // CACHE_INV_TIMEFRAME arm below was unreachable on the one event it was
+    // written for. The first frame of an instance therefore asks the
+    // cross-reload stamp instead (ResolvePeriodChangeAttach, resolved at the
+    // end of OnInitHandler); every later frame keeps using the static, which is
+    // the cheaper witness and equally correct once it has been seeded.
+    bool timeframeChanged = (s_lastPeriod == -1)
+                            ? g_periodChangedOnAttach
+                            : (currentPeriod != s_lastPeriod);
     bool customPriceChanged = false;
     if(g_thStartPointType == TH_START_POINT_CUSTOM_PRICE) {
         customPriceChanged = (MathAbs(currentCustomPrice - s_lastCustomPrice) > EPSILON_PRICE);
@@ -5700,12 +6081,20 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
            DrawStyleApplyOnCreate(sparam);
            CustomPriceForeignDrawSeen();
        }
+       //--- P-DRAW-128 (2026-10-13): every drawing's colour is witnessed from birth —
+       //--- styled (we know what it was just given) or the terminal's own (a kind we
+       //--- never styled). Without this the first native change after a reload could
+       //--- not be told apart from a move-drop, and the copy would wear the old colour.
+       DrawInkMemoPrime(sparam);
    }
 // P-TICKWRAP: the window is asked through its owner, never compared against GetTickCount()
     // directly — an absolute compare stays true forever after the 49.7-day counter wrap, and
     // then EVERY delete would be ignored for the rest of the cycle (TickDeadlinePending).
     bool suppressDeleteEvent = g_suppressDeleteEvents || TickDeadlinePending(g_suppressDeleteEventsUntilMs);
     if(id == CHARTEVENT_OBJECT_DELETE && !suppressDeleteEvent) {
+        //--- P-DRAW-128 (2026-10-13): a deleted drawing's witness goes with it, so the
+        //--- memo cannot answer for a name that no longer exists.
+        DrawInkMemoForget(sparam);
         string indicatorPrefix = inpObjectPrefix;
         int prefixLen = StringLen(indicatorPrefix);
         // P-BK-01 / P-HR-01: Base/Knot deletes are owned by BaseKnotTool (cascade/heal) and
@@ -6450,7 +6839,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     //  
     if(id == CHARTEVENT_CHART_CHANGE) {
         if(IsIndicatorHidden()) return;
+        uint p_tmpCc0 = GetTickCount();   // P-PERF-TMP (remove after attribution)
         HandsetMarkersRide();   // P-UI-98d v2: the handles ride every layout change
+        uint p_tmpCc1 = GetTickCount();   // P-PERF-TMP
         static uint s_lastLayoutMs = 0;
         static int s_lastW = -1;
         static int s_lastH = -1;
@@ -6498,6 +6889,13 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // Split it the way every other ledger here is split, and only print
         // when the branch blows the event budget.
         uint p28t = GetTickCount();
+        // P-PERF-TMP (remove after attribution): the part of the branch the
+        // phase ledger below does not cover — the ride and the pre-throttle head
+        // (throttle read, chart reads, the prime). The TF-switch event that took
+        // 1141 ms showed a 78 ms phase sum, so its owner is in here.
+        if((p28t - p_tmpCc0) >= 100)
+           Print("[W][PERF-TMP] cc pre: ride=", (int)(p_tmpCc1 - p_tmpCc0),
+                 "ms head=", (int)(p28t - p_tmpCc1), "ms total=", (int)(p28t - p_tmpCc0), "ms");
         uint p28redraw = 0, p28labels = 0, p28leg = 0;
         if(sizeChanged) g_labelsRelayoutNeeded = true;
         if(viewportChanged) {
@@ -7062,6 +7460,32 @@ void RunIncrementalObjectCleanup()
     datetime currentTime = TimeGMT();
     if(currentTime - g_lastObjectCleanup <= CLEANUP_INTERVAL_SECONDS) return;
 
+    // P-PERF-105 (2026-10-16) — THE FIRST INTERVAL AFTER ATTACH SEEDS THE
+    // BASELINE; IT DOES NOT WALK THE CHART.
+    //
+    // `g_objectCountLast` starts at 0 on every instance (fresh statics; the
+    // teardown at OnDeinitHandler zeroes them for symmetry), so the growth
+    // test below (`currentObjectCount > 0 + OBJECT_COUNT_INCREASE_THRESHOLD`)
+    // is true on the FIRST coop tick of EVERY attach — and the walk then
+    // processes up to 300 objects with one `ObjectName`/`ObjectGetInteger`
+    // call each. On a ~1200-object chart at this terminal's per-call price
+    // (~3 ms, the P-PERF-100/101/103 law) the live log charged exactly that:
+    // `coop job=obj-cleanup waited=0ms ran=890ms` on the D1 attach of
+    // 2026.10.16 13:59 — the single largest item of the whole switch, spent
+    // BEFORE any growth had happened.
+    //
+    // The cleanup's contract is "react to count INCREASE between intervals",
+    // and a fresh attach has no previous interval: the first run ESTABLISHES
+    // the baseline (one `ObjectsTotal` call) and the emergency net arms from
+    // the second interval onward. Family hygiene at attach is already owned
+    // by the label sweep, CleanupSurplusPipeline and SweepForeignLadderObjects.
+    if(g_lastObjectCleanup == 0)
+    {
+        g_objectCountLast = ObjectsTotal(0, -1, -1);
+        g_lastObjectCleanup = currentTime;
+        return;
+    }
+
     TH3_PROF_START(ObjectCleanup);
     int currentObjectCount = ObjectsTotal(0, -1, -1);
 
@@ -7315,6 +7739,29 @@ void CoopPump()
       {
          owed = true;
          s_coopOwedMs[job] = GetTickCount();
+         // P-PERF-45c (2026-10-13): THE FLAG IS SET TOO, NOT ONLY THE CLOCK.
+         //
+         // MEASURED defect this closes: the live journal carried
+         //   [W][PERF] coop job=heavy-frame waited=-16ms ran=16ms stillOwed=0
+         //   ... waited=-31ms ran=31ms  ·  waited=-32ms ran=47ms  ·  waited=-47ms ran=47ms
+         // A NEGATIVE wait is impossible by construction (`waited = t0 - owedMs`
+         // with `t0 >= owedMs`), so the number was not a latency - it was a lie,
+         // and a diagnostic that lies reads as "no defect" (the loop's own law).
+         //
+         // The cause: this branch set the CLOCK but left `s_coopOwed[job]` FALSE.
+         // The frame it then runs re-arms itself (RedrawAllObjects' own
+         // `ScheduleHeavyFrame`, the coalesce and chart-event guards), and that
+         // re-arm only takes the clock when the flag is FALSE - so it overwrote
+         // `s_coopOwedMs[job]` with a tick LATER than this iteration's `t0`, and
+         // `t0 - owedMs` wrapped. Setting the flag keeps the invariant
+         // `owed == true => the clock belongs to the ask that started this run`,
+         // so the re-arm is a no-op and `waited` is the honest latency again.
+         //
+         // It also fixes the state itself: with the flag false, a frame that
+         // re-armed was indistinguishable from one that had not, and the
+         // `s_coopFrameStarved` counter at the slice check below could not see
+         // the progress-maker it was counting.
+         s_coopOwed[job] = true;
       }
       if(!owed) continue;
 
