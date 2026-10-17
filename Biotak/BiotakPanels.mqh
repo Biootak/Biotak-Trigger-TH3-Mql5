@@ -4568,11 +4568,15 @@ int PnlApplySet(const int item,const int row,const double v)
                             flags=REFRESH_NONE; }
          break;
       case 1:   // ZONES & LEVELS — main card. Row 0 = MID ZONES (ring master).
-         if(row==0)       { g_showMidZones=(v>0.5);
+         if(row==0)       {
                             // P-PERF-41: the ring's Zones & Levels light is this row
                             // AND row 1, so the ring must be repainted too.
+                            // P-PERF-117: ONE owner paints the family now - canvas:
+                            // one layer mask; object path: the render re-assert it
+                            // always owed. The REFRESH_BUFFERS here re-asserted the
+                            // WHOLE ladder for a mask.
                             RequestUISync();
-                            flags=REFRESH_BUFFERS; }
+                            flags = SetMidZonesVisible(v>0.5); }
          else if(row==1)  // SHOW LINES — master visibility. P-PERF-29: one owner
                           // writes the state, the mirror, the persisted key AND the
                           // object mask. This row used to skip the mask, and the
@@ -4581,7 +4585,11 @@ int PnlApplySet(const int item,const int row,const double v)
                          { g_showLines=(v>0.5);
                            SetLinesVisible(g_showLines, true);
                            RequestUISync();   // P-PERF-41: the ring light reads this row too
-                           flags=REFRESH_BUFFERS; }
+                           // P-PERF-117: the walk above wrote every mask; P-PERF-25
+                           // already proved a mask-only change needs no render - the
+                           // REFRESH_BUFFERS here paid a whole-ladder re-assert for it.
+                           RepaintForDiscreteAction();
+                           flags=REFRESH_NONE; }
          else if(row==2)  // ZONE STYLE — the picture itself (P-UI-62: Filled / Empty /
                           // Outlined, i.e. WHICH halves of the zone are drawn)
                          { ENUM_ZONE_STYLE newPicture=(ENUM_ZONE_STYLE)(int)MathRound(v);
@@ -4630,7 +4638,13 @@ int PnlApplySet(const int item,const int row,const double v)
          if(row==0)       { g_showLiveCountdown=(v>0.5);
                             RuntimeSettingsSaveOverridesThrottled();   // OV_CD
                             RefreshLiveCountdown();
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            // P-PERF-117: the tag owns its own layer and its own
+                            // refresh IS the paint (the D key has always been this
+                            // shape, down to the forced repaint); the row paid a
+                            // whole render for the same press.
+                            RequestUISync();   // ...and the drain settles the row's own switch bitmap
+                            RepaintForDiscreteAction();
+                            flags=REFRESH_NONE; }
          else if(row==1)  { /* COUNT COLOR — the palette owns this row */ }
          else if(row==2)  { g_countdownFontSize=ClampInt((int)MathRound(v),0,24);
                             RuntimeSettingsSaveOverridesThrottled();   // OV_CDS
@@ -4646,23 +4660,28 @@ int PnlApplySet(const int item,const int row,const double v)
                                               g_atrLabelsVisible?1.0:0.0);
                             string opA=GetLevelObjectPrefix();
                             SetATRLabelsVisibility(opA,g_atrLabelsVisible);
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            RequestUISync();   // P-PERF-117: the ring's ATR light + card settle via the drain
+                            RepaintLabelsForSwitch(); flags=REFRESH_NONE; }
          else if(row==5)  { g_showATRTargets=(v>0.5);
                             string opB=GetLevelObjectPrefix();
                             SetATRLabelsVisibility(opB,g_atrLabelsVisible);
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            RequestUISync();   // P-PERF-117: the ring's ATR light + card settle via the drain
+                            RepaintLabelsForSwitch(); flags=REFRESH_NONE; }
          else if(row==6)  { g_showATRTradeLabels=(v>0.5);
                             string opC=GetLevelObjectPrefix();
                             SetATRLabelsVisibility(opC,g_atrLabelsVisible);
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            RequestUISync();   // P-PERF-117: the ring's ATR light + card settle via the drain
+                            RepaintLabelsForSwitch(); flags=REFRESH_NONE; }
          else if(row==7)  { g_showATRTradeSLLabels=(v>0.5);
                             string opD=GetLevelObjectPrefix();
                             SetATRLabelsVisibility(opD,g_atrLabelsVisible);
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            RequestUISync();   // P-PERF-117: the ring's ATR light + card settle via the drain
+                            RepaintLabelsForSwitch(); flags=REFRESH_NONE; }
          else if(row==8)  { g_showATRTradeTPLabels=(v>0.5);
                             string opE=GetLevelObjectPrefix();
                             SetATRLabelsVisibility(opE,g_atrLabelsVisible);
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            RequestUISync();   // P-PERF-117: the ring's ATR light + card settle via the drain
+                            RepaintLabelsForSwitch(); flags=REFRESH_NONE; }
          else if(row==9)  { g_showPipDistanceLabels=(v>0.5); g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
          // P-UI-70d — the trade card's four knobs. Every write is clamped by the
          // SAME named bound the card's owner applies, so the slider's travel and
@@ -4714,7 +4733,7 @@ int PnlApplySet(const int item,const int row,const double v)
             RequestUISync();
             string opT=GetLevelObjectPrefix();
             SetTHLabelsVisibility(opT,m0);
-            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL;
+            RepaintLabelsForSwitch(); flags=REFRESH_NONE;   // P-PERF-117
          }
          else if(row==1 || row==2)
          {
@@ -4743,12 +4762,13 @@ int PnlApplySet(const int item,const int row,const double v)
             RequestUISync();
             string opT2=GetLevelObjectPrefix();
             SetTHLabelsVisibility(opT2,m1);
-            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL;
+            RepaintLabelsForSwitch(); flags=REFRESH_NONE;   // P-PERF-117
          }
-         else if(row==3)  { g_showTHTargets=(v>0.5);
+          else if(row==3)  { g_showTHTargets=(v>0.5);
                             string opT3=GetLevelObjectPrefix();
                             SetTHLabelsVisibility(opT3,g_thLabelsMode);
-                            g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+                            RequestUISync();   // P-PERF-117: the ring's TH light + card settle via the drain
+                            RepaintLabelsForSwitch(); flags=REFRESH_NONE; }
          // P-TH-01: row 4 (MARGIN BOTTOM) is spelled out rather than left to the
          // trailing `else` below, because the wiring audit reads the trailing
          // statement as answering only the card's TOP address (setting 5).
@@ -4839,7 +4859,11 @@ int PnlApplySet(const int item,const int row,const double v)
                 // Zones card row 1 (same g_showLines / g_linesVisible pair).
           if(row==1)       { g_showLines=(v>0.5);
                              SetLinesVisible(g_showLines, true);   // P-PERF-29: mask included
-                             flags=REFRESH_BUFFERS; }
+                             RequestUISync();   // P-PERF-117: the ring's LINES light + card settle via the drain
+                             // P-PERF-117: the masks are the pixels (P-PERF-25 proved a
+                             // mask-only change skips the render); paint the press.
+                             RepaintForDiscreteAction();
+                             flags=REFRESH_NONE; }
          else if(row==2)  { g_lineWidth=ClampInt((int)MathRound(v),1,5); flags=REFRESH_BUFFERS; }
          else if(row==3)  { g_lineStyle=NativeStyleFromIdx((int)MathRound(v)); flags=REFRESH_BUFFERS; }
          else if(row==4)  { g_lineTransparency=ClampInt((int)MathRound(v),0,100); flags=REFRESH_BUFFERS; }
@@ -10821,6 +10845,18 @@ void UISyncDrain()
    UpdateCircularItemStates();
    UpdateCircularBadges();
    PnlSyncOpenCard();
+   // P-PERF-117 (2026-10-17): THE DRAIN'S WRITES ARE THE LAST VISUAL WORD OF THE
+   // EVENT — PAINT THEM HERE. Every fast-path switch owner (trigger / zones /
+   // ATR / TH) paints its content in the press and returns REFRESH_NONE, so the
+   // click path skips ApplyRefreshFlags — and this drain then rewrote the ring
+   // light and the open card's switch bitmaps AFTER that paint. The family
+   // toggled instantly while its light settled on the next natural repaint:
+   // «اون رنگ زرد دیر روشن و خاموش میشه ... استیت رینگ ها باید هماهنگ باشه».
+   // The paint is forced exactly like every other discrete action (P-PERF-24),
+   // and it can only ride a real request — the consume-first guard above keeps
+   // the tick net (RefreshKitOnBar) from ever re-draining, and every raiser is
+   // a user action (a switch press or a key), never the tick itself.
+   RepaintForDiscreteAction();
 }
 
 //+------------------------------------------------------------------+

@@ -190,6 +190,51 @@ static int  s_UIDragPend   = REFRESH_NONE;   // flags owed to the chart
 static uint s_UIDragHeavy  = 0;              // last heavy pass (0 = none yet)
 
 //==============================================================================
+// P-PERF-117 (2026-10-17) — THE MID-ZONES SWITCH PAINTS IN ITS OWN EVENT.
+//
+// «خاموش و روشن کردن زون ها کند هستش» — the ring's ZONES & LEVELS light and
+// the Zones card's MID ZONES row flipped the state and then asked the RENDER
+// for the pixels (`g_redrawTHLevelsNeeded + REFRESH_BUFFERS`): the dispatcher
+// below re-asserted the whole ladder (RedrawAllObjects) for a family whose
+// pixels are a MASK — the same defect P-PERF-32b fixed for the trigger light,
+// and the reason the trigger now feels instant while this one did not.
+//
+// It lives in the kit, not next to SetTriggerLevelsVisible, because it RETURNS
+// REFRESH_* — the flags are defined here and its callers (the ring, the card
+// rows) are included after this module.
+//
+// IN CANVAS MODE the family is ONE layer mask over the recs
+// (R-RENDER-ENGINE): hiding/showing moves no price, and the recs keep the last
+// build's picture. The store goes STALE exactly while no render could see the
+// family (the OFF branch of RenderZones skips the staging), so the ON press
+// owes a build in that one case — ScheduleHeavyFrame, which the entry's
+// same-event pump runs (P-PERF-40), the same arm SetTriggerLevelsVisible keeps
+// for `bands=0`.
+//
+// THE OBJECT PATH IS UNTOUCHED: the family has no show walk of its own
+// (HideAllZoneFamilyObjects is the OFF half only), so the render re-asserts —
+// which is what the switch always did, and what its return value still asks
+// for. One owner decides both, so the ring and the card cannot drift.
+int SetMidZonesVisible(const bool on)
+{
+   g_showMidZones = on;   // P-UI-93: one writer for the restored state
+   RuntimeSettingsSaveOverridesThrottled();   // ZO outlives the session
+#ifdef BIOTAK_RENDER_ENGINE
+   if(RBridgeActive())
+   {
+      // MT5-ONLY (R-RENDER-ENGINE): ONE layer mask; the recs rebuild only when
+      // the time spent hidden made them stale.
+      RBridgeZoneFamilyMask(on);
+      if(on && RBridgeZonesStale()) ScheduleHeavyFrame("zone-build");
+      RepaintForDiscreteAction();      // P-PERF-24: the press paints NOW
+      return REFRESH_NONE;
+   }
+#endif
+   g_redrawTHLevelsNeeded = true;   // the object path's render re-assert
+   return REFRESH_BUFFERS;
+}
+
+//==============================================================================
 // REFRESH DISPATCHER — applies REFRESH_* flags returned by the menu/panels
 //==============================================================================
 void ApplyRefreshFlags(const int flags)

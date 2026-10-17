@@ -733,7 +733,12 @@ static int  g_LongPressY      = 0;      // mouse Y at press start
 static bool g_LongPressFired  = false;  // true after panel opened (prevents toggle on release)
 #define LONG_PRESS_TIME 500   // one hold language everywhere (P-UI-14): 250ms fired on press-pause-drags
 #define LONG_PRESS_MOVE 8
-#define CIRC_DRAG_REDRAW_INTERVAL 30
+// P-PERF-117 (2026-10-17, user order «خوده رینگ هم روان درگ بشه»): 30 ms capped
+// the apply rate at 33 frames/s BEFORE the frame's ChartRedraw was even counted,
+// so the hand's move and the painted move could drift a whole redraw apart — the
+// drag read as stepping. 15 ms doubles the attempt rate; the real rate is still
+// bounded by the redraw itself, and only a live grab ever reaches this gate.
+#define CIRC_DRAG_REDRAW_INTERVAL 15
 
 //--- chart lock while dragging or while a settings panel is open
 //
@@ -4993,10 +4998,13 @@ int HandleButtonClick(const string clickedObject)
       // It must NOT call SetLinesVisible: the SHOW LINES row (and the L key) own
       // that switch, and a press that turned the lines on would overwrite a
       // choice the user made elsewhere. See the note on CircFeatureOn.
-      g_showMidZones = wantOn;   // P-UI-93: what the light showed, inverted
+      // P-PERF-117 (2026-10-17): ONE owner paints it now — in canvas mode a
+      // single layer mask (plus a build only when the recs went stale behind
+      // the OFF), on the object path the render re-assert it always owed. The
+      // REFRESH_BUFFERS this branch used to return made the press re-assert
+      // the WHOLE ladder for a mask — «خاموش و روشن کردن زون ها کند هستش».
       RequestUISync();   // P-UI-40: the Zones card's MID ZONES row shows this
-      g_redrawTHLevelsNeeded = true;
-      refreshFlags = REFRESH_BUFFERS;
+      refreshFlags = SetMidZonesVisible(wantOn);
    }
    else if(feat == CIR_ATR)
    {
@@ -5007,8 +5015,13 @@ int HandleButtonClick(const string clickedObject)
       GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
       string objectPrefix = GetLevelObjectPrefix();
       SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible);
-      g_labelsRelayoutNeeded = true;
-      refreshFlags = REFRESH_ALL;
+      // P-PERF-117 (2026-10-17): the mask above IS the pixels; the family
+      // repaints in THIS event through the same owner the A hotkey uses. The
+      // REFRESH_ALL this branch returned made the press re-assert the whole
+      // ladder and STILL re-pay the relayout on the next frame — the reason
+      // «لیبل ها th , atr هم کند هستش».
+      RepaintLabelsForSwitch();
+      refreshFlags = REFRESH_NONE;
    }
    else if(feat == CIR_TH)
    {
@@ -5035,8 +5048,8 @@ int HandleButtonClick(const string clickedObject)
       GlobalVariableSet(thGvar, (double)g_thLabelsMode);
       string objectPrefix = GetLevelObjectPrefix();
       SetTHLabelsVisibility(objectPrefix, g_thLabelsMode);
-      g_labelsRelayoutNeeded = true;
-      refreshFlags = REFRESH_ALL;
+      RepaintLabelsForSwitch();   // P-PERF-117: relayout + settle + forced paint, one owner
+      refreshFlags = REFRESH_NONE;
    }
    // VIEWLOCK-OFF:
    //else if(feat == CIR_VLOCK)

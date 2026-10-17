@@ -4177,8 +4177,8 @@ void SetTriggerLevelsVisible(const bool on)
    // paid for; `bands=0` says the render still has to build it (the one slow
    // direction left, and it can only happen once per attach).
    _LOG_GATE_D Print("[P-KEY] T applied on=", (on ? 1 : 0),
-         " ms=", (int)(GetTickCount() - t32b),
-         " bands=", seen, " masks=", written);
+          " ms=", (int)(GetTickCount() - t32b),
+          " bands=", seen, " masks=", written);
 }
 
 // P-PERF-10: named-phase report for the INIT path (attach / TF switch). The
@@ -6383,11 +6383,12 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             GlobalVariableSet(atrGvarNameKey, g_atrLabelsVisible ? 1.0 : 0.0);
             
             string objectPrefix = GetLevelObjectPrefix();
-            SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible); 
-            g_labelsRelayoutNeeded = true;
-            RedrawLabelsOnly();
+            SetATRLabelsVisibility(objectPrefix, g_atrLabelsVisible);
+            // P-PERF-117: ONE owner for the paint — it relayouts, SETTLES the
+            // relayout flag and forces the repaint (the old tail left the flag
+            // armed for the next frame to pay the very same relayout again).
+            RepaintLabelsForSwitch();
             LOG_I(LOG_CAT_LABELS, "ATR Labels " + (g_atrLabelsVisible ? "VISIBLE" : "HIDDEN"));
-            ThrottledChartRedraw();
             return;
         }
 
@@ -6430,11 +6431,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             
             string objectPrefix = GetLevelObjectPrefix();
             SetTHLabelsVisibility(objectPrefix, g_thLabelsMode);
-            g_labelsRelayoutNeeded = true;
-            RedrawLabelsOnly();
+            RepaintLabelsForSwitch();   // P-PERF-117: relayout + settle + forced paint, one owner
             string logMsg = "TH Labels mode=" + IntegerToString(g_thLabelsMode) + " (0=OFF,1=FRACTAL,2=STANDARD)";
             LOG_I(LOG_CAT_LABELS, logMsg);
-            ThrottledChartRedraw();
             return;
         }
 
@@ -7598,6 +7597,41 @@ void RedrawLabelsOnly() {
         _LOG_GATE_W Print("[W][PERF] labels relayout: clear=", (int)p49clear, "ms atr=", (int)p49atr,
               "ms th=", (int)p49th, "ms trade=", (int)p49trade,
               "ms tail=", (int)p49tail, "ms (count+repo+paint)");
+}
+
+// P-PERF-117 (2026-10-17) — A LABELS-FAMILY SWITCH PAINTS IN ITS OWN EVENT.
+//
+// The A / TH hotkeys have always had this shape (state + masks + one
+// RedrawLabelsOnly), but the ring's ATR and TH lights and every card row that
+// owns a labels switch still returned REFRESH_ALL: one press paid the
+// dispatcher's whole-ladder re-assert (RedrawAllObjects) and STILL left
+// `g_labelsRelayoutNeeded` armed, so the next frame cleared and rebuilt the
+// very same labels a second time — «لیبل ها th , atr هم کند هستش». The label
+// family is objects: its masks are the pixels, and its stacking needs exactly
+// ONE relayout, paid here.
+//
+// The flag is SETTLED here — but only by a run that really relayouted. A
+// hidden chart returns early from RedrawLabelsOnly, so the flag stays armed
+// for the SHOW path exactly as its contract promises; a staged rebuild
+// (g_buildStage != 0) keeps it too, because the ZONES->BLOCK hand-off re-arms
+// it anyway (:3661) and the frame that completes the stage owns that work.
+// That settles the one duplicate the old tails left: CoopPump runs right after
+// every event (P-PERF-40) and would have paid the same relayout again.
+void RepaintLabelsForSwitch()
+{
+    const uint t0 = GetTickCount();
+    if(IsIndicatorHidden())
+    {
+        g_labelsRelayoutNeeded = true;   // the SHOW path owes the relayout
+        RepaintForDiscreteAction();
+    }
+    else
+    {
+        RedrawLabelsOnly();
+        if(g_buildStage == 0) g_labelsRelayoutNeeded = false;   // PAID — this call WAS the relayout
+        RepaintForDiscreteAction();      // P-PERF-24: forced — a drag budget must not swallow a press
+    }
+    _LOG_GATE_D Print("[P-LBL] switch repaint ms=", (int)(GetTickCount() - t0));
 }
 
 //+------------------------------------------------------------------+

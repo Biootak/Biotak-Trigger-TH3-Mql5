@@ -98,8 +98,18 @@ RBrZoneRec g_rbrZones[];
 int  g_rbrZCursor=0;
 bool g_rbrStageZones=false, g_rbrDirtyZones=false;
 bool g_rbrZoneShow=true;   // the zone layer's mask (F + the MID ZONES master)
+// P-PERF-117 (2026-10-17, MT5-ONLY): are the recs below the picture of the
+// CURRENT basis? A render that can see the family stages it, and Commit marks
+// the store fresh; the one render that cannot - the OFF branch of RenderZones -
+// skips the staging entirely, so the recs keep the last ON pass's geometry and
+// must never be shown as if they were current. The MID ZONES press reads this
+// once: stale owes a build (ScheduleHeavyFrame, pumped in the same event), a
+// fresh family is a mask flip. Init = empty store = stale.
+bool g_rbrZonesStale=true;
 
 bool RBridgeActive() { return g_rbrArmed; }
+bool RBridgeZonesStale() { return g_rbrZonesStale; }
+void RBridgeZonesMarkStale() { g_rbrZonesStale=true; }   // the OFF render skipped the staging
 
 bool RBrNameIn3(const string nm)
 {
@@ -124,6 +134,7 @@ void RBridgeInit()
    for(int i=0;i<3;i++){ g_rbrPin[i]=""; g_rbrPrevPin[i]=""; }
    g_rbrDirtyUnder=false; g_rbrDirtyTexts=false; g_rbrDirtyZones=false;
    g_rbrStageZones=false; g_rbrZCursor=0; g_rbrZoneShow=true;
+   g_rbrZonesStale=true;   // P-PERF-117: the store was just emptied
    g_rbrMaskInited=false; g_rbrLastHidden=true;   // no paint before the first mask sync
    g_engManageTimer=false;     // the product's 250 ms timer is not ours to re-arm
    g_engUnderBack=false;       // ladder lines draw OVER the candles, like their HLINEs did
@@ -365,6 +376,7 @@ void RBridgeZonesCommit()
 {
    if(!g_rbrStageZones) return;
    g_rbrStageZones=false;
+   g_rbrZonesStale=false;   // P-PERF-117: this render SAW the family and re-decided the store
    int w=0;
    const int n=ArraySize(g_rbrZones);
    for(int i=0;i<n;i++)

@@ -863,7 +863,10 @@ void RenderZones(
 #ifdef BIOTAK_RENDER_ENGINE
         // MT5-ONLY (R-RENDER-ENGINE): the canvas family hides as ONE layer
         // mask - the object path's per-object walk has nothing to walk here.
-        if(RBridgeActive()) { RBridgeZoneFamilyMask(false); return; }
+        // P-PERF-117: the staging below is unreachable while the family is
+        // off, so the recs age from this very pass on - the MID ZONES press
+        // must know before it shows them again.
+        if(RBridgeActive()) { RBridgeZoneFamilyMask(false); RBridgeZonesMarkStale(); return; }
 #endif
         HideAllZoneFamilyObjects(); return;
     }
