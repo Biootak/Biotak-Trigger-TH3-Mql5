@@ -438,11 +438,16 @@ bool CircRailShape(bool &vertical, int &dir)
    return true;
 }
 
-// The train's own fit walk: the longest count whose run at ITS OWN side seats
-// the last seat's far edge inside the padded bound — the same numbers
-// CircLayout paints with (room = dist - CIRC_PAD - s/2, len = ORB/2 + s/2 +
-// GAP + (k-1)*(s+GAP)). 1 (the door alone) is the floor: degrade to the
-// previous surface, never to nothing and never to a stack (P-UI-13).
+// The train's own fit walk: the longest count whose run at ITS OWN side puts
+// the last TILE's far edge inside the padded bound — the SAME numbers
+// CircLayout paints with (room = dist - CIRC_PAD - box/2, len = ORB/2 + box/2 +
+// GAP + (k-1)*(box+GAP), box = s + 2*CIRC_BG_MARGIN).
+// P-UI-205: this walk measured the SEAT while the paint measured the TILE, so
+// it over-counted by 8px a seat (the P-UI-204 correction reached the paint and
+// not the capacity) and the tail seats drew past the padded edge. One pitch
+// owner, both sides of the comparison.
+// 1 (the door alone) is the floor: degrade to the previous surface, never to
+// nothing and never to a stack (P-UI-13).
 int CircRailCapacity(const int n, const bool vertical, const int dir)
 {
    int cw, ch;
@@ -451,10 +456,11 @@ int CircRailCapacity(const int n, const bool vertical, const int dir)
    int oy = g_UI.menuY;
    for(int k = n; k >= 2; k--)
    {
-      int s    = CircBtnSizeForN(k);   // each candidate at ITS OWN side — the paint's own number
-      int room = (dir < 0) ? (vertical ? oy : ox) - CIRC_PAD - s / 2
-                           : (vertical ? ch - oy : cw - ox) - CIRC_PAD - s / 2;
-      int len  = CIRC_ORB_SIZE / 2 + s / 2 + CIRC_GAP + (k - 1) * (s + CIRC_GAP);
+      int s    = CircBtnSizeForN(k);        // each candidate at ITS OWN side — the paint's own number
+      int box  = s + 2 * CIRC_BG_MARGIN;    // P-UI-205: the TILE is what is drawn and what must fit
+      int room = (dir < 0) ? (vertical ? oy : ox) - CIRC_PAD - box / 2
+                           : (vertical ? ch - oy : cw - ox) - CIRC_PAD - box / 2;
+      int len  = CIRC_ORB_SIZE / 2 + box / 2 + CIRC_GAP + (k - 1) * (box + CIRC_GAP);
       if(len <= room) return k;
    }
    return 1;   // the door alone — a degrade to the previous surface, never to nothing (P-UI-13)

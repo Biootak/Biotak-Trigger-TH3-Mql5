@@ -2234,21 +2234,24 @@ void CircLayout(const int i, int &x, int &y)
    if(CircRailShape(vertical, dir))
    {
       int s = CircBtnSize();   // the train's one side (P-UI-166) — CircSeatSize answers the same
-      int step = s + CIRC_GAP;
+      // P-UI-204: the PITCH is the TILE's width (s + 2*margin). MEASURED 10:29: box 43 at
+      // pitch 41 - every tile overlapped its neighbour by 2px and the train read as a comb.
+      int box = s + 2 * CIRC_BG_MARGIN;
+      int step = box + CIRC_GAP;
       // P-UI-26: clamp the rail's CROSS axis so buttons never draw half
       // off-chart. One uniform shift for the whole train — never a per-item
       // clamp (that stacks the train, P-UI-13) and never a radius shrink
       // (R-SUBLADDER). The orb itself stays where the user put it.
-      int half = s / 2 + CIRC_PAD;
+      int half = box / 2 + CIRC_PAD;   // P-UI-204: the TILE must stay inside, not the seat
       if(vertical)
       {
          x = MathMax(half, MathMin(cw - half, ox));
-         y = oy + dir * (CIRC_ORB_SIZE / 2 + s / 2 + CIRC_GAP + i * step);
+         y = oy + dir * (CIRC_ORB_SIZE / 2 + box / 2 + CIRC_GAP + i * step);
       }
       else
       {
          y = MathMax(half, MathMin(ch - half, oy));
-         x = ox + dir * (CIRC_ORB_SIZE / 2 + s / 2 + CIRC_GAP + i * step);
+         x = ox + dir * (CIRC_ORB_SIZE / 2 + box / 2 + CIRC_GAP + i * step);
       }
    }
    else if(CircSeatOuter(i))
@@ -2358,6 +2361,14 @@ double SubFanFitRadius(const int ox, const int oy, const int cw, const int ch)
 // NOTE: the old Tools rail MIRRORED ring item 1's direction, which pointed the
 // train off-chart at a corner (top-left/bottom-right) — this picks the free axis
 // instead, so the train is correct on all four edges and all four corners.
+// P-UI-205: THE RAIL'S PITCH AND FIRST CENTRE — ONE OWNER.
+// The paint (SubPlaceItem), the fit walk (SubRailAxis) and the hit box
+// (ToolsItemAt) all read these two numbers. A second copy of either is a
+// second grid: P-UI-204 corrected the pitch in the paint only, so the fit walk
+// still promised room for tiles it had measured as seats.
+int SubRailPitch()       { return CIRC_BG_SIZE + CIRC_GAP; }              // tile canvas + gap
+int SubRailFirstCentre() { return CIRC_ORB_SIZE / 2 + CIRC_BG_SIZE / 2 + CIRC_GAP; }
+
 bool SubRailAxis(const int n, const int ox, const int oy, const int cw, const int ch,
                  int &ux, int &uy, bool &fits)
 {
@@ -2368,13 +2379,16 @@ bool SubRailAxis(const int n, const int ox, const int oy, const int cw, const in
    bool nearBottom = (oy >= ch - CIRC_EDGE_TRIGGER);
    if(!(nearLeft || nearRight || nearTop || nearBottom)) return false;
 
-   int pitch    = CIRC_BTN_SIZE + CIRC_GAP;
-   int trainLen = CIRC_ORB_SIZE / 2 + CIRC_BTN_SIZE / 2 + CIRC_GAP
-                  + (n - 1) * pitch + CIRC_BTN_SIZE / 2 + CIRC_BG_MARGIN;
+   // P-UI-205: the train's PITCH is the TILE (canvas), not the seat — the same
+   // law P-UI-204 gave the ring train. SEAT pitch (44+6) drew every 52px disc
+   // canvas 2px into its neighbour (a comb) and let the last tile hang past the
+   // padded edge, because the fit walk measured a smaller box than the paint.
+   int pitch    = SubRailPitch();
+   int trainLen = SubRailFirstCentre() + (n - 1) * pitch + CIRC_BG_SIZE / 2;   // the last tile's far edge
    if(nearLeft || nearRight)
    {
-      int upRoom   = oy - CIRC_PAD - CIRC_BTN_SIZE / 2;
-      int downRoom = ch - CIRC_PAD - oy - CIRC_BTN_SIZE / 2;
+      int upRoom   = oy - CIRC_PAD - CIRC_BG_SIZE / 2;
+      int downRoom = ch - CIRC_PAD - oy - CIRC_BG_SIZE / 2;
       int dir = (upRoom >= downRoom) ? -1 : 1;
       if(dir == -1 && upRoom < trainLen && downRoom >= trainLen) dir = 1;
       else if(dir == 1 && downRoom < trainLen && upRoom >= trainLen) dir = -1;
@@ -2382,8 +2396,8 @@ bool SubRailAxis(const int n, const int ox, const int oy, const int cw, const in
       fits = ((dir == -1) ? upRoom : downRoom) >= trainLen;
       return true;
    }
-   int leftRoom  = ox - CIRC_PAD - CIRC_BTN_SIZE / 2;
-   int rightRoom = cw - CIRC_PAD - ox - CIRC_BTN_SIZE / 2;
+   int leftRoom  = ox - CIRC_PAD - CIRC_BG_SIZE / 2;
+   int rightRoom = cw - CIRC_PAD - ox - CIRC_BG_SIZE / 2;
    int dir = (leftRoom >= rightRoom) ? -1 : 1;
    if(dir == -1 && leftRoom < trainLen && rightRoom >= trainLen) dir = 1;
    else if(dir == 1 && rightRoom < trainLen && leftRoom >= trainLen) dir = -1;
@@ -2560,8 +2574,10 @@ void SubPlaceItem(const int i, int &x, int &y)
       int ux = 0, uy = 0;
       bool fits = false;
       SubRailAxis(CAT_COUNT, ox, oy, cw, ch, ux, uy, fits);
-      int dist = CIRC_ORB_SIZE / 2 + CIRC_BTN_SIZE / 2 + CIRC_GAP
-                 + i * (CIRC_BTN_SIZE + CIRC_GAP);
+      // P-UI-205: the rail's step is the TILE's canvas (52) + gap — the pit the
+      // paint (ToolsEnsureBg) writes, so neighbours never share a pixel column.
+      // Both numbers come from the one owner above, never from a local copy.
+      int dist = SubRailFirstCentre() + i * SubRailPitch();
       x = ox + ux * dist;
       y = oy + uy * dist;
       return;
@@ -2612,11 +2628,14 @@ void ToolsLayout(const int toolIdx, int &x, int &y)
 int ToolsItemAt(const int mx, const int my)
 {
    if(!g_ToolsOpen || !g_UI.menuVisible) return -1;
-   // Hit tile == the item's own canvas: 52px in the fan/ring (the disc skin),
-   // 46px in the grid (== SUB_GRID_PITCH, so adjacent tiles ABUT exactly — no
-   // dead strip between cells and no overlap that would make a click ambiguous).
+   // Hit tile == the item's own cell: 46px in the grid (== SUB_GRID_PITCH) and
+   // 58px on the rail (== the P-UI-205 pitch), so adjacent cells ABUT exactly —
+   // no dead strip between them and no overlap that would make a click
+   // ambiguous. The fan/ring keep their 52px canvas: their neighbours are spaced
+   // on a chord, so a square cell there would steal a neighbour's pixels.
    int hitHalf = SubIsPanelMode() ? SUB_GRID_PITCH / 2
-                                  : CIRC_BTN_SIZE / 2 + CIRC_BG_MARGIN;
+               : (SubMode() == SUB_MODE_RAIL) ? SubRailPitch() / 2
+                                              : CIRC_BTN_SIZE / 2 + CIRC_BG_MARGIN;
    for(int i = 0; i < CAT_COUNT; i++)
    {
       if(!SubItemOnPage(i)) continue;    // parked items must never answer a click
@@ -3120,7 +3139,12 @@ void ToolsCreateBadge(const int i)
    // repaint. The badge is its BGCOLOR + the value label below; a dead bitmap
    // reference can only ever fail silently, so it is gone. Restore the two
    // OBJPROP_BMPFILE writes together with a real, DECLARED `badge.bmp` if the
-   // badge skin ever comes back.          ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
+   // badge skin ever comes back.
+   // P-UI-205: the tooltip strip is NOT part of that retire — P-UI-119's law
+   // covers every UI object — and this write had been swallowed by the note
+   // above, so the bg kept whatever tooltip it was born with while its own text
+   // label was cleared.
+   ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, bg, OBJPROP_STATE, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
@@ -3199,7 +3223,12 @@ void CircCreateBadge(const int i)
    // repaint. The badge is its BGCOLOR + the value label below; a dead bitmap
    // reference can only ever fail silently, so it is gone. Restore the two
    // OBJPROP_BMPFILE writes together with a real, DECLARED `badge.bmp` if the
-   // badge skin ever comes back.          ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
+   // badge skin ever comes back.
+   // P-UI-205: the tooltip strip is NOT part of that retire — P-UI-119's law
+   // covers every UI object — and this write had been swallowed by the note
+   // above, so the bg kept whatever tooltip it was born with while its own text
+   // label was cleared.
+   ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
    ObjectSetInteger(0, bg, OBJPROP_STATE, false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
