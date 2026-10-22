@@ -8398,6 +8398,13 @@ bool PnlPointInside(const int mx,const int my)
    if(g_PalOpen && mx >= g_PalX && mx <= g_PalX+PalW() &&
       my >= g_PalY && my <= g_PalY+PalH())
       return true;
+   // MT5-ONLY (P-UI-201): the generic dropdown hangs past the card for lower
+   // rows and can be wider than it. It is a visible UI surface, so a press on
+   // it must not arm BkHold/CpHold behind it (the MT4 twin has the same gap).
+   if(g_PnlDdItem >= 0 &&
+      mx >= g_PnlDdX && mx <= g_PnlDdX+g_PnlDdW &&
+      my >= g_PnlDdY && my <= g_PnlDdY+g_PnlDdH)
+      return true;
    return false;
 }
 
