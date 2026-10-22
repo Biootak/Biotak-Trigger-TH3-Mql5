@@ -2206,7 +2206,12 @@ int CircPlacedCount()
 
 void CircNoteBuilt()
 {
-   s_circBuiltSeats = CircPlacedCountLive();   // note BEFORE a create: CircLayout reads this n
+   // P-UI-206: the fingerprint must be the count the LAYOUT will draw at. While the hand
+   // holds the orb that is the FROZEN set (CircLayout reads CircPlacedCount()), so noting the
+   // live count here stamped a set the paint never used — and the release gate
+   // (built == live) then answered "same set" and rebuilt nothing: old pitch, new seats.
+   s_circBuiltSeats = (g_OrbDragging && s_circBuiltSeats >= 0) ? s_circBuiltSeats
+                                                             : CircPlacedCountLive();
    // P-UI-195: the two circles name themselves once per build (open / restore /
    // relayout), through the FLUSHED channel (P-LOG-3) — the seat count, the split,
    // the outer side and radius, the first gap angle and the pitch, and whether the
@@ -3261,7 +3266,8 @@ void CircEnsureBg(const int i, const int x, const int y, const bool on)
    if(ObjectFind(0, bg) < 0)
    {
       if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0))
-      { DrawStripDiagEmit(StringFormat("[P-UI-202] bg create FAILED seat=%d", i)); return; }
+      { DrawStripDiagEmit(StringFormat("[P-UI-202] bg create FAILED seat=%d", i));
+        ObjectDelete(0, CircIcon(i)); return; }   // P-UI-206: no tile, no glyph
       DrawStripDiagEmit(StringFormat("[P-UI-202] bg heal seat=%d s=%d", i, s));
    }
    string bgRes = CircBgRes(s, on);   // P-UI-162: the canvas is the seat's own box size (s + 2*margin)
@@ -3288,6 +3294,7 @@ void CircCreateItem(const int i)
    bool on = CircFeatureLit(feat);
 
    CircEnsureBg(i, x, y, on);   // P-UI-202
+   if(ObjectFind(0, CircBg(i)) < 0) return;   // P-UI-206: no tile, no glyph
 
    // P-UI-163: create-if-missing, NEVER delete+recreate in one tick — MEASURED 2026-10-17 (the 12:05:39 frame): a same-tick re-create that failed kept the bg and no glyph, and NO writer healed a MISSING icon (every path gates on ObjectFind>=0). Output-identical: the configure below rewrites all, and a BMPFILE re-set re-decodes (the P-UI-161 sync's own law).
    string icon = CircIcon(i);
@@ -3312,7 +3319,8 @@ void ToolsEnsureBg(const int t, const int x, const int y, const bool on)
    if(ObjectFind(0, bg) < 0)
    {
       if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0))
-      { DrawStripDiagEmit(StringFormat("[P-UI-202] tools bg create FAILED cell=%d", t)); return; }
+      { DrawStripDiagEmit(StringFormat("[P-UI-202] tools bg create FAILED cell=%d", t));
+        ObjectDelete(0, ToolsIcon(t)); return; }   // P-UI-206: no tile, no glyph
       DrawStripDiagEmit(StringFormat("[P-UI-202] tools bg heal cell=%d size=%d", t, bgSize));
    }
    string bgRes = SubBgRes(on);
@@ -3339,6 +3347,7 @@ void ToolsCreateItem(const int toolIdx)
    bool on = CircFeatureLit(feat);
 
    ToolsEnsureBg(toolIdx, x, y, on);   // P-UI-202
+   if(ObjectFind(0, ToolsBg(toolIdx)) < 0) return;   // P-UI-206: no tile, no glyph
 
    // P-UI-163: the same create-if-missing law as CircCreateItem's icon (one class, two live writers — see the measured note there).
    string icon = ToolsIcon(toolIdx);
@@ -3445,7 +3454,7 @@ void CircCreateOrb()
 //--- pitch and leaves the old tail painted at its old place; sweep = DeleteRing's width.
 void CircRebuildRing()
 {
-   CircNoteBuilt(); int n = CircPlacedCountLive();   // note BEFORE the create: CircLayout reads this n
+   CircNoteBuilt(); int n = CircPlacedCount();   // P-UI-206: the count the LAYOUT uses, not the live one
    for(int i = n; i < RING_MAX_SEATS; i++)
    {
       ObjectDelete(0, CircIcon(i)); ObjectDelete(0, CircBg(i));
@@ -3740,11 +3749,10 @@ void ToolsMoveItem(const int t)
    int x, y;
    ToolsLayout(t, x, y);
    int bgSize = SubBgSize();
-   if(ObjectFind(0, ToolsBg(t)) >= 0)
-   {
-      ObjectSetInteger(0, ToolsBg(t), OBJPROP_XDISTANCE, x - bgSize / 2);
-      ObjectSetInteger(0, ToolsBg(t), OBJPROP_YDISTANCE, y - bgSize / 2);
-   }
+   if(ObjectFind(0, ToolsBg(t)) < 0 || (int)ObjectGetInteger(0, ToolsBg(t), OBJPROP_XSIZE) != bgSize)
+      ToolsEnsureBg(t, x, y, CircFeatureLit(ToolFeature(t)));   // P-UI-202: the skin follows the MODE
+   else { ObjectSetInteger(0, ToolsBg(t), OBJPROP_XDISTANCE, x - bgSize / 2);
+          ObjectSetInteger(0, ToolsBg(t), OBJPROP_YDISTANCE, y - bgSize / 2); }
    if(ObjectFind(0, ToolsIcon(t)) >= 0)
    {
       ObjectSetInteger(0, ToolsIcon(t), OBJPROP_XDISTANCE, x - CIRC_ICON_SIZE / 2);
@@ -4169,6 +4177,8 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
       // was frozen the same way — the release is where it may change too.
       SubRelayoutIfNeeded();
       CircRelayoutIfNeeded();
+      // P-UI-206: a release is a frame, not only a rebuild.
+      ChartRedraw(); DrawStripDiagEmit(StringFormat("[P-UI-206] orb release built=%d live=%d mode=%d", s_circBuiltSeats, CircPlacedCountLive(), SubMode()));
       return;
    }
 
@@ -4663,8 +4673,21 @@ void CircHealRingStep()
    int n = CircPlacedCount();
    if(n <= 0) return;
    static int s_healSeat = 0;
-   if(s_healSeat >= n) s_healSeat = 0;
+   if(s_healSeat >= RING_MAX_SEATS) s_healSeat = 0;
    int i = s_healSeat++;
+   // P-UI-205: a name PAST the placed set is an orphan of a larger mask or of a drag-time
+   // layout (the freeze paints the OLD count) — sweep it here, one slot per tick, BEFORE
+   // the user's next look. Cost: one ObjectFind on a tail slot; 0 writes when clean.
+   if(i >= n)
+   {
+      if(ObjectFind(0, CircIcon(i)) >= 0 || ObjectFind(0, CircBg(i)) >= 0)
+      {
+         ObjectDelete(0, CircIcon(i));    ObjectDelete(0, CircBg(i));
+         ObjectDelete(0, CircBadgeBg(i)); ObjectDelete(0, CircBadgeTxt(i));
+         DrawStripDiagEmit(StringFormat("[P-UI-205] orphan seat=%d swept (live=%d)", i, n));
+      }
+      return;
+   }
    bool bHole = (ObjectFind(0, CircBg(i)) < 0 || ObjectFind(0, CircIcon(i)) < 0);
    if(!bHole && CircHasBadge(RingFeature(i)))
       bHole = (ObjectFind(0, CircBadgeBg(i)) < 0 || ObjectFind(0, CircBadgeTxt(i)) < 0);

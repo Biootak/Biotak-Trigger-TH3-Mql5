@@ -8317,6 +8317,18 @@ void PnlCloseAll()
    // dying instance), so this line is the free built-in call again and the
    // source text stays IDENTICAL TO MT4. Do not "optimize" the line itself.
    ObjectsDeleteAll(0, g_UI.btnPrefix + "Pnl", -1, -1);
+   // P-UI-145c: AND THE SEATS THIS FAMILY TAUGHT GO WITH IT — the same release the
+   // palette's own teardown does. The card teardown wiped the OBJECTS and kept every
+   // SEAT: `PnlSeatRemember` (called by `PnlSetButton`) taught the registry one name per
+   // card control, and the only releaser in the tree was `PnlSeatForget` — reachable
+   // only from `PnlDestroy`, which has NO caller (the P-PERF-47 family wipe replaced
+   // it). So a closed card left its names behind for good: the registry filled with
+   // dead names, `PNL_SEAT_MAX` was reached, and `PnlSeatRemember` returned early for
+   // EVERY later control — the P-UI-145 revert died silently, in the fix whose whole
+   // point was to stop a silent displacement. ONE call, ONE pass over the registry, per
+   // USER ACTION (never per paint) — the EXISTING mechanism, with the EXACT prefix the
+   // wipe above used, so every name deleted above is released and nothing else is.
+   PnlSeatForget(g_UI.btnPrefix + "Pnl");
    // The two popovers still go through their own closers because they reset
    // STATE as well as objects (g_PnlDdItem / g_BkDd), and both are guarded by
    // "is it open?" so a closed popover costs one compare.
