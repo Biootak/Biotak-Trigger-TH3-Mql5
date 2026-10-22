@@ -218,7 +218,7 @@ double PenStackSecPerPx()
    double anyP = (hi + lo) / 2.0;
    int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
    if(!ChartTimePriceToXY(0, 0, t0, anyP, x1, y1)) return 0.0;
-   datetime t2 = t0 + (datetime)(PeriodSeconds() * 30);
+   datetime t2 = t0 + (datetime)(CompatPeriodSeconds() * 30);
    if(!ChartTimePriceToXY(0, 0, t2, anyP, x2, y2)) return 0.0;
    int dx = x2 - x1;
    if(dx < 4) return 0.0;

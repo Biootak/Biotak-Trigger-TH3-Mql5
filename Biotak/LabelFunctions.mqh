@@ -455,7 +455,7 @@ string TradePlanCloseInText(const bool compact = false)
 {
    datetime bt = iTime(Symbol(), Period(), 0);
    if(bt <= 0) return compact ? "--" : "Close in : --";
-   long left = (long)(bt + PeriodSeconds() - TimeCurrent());
+   long left = (long)(bt + CompatPeriodSeconds() - TimeCurrent());
    if(left < 0) left = 0;
    long d = left / 86400; left -= d * 86400;
    long h = left / 3600;  left -= h * 3600;
@@ -573,7 +573,7 @@ bool CreateLivePriceCountdown(const string name)
    // with the zoom instead of being a fixed guess.
    int prevX = 0, prevY = 0;
    int barPx = 8;   // safe default for a chart that cannot resolve bar 1
-   if(ChartTimePriceToXY(0, 0, bt - PeriodSeconds(), price, prevX, prevY) && barX > prevX)
+   if(ChartTimePriceToXY(0, 0, bt - CompatPeriodSeconds(), price, prevX, prevY) && barX > prevX)
       barPx = barX - prevX;
 
    string text = TradePlanCloseInText(true);

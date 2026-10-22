@@ -1801,7 +1801,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // a new bar closes, and 100 bars ahead of D already covers the trade. It
     // is derived from D (which only changes when the user drags a point) so a
     // still chart costs nothing here.
-    datetime endTime = tD + (100 * PeriodSeconds());
+    datetime endTime = tD + (100 * CompatPeriodSeconds());
     // P-TH3-ZONE-04: the style family the zones on the chart were BORN in. A
     // -1 first pass means «nothing on the chart yet», so the first frame builds
     // without a sweep; after that the sweep runs only when the user changes the
@@ -1875,24 +1875,25 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         if(!rbr)
 #endif
         if(ObjectFind(0, lineName) < 0) {
-            ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, centerPrice, endTime, centerPrice);
-            ObjectSetInteger(0, lineName, OBJPROP_COLOR, targetInk);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, targetInk);
-            ObjectSetInteger(0, lineName, OBJPROP_WIDTH, 2);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELWIDTH, 2);
-            ObjectSetInteger(0, lineName, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
-            ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, lineName, OBJPROP_LEVELS, 1);
-            ObjectSetDouble(0, lineName, OBJPROP_LEVELVALUE, 0, 0.0);
-            
-            if(inpTH3LabelPosition != TH3_LABEL_HIDDEN) {
-                // P-TH3-ZONE-01: the number is the band's FULL height in pips (what
-                // is drawn), and the separator is short enough that it stays INSIDE
-                // the plot — 20 dashes ran the text past the right edge and cut the
-                // height off the chart entirely.
-                double zonePips = (zoneHalfWidth * 2.0) / pipSize;
-                string labelText = StringFormat("%s (%.1f) ========%.1f", targetNames[i], targetPips[i], zonePips);
-                ObjectSetString(0, lineName, OBJPROP_LEVELTEXT, 0, labelText);
+            if(ObjectCreate(0, lineName, OBJ_FIBO, 0, startTime, centerPrice, endTime, centerPrice)) {
+                ObjectSetInteger(0, lineName, OBJPROP_COLOR, targetInk);
+                ObjectSetInteger(0, lineName, OBJPROP_LEVELCOLOR, targetInk);
+                ObjectSetInteger(0, lineName, OBJPROP_WIDTH, 2);
+                ObjectSetInteger(0, lineName, OBJPROP_LEVELWIDTH, 2);
+                ObjectSetInteger(0, lineName, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
+                ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
+                ObjectSetInteger(0, lineName, OBJPROP_LEVELS, 1);
+                ObjectSetDouble(0, lineName, OBJPROP_LEVELVALUE, 0, 0.0);
+
+                if(inpTH3LabelPosition != TH3_LABEL_HIDDEN) {
+                    // P-TH3-ZONE-01: the number is the band's FULL height in pips (what
+                    // is drawn), and the separator is short enough that it stays INSIDE
+                    // the plot — 20 dashes ran the text past the right edge and cut the
+                    // height off the chart entirely.
+                    double zonePips = (zoneHalfWidth * 2.0) / pipSize;
+                    string labelText = StringFormat("%s (%.1f) ========%.1f", targetNames[i], targetPips[i], zonePips);
+                    ObjectSetString(0, lineName, OBJPROP_LEVELTEXT, 0, labelText);
+                }
             }
         } else {
             // Update position AND label text when frequency/step changes
@@ -1958,14 +1959,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 
             // Top border (extends right, matching the filled box)
             if(ObjectFind(0, topBorder) < 0) {
-                ObjectCreate(0, topBorder, OBJ_TREND, 0, startTime, upperZone, endTime, upperZone);
-                zoneBornThisPass++;
-                ObjectSetInteger(0, topBorder, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, topBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, topBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
-                ObjectSetInteger(0, topBorder, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
-                ObjectSetInteger(0, topBorder, OBJPROP_SELECTABLE, false);
-                ObjectSetInteger(0, topBorder, OBJPROP_BACK, true);
+                if(ObjectCreate(0, topBorder, OBJ_TREND, 0, startTime, upperZone, endTime, upperZone)) {
+                    zoneBornThisPass++;
+                    ObjectSetInteger(0, topBorder, OBJPROP_COLOR, zoneColor);
+                    ObjectSetInteger(0, topBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
+                    ObjectSetInteger(0, topBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
+                    ObjectSetInteger(0, topBorder, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
+                    ObjectSetInteger(0, topBorder, OBJPROP_SELECTABLE, false);
+                    ObjectSetInteger(0, topBorder, OBJPROP_BACK, true);
+                }
             } else {
                 // P-PERF-ZB1 (2026-10-12): guard all visual-property writes on the
                 // update path — MT5/MT4 repaints on every ObjectSet*, so these three
@@ -1983,14 +1985,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 
             // Bottom border (extends right, matching the filled box)
             if(ObjectFind(0, bottomBorder) < 0) {
-                ObjectCreate(0, bottomBorder, OBJ_TREND, 0, startTime, lowerZone, endTime, lowerZone);
-                zoneBornThisPass++;
-                ObjectSetInteger(0, bottomBorder, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_SELECTABLE, false);
-                ObjectSetInteger(0, bottomBorder, OBJPROP_BACK, true);
+                if(ObjectCreate(0, bottomBorder, OBJ_TREND, 0, startTime, lowerZone, endTime, lowerZone)) {
+                    zoneBornThisPass++;
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_COLOR, zoneColor);
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_RAY_RIGHT, inpABCDExtendCD);
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_SELECTABLE, false);
+                    ObjectSetInteger(0, bottomBorder, OBJPROP_BACK, true);
+                }
             } else {
                 ObjectMove(0, bottomBorder, 0, startTime, lowerZone);
                 ObjectMove(0, bottomBorder, 1, endTime, lowerZone);
@@ -2004,14 +2007,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 
             // Left border (vertical - closes the outline)
             if(ObjectFind(0, leftBorder) < 0) {
-                ObjectCreate(0, leftBorder, OBJ_TREND, 0, startTime, lowerZone, startTime, upperZone);
-                zoneBornThisPass++;
-                ObjectSetInteger(0, leftBorder, OBJPROP_COLOR, zoneColor);
-                ObjectSetInteger(0, leftBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
-                ObjectSetInteger(0, leftBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
-                ObjectSetInteger(0, leftBorder, OBJPROP_RAY_RIGHT, false);
-                ObjectSetInteger(0, leftBorder, OBJPROP_SELECTABLE, false);
-                ObjectSetInteger(0, leftBorder, OBJPROP_BACK, true);
+                if(ObjectCreate(0, leftBorder, OBJ_TREND, 0, startTime, lowerZone, startTime, upperZone)) {
+                    zoneBornThisPass++;
+                    ObjectSetInteger(0, leftBorder, OBJPROP_COLOR, zoneColor);
+                    ObjectSetInteger(0, leftBorder, OBJPROP_STYLE, inpTH3ZoneBorderStyle);
+                    ObjectSetInteger(0, leftBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
+                    ObjectSetInteger(0, leftBorder, OBJPROP_RAY_RIGHT, false);
+                    ObjectSetInteger(0, leftBorder, OBJPROP_SELECTABLE, false);
+                    ObjectSetInteger(0, leftBorder, OBJPROP_BACK, true);
+                }
             } else {
                 ObjectMove(0, leftBorder, 0, startTime, lowerZone);
                 ObjectMove(0, leftBorder, 1, startTime, upperZone);

@@ -324,6 +324,17 @@ int PeriodMinutes(ENUM_TIMEFRAMES tf = PERIOD_CURRENT)
     return 0;
 }
 
+// Nominal seconds for the current chart period. MT4's PeriodSeconds() was
+// exactly Period()*60, including W1/MN1; MT5's is calendar truth and is wrong
+// on the monthly bar. The zero-argument call sites in the shared modules go
+// through here so the minute ladder keeps one meaning.
+int CompatPeriodSeconds() { return CompatPeriodMinutes() * 60; }
+
+// Nominal seconds for a timeframe value already in minutes. Used by the
+// period-seconds caches, where the caller has GetCachedPeriod() (which may be
+// the locked timeframe) rather than the chart's builtin Period().
+int CompatSecondsForMinutes(const int minutes) { return (minutes > 0) ? minutes * 60 : 0; }
+
 // MQL4-style iATR(symbol, timeframe, period, shift).
 //
 // P-ATR-SYNC (2026-10-17) — THE RATES ENGINE IS THE ENGINE.

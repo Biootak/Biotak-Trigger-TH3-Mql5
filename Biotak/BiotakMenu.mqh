@@ -155,12 +155,12 @@
 //--- the membership STAR on every Tools cell — same canvas as the badge, so the
 //--- corner seat below is one number (star_off/star_on.bmp, baked by the generator).
 #define CIRC_STAR_SIZE   16
-//--- P-UI-195 (2026-10-21) — TWO CIRCLES: «این رینگ‌ها پیش فرض ۹ تا اصلی باشه و بقیه
-//--- دورش … در دایره دوم … ولی از دایره اول کوچیک‌تر باشه» + «شعاع بزرگ‌تر ولی بین دو
-//--- ایتم اصلی» + «بالا (۱۲ ساعت)، ساعتگرد»: the first nine SEATS at 44px/r80
-//--- (byte-identical — eight stars + the door draw where they did), every seat past
-//--- them (extra stars, then the door, still LAST) at 32px (baked circ_*_32.bmp) on
-//--- an outer circle that clears the inner discs, half an inner step clockwise.
+//--- P-UI-195 (2026-10-21) — TWO CIRCLES: «پیش فرض ۹ تا اصلی … بقیه در دایره دوم …
+//--- کوچیک‌تر از دایره اول» + «شعاع بزرگ‌تر ولی بین دو ایتم اصلی» + «بالا، ساعتگرد»:
+//--- nine seats at 44px/r80, every seat past them (extra stars, then the door, still
+//--- LAST) at 32px (baked circ_*_32.bmp) on an outer circle that clears the inner
+//--- discs, IN THE ROW'S GAPS (P-UI-195b: the last n2 gaps before 12 at the inner
+//--- pitch — «دایره کوچیک‌تر به ردیف باشه»).
 #define CIRC_RING1_SEATS    9
 #define CIRC_RING2_BTN_SIZE 32
 //--- P-UI-147 (2026-10-02): 1 px, not 3. This gate used to answer TWO questions — «did the
@@ -236,6 +236,11 @@
 //--- identities it reads, above every reader (the menu halves below, the
 //--- panels after the hub).
 #include "BiotakMenu_Ring.mqh"
+// P-UI-200 (2026-10-22): the ring's own census - reads every seat's BMPFILE and
+// names every object touching the ring's rect. Body is a separate file (the
+// 1500-line ceiling); included after Ring (radius/seat side) and before every
+// caller (CreateMenu's seat loop). Reads only: no write, no pixel.
+#include "BiotakMenu_RingCensus.mqh"
 
 // R-SUBLADDER (2026-09-11): the sub-menu picks its geometry from the catalog
 // count (CAT_COUNT) so that adding a tool can never make two buttons collide.
@@ -2204,10 +2209,12 @@ void CircNoteBuilt()
    s_circBuiltSeats = CircPlacedCountLive();   // note BEFORE a create: CircLayout reads this n
    // P-UI-195: the two circles name themselves once per build (open / restore /
    // relayout), through the FLUSHED channel (P-LOG-3) — the seat count, the split,
-   // the outer side and radius, and whether the door really rides the outer one.
-   DrawStripDiagEmit(StringFormat("[P-UI-195] seats=%d ring1=%d ring2=%d s1=%d s2=%d r2=%.1f door_outer=%d",
+   // the outer side and radius, the first gap angle and the pitch, and whether the
+   // door really rides the outer one (P-UI-195b: th0 210 / step 40 for n1=9, n2=2).
+   DrawStripDiagEmit(StringFormat("[P-UI-195] seats=%d ring1=%d ring2=%d s1=%d s2=%d r2=%.1f th0=%.1f step=%.1f door_outer=%d",
                                   s_circBuiltSeats, CircRing1Count(), CircRing2Count(),
                                   CIRC_BTN_SIZE, CIRC_RING2_BTN_SIZE, CircRing2Radius(),
+                                  CircRing2StartDeg(), CircRing2StepDeg(),
                                   (CircSeatOuter(s_circBuiltSeats - 1) ? 1 : 0)));
 }
 
@@ -2246,13 +2253,12 @@ void CircLayout(const int i, int &x, int &y)
    }
    else if(CircSeatOuter(i))
    {
-      // P-UI-195: the SECOND circle — the stars past the ninth and the Tools door,
-      // on a bigger radius at 32px, starting half an inner step clockwise from 12
-      // o'clock so every outer seat sits BETWEEN two inner seats.
+      // P-UI-195b (2026-10-22): the SECOND circle — IN THE ROW'S GAPS, at the row's
+      // own pitch, the last n2 gaps before 12 o'clock (the door last). The stair
+      // never scatters 360/n2 apart and never sits radially behind an inner seat.
       int n1 = CircRing1Count();
-      int n2 = CircRing2Count();
       double r   = CircRing2Radius();
-      double deg = (CircRing2StartDeg() + ((n2 > 0) ? 360.0 * (i - n1) / n2 : 0.0)) * M_PI / 180.0;
+      double deg = (CircRing2StartDeg() + CircRing2StepDeg() * (i - n1)) * M_PI / 180.0;
       x = ox + (int)MathRound(r * MathCos(deg));
       y = oy + (int)MathRound(r * MathSin(deg));
    }
@@ -3412,6 +3418,9 @@ void CreateMenu()
       CircNoteBuilt();                             // BEFORE the create: CircLayout's n is this live set (the orb press keeps the freeze on)
       for(int i = 0; i < CircPlacedCountLive(); i++)
          CircCreateItem(i);
+      #ifdef DSTRIP_DIAG
+      CircRingCensus(CircPlacedCountLive());       // P-UI-200: after the create - the seats exist now
+      #endif
    }
    if(g_ToolsOpen)
       for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);

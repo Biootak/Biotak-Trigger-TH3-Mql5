@@ -2578,10 +2578,10 @@ datetime BaseKnotTPEdgeTime()
 void BaseKnotTPTickSpan(const datetime t1, const datetime t2, datetime &ts, datetime &te)
 {
    datetime et = BaseKnotTPEdgeTime();
-   if(et > 0) { te = et; ts = et - (datetime)(2 * PeriodSeconds()); return; }
+   if(et > 0) { te = et; ts = et - (datetime)(2 * CompatPeriodSeconds()); return; }
    datetime cur0 = iTime(_Symbol, 0, 0);
    ts = (cur0 > 0 ? cur0 : t2);
-   te = ts + (datetime)(2 * PeriodSeconds());
+   te = ts + (datetime)(2 * CompatPeriodSeconds());
 }
 // Lean edge glue for the 500ms pump: scroll/zoom/new bars only remap TIME, so
 // the tick is re-anchored with two ObjectMoves (level untouched) — never a
@@ -2599,7 +2599,7 @@ void BaseKnotTPGlue(const string pfx, const datetime edgeT)
       string tpNm = BaseKnotTPTickName(pfx, k);
       if(ObjectFind(0, tpNm) < 0) continue;
       if(ObjectGetInteger(0, tpNm, OBJPROP_RAY_RIGHT) != 0) continue;   // structural — the Sync path rebuilds it
-      datetime ts = edgeT - (datetime)(2 * PeriodSeconds());
+      datetime ts = edgeT - (datetime)(2 * CompatPeriodSeconds());
       if((datetime)ObjectGetInteger(0, tpNm, OBJPROP_TIME, 0) != ts ||
          (datetime)ObjectGetInteger(0, tpNm, OBJPROP_TIME, 1) != edgeT)
       {
@@ -5800,7 +5800,7 @@ void BaseKnotSyncLive(const datetime t2raw, const double p2raw)
      string tradeTipLive = "risk " + DoubleToString(hPips, 1) + " pips (" + riskTag + ") = the stop" + stopWhyLive +
                            BaseKnotEntryLine(BK_NODE_NONE, liveTF, false, dir, top, bot, 0) +
                            BaseKnotCalcTip(dir, top, bot, entry, sl, offPips, false, hPips, riskTag);   // P-BK-93: the same arithmetic the committed box prints
-    datetime tLiveFar = te + (te > t1 ? (te - t1) : PeriodSeconds());
+    datetime tLiveFar = te + (te > t1 ? (te - t1) : CompatPeriodSeconds());
     datetime tLiveTps, tLiveTpe;
     BaseKnotTPTickSpan(t1, te, tLiveTps, tLiveTpe);
     BaseKnotMakeRay(tag + "ENTRY", te, tLiveFar, entry, g_bkEntryColor, STYLE_SOLID, BK_LEVEL_WIDTH,
@@ -6543,7 +6543,7 @@ void BaseKnotSync(const string id)
    // BaseKnotDrawEdges(pfx, t1, p1, t2, p2,
    //                   GetBoxBorderRenderColor(), inpBoxBorderStyle, inpBoxBorderWidth, tip, tfMask);
    BaseKnotPlaceText(pfx, t1, t2, top, bot, tfMask, tip);   // existing user text follows the box (never resurrected)
-   datetime tFar = t2 + (t2 > t1 ? (t2 - t1) : PeriodSeconds());
+   datetime tFar = t2 + (t2 > t1 ? (t2 - t1) : CompatPeriodSeconds());
    datetime tps, tpe;
    BaseKnotTPTickSpan(t1, t2, tps, tpe);   // TP tick rides the right edge, not the box
    // P-BK-46/50: the entry line names the edge the side came in on AND the one-R
@@ -6695,7 +6695,7 @@ void BaseKnotMoveChildren(const string id, datetime t1, const double p1,
     double offPips = 0.0, riskPips = 0.0;   // P-BK-93: published by the geometry, unused here — the lean mover moves LEVELS only (the note's numbers are the release Sync's own)
      BaseKnotCalcLevels(top, bot, g_bkBoxes[k].dir, g_bkBoxes[k].nodeKind, g_bkBoxes[k].baseTFMin, entry, sl, offPips, riskPips, an);
     // BKE2-OFF: no 2nd set on the drag (Sync purges it at release).
-    datetime tFar = t2 + (t2 > t1 ? (t2 - t1) : PeriodSeconds());
+    datetime tFar = t2 + (t2 > t1 ? (t2 - t1) : CompatPeriodSeconds());
    datetime tps, tpe;
    BaseKnotTPTickSpan(t1, t2, tps, tpe);   // TP tick rides the right edge, not the box
    // BKEDGE-OFF (P-BK-74): the border IS the box, so a body drag carries no edge
@@ -6916,7 +6916,7 @@ datetime BaseKnotGripSnapTime(const datetime t)
    if(shift < 0) return t;
    datetime bo = iTime(_Symbol, 0, shift);
    if(bo <= 0) return t;
-   double half = (double)PeriodSeconds() / 2.0;
+   double half = (double)CompatPeriodSeconds() / 2.0;
    if(MathAbs((double)(t - bo)) > half) return t;   // not "that close" to a bar open
    return bo;
 }
@@ -7484,7 +7484,7 @@ void BaseKnotCommit(const datetime t2, const double p2raw)
    double p2 = BaseKnotSnapPrice(t2, p2raw);
    if(t2 <= 0) return;
    datetime tc = t2;
-   if(tc == g_bkT1) tc = g_bkT1 + PeriodSeconds();   // same-bar drag: corner times snap to bar opens,
+   if(tc == g_bkT1) tc = g_bkT1 + CompatPeriodSeconds();   // same-bar drag: corner times snap to bar opens,
                                                      // so the honest box is one bar wide — never reject it
    if(tc < g_bkT1) { datetime tt = g_bkT1; g_bkT1 = tc; tc = tt; double pp = g_bkP1; g_bkP1 = p2; p2 = pp; }   // dragged right-to-left: store canonical corner order
    if(MathAbs(p2 - g_bkP1) < pt)   // a true point-click, not a box — ignore it silently (no bottom text)

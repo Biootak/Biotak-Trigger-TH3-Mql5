@@ -244,7 +244,7 @@ void HRayPlace(const datetime t, const double price)
    }
    if(ln == "") return;
    string id = StringSubstr(ln, StringLen(pfx));
-   int span = (PeriodSeconds() > 0 ? 10 * PeriodSeconds() : 600);
+   int span = (CompatPeriodSeconds() > 0 ? 10 * CompatPeriodSeconds() : 600);
    if(ObjectCreate(0, ln, OBJ_TREND, 0, t, price, t + span, price))
    {
       ObjectSetInteger(0, ln, OBJPROP_COLOR, HRAY_COLOR);
@@ -329,7 +329,7 @@ void HRayDragApply(const string line, const datetime curT, const double curP)
    if(ObjectFind(0, line) < 0) { HRayDragRelease(); return; }
    if(!(curP > 0) || curT <= 0) return;
    int span = s_hraySnapSpan;
-   if(span <= 0) span = (PeriodSeconds() > 0 ? 10 * PeriodSeconds() : 600);
+   if(span <= 0) span = (CompatPeriodSeconds() > 0 ? 10 * CompatPeriodSeconds() : 600);
    datetime t1 = curT, t2 = curT + span;
    if(ObjectGetDouble(0, line, OBJPROP_PRICE, 0) != curP)
       ObjectMove(0, line, 0, t1, curP);
@@ -364,7 +364,7 @@ void HRayDragRestore()
    string line = s_hrayDrag;
    if(line != "" && ObjectFind(0, line) >= 0 && s_hraySnapT > 0 && s_hraySnapP > 0)
    {
-      int span = (s_hraySnapSpan > 0 ? s_hraySnapSpan : (PeriodSeconds() > 0 ? 10 * PeriodSeconds() : 600));
+      int span = (s_hraySnapSpan > 0 ? s_hraySnapSpan : (CompatPeriodSeconds() > 0 ? 10 * CompatPeriodSeconds() : 600));
       ObjectMove(0, line, 0, s_hraySnapT, s_hraySnapP);
       ObjectMove(0, line, 1, s_hraySnapT + span, s_hraySnapP);
       ObjectSetString(0, line, OBJPROP_TOOLTIP, HRayTooltip(s_hraySnapP));

@@ -563,7 +563,7 @@ static int g_cachedPeriodForSecondsGlobal = 0;
 int GetCachedPeriodSecondsGlobal() {
     int curPeriod = GetCachedPeriod();
     if(g_cachedPeriodForSecondsGlobal != curPeriod || g_cachedPeriodSecondsGlobal <= 0) {
-        g_cachedPeriodSecondsGlobal = PeriodSeconds(CompatTF(curPeriod));
+        g_cachedPeriodSecondsGlobal = CompatSecondsForMinutes(curPeriod);
         g_cachedPeriodForSecondsGlobal = curPeriod;
     }
     return g_cachedPeriodSecondsGlobal;

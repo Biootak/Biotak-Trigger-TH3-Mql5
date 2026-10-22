@@ -194,7 +194,7 @@ double CalculateTimeframeTH(const string timeframe) {
             double percentage = FractalPercentScaled(i);
             
             // Store in cache for future use
-            int periodSeconds = PeriodSeconds(CompatTF(currentPeriod));
+            int periodSeconds = CompatSecondsForMinutes(currentPeriod);
             StoreTimeframeConversion(currentPeriod, timeframe, percentage, periodSeconds);
             return percentage;
         }
@@ -202,7 +202,7 @@ double CalculateTimeframeTH(const string timeframe) {
     
     // Fallback: return 1.0% for unknown timeframes
     double fallbackPercentage = 1.0;
-    int periodSeconds = PeriodSeconds(CompatTF(currentPeriod));
+    int periodSeconds = CompatSecondsForMinutes(currentPeriod);
     StoreTimeframeConversion(currentPeriod, timeframe, fallbackPercentage, periodSeconds);
     return fallbackPercentage;
 }
