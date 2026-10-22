@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/GlobalVariables.mqh
 //
@@ -652,6 +652,22 @@ void AlertCacheAdd(const string name, const double price, const int step, const 
     g_alertLevels[g_alertLevelCount].step  = step;
     g_alertLevels[g_alertLevelCount].above = above;
     g_alertLevelCount++;
+}
+
+string PerfArmWhy(const int m)
+{
+   string s = "";
+   if((m & 1) != 0)   s += "force ";
+   if((m & 2) != 0)   s += "labels ";
+   if((m & 4) != 0)   s += "th ";
+   if((m & 8) != 0)   s += "histRange ";
+   if((m & 16) != 0)  s += "base ";
+   if((m & 32) != 0)  s += "stage ";
+   if((m & 64) != 0)  s += "heavy ";
+   if((m & 128) != 0) s += "renderAll ";
+   if((m & 256) != 0) s += "clear ";
+   if(s == "") s = "sig";        // only the geometry signature moved
+   return s;
 }
 
 // P-PERF-02: did the last RedrawAllObjects frame actually paint something?
@@ -1457,5 +1473,28 @@ bool RestoreBoolGlobalVar(const string gvarName, bool defaultVal) {
     }
     return defaultVal;
 }
+
+//+------------------------------------------------------------------+
+//| P-ANCHOR-LAST - the ONE active historical calculation anchor.       |
+//|                                                                  |
+//| The newest committed LegMeasure or BaseKnot owns the read: its    |
+//| end bar is written here, and the ATR layer reads every live       |
+//| composite AT that bar while the ATR card's LAST OBJECT switch is  |
+//| ON. The switch is per chart and survives an attach; the active    |
+//| object itself is deliberately NOT persisted (an object list can   |
+//| differ after a restart, so restoring a name would anchor to a     |
+//| ghost). Deleting the owner clears the anchor; drawing again       |
+//| re-arms it. Cost: two compares in the ATR read, and writes only   |
+//| on commit/delete/toggle.                                         |
+//+------------------------------------------------------------------+
+static bool     g_calcAnchorOn        = false;
+static datetime g_calcAnchorTime      = 0;
+static string   g_calcAnchorOwner     = "";
+static datetime g_calcAnchorLastTime  = 0;
+static string   g_calcAnchorLastOwner = "";
+
+// The owner's functions live in their own unit; the state above is read here so
+// every test harness that includes GlobalVariables gets the same API as the product.
+#include "CalcAnchor.mqh"
 
 #endif // GLOBAL_VARIABLES_MQH

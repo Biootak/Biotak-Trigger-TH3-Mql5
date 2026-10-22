@@ -107,11 +107,18 @@ there at compile time; the bytes are then embedded in the `.ex5`).
   and require `ENUM_TIMEFRAMES` / `ENUM_OBJECT` in MQL5. Cast at the call site
   so both compilers accept the same line.
 - **MT5 additions to the entries are unavoidable and are marked `MT5-ONLY`:**
-  `ArraySetAsSeries` on the `OnCalculate` arrays, `CompatRefreshChartData()`
-  in `OnCalculate`/`OnTimer`, and the R-RENDER-ENGINE block
+  `CompatRefreshChartData()` in `OnCalculate`/`OnTimer`, the `CompatConsumeObjEvent()`
+  filter in `OnChartEvent` (MT5 delivers `OBJECT_CREATE`/`OBJECT_DELETE` for our OWN
+  programmatic writes; MT4 does not), and the R-RENDER-ENGINE block
   (`#define BIOTAK_RENDER_ENGINE`, the `Engine\RenderBridge.mqh` include, the
   `RBridgeInit`/`RBridgeShutdown` calls and the `RBridgePump` calls in
   `OnChartEvent`/`OnTimer`). Nothing else in the entries is platform-specific.
+- **`ArraySetAsSeries` is NOT applied to the `OnCalculate` parameter arrays** (and must
+  not be): the shared `OnCalculateHandler` was written for the MQL4 convention where
+  those arrays are *not* timeseries (`close[0]` = oldest, `close[rates_total-1]` = current).
+  Reversing them would make `close[rates_total-1]` the OLDEST bar and the live price /
+  bar time would read the wrong end of history. The global `Time[]`/`Open[]`/… series the
+  shared code actually reads are filled as timeseries by `CompatRefreshChartData()`.
 
 ## Working rules
 

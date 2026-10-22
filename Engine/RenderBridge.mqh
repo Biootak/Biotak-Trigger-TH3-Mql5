@@ -753,7 +753,16 @@ void RBrPushFront()
    for(int i=0;i<np;i++)
    {
       tmp[nl+i].price   =g_rbrPatTexts[i].price;
-      tmp[nl+i].x       =0;                          // unused: t>0 resolves both axes
+      // P-MT5-PARITY (2026-10-21) - R-RENDER-ENGINE (parity fix): the sentinel is -1, NOT 0. A pattern row
+      // can carry t==0 (the AB=CD target's LEVELTEXT and the mid rung's, the two
+      // the object path drew with OBJPROP_RAY_RIGHT -> the text rides the RIGHT
+      // EDGE). RDrawTexts resolves the right edge only for x<0; x==0 fell through
+      // and blitted the row at pixel 0 with a TA_RIGHT anchor - off the chart's
+      // left side. The four "Step1/3/5/7 (x.x) ========y.y" targets and the three
+      // "Step2/4/6 (x.x)" mid rungs were therefore invisible in the canvas build.
+      // A t>0 row ignores x (RPlatTimePriceToXY writes both axes), so the
+      // sentinel is safe for every row.
+      tmp[nl+i].x       =-1;                         // sentinel: the right edge, resolved at draw
       tmp[nl+i].anchor  =g_rbrPatTexts[i].anchor;
       tmp[nl+i].text    =g_rbrPatTexts[i].text;
       tmp[nl+i].argb    =g_rbrPatTexts[i].argb;

@@ -1,9 +1,20 @@
 ﻿// ========================================================================
-// GENERATED MIRROR of Biotak Trigger TH3.mq4 - MT4 is the source of truth.
-// regenerate: python tools/parity/resync-module.py --entry
-// Only the declared MT5 platform blocks below are added (the MQL4
-// series-array emulation and the resource adaptations MQL5 needs);
-// nothing else is MT5-specific.
+// OWNED MT5 ENTRY - forked from the MetaTrader 4 source on 2026-10-12.
+//   MT4 source : Biotak Trigger TH3.mq4
+//
+// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
+// any drift, but nothing regenerates this file: the MT5-only changes live
+// here directly, marked MT5-ONLY / R-RENDER-ENGINE / P-PERF-*. The retired
+// generator (tools/parity/_retired/resync-module.py) must never run on this
+// tree - it would overwrite every MT5-only edit.
+//
+// The MT5-specific blocks below are the ONLY differences from MT4:
+//   * the MQL5Compat include (the series-array emulation and the resource
+//     adaptations MQL5 needs),
+//   * #define BIOTAK_RENDER_ENGINE (the canvas engine, see below),
+//   * the RBridgeInit / RBridgeShutdown / RBridgePump calls,
+//   * CompatRefreshChartData() in OnCalculate / OnTimer,
+//   * the P4Report* census / teardown stamps.
 // ========================================================================
   //+------------------------------------------------------------------+
 //|                                           Biotak Trigger TH3.mq4 |
@@ -150,6 +161,13 @@
 #include "Biotak\LabelFunctions.mqh"
 #include "Biotak\AlertFunctions.mqh"
 #include "Biotak\HistoricalDataFunctions.mqh"
+// P-SESS: the sessions engine + model + renderer. Ahead of EventHandlers -
+// the coop pump (EventHandlers_Tail) calls SessionsTick, and top-down
+// resolution needs the definition before its use. Shared module rules:
+// no UI reads (P-BUILD-01).
+#include "Biotak\Sessions_Time.mqh"
+#include "Biotak\Sessions_Model.mqh"
+#include "Biotak\Sessions_Draw.mqh"
 #include "Biotak\EventHandlers.mqh"
 
 //                                                                    

@@ -26,368 +26,7 @@
 #property strict
 
 #include "HTFCandles.mqh"
-// BiotakHomes.mqh - the PLACE of the three placeable surfaces, split out of
-// BiotakMenu_A.mqh on 2026-10-05 because that file reached 1532 lines and
-// contract 7 says a file over the 1500-line ceiling never grows (P-SIZE-1500):
-// touch it = split it by owner. This IS that owner - one home per surface, the
-// fraction it is stored as, and the one default when there is no home at all.
-//
-// MUST be included ABOVE BiotakMenu_A.mqh: MQL4 resolves a call top-down, and
-// every reader of a home (LoadUIPlaces, SaveUIStates, the orb's release, the
-// chip's drag) lives below the cut, so a half included under them is error 168.
-#ifndef BIOTAK_HOMES_MQH
-#define BIOTAK_HOMES_MQH
-
-//+------------------------------------------------------------------+
-//| P-UI-118 — THE ORB'S DEFAULT HOME IS THE CHART'S CENTRE, ONE OWNER.|
-//|                                                                  |
-//| User order 2026-09-25: «منو وسط باز بشه از هر طرف» — the menu must |
-//| open as a RING, fanning from every side. `CircLayout` leaves the   |
-//| arc the moment the orb is within `CIRC_EDGE_TRIGGER` (90 px) of    |
-//| any edge and collapses the ring into a train along it — which is   |
-//| exactly what a corner-parked orb does, and what the Tools          |
-//| sub-menu escalates away from (fan -> rail -> grid). The centre is  |
-//| the ONLY position where every layout family is reachable as         |
-//| designed, so it is the default.                                    |
-//|                                                                  |
-//| BOTH readers ask here — the first-attach default and the fallback  |
-//| when a saved position is missing — so the two can never disagree    |
-//| about where "default" is. A SAVED position still wins: the user's   |
-//| drag is the truth, and only a chart with no stored pair lands here. |
-//| The value is clamped like every other orb write on the next pass.   |
-//+------------------------------------------------------------------+
-void CircDefaultMenuPos(int &x, int &y)
-{
-   int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
-   if(cw <= 0) cw = 1920;
-   if(ch <= 0) ch = 1080;
-   x = cw / 2;
-   y = ch / 2;
-}
-
-//--- P-UI-131e — A HOME THAT OUTLIVES THE CHART AND THE SYMBOL. User order: «در هر چارت
-//--- در هر شرایط همون جا باشه، بدون هزینه». A placed surface is the HAND's preference,
-//--- not a fact of one window: the keys still carried ChartID(), and a CLAMP was saved
-//--- back into the live pair (so one narrow chart ratcheted the place for good). A home
-//--- lives under a key with no chart and no symbol in it; the value that paints is never
-//--- the value stored; cost is one read at load and one write when the hand really moves.
-string GVHomeName(const string id,const bool y) { return "BIOMENU_HOME_" + id + (y ? "Y" : "X"); }
-
-//--- one home, three readers (the orb, the strip, the chip): the chart-free pair first,
-//--- then the pre-131e per-chart pair it replaced, so the upgrade keeps the place the
-//--- hand already chose instead of re-seeding the default. Absent both = no home.
-bool GVHomeLoad(const string id,const string legacyInfix,int &x,int &y)
-{
-   string nx = GVHomeName(id,false), ny = GVHomeName(id,true);
-   if(GlobalVariableCheck(nx) && GlobalVariableCheck(ny))
-   {
-      x = (int)GlobalVariableGet(nx); y = (int)GlobalVariableGet(ny);
-      if(x >= 0 && y >= 0) return true;
-   }
-   string lx = GetGVName(legacyInfix + "X"), ly = GetGVName(legacyInfix + "Y");
-   if(GlobalVariableCheck(lx) && GlobalVariableCheck(ly))
-   {
-      x = (int)GlobalVariableGet(lx); y = (int)GlobalVariableGet(ly);
-      if(x >= 0 && y >= 0) return true;
-   }
-   x = -1; y = -1;
-   return false;
-}
-
-//--- the orb's own home. -1 = the hand has never placed it: CircDefaultMenuPos answers.
-static int s_OrbHomeX = -1, s_OrbHomeY = -1;
-bool CircOrbHomeGet(int &x,int &y)
-{
-   x = s_OrbHomeX; y = s_OrbHomeY;
-   return (s_OrbHomeX >= 0 && s_OrbHomeY >= 0);
-}
-void CircOrbHomeSet(const int x,const int y) { s_OrbHomeX = x; s_OrbHomeY = y; }
-
-//--- P-UI-126: THE CHIP'S OWN PLACE — P-DRAW-41's home, one surface over, and owned
-//--- here because the UI-state block below is its only reader and writer. (-1,-1) =
-//--- the hand has never placed it: the chart's middle then answers, measured LIVE so a
-//--- resized chart is never stuck with a stale centre. Stored as the BOX's centre.
-static int s_TipHomeX = -1, s_TipHomeY = -1;
-bool CircTipHomeGet(int &x, int &y)
-{
-   x = s_TipHomeX; y = s_TipHomeY;
-   return (s_TipHomeX >= 0 && s_TipHomeY >= 0);
-}
-void CircTipHomeSet(const int x, const int y) { s_TipHomeX = x; s_TipHomeY = y; }
-
-//+------------------------------------------------------------------+
-//| P-UI-140 (2026-10-05) — A PLACE IS A PLACE ON THIS WINDOW.        |
-//| Report: «این دوتا موقع ریستارت ترمینال از جاش تکون میخوره» — the  |
-//| orb and the chip both MOVED on restart. Cause: both homes were     |
-//| stored as ABSOLUTE PIXELS, a restart re-lays the window out, so    |
-//| the same number is painted in a different box and clamped into it; |
-//| a stored centre made it worse, because `ohx == defX` then read the |
-//| OLD centre as «the hand moved it». ONE RULE, every scenario       |
-//| (restart, resize, maximize, another monitor, another symbol or    |
-//| chart): the STORED form is a FRACTION of the chart box and the     |
-//| painted pixels are re-derived from it against the LIVE metrics —   |
-//| (0.5,0.5) is the centre of every window, which retires the centre |
-//| heuristic. Nothing is re-saved on the way (that ratchet is         |
-//| P-UI-131e again) and a pixel home is migrated once, in the window   |
-//| it is read in. Long form: docs/th3-ui-placement.md                  |
-//+------------------------------------------------------------------+
-string GVHomeFracName(const string id,const bool y) { return "BIOMENU_HOME_" + id + (y ? "_FY" : "_FX"); }
-void HomeChartSize(int &cw, int &ch)
-{
-   cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
-   if(cw <= 0) cw = 1920;  if(ch <= 0) ch = 1080;   // the fallback every reader keeps
-}
-//--- the WRITER's size: no fallback. A fraction divided by a window that is not
-//--- the one the pixels came from is the poisoned store (measured CHIP_FX=1.1075
-//--- above) — and at teardown the terminal can report 0 for a window it is
-//--- destroying. A writer that cannot measure the box stores nothing.
-bool HomeChartSizeRaw(int &cw, int &ch)
-{
-   cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
-   return (cw > 0 && ch > 0);
-}
-bool GVHomeFracKnown(const string id)
-{
-   return GlobalVariableCheck(GVHomeFracName(id,false)) && GlobalVariableCheck(GVHomeFracName(id,true));
-}
-//--- P-UI-158 — THE CLAIM. One flag per surface, because an answer is about a SURFACE,
-//--- not a moment. It is set where a place is really decided (a release, a first
-//--- measurement, a migration) and consumed by the one write that publishes it.
-static bool s_homeAnsOrb = false, s_homeAnsStrip = false, s_homeAnsChip = false;
-void GVHomeAnswerNew(const string id)
-{
-   if(id == "ORB")        s_homeAnsOrb   = true;
-   else if(id == "STRIP") s_homeAnsStrip = true;
-   else if(id == "CHIP")  s_homeAnsChip  = true;
-}
-bool GVHomeAnswerAny() { return (s_homeAnsOrb || s_homeAnsStrip || s_homeAnsChip); }
-//--- spent when the homes were really evaluated (a box was measurable), NOT on every
-//--- pass: a claim made while the terminal reports no window must survive to the first
-//--- save that can measure one, or the hand's own drag would be lost at teardown.
-void GVHomeAnswerClear() { s_homeAnsOrb = false; s_homeAnsStrip = false; s_homeAnsChip = false; }
-//--- MQL4 forbids `static` on a global function (error 350), so this is a plain one; the
-//--- door below is still the only caller, and the flag names are the private state.
-bool GVHomeAnswerTake(const string id)
-{
-   if(id == "ORB")   { const bool had = s_homeAnsOrb;   s_homeAnsOrb   = false; return had; }
-   if(id == "STRIP") { const bool had = s_homeAnsStrip; s_homeAnsStrip = false; return had; }
-   if(id == "CHIP")  { const bool had = s_homeAnsChip;  s_homeAnsChip  = false; return had; }
-   return false;
-}
-//--- ONE place a pixel becomes a fraction, so the writer and the slot guards in
-//--- `SaveUIStates` can never disagree about what was stored.
-double HomeFracOf(const int v, const int span)
-{
-   if(span <= 0) return 0.5;
-   return (double)v / (double)span;
-}
-//--- ONE clamp, used by the reader below and by `GVHomeSaveFrac`. A live drag is already
-//--- inside the window, so the write side only bites the one case that can be outside it:
-//--- `SaveUIStates` re-deriving a pair whose window has since shrunk. A store holding a
-//--- place outside the box is the state the reader has to repair; nothing here may
-//--- create it, or the pair drifts a little further on every re-derivation.
-double HomeFracClamp(const double f)
-{
-   if(f < 0.0) return 0.0;
-   if(f > 1.0) return 1.0;
-   return f;
-}
-//--- the ONE reader of a fractional home, and the only one the 250 ms pass may use:
-//--- fractions only, NO writes. A read that repairs the store is a write under the
-//--- user's hand — the ratchet P-UI-131e removed.
-//---
-//--- MEASURED 2026-10-05 in the trade terminal (`profiles/gvariables.dat`, read twice):
-//--- a pair can sit OUTSIDE the box — that store carried `CHIP_FX = 1.1075`, greater
-//--- than 1, in both reads (its sibling `ORB_FY` also read 1.613 once and was rewritten
-//--- between the two reads, because the terminal keeps saving while it runs: that
-//--- rewriting is the creep this block ends). The cause is a fraction divided by a
-//--- window that was not the one the pixels came from. Such a value is not garbage: it
-//--- is the same place said with a wrong denominator, so the place it MEANS is the near
-//--- EDGE. So the reader CLAMPS (`1.1075` becomes `1.0` = the right edge, `0.0896` stays
-//--- = the top, i.e. the pinned top-right chip of the report) — a reader that refused
-//--- instead would drop a placed surface to the chart's centre, i.e. MOVE it on the
-//--- upgrade that was supposed to stop the moving.
-//--- Clamping is also what makes the answer DETERMINISTIC: every restart derives the
-//--- same pixels from the same pair, so the drift cannot resume.
-bool GVHomeFracRead(const string id, int &x, int &y)
-{
-   if(!GVHomeFracKnown(id)) return false;
-   //--- P-UI-156 (2026-10-13) — A READER WITH NO BOX DERIVES NOTHING.
-   //--- Report: «این هنوز جابجا میشه بعد اینکه متاتریدر باز و بسته میکنم ... راه حل
-   //--- متفاوت که کار بکنه». The reader used to fall back to 1920x1080 whenever the
-   //--- terminal reported 0 for the chart box — and at attach and during a
-   //--- CHART_CHANGE it does. That fallback is a DENOMINATOR THE PIXELS DID NOT COME
-   //--- FROM, so the pair it produced was not a place, it was the same place said
-   //--- with the wrong divisor. `CircHomesRefresh` then handed that pair to
-   //--- `CircOrbHomeSet`/`CircTipHomeSet` — the in-memory HOME — and the next
-   //--- `SaveUIStates` persisted `HomeFracOf(thatPair, the REAL box)`.
-   //--- MEASURED, and still in the store: `BIOMENU_HOME_STRIP_FX` = **1.000000**
-   //--- exactly, which is `HomeFracClamp` saturating a value that had gone past the
-   //--- right edge; the same block already recorded `CHIP_FX = 1.1075` and
-   //--- `ORB_FY = 1.613` on 2026-10-05. Every one of those is this read.
-   //--- The writer has always refused this (`HomeChartSizeRaw`: «a writer that cannot
-   //--- measure the box stores nothing»). The reader had no such rule, and THAT
-   //--- ASYMMETRY was the ratchet: it could not save a bad place itself, but it could
-   //--- manufacture one for the writer to save.
-   //--- Refusing is also what makes the reader self-correcting: an absent answer
-   //--- leaves the home as it was, and the first pass that CAN measure the box
-   //--- derives the right pair — `CircHomesRefresh` runs again on every box change.
-   int cw = 0, ch = 0;
-   if(!HomeChartSizeRaw(cw, ch)) { x = -1; y = -1; return false; }
-   //--- P-UI-158: nothing about this read is remembered. What it produces is a
-   //--- DERIVATION, and the store refuses to accept one — only a claim may write — so
-   //--- there is no second piece of state that has to stay in step with the writer.
-   const double fx = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false)));
-   const double fy = HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true)));
-   x = (int)MathRound(fx * cw);
-   y = (int)MathRound(fy * ch);
-   return true;
-}
-//--- P-UI-158 — THE RAW DOOR, and the only place a fraction is ever written. Two rules,
-//--- both about the DENOMINATOR, and neither about who is calling:
-//---   * no measured box, no write — a fraction divided by a window that is not the one
-//---     the pixels came from is the poisoned store, and at teardown the terminal can
-//---     report 0 for a window it is destroying (`HomeChartSizeRaw`);
-//---   * a pair outside the box is not a place — it is two numbers measured against
-//---     different windows — so the last good home is the better answer. The clamp below
-//---     used to saturate such a pair into the store, which is how `STRIP_FX` became a
-//---     permanent 1.0: the place the user chose was replaced by "as far right as
-//---     possible" and every later read re-derived THAT (P-UI-156).
-void GVHomeWriteFrac(const string id, const int x, const int y)
-{
-   if(x < 0 || y < 0) return;
-   int rcw = 0, rch = 0;
-   if(!HomeChartSizeRaw(rcw, rch)) return;   // unknown denominator: store nothing,
-                                            // and keep the pixel keys (no data loss)
-   if(x > rcw || y > rch) return;
-   GlobalVariableSet(GVHomeFracName(id,false), HomeFracClamp(HomeFracOf(x, rcw)));
-   GlobalVariableSet(GVHomeFracName(id,true), HomeFracClamp(HomeFracOf(y, rch)));
-   //--- the pixel keys are dead on arrival: a reader that adopts a window-sized
-   //--- number as a place is the bug this block exists to end.
-   GlobalVariableDel(GVHomeName(id,false)); GlobalVariableDel(GVHomeName(id,true));
-}
-//--- P-UI-158 — THE AUTOMATIC DOOR, the one `SaveUIStates` uses. It writes ONLY when a
-//--- new answer is waiting, and the claim is consumed by the write — so the derivation
-//--- `SaveUIStates` performs on every attach and teardown can never reach the store.
-//--- That is the whole fix: before this, `SaveUIStates` re-derived all three homes and
-//--- wrote them, so a derivation made in one window and saved in another REWROTE the
-//--- fraction (CHIP_FX 0.942731 -> 0.618392, the 589 px jump). The ring never had this
-//--- shape — it stores no place of its own — and this makes the three surfaces match it.
-void GVHomeSaveFrac(const string id, const int x, const int y)
-{
-   if(!GVHomeAnswerTake(id)) return;
-   GVHomeWriteFrac(id, x, y);
-}
-//--- and the HAND's door: a release, the strip's first measured placement, a legacy
-//--- migration. Same write, but it makes its own claim and spends it, so a caller that
-//--- IS the answer never has to remember a second call or a second flag.
-void GVHomeSaveFracHand(const string id, const int x, const int y)
-{
-   GVHomeAnswerNew(id);
-   GVHomeWriteFrac(id, x, y);
-   GVHomeAnswerTake(id);
-}
-bool GVHomeLoadFrac(const string id, const string legacyInfix, int &x, int &y)
-{
-   if(GVHomeFracRead(id, x, y)) return true;
-   int px = 0, py = 0;
-   if(!GVHomeLoad(id, legacyInfix, px, py)) { x = -1; y = -1; return false; }
-   //--- P-UI-157: a migration is a WRITE, so it refuses to run at all without a
-   //--- measured box. Migrating in the fallback window would store a fraction of
-   //--- 1920x1080, which is the very creep this block ends.
-   int cw = 0, ch = 0;
-   if(!HomeChartSizeRaw(cw, ch))      // P-UI-157: no window, no migration
-   { x = -1; y = -1; return false; }
-   GVHomeSaveFracHand(id, px, py);      // migration, once, in the reading window
-   x = px; y = py;
-   return true;
-}
-//+------------------------------------------------------------------+
-//| P-UI-157/158 — A HOME THE WINDOW IS TOO YOUNG TO RESOLVE IS STILL |
-//| A PLACE.                                                          |
-//|                                                                   |
-//| `GVHomeFracRead` refuses to derive pixels without a measured box  |
-//| (P-UI-156), and at `OnInit` the terminal routinely reports 0 — so  |
-//| a stored fraction came back as «no home» and the surface was       |
-//| seeded at a DEFAULT: the orb and the chip at the chart's CENTRE,   |
-//| the strip by a fresh measurement. The first 250 ms pass then       |
-//| corrected it, which is the visible JUMP the report describes, and  |
-//| whether it happened at all depended on which timer tick first saw  |
-//| a real box.                                                        |
-//|                                                                   |
-//| Seeding from the fraction itself — against the fallback window,    |
-//| i.e. the same place said relatively — lands the FIRST paint in     |
-//| the right spot and leaves the refresh nothing but a refinement.    |
-//|                                                                   |
-//| It is a SEED and never a home. Nothing writes it: the automatic    |
-//| door refuses without a claim (P-UI-158), and the callers below     |
-//| deliberately do not call the home setters with it. So a pair       |
-//| measured in the fallback window can never reach the store.         |
-//+------------------------------------------------------------------+
-bool GVHomeFracSeed(const string id, int &x, int &y)
-{
-   if(!GVHomeFracKnown(id)) return false;
-   int scw = 0, sch = 0; HomeChartSize(scw, sch);
-   x = (int)MathRound(HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,false))) * scw);
-   y = (int)MathRound(HomeFracClamp(GlobalVariableGet(GVHomeFracName(id,true))) * sch);
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| P-UI-144 (2026-10-13) — THE GHOST SWEEP.                          |
-//|                                                                  |
-//| Report: «پنل‌ها، لوگو و منوها بعد از ری‌استارت ترمینال یا بستن و   |
-//| باز کردن پنجره از جاش تکون میخوره، روی هم میافته» — measured on   |
-//| the live terminal (AMarkets, data folder A1660DA4…):             |
-//|   profiles/default/chart03.chr (DXY H4, written 2026-10-12        |
-//|   15:58:11) holds                                                 |
-//|     object_name=BiotakMenuV2_134342075006101685_CircOrbBg        |
-//|     x_distance=70 y_distance=79 zorder=1200 selectable=0          |
-//| while THIS session's EURUSD chart runs under chart id            |
-//| 134362571361933137 (biotak_diag_EURUSD_134362571361933137.txt,    |
-//| written 09:24 the same morning).                                 |
-//|                                                                  |
-//| Every object this family paints carries `BiotakMenuV2_<ChartID>` |
-//| (BiotakMenu_A.mqh:867), and a chart id is per SESSION: the       |
-//| terminal hands a new one out at every restart and at every       |
-//| chart reopen. MT4 saves chart objects into the chart's profile   |
-//| and restores them at their ABSOLUTE pixels, so the previous      |
-//| session's names come back under a prefix this session can never  |
-//| address — the teardown (`DeleteMenu`, the `Pnl`/`Pal_`/`Sub`     |
-//| purges, `DeleteLegacyMenuObjects`) only knows the LIVE prefix.   |
-//| The restored object is therefore a permanent ghost:              |
-//|   * it stands at a stale absolute place, which is a different    |
-//|     RELATIVE place on every window of another size — the         |
-//|     «از جاش تکون میخوره» the user reports;                       |
-//|   * the fresh family is painted at its home fraction BESIDE it —  |
-//|     «روی هم افتاده», and a selectable ghost answers clicks the    |
-//|     live surface should have had;                                 |
-//|   * the next close saves it into the profile again, so the       |
-//|     ghost re-enters the next session forever.                     |
-//|                                                                  |
-//| The strip family (`PnlDrawS_*`) never carried a chart id and is   |
-//| therefore immune, and it got exactly this sweep at attach        |
-//| (`DrawStripSweepStale`, DrawStrip_GearA.mqh:1165, wired from the |
-//| entry's OnInit). This is that owner for the menu/panel families. |
-//|                                                                  |
-//| ONE prefix walk per init, both spellings the family ever painted  |
-//| (V1 `BiotakMenu_<id>_`, retired, and V2 `BiotakMenuV2_<id>_`).   |
-//| It is exact at attach: the paired teardown deleted THIS family   |
-//| before OnInit ran (or it never existed), so the walk can only    |
-//| remove foreign spellings. Two units on one chart are refused      |
-//| (P-ARCH-03, before `InitializeUIStates` runs), so a live         |
-//| sibling's objects are never the ones swept.                      |
-//+------------------------------------------------------------------+
-void BiotakMenuGhostSweep()
-{
-   ObjectsDeleteAll(0, "BiotakMenu_",   -1, -1);   // V1 + every older V2 spelling
-   ObjectsDeleteAll(0, "BiotakMenuV2_", -1, -1);   // V2 (the char after "BiotakMenu" is 'V')
-}
-
-#endif // BIOTAK_HOMES_MQH
+#include "BiotakHomes.mqh"
 
 //+------------------------------------------------------------------+
 //| Embedded icon resources (BMP, generated by tools/gen-icons.ps1)   |
@@ -424,6 +63,18 @@ void BiotakMenuGhostSweep()
 #resource "\\Files\\Icons\\hray_on.bmp"
 #resource "\\Files\\Icons\\path_off.bmp"
 #resource "\\Files\\Icons\\path_on.bmp"
+// P-UI-159: the Chart Scale cell's face (ART.scale, baked by the generator).
+#resource "\\Files\\Icons\\scale_off.bmp"
+#resource "\\Files\\Icons\\scale_on.bmp"
+// P-UI-160: the Hide / Show All cell's face (ART.eye, baked by the generator).
+#resource "\\Files\\Icons\\eye_off.bmp"
+#resource "\\Files\\Icons\\eye_on.bmp"
+// P-SESS: the Sessions cell's face (ART.sessions — a clock, baked by the generator).
+#resource "\\Files\\Icons\\sessions_off.bmp"
+#resource "\\Files\\Icons\\sessions_on.bmp"
+// P-UI-161: the ring-membership STAR on every Tools cell (ART star disc, 16px).
+#resource "\\Files\\Icons\\star_off.bmp"
+#resource "\\Files\\Icons\\star_on.bmp"
 #resource "\\Files\\Icons\\orb_bg.bmp"
 //--- ORBWORD-OFF (2026-09-12, user decision — no wordmark on the orb, ever:
 //--- the "TRex" text over the bow read as mud on the chart). The open-state
@@ -442,6 +93,19 @@ void BiotakMenuGhostSweep()
 // 90 CW, 90 CCW) - the arc's opening must face the orb on every side it can open on.
 #resource "\\Files\\Icons\\circ_off.bmp"
 #resource "\\Files\\Icons\\circ_on.bmp"
+// P-UI-162: the taper's own canvases — box (s + 2*CIRC_BG_MARGIN) == canvas on
+// every side the ring can be drawn at (43/39/35/32/30; 44 above), so MT4's
+// top-left clip rule never cuts the disc (the «دیگه دایره نیست» report).
+#resource "\\Files\\Icons\\circ_off_43.bmp"
+#resource "\\Files\\Icons\\circ_on_43.bmp"
+#resource "\\Files\\Icons\\circ_off_39.bmp"
+#resource "\\Files\\Icons\\circ_on_39.bmp"
+#resource "\\Files\\Icons\\circ_off_35.bmp"
+#resource "\\Files\\Icons\\circ_on_35.bmp"
+#resource "\\Files\\Icons\\circ_off_32.bmp"
+#resource "\\Files\\Icons\\circ_on_32.bmp"
+#resource "\\Files\\Icons\\circ_off_30.bmp"
+#resource "\\Files\\Icons\\circ_on_30.bmp"
 // R-SUBLADDER (2026-09-11): Tools grid panel + its cells. cell_*.bmp is the
 // rounded-square tile (46px canvas == the 46px pitch); sub_panel_r<N>[p].bmp is
 // the panel backdrop, one per visible row count 1..4 ('p' = with pager strip).
@@ -484,6 +148,21 @@ void BiotakMenuGhostSweep()
 #define CIRC_HIDE_POS   -500
 #define CIRC_EDGE_TRIGGER 90
 #define CIRC_MIN_RADIUS  40
+//--- P-UI-161/166 — the TRAIN's taper (the near-edge degrade, never the ring): the
+//--- side holds 44 through nine, floors at 35, radius by the chord law capped at
+//--- CIRC_SEAT_CAP (12). The ring itself is TWO circles (P-UI-195), no stack (P-UI-13).
+#define CIRC_BTN_MIN     35
+//--- the membership STAR on every Tools cell — same canvas as the badge, so the
+//--- corner seat below is one number (star_off/star_on.bmp, baked by the generator).
+#define CIRC_STAR_SIZE   16
+//--- P-UI-195 (2026-10-21) — TWO CIRCLES: «این رینگ‌ها پیش فرض ۹ تا اصلی باشه و بقیه
+//--- دورش … در دایره دوم … ولی از دایره اول کوچیک‌تر باشه» + «شعاع بزرگ‌تر ولی بین دو
+//--- ایتم اصلی» + «بالا (۱۲ ساعت)، ساعتگرد»: the first nine SEATS at 44px/r80
+//--- (byte-identical — eight stars + the door draw where they did), every seat past
+//--- them (extra stars, then the door, still LAST) at 32px (baked circ_*_32.bmp) on
+//--- an outer circle that clears the inner discs, half an inner step clockwise.
+#define CIRC_RING1_SEATS    9
+#define CIRC_RING2_BTN_SIZE 32
 //--- P-UI-147 (2026-10-02): 1 px, not 3. This gate used to answer TWO questions — «did the
 //--- hand really drag?» and «has the orb moved far enough to be worth saving?» — so a short
 //--- but deliberate drag moved nothing and stored nothing, and the next repaint put the orb
@@ -519,64 +198,51 @@ void BiotakMenuGhostSweep()
                                 // STRIP (no rows), so 14 is the first free slot that can own one
 #define CIR_HRAY            15  // P-HR-01 — Horizontal Ray (Tools cell: arm → 1 click places)
 #define CIR_PATH            16  // Path tool (Tools cell: arm → click per vertex, dbl-click commits)
-//--- ring layout (main circle — 8 items; Zones first = the main feature)
-// TH3TOOL-ON (2026-09-19): RING_TH3 comes back APPENDED (slot 7), never in the
-// middle — HTF/TOOLS/BASEKNOT keep the numbers they were renumbered to when
-// TH3TOOL-OFF removed it, and every persisted state key keeps its meaning.
-// VIEWLOCK-OFF: RING_VLOCK slot retired (was 4) — HTF/TOOLS shifted down again.
-// P-UI-95 (2026-09-16, user: «ایتم اندازه گیری بیس رو بیار توی منوی اصلی»): THE
-// MEASURING TOOL IS A MAIN-RING ITEM. It was TOOL_BASEKNOT — the third cell of the
-// Tools sub-menu, behind one more click than the features it measures those levels
-// for. It is APPENDED (`RING_BASEKNOT`), so no existing slot moves and every
-// persisted state key keeps its meaning.
-// The item needs NO new machinery: it has no on/off state of its own (the light is
-// `BaseKnotSessionActive`, the same query every momentary item uses), a PRESS arms
-// the draw session through the ONE arm path (`CircArmBaseKnot`) and a HOLD opens the
-// Base Box card (`FeaturePanel`) — both of which the Tools cell already ran.
-// Seven items need r >= (44 + 6) / 2 / sin(180/7) = 57.6 px to keep their pitch; the
-// shipped CIRC_RADIUS is 64, so the default look clears it with 6.4 px to spare — and
-// a menu dragged near an edge collapses to the rail at CIRC_EDGE_TRIGGER anyway.
-// RING_LEG appended as slot 8 — no existing slot moves.
-// Nine items: min-r = (44+6)/2 / sin(π/9) = 73.1 px → CIRC_RADIUS raised to 80.
-#define RING_COUNT 9
-#define CIRC_ITEM_COUNT RING_COUNT  // alias for legacy code
-#define RING_ZONES    0
-#define RING_TRIGGER  1
-#define RING_ATR      2
-#define RING_TH       3
-// VIEWLOCK-OFF: #define RING_VLOCK    4
-#define RING_HTF      4
-#define RING_TOOLS    5
-#define RING_BASEKNOT 6   // P-UI-95: the MEASURING tool — click arms, hold = Base Box card
-#define RING_TH3      7   // TH3TOOL-ON (2026-09-19): the TH3 tool / frequency — APPENDED, so no slot moves
-#define RING_LEG      8   // Leg Measure — APPENDED, so no existing slot moves
+#define CIR_SCALE           17  // P-UI-159 — Chart Scale (Tools cell: click toggles MT4's own
+                                // scale-fix; no card, the chart's bit IS the state)
+#define CIR_HIDE            18  // P-UI-160 — Hide / Show All (Tools cell: click runs the F
+                                // mute's own owner; no card, the mute IS the state)
+#define CIR_SESSIONS        19  // P-SESS — Sessions Zones (ring cell + card 15): the master
+                                // switch lives in g_sessMaster; the card holds zones, days
+                                // and the countdown
 
 //--- Tools sub-menu (sub-menu under Tools) — SCALABLE LADDER
 // FACTORBTN-OFF: Factor button retired (was 2) — its settings live inline in
 // the Step Mode card now.
 // UIBK-OFF (P-UI-95): Base/Knot was the cell at 2 (click = draw, hold = Base Box
 // style card); the MEASURING tool is a MAIN-RING item now (RING_BASEKNOT), so the
-// ladder is back to two cells. Restore it by counting 3 back into TOOL_COUNT and
-// uncommenting the three sites marked UIBK-OFF (the define, ToolFeature's line and
-// the click branch in HandleButtonClick) — the layout needs no change, because
-// TOOL_COUNT is the only number it reads.
-// Add new tools here AND to ToolFeature()/ToolPanel()/CircIconRes(); TOOL_COUNT
-// is the only number the layout reads — it picks its own geometry from it.
-#define TOOL_COUNT 5
+// ladder is back to two cells. Restore it by counting 3 back into the catalog count
+// and uncommenting the three sites marked UIBK-OFF (the define, ToolFeature's line
+// and the click branch in HandleButtonClick) — the layout needs no change, because
+// the catalog count is the only number it reads.
+// Add new tools here AND to ToolFeature()/ToolPanel()/CircIconRes(); the catalog
+// COUNT (CAT_COUNT) is the only number the layout reads — it picks its own
+// geometry from it. P-UI-161: the Tools menu now shows the WHOLE catalog (7 tools
+// at 0..6 + 8 features appended at 7..14), so the grid/paging maths scales to 15
+// cells; the TOOL_* indices below are the cells' stable identities, never a count.
 #define TOOL_PIN              0
 #define TOOL_STEP_OVERRIDE    1
 #define TOOL_GENERAL          2   // P-UI-131 — the cross-card settings door (a gear)
 #define TOOL_HRAY             3   // P-HR-01 — Horizontal Ray (arm → 1 click places, APPENDED so no slot moves)
 #define TOOL_PATH             4   // Path tool (arm → vertex clicks, double-click commits, APPENDED)
+#define TOOL_SCALE            5   // P-UI-159 — Chart Scale (one click = MT4's scale-fix, APPENDED)
+#define TOOL_HIDE             6   // P-UI-160 — Hide / Show All (one click = the F mute's own owner, APPENDED)
 // UIBK-OFF: #define TOOL_BASEKNOT         2
 // FACTORBTN-OFF: #define TOOL_FACTOR_OVERRIDE  2
 
-// R-SUBLADDER (2026-09-11): the sub-menu picks its geometry from TOOL_COUNT so
-// that adding a tool can never make two buttons collide. The 6 main-ring items
-// are HIDDEN while the sub-menu is open (CreateToolsMenu), so the orb is the
-// only other thing on screen — the arc maths is measured from the MENU CENTRE,
-// never from the Tools button, so the button can never push an item into a ring
-// item. Proven by tools/submenu_geometry_check.js (720 cases: 4 chart sizes x
+//--- P-SIZE-1500 (2026-10-17): the ring's catalog, its membership mask and
+//--- its growth law live in BiotakMenu_Ring.mqh (one owner: the ring's
+//--- identity and geometry). Included HERE — below the TOOL_*/CIR_*/CIRC_*
+//--- identities it reads, above every reader (the menu halves below, the
+//--- panels after the hub).
+#include "BiotakMenu_Ring.mqh"
+
+// R-SUBLADDER (2026-09-11): the sub-menu picks its geometry from the catalog
+// count (CAT_COUNT) so that adding a tool can never make two buttons collide.
+// The ring items are HIDDEN while the sub-menu is open (CreateToolsMenu), so the
+// orb is the only other thing on screen — the arc maths is measured from the MENU
+// CENTRE, never from the Tools button, so the button can never push an item into a
+// ring item. Proven by tools/submenu_geometry_check.js (720 cases: 4 chart sizes x
 // 9 menu positions x counts 1..20 — no collision, no orb overlap, nothing
 // off-chart).
 //   count 1..6  -> FAN   180 deg arc, r = min(112, fit), floor = chord radius
@@ -676,43 +342,19 @@ int FeaturePanel(const int feat)
    if(feat == CIR_STEP_OVERRIDE) return 9;    // Step Mode override card
    // FACTORBTN-OFF: if(feat == CIR_FACTOR_OVERRIDE) return 10; // Factor override card
    if(feat == CIR_BASEKNOT)      return 12;   // Base Box style card (a press still arms drawing)
+   // P-SESS: CIR_SESSIONS (19) is above the card-number space (0..17), so the
+   // identity fallback below cannot answer it — the Sessions card is 15.
+   if(feat == CIR_SESSIONS)      return 15;   // Sessions Zones card (P-SESS)
+   // P-UI-169: the four tools that own NO card - the identity fallback sent a
+   // hold on them to somebody else's card, and the release was eaten.
+   if(feat == CIR_HRAY || feat == CIR_PATH || feat == CIR_SCALE || feat == CIR_HIDE) return -1;
    return feat;                               // every other feature's card IS its code
 }
 
 int RingPanel(const int ringIdx)  { return FeaturePanel(RingFeature(ringIdx)); }
 int ToolPanel(const int toolIdx)  { return FeaturePanel(ToolFeature(toolIdx)); }
 
-//--- Ring / Tools mapping helpers (feature indices are stable panel keys)
-int RingFeature(const int ringIdx)
-{
-   switch(ringIdx)
-   {
-      case RING_ZONES:   return CIR_ZONES;
-      case RING_TRIGGER: return CIR_TRIGGER;
-      case RING_ATR:     return CIR_ATR;
-      case RING_TH:      return CIR_TH;
-       // VIEWLOCK-OFF: case RING_VLOCK: return CIR_VLOCK;
-       case RING_TH3: return CIR_TH3;   // TH3TOOL-ON (2026-09-19)
-       case RING_HTF:     return CIR_HTF;
-      case RING_TOOLS:   return CIR_TOOLS;
-      case RING_BASEKNOT: return CIR_BASEKNOT;   // P-UI-95: the measure tool's own ring slot
-      case RING_LEG:      return CIR_LEG;         // Leg Measure — APPENDED
-   }
-   return -1;
-}
-
-int ToolFeature(const int toolIdx)
-{
-   if(toolIdx == TOOL_PIN)             return CIR_PIN;
-   if(toolIdx == TOOL_STEP_OVERRIDE)   return CIR_STEP_OVERRIDE;
-   if(toolIdx == TOOL_GENERAL)         return CIR_GENERAL;   // P-UI-131
-   if(toolIdx == TOOL_HRAY)            return CIR_HRAY;      // P-HR-01
-   if(toolIdx == TOOL_PATH)            return CIR_PATH;      // Path tool
-   // UIBK-OFF (P-UI-95): if(toolIdx == TOOL_BASEKNOT) return CIR_BASEKNOT;
-   // FACTORBTN-OFF: if(toolIdx == TOOL_FACTOR_OVERRIDE) return CIR_FACTOR_OVERRIDE;
-   return -1;
-}
-
+//+------------------------------------------------------------------+
 // Tools half-circle state (transient, not persisted)
 static bool g_ToolsOpen = false;
 
@@ -1014,14 +656,19 @@ void UILongPressLatchClear()
 int CircItemAt(const int mx, const int my)
 {
    if(g_ToolsOpen) return -1;   // the ring is hidden while the Tools fan is open
-   for(int i = 0; i < RING_COUNT; i++)
+   // P-UI-161: the seat count and the button size are the BUILT ones (frozen
+   // mid-drag) — the hit test must read the same grid the paint wrote.
+   // P-UI-195: the side is the SEAT's own (two circles draw two sides).
+   const int n = CircPlacedCount();
+   for(int i = 0; i < n; i++)
    {
       int ix, iy;
       CircLayout(i, ix, iy);
-      int bx = ix - CIRC_BTN_SIZE / 2;
-      int by = iy - CIRC_BTN_SIZE / 2;
-      if(mx >= bx - CIRC_BG_MARGIN && mx <= bx + CIRC_BTN_SIZE + CIRC_BG_MARGIN &&
-         my >= by - CIRC_BG_MARGIN && my <= by + CIRC_BTN_SIZE + CIRC_BG_MARGIN)
+      const int bs = CircSeatSize(i);
+      int bx = ix - bs / 2;
+      int by = iy - bs / 2;
+      if(mx >= bx - CIRC_BG_MARGIN && mx <= bx + bs + CIRC_BG_MARGIN &&
+         my >= by - CIRC_BG_MARGIN && my <= by + bs + CIRC_BG_MARGIN)
          return i;
    }
    return -1;
@@ -1194,9 +841,15 @@ void LoadUIState()
    g_UI.menuVisible = GlobalVariableCheck(gvMen)   ? (GlobalVariableGet(gvMen)   > 0.5) : true;
    g_UI.showHTF     = GlobalVariableCheck(gvHtf)   ? (GlobalVariableGet(gvHtf)   > 0.5) : false;
    string gvTools = GetGVName("TOOLS");
-   g_ToolsOpen = GlobalVariableCheck(gvTools) ? (GlobalVariableGet(gvTools) > 0.5) : false;   // P-UI-142: menu creation rebuilds the chrome from this
+   g_ToolsOpen = GlobalVariableCheck(gvTools) && GlobalVariableGet(gvTools) > 0.5;   // read for the witness only
+   if(g_ToolsOpen)
+      DrawStripDiagEmit("[P-UI-142] tools chrome starts shut (the snapshot said open)");
+   g_ToolsOpen = false;   // P-UI-142b: shut every attach; the MEN snapshot still restores the ring
    if(GlobalVariableCheck(GetGVName("TIPPIN")))
       g_UI.tipPin = (GlobalVariableGet(GetGVName("TIPPIN")) > 0.5);
+   // P-UI-161/175: the membership mask is loaded BEFORE the version branch
+   // (InitializeUIStates) - the reset path keeps the key (P-UI-174) and
+   // saves the value it read, never the compile-time default.
    // P-DRAW-89: the plate's transparency setting is retired. Its GV is swept on
    // attach below so a chart that carried the old key cannot resurrect the look.
    GlobalVariableDel(GetGVName("PLATE"));
@@ -1215,7 +868,9 @@ void DeleteLegacyMenuObjects()
    // so one bulk sweep removes the identical set in ONE terminal call - and
    // any V1 straggler the name list had missed rides along: the sweep is
    // complete by construction (the P-PERF-47 rule). Cross-session V1
-   // spellings stay BiotakMenuGhostSweep's job.
+   // spellings stay BiotakMenuGhostSweep's job. The P-UI-161 counts
+   // (RING_MAX_SEATS / CAT_COUNT) are covered by the same prefix: the sweep
+   // is a SUPERSET of every name the old loop spelled.
    ObjectsDeleteAll(0, "BiotakMenu_" + IntegerToString(ChartID()) + "_");
 }
 
@@ -1320,7 +975,8 @@ void InitializeUIStates()
       versionOk = ((int)ver == UI_STATE_VERSION);
    }
 
-   LoadUIPlaces();   // P-UI-131e: the homes first — the reset branch below must not lose them
+   LoadUIPlaces();   // P-UI-131e: the homes first - the reset branch below must not lose them
+   g_CircStarMask = CircStarLoad(GetGVName("STAR"));   // P-UI-191: read BEFORE either branch can save
    if(versionOk && GlobalVariableCheck(GetGVName("INIT")))
    {
       LoadUIState();
@@ -1342,7 +998,13 @@ void ClearAllGVs()
    for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
    {
       const string name = GlobalVariableName(i);
-      if(StringLen(name) >= len && StringSubstr(name, 0, len) == pfx)
+      //--- P-UI-174/190 (2026-10-20): the reset is a UI-STATE reset - never a
+      //--- reset of where the user put things (HOME_/PNL_/PNLP/STAR) or of what
+      //--- they set (OV_ overrides); both lived in the swept namespace.
+      const bool keep = (StringFind(name, "_HOME_") >= 0 || StringFind(name, "STAR") >= 0 ||
+                         StringSubstr(name, len, 3) == "OV_" || StringSubstr(name, len, 4) == "PNL_" ||
+                         StringSubstr(name, len, 4) == "PNLP");
+      if(StringLen(name) >= len && StringSubstr(name, 0, len) == pfx && !keep)
          GlobalVariableDel(name);
    }
    // P-PERF-27c: every write-shadow that claims these keys exist is now wrong.
@@ -1425,9 +1087,13 @@ void SaveUIStates(const bool flushNow = false)
    if(haveBox) GVHomeAnswerClear();
    if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 11, g_UI.tipPin ? 1.0 : 0.0))
       { GlobalVariableSet(GetGVName("TIPPIN"), g_UI.tipPin ? 1.0 : 0.0); uiChanged++; }
+   // P-UI-161: the membership star mask — the ring's membership IS this number, so
+   // it is saved with the same per-key guard as the rest (one write per real flip).
+   if(GVSlotChanged(s_uiEpoch, s_uiKnown, s_uiShadow, 12, (double)g_CircStarMask))
+      { GlobalVariableSet(GetGVName("STAR"), (double)g_CircStarMask); uiChanged++; }
    // P-PERF-44 (3): report BEFORE the early return. A skip count that survives a
    // no-op pass would describe a teardown that already happened.
-   GVLedgerReport(GV_BLOCK_UI, uiChanged, 12);
+   GVLedgerReport(GV_BLOCK_UI, uiChanged, 13);
    // Nothing changed: no writes. No flush either - there is nothing new to make
    // durable, and the keys themselves stay in the terminal's table regardless
    // (GlobalVariablesFlush only forces the DISK copy, which the terminal also
@@ -1450,8 +1116,8 @@ void CircHomeWitness()
    bool hasHome = CircOrbHomeGet(hx, hy);
    int cw = 0, ch = 0; HomeChartSize(cw, ch);
    double fx = -1.0, fy = -1.0;
-   if(GlobalVariableCheck(GVHomeFracName("ORB", false))) fx = GlobalVariableGet(GVHomeFracName("ORB", false));
-   if(GlobalVariableCheck(GVHomeFracName("ORB", true))) fy = GlobalVariableGet(GVHomeFracName("ORB", true));
+   // P-UI-165: own-else-shared, so the witness names the source the orb derives from
+   if(GVHomeFracKnown("ORB")) { fx = GVHomeFracGet("ORB", false); fy = GVHomeFracGet("ORB", true); }
    string home = "none";
    if(hasHome) home = "(" + IntegerToString(hx) + "," + IntegerToString(hy) + ")";
    string s = "[MENUPOS] pair=(" + IntegerToString(g_UI.menuX) + "," + IntegerToString(g_UI.menuY) + ")"
@@ -1540,11 +1206,20 @@ bool CircFeatureOn(const int i)
 #endif
    if(i == CIR_HTF)             return g_UI.showHTF;
    if(i == CIR_PIN)             return g_customPriceLineCreated;
+   // P-SESS: the master switch every sessions writer reads. A family toggle like
+   // CIR_ZONES, so its light and its click share this one answer.
+   if(i == CIR_SESSIONS)        return g_sessMaster;
    // CIR_BASEKNOT is momentary: lit while the draw session is armed.
    if(i == CIR_BASEKNOT)        return BaseKnotSessionActive();
    // P-HR-01 is momentary too: lit while the ray session is armed.
    if(i == CIR_HRAY)            return HRaySessionActive();
    if(i == CIR_PATH)            return PathSessionActive();
+   // P-UI-159: the light IS the chart's own property — MT4's Properties dialog
+   // and this cell write/read the same bit, so they can never disagree.
+   if(i == CIR_SCALE)           return (ChartGetInteger(0, CHART_SCALEFIX) != 0);
+   // P-UI-160: the light IS the mute's own reader (P-UI-93's ONE reader) — the
+   // same question the F key's target-state inversion asks.
+   if(i == CIR_HIDE)            return IsIndicatorHidden();
    // STEPOVERRIDE-OFF: single Step Mode — the Tools step button is a plain
    // cycle button (no on/off state); the mode itself is shown by the chart label.
    //if(i == CIR_STEP_OVERRIDE)   return (g_stepModeOverride != -1);
@@ -1559,7 +1234,7 @@ bool CircFeatureOn(const int i)
 bool CircFeatureLit(const int i)
 {
    if(!CircFeatureOn(i)) return false;
-   if(i == CIR_ZONES || i == CIR_TRIGGER || i == CIR_ATR || i == CIR_TH)
+   if(i == CIR_ZONES || i == CIR_TRIGGER || i == CIR_ATR || i == CIR_TH || i == CIR_SESSIONS)
       return !IsIndicatorHidden();
    return true;
 }
@@ -1575,13 +1250,14 @@ bool CircHasBadge(const int i)
    // return (i != CIR_TOOLS);   // every main-ring feature shows a badge; Tools opens its sub-menu
 }
 
-void CircConfigureIcon(const string name, const int i, const bool on, const int x, const int y)
+void CircConfigureIcon(const string name, const int i, const bool on, const int x, const int y,
+                       const int size = CIRC_ICON_SIZE)
 {
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x - CIRC_ICON_SIZE / 2);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - CIRC_ICON_SIZE / 2);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, CIRC_ICON_SIZE);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, CIRC_ICON_SIZE);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x - size / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y - size / 2);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, size);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, size);
    string res = CircIconRes(i, on);
    ObjectSetString(0, name, OBJPROP_BMPFILE, 0, res);
    ObjectSetString(0, name, OBJPROP_BMPFILE, 1, res);
@@ -1607,8 +1283,11 @@ string CircIconRes(const int i, const bool on)
     else if(i == CIR_STEP_OVERRIDE)   base = "step";    // Step mode override icon
     // FACTORBTN-OFF: else if(i == CIR_FACTOR_OVERRIDE) base = "factor";  // Factor slider icon
     else if(i == CIR_BASEKNOT)   base = "ruler";   // Base / Knot MEASURE = a scale bar with ticks
-    else if(i == CIR_HRAY)       base = "hray";    // P-HR-01 — Horizontal Ray cell
-    else if(i == CIR_PATH)       base = "path";    // Path tool cell
+     else if(i == CIR_HRAY)       base = "hray";    // P-HR-01 — Horizontal Ray cell
+     else if(i == CIR_PATH)       base = "path";    // Path tool cell
+      else if(i == CIR_SCALE)      base = "scale";   // P-UI-159 — Chart Scale cell
+      else if(i == CIR_HIDE)       base = "eye";     // P-UI-160 — Hide / Show All cell
+      else if(i == CIR_SESSIONS)   base = "sessions"; // P-SESS — Sessions Zones cell (clock)
     else if(i == CIR_LEG)        base = "leg";     // Leg Measure — trendline + bracket
     else if(i == CIR_TOOLS)      base = "tools";
     // P-UI-131: the gear — a settings DOOR, so it wears the same art the strip's
@@ -1803,6 +1482,15 @@ string CircTooltipStatus(const int i)
        if(PathSessionActive()) return "Drawing";
        return "Ready";
     }
+    if(i == CIR_SCALE)   // P-UI-159: the chart's own bit, not an indicator state
+    {
+       return (ChartGetInteger(0, CHART_SCALEFIX) != 0) ? "Fixed" : "Auto";
+    }
+   if(i == CIR_HIDE)    // P-UI-160: the mute's own reader answers — what the NEXT press shows
+   {
+      return IsIndicatorHidden() ? "Hidden" : "Visible";
+   }
+   if(i == CIR_SESSIONS)          return g_sessMaster ? "ON" : "OFF";   // P-SESS
 #ifndef BUILD_LITE
    if(i == CIR_LEG)
    {
@@ -1843,6 +1531,9 @@ string CircItemTooltip(const int i)
       case CIR_BASEKNOT:        return "Base / Knot Measure · " + CircTooltipStatus(i);
       case CIR_HRAY:            return "Horizontal Ray · " + CircTooltipStatus(i);   // P-HR-01
       case CIR_PATH:            return "Path · " + CircTooltipStatus(i);
+      case CIR_SCALE:           return "Chart Scale · " + CircTooltipStatus(i);   // P-UI-159
+      case CIR_HIDE:            return "Hide / Show All (F) · " + CircTooltipStatus(i);   // P-UI-160
+      case CIR_SESSIONS:        return "Sessions · " + CircTooltipStatus(i);   // P-SESS
       case CIR_LEG:             return "Leg Measure · " + CircTooltipStatus(i);
       case CIR_TOOLS:           return "Biotak Tools · " + CircTooltipStatus(i);
       // P-UI-131: a DOOR has no state to report, so the tip names the card instead
@@ -2374,9 +2065,9 @@ bool CircTipAnchor(const int feat, int &ax, int &ay)
    if(feat == -1) { ax = g_UI.menuX; ay = g_UI.menuY; return true; }
    if(g_UI.menuVisible)
    {
-      for(int i = 0; i < RING_COUNT; i++)
+      for(int i = 0; i < CircPlacedCount(); i++)
          if(RingFeature(i) == feat) { CircLayout(i, ax, ay); return true; }
-      for(int t = 0; t < TOOL_COUNT; t++)
+      for(int t = 0; t < CAT_COUNT; t++)
          if(ToolFeature(t) == feat) { ToolsLayout(t, ax, ay); return true; }
    }
    return false;
@@ -2462,10 +2153,11 @@ void CircTipRefresh()
 //| once per ring item, ToolsItemAt() asks SubPlaceItem() once per    |
 //| tile, and CircPointOnMenu() asks both. Each of those read          |
 //| CHART_WIDTH_IN_PIXELS + CHART_HEIGHT_IN_PIXELS straight from the   |
-//| terminal, and CircLayout() also called CircFitRadius(), which      |
-//| walks every ring item doing sin/cos - so ONE hit test cost 16-40   |
-//| terminal reads and O(RING_COUNT^2) trigonometry just to answer     |
-//| "which button is under the cursor?". Every cursor move repeats it. |
+//| terminal, and CircLayout() also walked the ring doing sin/cos       |
+//| (CircFitRadius then; P-UI-161's CircFitLimit caches it now) - so    |
+//| ONE hit test cost 16-40 terminal reads and O(seats^2) trigonometry  |
+//| just to answer "which button is under the cursor?". Every cursor    |
+//| move repeats it.                                                    |
 //|                                                                  |
 //| The size cannot change inside a hit test, so the metrics are read  |
 //| once and invalidated on the events that can change them (chart-    |
@@ -2492,35 +2184,34 @@ void CircUIMetrics(int &cw, int &ch)
    if(ch <= 0) ch = 1080;
 }
 
-double CircFitRadius(const int cw, const int ch, const int ox, const int oy)
+//+------------------------------------------------------------------+
+//--- The button side the ring is DRAWN at. P-UI-162: the GLYPH does not follow
+//--- the taper — its canvas is 28 and MT4 clips, never scales — so the glyph's
+//--- box is CIRC_ICON_SIZE on create, update and move alike.
+//--- P-UI-161: the seat set the ring was BUILT with. The count is FROZEN while the
+//--- orb is dragged — the same rule SubMode() obeys (geometry must not rebuild under
+//--- the hand) — and CircRelayoutIfNeeded() rebuilds once the release re-derives it.
+static int s_circBuiltSeats = -1;
+
+int CircPlacedCount()
 {
-   // P-PERF-16: pure function of its four arguments and compile-time constants,
-   // asked once per ring item per hit test. The fit does not depend on the item,
-   // so it is computed once per (cw,ch,ox,oy) and remembered.
-   static int    s_fitCw = 0, s_fitCh = 0, s_fitOx = 0, s_fitOy = 0;
-   static double s_fitR = 0.0;
-   if(s_fitR > 0.0 && cw == s_fitCw && ch == s_fitCh && ox == s_fitOx && oy == s_fitOy)
-      return s_fitR;
-
-   double r = CIRC_RADIUS;
-   for(int i = 0; i < RING_COUNT; i++)
-   {
-      double deg = (-90.0 + 360.0 * i / RING_COUNT) * M_PI / 180.0;
-      double c = MathCos(deg);
-      double s = MathSin(deg);
-      double lim = 1e18;
-      if(c > 1e-6)        lim = MathMin(lim, (cw - CIRC_PAD - ox - CIRC_ITEM_REACH) / c);
-      else if(c < -1e-6)  lim = MathMin(lim, (ox - CIRC_PAD - CIRC_ITEM_REACH) / (-c));
-      if(s > 1e-6)        lim = MathMin(lim, (ch - CIRC_PAD - oy - CIRC_ITEM_REACH) / s);
-      else if(s < -1e-6)  lim = MathMin(lim, (oy - CIRC_PAD - CIRC_ITEM_REACH) / (-s));
-      if(lim < 1e17) r = MathMin(r, lim);
-   }
-   if(r < CIRC_MIN_RADIUS) r = CIRC_MIN_RADIUS;
-   if(r > CIRC_RADIUS) r = CIRC_RADIUS;
-
-   s_fitCw = cw; s_fitCh = ch; s_fitOx = ox; s_fitOy = oy; s_fitR = r;
-   return r;
+   if(g_OrbDragging && s_circBuiltSeats >= 0) return s_circBuiltSeats;   // frozen mid-drag
+   return CircPlacedCountLive();
 }
+
+void CircNoteBuilt()
+{
+   s_circBuiltSeats = CircPlacedCountLive();   // note BEFORE a create: CircLayout reads this n
+   // P-UI-195: the two circles name themselves once per build (open / restore /
+   // relayout), through the FLUSHED channel (P-LOG-3) — the seat count, the split,
+   // the outer side and radius, and whether the door really rides the outer one.
+   DrawStripDiagEmit(StringFormat("[P-UI-195] seats=%d ring1=%d ring2=%d s1=%d s2=%d r2=%.1f door_outer=%d",
+                                  s_circBuiltSeats, CircRing1Count(), CircRing2Count(),
+                                  CIRC_BTN_SIZE, CIRC_RING2_BTN_SIZE, CircRing2Radius(),
+                                  (CircSeatOuter(s_circBuiltSeats - 1) ? 1 : 0)));
+}
+
+int CircBtnSize()  { return CircBtnSizeForN(CircPlacedCount()); }   // the TRAIN's taper (P-UI-166)
 
 void CircLayout(const int i, int &x, int &y)
 {
@@ -2529,45 +2220,48 @@ void CircLayout(const int i, int &x, int &y)
    int ox = g_UI.menuX;
    int oy = g_UI.menuY;
 
-   bool nearLeft   = (ox <= CIRC_EDGE_TRIGGER);
-   bool nearRight  = (ox >= cw - CIRC_EDGE_TRIGGER);
-   bool nearTop    = (oy <= CIRC_EDGE_TRIGGER);
-   bool nearBottom = (oy >= ch - CIRC_EDGE_TRIGGER);
-
-   if(nearLeft || nearRight || nearTop || nearBottom)
+   // P-UI-164: the ONE shape decision — CircPlacedCountLive reads this same
+   // call, so the painted layout and the capacity can never be two grids.
+   bool vertical;
+   int dir;
+   if(CircRailShape(vertical, dir))
    {
-      int step = CIRC_BTN_SIZE + CIRC_GAP;
-      int trainLen = CIRC_ORB_SIZE / 2 + CIRC_BTN_SIZE / 2 + CIRC_GAP + (RING_COUNT - 1) * step;
+      int s = CircBtnSize();   // the train's one side (P-UI-166) — CircSeatSize answers the same
+      int step = s + CIRC_GAP;
       // P-UI-26: clamp the rail's CROSS axis so buttons never draw half
       // off-chart. One uniform shift for the whole train — never a per-item
       // clamp (that stacks the train, P-UI-13) and never a radius shrink
       // (R-SUBLADDER). The orb itself stays where the user put it.
-      int half = CIRC_BTN_SIZE / 2 + CIRC_PAD;
-      if(nearLeft || nearRight)
+      int half = s / 2 + CIRC_PAD;
+      if(vertical)
       {
          x = MathMax(half, MathMin(cw - half, ox));
-         int upRoom   = oy - CIRC_PAD - CIRC_BTN_SIZE / 2;
-         int downRoom = ch - CIRC_PAD - oy - CIRC_BTN_SIZE / 2;
-         int dir = (upRoom >= downRoom) ? -1 : 1;
-         if(dir == -1 && upRoom < trainLen && downRoom >= trainLen) dir = 1;
-         else if(dir == 1 && downRoom < trainLen && upRoom >= trainLen) dir = -1;
-         y = oy + dir * (CIRC_ORB_SIZE / 2 + CIRC_BTN_SIZE / 2 + CIRC_GAP + i * step);
+         y = oy + dir * (CIRC_ORB_SIZE / 2 + s / 2 + CIRC_GAP + i * step);
       }
       else
       {
          y = MathMax(half, MathMin(ch - half, oy));
-         int leftRoom  = ox - CIRC_PAD - CIRC_BTN_SIZE / 2;
-         int rightRoom = cw - CIRC_PAD - ox - CIRC_BTN_SIZE / 2;
-         int dir = (leftRoom >= rightRoom) ? -1 : 1;
-         if(dir == -1 && leftRoom < trainLen && rightRoom >= trainLen) dir = 1;
-         else if(dir == 1 && rightRoom < trainLen && leftRoom >= trainLen) dir = -1;
-         x = ox + dir * (CIRC_ORB_SIZE / 2 + CIRC_BTN_SIZE / 2 + CIRC_GAP + i * step);
+         x = ox + dir * (CIRC_ORB_SIZE / 2 + s / 2 + CIRC_GAP + i * step);
       }
+   }
+   else if(CircSeatOuter(i))
+   {
+      // P-UI-195: the SECOND circle — the stars past the ninth and the Tools door,
+      // on a bigger radius at 32px, starting half an inner step clockwise from 12
+      // o'clock so every outer seat sits BETWEEN two inner seats.
+      int n1 = CircRing1Count();
+      int n2 = CircRing2Count();
+      double r   = CircRing2Radius();
+      double deg = (CircRing2StartDeg() + ((n2 > 0) ? 360.0 * (i - n1) / n2 : 0.0)) * M_PI / 180.0;
+      x = ox + (int)MathRound(r * MathCos(deg));
+      y = oy + (int)MathRound(r * MathSin(deg));
    }
    else
    {
-      double r = CircFitRadius(cw, ch, ox, oy);
-      double deg = (-90.0 + 360.0 * i / RING_COUNT) * M_PI / 180.0;
+      // P-UI-195: the FIRST circle — the first nine stars, the shipped 44px look.
+      int n1 = MathMax(1, CircRing1Count());
+      double r = CircRadius();
+      double deg = (-90.0 + 360.0 * i / n1) * M_PI / 180.0;
       x = ox + (int)MathRound(r * MathCos(deg));
       y = oy + (int)MathRound(r * MathSin(deg));
    }
@@ -2626,16 +2320,16 @@ double SubChordRadius(const int n, const double sweepDeg)
 }
 
 // Radius that keeps every FAN button inside the padded chart rect (the same
-// ray-vs-bounds walk CircFitRadius() does for the ring). Capped at TOOL_RADIUS;
+// ray-vs-bounds walk CircFitLimit() does for the ring). Capped at TOOL_RADIUS;
 // the caller compares the result against SubChordRadius() to decide whether the
 // fan is usable at all at this position.
 double SubFanFitRadius(const int ox, const int oy, const int cw, const int ch)
 {
    double r = TOOL_RADIUS;
    double reach = CIRC_PAD + CIRC_BTN_SIZE / 2 + CIRC_BG_MARGIN;
-   double step = (TOOL_COUNT > 1) ? TOOL_SPREAD / (TOOL_COUNT - 1) : 0.0;
+   double step = (CAT_COUNT > 1) ? TOOL_SPREAD / (CAT_COUNT - 1) : 0.0;
    double start = 210.0 - TOOL_SPREAD / 2.0;      // 210 deg = the Tools axis
-   for(int k = 0; k < TOOL_COUNT; k++)
+   for(int k = 0; k < CAT_COUNT; k++)
    {
       double deg = (start + k * step) * M_PI / 180.0;
       double c = MathCos(deg);
@@ -2723,25 +2417,25 @@ int SubMode()
 
    int cw, ch, ox, oy;
    SubChartRect(cw, ch, ox, oy);
-   int key = TOOL_COUNT * 1000003 + cw * 1009 + ch * 101 + ox * 7 + oy;
+   int key = CAT_COUNT * 1000003 + cw * 1009 + ch * 101 + ox * 7 + oy;
    if(s_SubMode >= 0 && key == s_SubModeKey) return s_SubMode;
 
    int mode = SUB_MODE_GRID;                    // the grid is the universal fallback
    int ux = 0, uy = 0;
    bool railFits = false;
-   if(TOOL_COUNT <= SUB_FAN_MAX)
+   if(CAT_COUNT <= SUB_FAN_MAX)
    {
-      if(SubRailAxis(TOOL_COUNT, ox, oy, cw, ch, ux, uy, railFits))
+      if(SubRailAxis(CAT_COUNT, ox, oy, cw, ch, ux, uy, railFits))
          mode = railFits ? SUB_MODE_RAIL : SUB_MODE_GRID;
-      else if(SubFanFitRadius(ox, oy, cw, ch) >= SubChordRadius(TOOL_COUNT, TOOL_SPREAD))
+      else if(SubFanFitRadius(ox, oy, cw, ch) >= SubChordRadius(CAT_COUNT, TOOL_SPREAD))
          mode = SUB_MODE_FAN;
       else
          mode = SUB_MODE_GRID;                 // the arc cannot hold the invariant
    }
-   else if(TOOL_COUNT <= SUB_RING_MAX)
+   else if(CAT_COUNT <= SUB_RING_MAX)
       mode = SubRingFits(ox, oy, cw, ch) ? SUB_MODE_RING : SUB_MODE_GRID;
    else
-      mode = (TOOL_COUNT > SubPageSize()) ? SUB_MODE_GRID_PAGED : SUB_MODE_GRID;
+      mode = (CAT_COUNT > SubPageSize()) ? SUB_MODE_GRID_PAGED : SUB_MODE_GRID;
 
    s_SubMode    = mode;
    s_SubModeKey = key;
@@ -2759,7 +2453,7 @@ int SubPageCount()
 {
    if(!SubIsPaged()) return 1;
    int ps = SubPageSize();
-   return (TOOL_COUNT + ps - 1) / ps;
+   return (CAT_COUNT + ps - 1) / ps;
 }
 // Only the items on the current page are real; the rest park off-screen.
 bool SubItemOnPage(const int i)
@@ -2771,9 +2465,9 @@ int SubVisibleRows()
 {
    int n;
    if(!SubIsPaged())
-      n = TOOL_COUNT;
+      n = CAT_COUNT;
    else
-      n = TOOL_COUNT - g_ToolsPage * SubPageSize();
+      n = CAT_COUNT - g_ToolsPage * SubPageSize();
    int rows = (n + SUB_GRID_COLS - 1) / SUB_GRID_COLS;
    int cap  = SubPageRowsCap();
    if(rows < 1)   return 1;
@@ -2859,7 +2553,7 @@ void SubPlaceItem(const int i, int &x, int &y)
    {
       int ux = 0, uy = 0;
       bool fits = false;
-      SubRailAxis(TOOL_COUNT, ox, oy, cw, ch, ux, uy, fits);
+      SubRailAxis(CAT_COUNT, ox, oy, cw, ch, ux, uy, fits);
       int dist = CIRC_ORB_SIZE / 2 + CIRC_BTN_SIZE / 2 + CIRC_GAP
                  + i * (CIRC_BTN_SIZE + CIRC_GAP);
       x = ox + ux * dist;
@@ -2872,15 +2566,15 @@ void SubPlaceItem(const int i, int &x, int &y)
    {
       r = SUB_RING_RADIUS;
       startDeg = -90.0;
-      stepDeg  = 360.0 / TOOL_COUNT;
+      stepDeg  = 360.0 / CAT_COUNT;
    }
    else
    {
       r = MathMin(TOOL_RADIUS, SubFanFitRadius(ox, oy, cw, ch));
-      double floorR = SubChordRadius(TOOL_COUNT, TOOL_SPREAD);
+      double floorR = SubChordRadius(CAT_COUNT, TOOL_SPREAD);
       if(r < floorR) r = floorR;               // never below the collision floor
       startDeg = 210.0 - TOOL_SPREAD / 2.0;
-      stepDeg  = (TOOL_COUNT > 1) ? TOOL_SPREAD / (TOOL_COUNT - 1) : 0.0;
+      stepDeg  = (CAT_COUNT > 1) ? TOOL_SPREAD / (CAT_COUNT - 1) : 0.0;
    }
    double deg = (startDeg + i * stepDeg) * M_PI / 180.0;
    x = ox + (int)MathRound(r * MathCos(deg));
@@ -2917,7 +2611,7 @@ int ToolsItemAt(const int mx, const int my)
    // dead strip between cells and no overlap that would make a click ambiguous).
    int hitHalf = SubIsPanelMode() ? SUB_GRID_PITCH / 2
                                   : CIRC_BTN_SIZE / 2 + CIRC_BG_MARGIN;
-   for(int i = 0; i < TOOL_COUNT; i++)
+   for(int i = 0; i < CAT_COUNT; i++)
    {
       if(!SubItemOnPage(i)) continue;    // parked items must never answer a click
       int ix, iy;
@@ -2975,6 +2669,9 @@ void SubParkItem(const int i)
       ObjectSetInteger(0, ToolsIcon(i), OBJPROP_YDISTANCE, CIRC_HIDE_POS);
    }
    ToolsShowBadge(i, false);
+   // P-UI-161: the star parks with its cell — ToolsMoveStar's own guard hides it
+   // off-page, so one call covers both callers of this function (page flip + drag).
+   ToolsMoveStar(i);
 }
 
 //+------------------------------------------------------------------+
@@ -3210,7 +2907,7 @@ void SubChromeCreate()
    int pages = SubPageCount();
    string cnt = SubIsPaged()
                 ? (IntegerToString(g_ToolsPage + 1) + "/" + IntegerToString(pages))
-                : IntegerToString(TOOL_COUNT);
+                : IntegerToString(CAT_COUNT);
    SubSetLabel(SubPanelCnt(), SubReadoutX(px, pw, cnt), py + 8,
                cnt, SUB_CLR_ACCENT, SUB_PT_READOUT, Z_MENU_BADGE);
 
@@ -3220,6 +2917,10 @@ void SubChromeCreate()
       ObjectDelete(0, SubPagerNext());
       ObjectDelete(0, SubPagerTxt());
       for(int k = 0; k < SUB_PAGER_DOTS_MAX; k++) ObjectDelete(0, SubPagerDot(k));
+      // The non-paged grid is a BUILT shape too. Without this note s_SubBuilt*
+      // keeps the previous mode/rows, SubRelayoutIfNeeded never matches, and
+      // every release/chart-change rebuilds all 16 cells under the pointer.
+      SubNoteBuilt();
       return;
    }
 
@@ -3279,7 +2980,7 @@ void SubChromeMove()
    {
       string cnt = SubIsPaged()
                    ? (IntegerToString(g_ToolsPage + 1) + "/" + IntegerToString(pages))
-                   : IntegerToString(TOOL_COUNT);
+                   : IntegerToString(CAT_COUNT);
       ObjectSetInteger(0, SubPanelCnt(), OBJPROP_XDISTANCE, SubReadoutX(px, pw, cnt));
       ObjectSetInteger(0, SubPanelCnt(), OBJPROP_YDISTANCE, py + 8);
    }
@@ -3363,20 +3064,21 @@ void ToolsBadgePos(const int i, int &x, int &y)
 //| auto-scroll on it lands many times a second. The branch that       |
 //| answers it called `UpdateCircularMenuPosition()` — and that call   |
 //| re-applied the WHOLE ring through `CircApplyMenuPosition()`, whose |
-//| write set with the ring up is 1 orb + RING_COUNT(9) items x (2     |
+//| write set with the ring up is 1 orb + the seats (9 then) x (2      |
 //| `ObjectFind` + 4 `ObjectSetInteger`) + the badge seats + the tools |
 //| row and its header/pager = roughly 60-100 terminal calls, every    |
 //| one of them re-writing a number that had not changed.             |
 //|                                                                   |
 //| `CircLayout(i,x,y)` is a PURE function of (i, menuX, menuY, cw,    |
-//| ch) — `CircFitRadius` beside it already caches on the same four —  |
-//| so the applied position is a derivation of exactly those four plus |
-//| the metrics it read them against, plus what is on screen. When all |
-//| of those are the value the LAST apply already wrote, the write set |
-//| is identical and the call is pure cost. Nothing below the guard    |
-//| can be owed by a chart-change alone: `CircCreateItem`/`CircCreate- |
-//| Orb` position themselves at birth, the sub-panel keeps its OWN     |
-//| shape key (`SubRelayoutIfNeeded`, which still runs), and           |
+//| ch) — `CircFitLimit` beside it already caches on the same four     |
+//| (then `CircFitRadius`) — so the applied position is a derivation of |
+//| exactly those four plus the metrics it read them against, plus what |
+//| is on screen. When all of those are the value the LAST apply        |
+//| already wrote, the write set is identical and the call is pure cost.|
+//| Nothing below the guard can be owed by a chart-change alone:       |
+//| `CircCreateItem`/`CircCreateOrb` position themselves at birth, the |
+//| sub-panel keeps its OWN shape key (`SubRelayoutIfNeeded`, which    |
+//| still runs), and                                                   |
 //| `SaveUIStates` is compare-guarded on the very values the key holds.|
 //|                                                                   |
 //| The CHROME GENERATION is in the key so this can never skip a       |
@@ -3460,7 +3162,8 @@ void CircBadgePos(const int i, int &x, int &y)
    CircLayout(i, cx, cy);
    double dx, dy;
    CircBadgeDir(i, dx, dy);
-   double off = CIRC_BTN_SIZE / 2 + CIRC_BADGE_FLOAT;
+   // P-UI-161: follows the ring's own side — P-UI-195: the SEAT's own side (two circles).
+   double off = CircSeatSize(i) / 2 + CIRC_BADGE_FLOAT;
    x = (int)MathRound(cx + dx * off - CIRC_BADGE_SIZE / 2.0);
    y = (int)MathRound(cy + dy * off - CIRC_BADGE_SIZE / 2.0);
 }
@@ -3519,8 +3222,9 @@ void CircCreateItem(const int i)
 {
    int x, y;
    CircLayout(i, x, y);
-   int bx = x - CIRC_BTN_SIZE / 2;
-   int by = y - CIRC_BTN_SIZE / 2;
+   int s  = CircSeatSize(i);   // P-UI-161: the seat's own side — P-UI-195: inner 44 / outer 32
+   int bx = x - s / 2;
+   int by = y - s / 2;
    int feat = RingFeature(i);
    bool on = CircFeatureLit(feat);
 
@@ -3529,12 +3233,12 @@ void CircCreateItem(const int i)
    {
       if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
    }
-   string bgRes = on ? "::Files\\Icons\\circ_on.bmp" : "::Files\\Icons\\circ_off.bmp";
+   string bgRes = CircBgRes(s, on);   // P-UI-162: the canvas is the seat's own box size (s + 2*margin)
    ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, bx - CIRC_BG_MARGIN);
    ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, by - CIRC_BG_MARGIN);
-   ObjectSetInteger(0, bg, OBJPROP_XSIZE, CIRC_BG_SIZE);
-   ObjectSetInteger(0, bg, OBJPROP_YSIZE, CIRC_BG_SIZE);
+   ObjectSetInteger(0, bg, OBJPROP_XSIZE, s + 2 * CIRC_BG_MARGIN);
+   ObjectSetInteger(0, bg, OBJPROP_YSIZE, s + 2 * CIRC_BG_MARGIN);
    ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, bgRes);
    ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, bgRes);
    ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119
@@ -3544,13 +3248,13 @@ void CircCreateItem(const int i)
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_ZORDER, Z_MENU_ITEM);
 
+   // P-UI-163: create-if-missing, NEVER delete+recreate in one tick — MEASURED 2026-10-17 (the 12:05:39 frame): a same-tick re-create that failed kept the bg and no glyph, and NO writer healed a MISSING icon (every path gates on ObjectFind>=0). Output-identical: the configure below rewrites all, and a BMPFILE re-set re-decodes (the P-UI-161 sync's own law).
    string icon = CircIcon(i);
-   if(ObjectFind(0, icon) >= 0)
-      ObjectDelete(0, icon);
-   if(!ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
-   CircConfigureIcon(icon, feat, on,
-      bx + CIRC_BTN_SIZE / 2,
-      by + CIRC_BTN_SIZE / 2);
+   if(ObjectFind(0, icon) < 0)
+   {
+      if(!ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0)) { DrawStripDiagEmit(StringFormat("[P-UI-163] icon create FAILED seat=%d feat=%d", i, feat)); return; }
+   }
+   CircConfigureIcon(icon, feat, on, x, y);   // P-UI-162: the glyph's box is its own 28px canvas (no taper)
 
    if(CircHasBadge(feat))
    {
@@ -3589,10 +3293,12 @@ void ToolsCreateItem(const int toolIdx)
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_ZORDER, Z_MENU_ITEM);
 
+   // P-UI-163: the same create-if-missing law as CircCreateItem's icon (one class, two live writers — see the measured note there).
    string icon = ToolsIcon(toolIdx);
-   if(ObjectFind(0, icon) >= 0)
-      ObjectDelete(0, icon);
-   if(!ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+   if(ObjectFind(0, icon) < 0)
+   {
+      if(!ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0)) { DrawStripDiagEmit(StringFormat("[P-UI-163] tools icon create FAILED cell=%d feat=%d", toolIdx, feat)); return; }
+   }
    CircConfigureIcon(icon, feat, on, x, y);
 
    // Settings badge (click → open the item's panel). Created only when the
@@ -3602,6 +3308,10 @@ void ToolsCreateItem(const int toolIdx)
       ToolsCreateBadge(toolIdx);
       if(!CircFeatureLit(feat)) ToolsShowBadge(toolIdx, false);
    }
+
+   // P-UI-161: the membership star — born AFTER the badge, on its own Z rung
+   // (Z_MENU_STAR), so the corner mark is the object the click lands on.
+   ToolsCreateStar(toolIdx);
 }
 
 void ToolsShowBadge(const int i, const bool show)
@@ -3698,30 +3408,47 @@ void CreateMenu()
    // The ring stays hidden while the Tools submenu is open (CreateToolsMenu
    // deleted it, CircItemAt refuses it) — rebuilding it here painted both.
    if(!g_ToolsOpen)
-      for(int i = 0; i < RING_COUNT; i++)
+   {
+      CircNoteBuilt();                             // BEFORE the create: CircLayout's n is this live set (the orb press keeps the freeze on)
+      for(int i = 0; i < CircPlacedCountLive(); i++)
          CircCreateItem(i);
+   }
    if(g_ToolsOpen)
-      for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
+      for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
 }
 
 void CreateToolsMenu()
 {
    if(!g_UI.menuVisible) return;
-   if(TOOL_COUNT <= 0) return;                  // nothing to show — stay closed
+   if(CAT_COUNT <= 0) return;                   // nothing to show — stay closed
    g_ToolsOpen = true;
    g_ToolsPage = 0;                             // always open on the first page
    SubInvalidateLayout();                       // fresh geometry for this open
+   // P-UI-163c: the ring is deleted below, so a shown seat tip (and a pending arm)
+   // must not outlive the seat it describes. The pinned orb banner is not a seat
+   // tip and survives (CircTipDisarm's own rule, P-UI-126).
+   CircTipDisarm();
    // SUB-MENU: hide EVERY main-ring item first (the orb stays). With nothing else
    // on screen the chosen geometry provably cannot overlap anything — any
    // position, any edge. The fan (r=112) and the full ring (r=100) genuinely
    // cannot coexist with the main ring at r=64: 44px buttons + their glow overlap.
-   for(int i = 0; i < RING_COUNT; i++)
+   // P-UI-161: the sweep is RING_MAX_SEATS, not the live count — a star toggled
+   // while the Tools menu is open must not leave the previous set's tail behind.
+   for(int i = 0; i < RING_MAX_SEATS; i++)
    {
+      // P-UI-163c: the WHOLE seat family, the way DeleteRing's own sweep names it —
+      // the badge objects (alive while the feature is on) are part of the seat, so
+      // leaving them behind was the same bare-artifact class one layer down. The
+      // restore path is already complete: DeleteToolsMenu's CircCreateItem(i) walks
+      // CircCreateBadge (P-UI-163's own create-if-missing).
       ObjectDelete(0, CircIcon(i));
       ObjectDelete(0, CircBg(i));
+      ObjectDelete(0, CircBadgeBg(i));
+      ObjectDelete(0, CircBadgeTxt(i));
    }
    SubChromeCreate();                           // panel backdrop + header + pager
-   for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
+   for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
+   DrawStripDiagEmit(StringFormat("[P-UI-168] fan open=1 cells=%d placed=%d", CAT_COUNT, CircPlacedCountLive()));
    ChartRedraw();
 }
 
@@ -3729,29 +3456,38 @@ void CreateToolsMenu()
 // wiped the ring, and recreating it here would leak objects onto the chart.
 void DeleteToolsMenu(const bool restoreRing = true)
 {
-   for(int t = 0; t < TOOL_COUNT; t++)
+   for(int t = 0; t < CAT_COUNT; t++)
    {
       ObjectDelete(0, ToolsBg(t));
       ObjectDelete(0, ToolsIcon(t));
       ObjectDelete(0, ToolsBadgeBg(t));
       ObjectDelete(0, ToolsBadgeTxt(t));
+      ObjectDelete(0, ToolsStar(t));   // P-UI-161: the membership mark dies with its cell
    }
    SubChromeDelete();                           // panel + header + pager + dots
    g_ToolsOpen = false;
    g_ToolsPage = 0;                             // next open starts on page 1 again
    SubInvalidateLayout();
-   if(restoreRing && g_UI.menuVisible)             // bring the ring back
-      for(int i = 0; i < RING_COUNT; i++) CircCreateItem(i);
+   // P-UI-163c: the twin edge, a cell tip cannot describe a deleted cell.
+   CircTipDisarm();
+   if(restoreRing && g_UI.menuVisible)          // bring the ring back
+   {
+      // P-UI-161: the ring is rebuilt from the mask the stars just wrote — a star
+      // toggled while the Tools menu was open lands HERE, in the same click.
+      CircNoteBuilt();
+      for(int i = 0; i < CircPlacedCountLive(); i++) CircCreateItem(i);
+   }
+   DrawStripDiagEmit(StringFormat("[P-UI-168] fan open=0 restore=%d placed=%d built=%d", (restoreRing ? 1 : 0), CircPlacedCountLive(), s_circBuiltSeats));
    ChartRedraw();
 }
 
 // Re-place every cell + refresh the pager for the CURRENT page (a page flip).
-// Cheap: TOOL_COUNT object moves and no bitmap re-decode — the panel BMP depends
+// Cheap: CAT_COUNT object moves and no bitmap re-decode — the panel BMP depends
 // on the row count, and a flip never changes that.
 void SubApplyPage()
 {
    if(!g_ToolsOpen) return;
-   for(int t = 0; t < TOOL_COUNT; t++) ToolsMoveItem(t);
+   for(int t = 0; t < CAT_COUNT; t++) ToolsMoveItem(t);
    SubChromeCreate();
 }
 
@@ -3762,19 +3498,20 @@ void SubRebuild()
 {
    if(!g_ToolsOpen) return;
    SubChromeDelete();
-   for(int t = 0; t < TOOL_COUNT; t++)
+   for(int t = 0; t < CAT_COUNT; t++)
    {
       ObjectDelete(0, ToolsBg(t));
       ObjectDelete(0, ToolsIcon(t));
       ObjectDelete(0, ToolsBadgeBg(t));
       ObjectDelete(0, ToolsBadgeTxt(t));
+      ObjectDelete(0, ToolsStar(t));   // P-UI-161
    }
    // A shorter chart pages MORE, so the current page may no longer exist.
    int pages = SubPageCount();
    if(g_ToolsPage > pages - 1) g_ToolsPage = pages - 1;
    if(g_ToolsPage < 0)          g_ToolsPage = 0;
    SubChromeCreate();
-   for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
+   for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
    ChartRedraw();
 }
 
@@ -3803,13 +3540,31 @@ void SubRelayoutIfNeeded()
    SubRebuild();
 }
 
+//--- P-UI-161: the RING's own shape fingerprint — the seat set. A star toggled
+//--- while the Tools menu is open lands on DeleteToolsMenu's own rebuild; but a
+//--- chart resize or an orb drag can change how many starred seats FIT, and that
+//--- flip is answered here (the release + the chart-change path), never mid-drag:
+//--- while dragging, CircPlacedCount() returns the BUILT count, so the compare
+//--- below sees "same" and the hand keeps its geometry (the SubMode() rule).
+void CircRelayoutIfNeeded()
+{
+   if(!g_UI.menuVisible || g_ToolsOpen || g_OrbDragging) return;
+   if(s_circBuiltSeats == CircPlacedCountLive()) return;   // same set — the move already ran
+   DrawStripDiagEmit(StringFormat("[P-UI-168] ring relayout built=%d live=%d", s_circBuiltSeats, CircPlacedCountLive()));
+   DeleteRing();
+   CreateMenu();          // rebuilds orb + the new seat set and re-notes the fingerprint
+   ChartRedraw();
+}
+
 //--- P-UI-129 (2026-09-25): the RING family alone, ONE owner. `DeleteMenu`
 //--- (every teardown) and the orb TOGGLE both want exactly this, and the toggle
 //--- wants nothing else — so it is a function, not a loop written twice.
 void DeleteRing()
 {
    s_circChromeGen++;   // P-PERF-55: the family is gone - a later apply must not be skipped
-   for(int i = 0; i < RING_COUNT; i++)
+   // P-UI-161: the sweep is RING_MAX_SEATS, not the live count — a name a previous
+   // (larger) mask wrote must not survive the star that removed its seat.
+   for(int i = 0; i < RING_MAX_SEATS; i++)
    {
       ObjectDelete(0, CircIcon(i));
       ObjectDelete(0, CircBg(i));
@@ -3881,10 +3636,12 @@ void CircMoveItem(const int i)
 {
    int x, y;
    CircLayout(i, x, y);
-   int bx = x - CIRC_BTN_SIZE / 2;
-   int by = y - CIRC_BTN_SIZE / 2;
+   int s  = CircSeatSize(i);   // P-UI-161: matches CircCreateItem's own side — P-UI-195: per circle
+   int bx = x - s / 2;
+   int by = y - s / 2;
    if(ObjectFind(0, CircIcon(i)) >= 0)
    {
+      // P-UI-162: the glyph is CIRC_ICON_SIZE (28) on every path — a drag must not shift it
       ObjectSetInteger(0, CircIcon(i), OBJPROP_XDISTANCE, x - CIRC_ICON_SIZE / 2);
       ObjectSetInteger(0, CircIcon(i), OBJPROP_YDISTANCE, y - CIRC_ICON_SIZE / 2);
    }
@@ -3892,6 +3649,8 @@ void CircMoveItem(const int i)
    {
       ObjectSetInteger(0, CircBg(i), OBJPROP_XDISTANCE, bx - CIRC_BG_MARGIN);
       ObjectSetInteger(0, CircBg(i), OBJPROP_YDISTANCE, by - CIRC_BG_MARGIN);
+      ObjectSetInteger(0, CircBg(i), OBJPROP_XSIZE, s + 2 * CIRC_BG_MARGIN);
+      ObjectSetInteger(0, CircBg(i), OBJPROP_YSIZE, s + 2 * CIRC_BG_MARGIN);
    }
    int feat = RingFeature(i);
    if(CircHasBadge(feat)) CircMoveBadge(i);
@@ -3943,6 +3702,8 @@ void ToolsMoveItem(const int t)
    int featT = ToolFeature(t);
    if(CircHasBadge(featT) && ObjectFind(0, ToolsBadgeBg(t)) >= 0)
       ToolsShowBadge(t, CircFeatureOn(featT));
+   // P-UI-161: the star follows its cell (and parks itself when off-page)
+   ToolsMoveStar(t);
 }
 
 void CircApplyMenuPosition()
@@ -3957,12 +3718,12 @@ void CircApplyMenuPosition()
 
    if(g_UI.menuVisible)
    {
-      for(int i = 0; i < RING_COUNT; i++)
+      for(int i = 0; i < CircPlacedCount(); i++)   // P-UI-161: exactly the built set (frozen mid-drag)
          CircMoveItem(i);
       if(g_ToolsOpen)
       {
          SubChromeMove();   // panel + header + pager translate with the orb
-         for(int t = 0; t < TOOL_COUNT; t++) ToolsMoveItem(t);
+         for(int t = 0; t < CAT_COUNT; t++) ToolsMoveItem(t);
       }
    }
 }
@@ -4018,6 +3779,11 @@ void UpdateCircularMenuPosition()
    // fit, or fewer rows may fit and the panel must page). Rebuild only when the
    // shape actually changed — a plain move already ran above.
    SubRelayoutIfNeeded();
+   // P-UI-161: and the RING's seat set is a function of the SAME box — a resize can
+   // change how many starred seats fit. Answered HERE, on the apply path only (the
+   // skip path's key covers every input CircPlacedCountLive reads, so a change that
+   // reaches this line is the only one that can move the count).
+   CircRelayoutIfNeeded();
    CircTipPinnedTouch();   // P-UI-126: a pinned banner "above the orb" follows by tick, not per move
    SaveUIStates();
 }
@@ -4221,6 +3987,8 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
          else if(!g_LongPressFired && GetTickCount() - g_LongPressStart >= LONG_PRESS_TIME)
          {
             g_LongPressFired = true;
+            // P-UI-169: a hold that owns NO card must not eat the release.
+            if(g_LongPressItem < 0 || g_LongPressItem >= PNL_COUNT) { g_LongPressFired = false; return; }
             PnlOpen(g_LongPressItem);
             UISuppressNextClick();
          }
@@ -4281,7 +4049,10 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
       {
          int feat = RingFeature(hitIdx);
          if(feat == CIR_TOOLS) return; // tools toggles submenu on click, no long press
-         g_LongPressItem  = RingPanel(hitIdx);
+         // P-UI-169: an item with no card refuses the hold - its click still answers.
+         int rp = RingPanel(hitIdx);
+         if(rp < 0) return;
+         g_LongPressItem  = rp;
          g_LongPressStart = GetTickCount();
          g_LongPressX     = mx;
          g_LongPressY     = my;
@@ -4342,8 +4113,10 @@ void CircHandleMouseMove(const int mx, const int my, const bool leftDown,
       // The mode was FROZEN for the whole drag (rebuilding geometry under the
       // hand would flicker). The release is where it is allowed to change, so
       // re-derive it now: dragging out of a corner may turn the arc into a
-      // train, or a train into the grid panel.
+      // train, or a train into the grid panel. P-UI-161: the ring's SEAT COUNT
+      // was frozen the same way — the release is where it may change too.
       SubRelayoutIfNeeded();
+      CircRelayoutIfNeeded();
       return;
    }
 
@@ -4414,16 +4187,18 @@ void CircUpdateItemState(const int i)
    bool on = CircFeatureLit(feat);
 
    string icon = CircIcon(i);
-   if(ObjectFind(0, icon) >= 0)
+   int ix, iy;
+   CircLayout(i, ix, iy);
+   if(ObjectFind(0, icon) < 0)   // P-UI-163: the ONE state this pass used to skip — heal it, flushed (the sync's hash sees the desired state, not the chart)
    {
-      int ix, iy;
-      CircLayout(i, ix, iy);
-      CircConfigureIcon(icon, feat, on, ix, iy);
+      if(!ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+      DrawStripDiagEmit(StringFormat("[P-UI-163] icon heal seat=%d feat=%d", i, feat));
    }
+   CircConfigureIcon(icon, feat, on, ix, iy);
    string bg = CircBg(i);
    if(ObjectFind(0, bg) >= 0)
    {
-      string res = on ? "::Files\\Icons\\circ_on.bmp" : "::Files\\Icons\\circ_off.bmp";
+      string res = CircBgRes(CircSeatSize(i), on);   // P-UI-162: per-side canvas — box == canvas on this path too
       ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, res);
       ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, res);
       ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119   // bg ring keeps a live tooltip too
@@ -4489,15 +4264,24 @@ void CircShowBadge(const int i, const bool show)
 
 void UpdateCircularItemStates()
 {
-   for(int i = 0; i < RING_COUNT; i++)
-      CircUpdateItemState(i);
+   // P-UI-163c (MEASURED 2026-10-17, the 17:07 frame): the ring is HIDDEN while the
+   // Tools fan is open (CreateToolsMenu's own sweep) — so this pass must not rebuild
+   // it. A state change while open used to run the loop below, CircUpdateItemState
+   // re-created every missing icon (13 × `[P-UI-163] icon heal`) while the bg stayed
+   // deleted — the bare-glyph ring in the user's screenshot. Every other ring writer
+   // carries the guard (CreateMenu C:356, CircRelayoutIfNeeded C:482,
+   // ToggleMenuVisibility D:533, CircHealRingStep D:16); this loop was the odd one
+   // out. Cost: one bool test.
+   if(g_UI.menuVisible && !g_ToolsOpen)
+      for(int i = 0; i < CircPlacedCount(); i++)
+         CircUpdateItemState(i);
    if(g_ToolsOpen)
-      for(int t = 0; t < TOOL_COUNT; t++) ToolsUpdateItemState(t);
+      for(int t = 0; t < CAT_COUNT; t++) ToolsUpdateItemState(t);
 }
 
 void UpdateCircularBadges()
 {
-   for(int i = 0; i < RING_COUNT; i++)
+   for(int i = 0; i < CircPlacedCount(); i++)
    {
       int feat = RingFeature(i);
       if(!CircHasBadge(feat)) continue;
@@ -4513,47 +4297,8 @@ void UpdateCircularBadges()
    }
 }
 
-//+------------------------------------------------------------------+
-//| PERF: change-guarded periodic icon sync.                          |
-//| Re-setting OBJPROP_BMPFILE makes MT4 re-decode the bitmap, so the |
-//| old every-500ms unconditional pass churned the chart thread even  |
-//| when nothing changed. We fingerprint the on/off state of all ring |
-//| icons and only run the heavy pass when it actually differs.       |
-//+------------------------------------------------------------------+
-void UpdateMenuSyncIfChanged()
-{
-   static ulong s_LastStateHash = 0;
-
-   // FNV-1a fingerprint of ring + tools on/off state AND badge TEXT, so
-   // value-only changes (E/S hotkeys, factor override, TH mode) refresh the
-   // badges — not just on/off flips.
-   ulong h = 1469598103934665603;
-   for(int i = 0; i < RING_COUNT; i++)
-   {
-      int feat = RingFeature(i);
-      ulong v = (ulong)(CircFeatureLit(feat) ? 1 : 0);
-      h = (h ^ (v + 0x9E3779B97F4A7C15 * (ulong)(feat + 1))) * 1099511628211;
-      string t = CircBadgeText(feat);
-      for(int c = 0; c < StringLen(t); c++)
-         h = (h ^ StringGetCharacter(t, c)) * 1099511628211;
-   }
-   for(int t = 0; t < TOOL_COUNT; t++)
-   {
-      int feat = ToolFeature(t);
-      ulong v = (ulong)(CircFeatureLit(feat) ? 1 : 0);
-      h = (h ^ (v + 0x9E3779B97F4A7C15 * (ulong)(feat + 1))) * 1099511628211;
-      string bt = CircBadgeText(feat);
-      for(int c = 0; c < StringLen(bt); c++)
-         h = (h ^ StringGetCharacter(bt, c)) * 1099511628211;
-   }
-   if(h == s_LastStateHash) return;   // nothing visible changed -> no churn
-   s_LastStateHash = h;
-
-   if(g_UI.menuVisible)
-      UpdateCircularItemStates();
-   UpdateCircularBadges();
-   CircTipRefresh();   // hovered tooltip follows the new state
-}
+// P-SIZE-1500 (2026-10-17): UpdateMenuSyncIfChanged moved to BiotakMenu_D.mqh —
+// its only caller (BiotakKit's per-tick pass) loads after both files.
 
 int CircIndexFromName(const string name)
 {
@@ -4576,7 +4321,10 @@ int ToolsIndexFromName(const string name)
    string pfx;
    // NOTE: check "ToolsBadgeTxt" BEFORE "ToolsBadge" — the plain-prefix match
    // would otherwise swallow the text object and mis-parse its index.
+   // P-UI-161: "ToolsStar" is its own prefix (no other family starts with it).
    pfx = g_UI.btnPrefix + "ToolsBadgeTxt";
+   if(StringFind(name, pfx) == 0) return (int)StringToInteger(StringSubstr(name, StringLen(pfx)));
+   pfx = g_UI.btnPrefix + "ToolsStar";
    if(StringFind(name, pfx) == 0) return (int)StringToInteger(StringSubstr(name, StringLen(pfx)));
    pfx = g_UI.btnPrefix + "ToolsBg";
    if(StringFind(name, pfx) == 0) return (int)StringToInteger(StringSubstr(name, StringLen(pfx)));
@@ -4585,6 +4333,92 @@ int ToolsIndexFromName(const string name)
    pfx = g_UI.btnPrefix + "ToolsBadge";
    if(StringFind(name, pfx) == 0) return (int)StringToInteger(StringSubstr(name, StringLen(pfx)));
    return -1;
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-161 — THE MEMBERSHIP STAR, one object per Tools cell.       |
+//|                                                                  |
+//| The user's own mechanism («توی همون تولز که هستش یک علامت ستاره   |
+//| باشه که بهتر و سریع تره»): every cell of the Tools menu wears a   |
+//| star at its top-right corner — amber when the item is IN the main |
+//| ring, silver when it is not. A click on the star toggles the bit; |
+//| the state and the ring are the SAME fact, so the witness below     |
+//| carries the read-back the report needs (a click that "did       |
+//| nothing" is unprovable without it — DIAG-131's law).              |
+//|                                                                  |
+//| Seat: the star box is 16px inside the cell's own visible half     |
+//| (the grid tile is SUB_CELL_VIS wide, the disc fan/ring 44) — so   |
+//| it reads as a corner mark of the icon, not a second control.      |
+//| Z: it is born AFTER the badge (Z_MENU_STAR above Z_MENU_BADGE),   |
+//| so a badge and a star can never fight over the corner.            |
+//+------------------------------------------------------------------+
+string ToolsStar(const int i) { return g_UI.btnPrefix + "ToolsStar" + IntegerToString(i); }
+
+void ToolsStarPos(const int i, int &x, int &y)
+{
+   int cx, cy;
+   ToolsLayout(i, cx, cy);
+   int half = SubIsPanelMode() ? SUB_CELL_VIS / 2 : CircBtnSizeForN(CAT_COUNT) / 2;
+   x = cx + half - CIRC_STAR_SIZE - 1;
+   y = cy - half + 1;
+}
+
+void ToolsCreateStar(const int i)
+{
+   int x, y;
+   ToolsStarPos(i, x, y);
+   string name = ToolsStar(i);
+   if(ObjectFind(0, name) < 0)
+      if(!ObjectCreate(0, name, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+   string res = CircCatStarred(i) ? "::Files\\Icons\\star_on.bmp" : "::Files\\Icons\\star_off.bmp";
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, CIRC_STAR_SIZE);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, CIRC_STAR_SIZE);
+   ObjectSetString(0, name, OBJPROP_BMPFILE, 0, res);
+   ObjectSetString(0, name, OBJPROP_BMPFILE, 1, res);
+   ObjectSetString(0, name, OBJPROP_TOOLTIP, "");   // P-UI-119
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, Z_MENU_STAR);
+}
+
+void ToolsUpdateStar(const int i)
+{
+   string name = ToolsStar(i);
+   if(ObjectFind(0, name) < 0) return;
+   string res = CircCatStarred(i) ? "::Files\\Icons\\star_on.bmp" : "::Files\\Icons\\star_off.bmp";
+   ObjectSetString(0, name, OBJPROP_BMPFILE, 0, res);
+   ObjectSetString(0, name, OBJPROP_BMPFILE, 1, res);
+}
+
+void ToolsMoveStar(const int i)
+{
+   string name = ToolsStar(i);
+   if(ObjectFind(0, name) < 0) return;
+   if(!SubItemOnPage(i)) { ObjectSetInteger(0, name, OBJPROP_XDISTANCE, CIRC_HIDE_POS);
+                           ObjectSetInteger(0, name, OBJPROP_YDISTANCE, CIRC_HIDE_POS); return; }
+   int x, y;
+   ToolsStarPos(i, x, y);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+}
+
+//--- The star's ONE writer: flip the bit, repaint the mark, persist, witness.
+//--- The ring follows on its own (DeleteToolsMenu's restore rebuilds it from the
+//--- mask the moment the Tools menu closes), so nothing else needs telling.
+void CircStarToggle(const int cat)
+{
+   bool on = !CircCatStarred(cat);
+   CircStarSet(cat, on);
+   ToolsUpdateStar(cat);
+   SaveUIStates();
+   DrawStripDiagEmit(StringFormat("[P-UI-161] star cat=%d on=%d mask=0x%X ringN=%d",
+                                  cat, (on ? 1 : 0), (int)g_CircStarMask, RingCount()));
+   ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
@@ -4630,6 +4464,10 @@ int CircArmBaseKnot()
    CreateMenu();   // orb only — the ring is gone while menuVisible=false
    SaveUIStates();
    PnlCloseAll();   // a stale strip/card must not survive under the draw session
+   // P-MT5-PARITY (2026-10-21) - PARITY (MT4 BiotakMenu_C.mqh:1397-1398): the box yields the RAY and the
+   // PATH - those two only. MT5's own "cancel every other tool" sweep also tore
+   // down a live custom-price placement, a live TH3/leg session and a live box
+   // session; MT4 never did that here.
    if(HRaySessionActive()) HRayCancel();   // P-HR-06: the ray yields (its lock goes back)
    if(PathSessionActive()) { PathSessionClear(); PathCancel(); }
    BaseKnotArm();
@@ -4641,6 +4479,10 @@ int CircArmBaseKnot()
 int CircArmPath()
 {
    if(BaseKnotSessionActive()) return REFRESH_NONE;
+   // P-MT5-PARITY (2026-10-21) - PARITY (MT4 BiotakMenu_C.mqh:1407-1410): ONE GESTURE AT A TIME. The press
+   // is DEAD under a live leg/TH3 session - the path refuses, it does not tear
+   // the other gesture down. MT5's own sweep cancelled the live TH3/leg session
+   // instead, so arming a path silently killed an unfinished drawing.
 #ifndef BUILD_LITE
    if(LegMeasureSessionActive() || TH3SessionActive()) return REFRESH_NONE;
 #endif
@@ -4661,6 +4503,9 @@ int CircArmHRay()
    // P-HR-06: one gesture at a time — the ray yields to a live draw session
    // instead of arming under it (a second light whose clicks never arrive).
    if(BaseKnotSessionActive()) return REFRESH_NONE;
+   // P-MT5-PARITY (2026-10-21) - PARITY (MT4 BiotakMenu_C.mqh:1427-1430): the press is DEAD under a live
+   // leg/TH3 session - the ray refuses, it does not tear the other gesture
+   // down. MT5's own sweep cancelled the live TH3/leg session instead.
 #ifndef BUILD_LITE
    if(LegMeasureSessionActive() || TH3SessionActive()) return REFRESH_NONE;
 #endif
@@ -4738,6 +4583,105 @@ int CircArmTH3Draw()
 #ifndef BIOTAK_MENU_D_MQH
 #define BIOTAK_MENU_D_MQH
 
+//--- P-UI-163: the ring's own existence probe — ONE seat per tick, round-robin.
+//--- MEASURED 2026-10-17 (the 12:05:39 frame): a seat whose icon create failed
+//--- mid-burst kept its bg and lost its glyph for the rest of the attach — and NO
+//--- writer re-created a missing icon (every path gated on ObjectFind>=0; the
+//--- P-UI-161 sync's hash sees the DESIRED state, not the chart;
+//--- CircRelayoutIfNeeded compares counts). Cost on a still frame: 2 ObjectFind
+//--- per tick, 0 writes; the ring is swept in CircPlacedCount() ticks and a hole
+//--- is rebuilt the tick it is seen (the tip's own one-probe-per-tick shape,
+//--- P-PERF-17). P-SIZE-1500 sent it here from BiotakMenu_C (its owner file).
+//--- P-UI-163c: while the fan is open the ring does not exist on purpose, so the
+//--- probe serves the CELLS then — one per tick, the same hole class (a failed
+//--- cell create was a permanent hole too: no writer re-created it). The whole
+//--- seat family is probed: bg+icon always, badge when the feature has one, and
+//--- the ring seat's badge likewise. Still ~2-4 ObjectFind/tick, 0 writes whole.
+//--- Parked cells are skipped: a hole off-page is invisible by definition and
+//--- heals the tick it is back on its page.
+void CircHealRingStep()
+{
+   if(!g_UI.menuVisible || g_OrbDragging) return;
+   if(g_ToolsOpen)
+   {
+      if(CAT_COUNT <= 0) return;
+      static int s_healCell = 0;
+      if(s_healCell >= CAT_COUNT) s_healCell = 0;
+      int t = s_healCell++;
+      if(!SubItemOnPage(t)) return;
+      bool bHole = (ObjectFind(0, ToolsBg(t)) < 0 || ObjectFind(0, ToolsIcon(t)) < 0 ||
+                    ObjectFind(0, ToolsStar(t)) < 0);
+      if(!bHole && CircHasBadge(ToolFeature(t)))
+         bHole = (ObjectFind(0, ToolsBadgeBg(t)) < 0 || ObjectFind(0, ToolsBadgeTxt(t)) < 0);
+      if(bHole)
+      {
+         ToolsCreateItem(t);   // the whole cell family; on-page by the gate above
+         DrawStripDiagEmit(StringFormat("[P-UI-163] tools heal cell=%d", t));
+      }
+      return;
+   }
+   int n = CircPlacedCount();
+   if(n <= 0) return;
+   static int s_healSeat = 0;
+   if(s_healSeat >= n) s_healSeat = 0;
+   int i = s_healSeat++;
+   bool bHole = (ObjectFind(0, CircBg(i)) < 0 || ObjectFind(0, CircIcon(i)) < 0);
+   if(!bHole && CircHasBadge(RingFeature(i)))
+      bHole = (ObjectFind(0, CircBadgeBg(i)) < 0 || ObjectFind(0, CircBadgeTxt(i)) < 0);
+   if(bHole)
+   {
+      CircCreateItem(i);
+      DrawStripDiagEmit(StringFormat("[P-UI-163] ring heal seat=%d", i));
+   }
+}
+
+// P-SIZE-1500 (2026-10-17): moved here from BiotakMenu_C, verbatim — its only
+// caller (BiotakKit's per-tick pass) loads after this file, and C sat 22 lines
+// over the ceiling. The law is unchanged: only a state edge runs the heavy pass.
+//+------------------------------------------------------------------+
+//| PERF: change-guarded periodic icon sync.                          |
+//| Re-setting OBJPROP_BMPFILE makes MT4 re-decode the bitmap, so the |
+//| old every-500ms unconditional pass churned the chart thread even  |
+//| when nothing changed. We fingerprint the on/off state of all ring |
+//| icons and only run the heavy pass when it actually differs.       |
+//+------------------------------------------------------------------+
+void UpdateMenuSyncIfChanged()
+{
+   static ulong s_LastStateHash = 0;
+
+   // FNV-1a fingerprint of ring + tools on/off state AND badge TEXT, so
+   // value-only changes (E/S hotkeys, factor override, TH mode) refresh the
+   // badges — not just on/off flips. P-UI-161: the star MASK is in the hash too,
+   // so a membership change repaints even when no feature state moved.
+   ulong h = 1469598103934665603;
+   h = (h ^ (ulong)g_CircStarMask) * 1099511628211;
+   for(int i = 0; i < CircPlacedCount(); i++)
+   {
+      int feat = RingFeature(i);
+      ulong v = (ulong)(CircFeatureLit(feat) ? 1 : 0);
+      h = (h ^ (v + 0x9E3779B97F4A7C15 * (ulong)(feat + 1))) * 1099511628211;
+      string t = CircBadgeText(feat);
+      for(int c = 0; c < StringLen(t); c++)
+         h = (h ^ StringGetCharacter(t, c)) * 1099511628211;
+   }
+   for(int t = 0; t < CAT_COUNT; t++)
+   {
+      int feat = ToolFeature(t);
+      ulong v = (ulong)(CircFeatureLit(feat) ? 1 : 0);
+      h = (h ^ (v + 0x9E3779B97F4A7C15 * (ulong)(feat + 1))) * 1099511628211;
+      string bt = CircBadgeText(feat);
+      for(int c = 0; c < StringLen(bt); c++)
+         h = (h ^ StringGetCharacter(bt, c)) * 1099511628211;
+   }
+   if(h == s_LastStateHash) return;   // nothing visible changed -> no churn
+   s_LastStateHash = h;
+
+   if(g_UI.menuVisible)
+      UpdateCircularItemStates();
+   UpdateCircularBadges();
+   CircTipRefresh();   // hovered tooltip follows the new state
+}
+
 // P-HTF-KEY — ONE owner for the HTF overlay switch: the R hotkey, the ring's
 // HTF light and the card's ENABLED row. State + persisted key + mask walk
 // (instant both ways, no delete/rebuild); first ON builds via the walk.
@@ -4751,6 +4695,94 @@ void SetHTFVisible(const bool on)
    RepaintForDiscreteAction();      // P-PERF-24: the press paints NOW
    _LOG_GATE_D Print("[HTF] set on=", (on ? 1 : 0), " drawn=", g_HTFDrawnCount,
          " ms=", (int)(GetTickCount() - t0));
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-192 - the seven TOOLS' one body.                             |
+//| The ring seat and the Tools cell are the same control; both run   |
+//| this function. `stopped` is the GENERAL door's early exit.        |
+//+------------------------------------------------------------------+
+int ToolFeatureClick(const int tfeat, bool &stopped)
+{
+   stopped = false;
+   int tflags = REFRESH_NONE;
+   if(tfeat == CIR_PIN)
+   {
+      if(g_customPriceLineCreated || g_waitingForCustomPriceClick ||
+         g_customPriceKeyboardOverride)
+      {
+         DeactivateCustomPriceMode("ring PIN");
+         tflags = REFRESH_ALL;
+      }
+      else
+      {
+         g_waitingForCustomPriceClick = true;
+         g_customPriceKeyboardOverride = true;
+         ObjectDelete(0, g_customPriceHorizontalLineName);
+         g_customPriceLineCreated = false;
+         double currentPrice = ScreenMiddlePrice();
+         if(!(currentPrice > 0.0))
+             currentPrice = iClose(_Symbol, CompatTF(GetCachedPeriod()), 0);
+         g_customTHStartPrice = currentPrice;
+         g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
+         HandsetPlacementArm();
+         CustomPricePersistPlacement(currentPrice);
+         CreateCustomPriceLine(currentPrice, Digits);
+         g_redrawTHLevelsNeeded = true;
+         tflags = REFRESH_ALL;
+      }
+   }
+   else if(tfeat == CIR_STEP_OVERRIDE)
+   {
+      g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)(((int)GetCurrentStepMode() + 1) % 4);
+      RequestUISync();
+      GlobalVariableDel("Biotak_StepMode_" + GetCachedChartIdStr());
+      UpdateStepModeLabel();
+      g_forceClearOnNextDraw = true;
+      g_redrawTHLevelsNeeded = true;
+      tflags = REFRESH_ALL;
+   }
+   else if(tfeat == CIR_GENERAL)
+   {
+      UISuppressNextClick();
+      PnlOpen(FeaturePanel(tfeat));
+      stopped = true;
+      return REFRESH_NONE;
+   }
+   else if(tfeat == CIR_HRAY)
+   {
+      tflags = CircArmHRay();
+   }
+   else if(tfeat == CIR_PATH)
+   {
+      tflags = CircArmPath();
+   }
+   else if(tfeat == CIR_SCALE)
+   {
+      bool wasFixed = (ChartGetInteger(0, CHART_SCALEFIX) != 0);
+      bool retOk    = ChartSetInteger(0, CHART_SCALEFIX, !wasFixed);
+      bool nowFixed = (ChartGetInteger(0, CHART_SCALEFIX) != 0);
+      DrawStripDiagEmit("[P-UI-159] scale was=" + IntegerToString(wasFixed ? 1 : 0) +
+                        " now=" + IntegerToString(nowFixed ? 1 : 0) +
+                        " ret=" + IntegerToString(retOk ? 1 : 0));
+      ChartRedraw();
+   }
+   else if(tfeat == CIR_HIDE)
+   {
+      bool wasHidden = IsIndicatorHidden();
+      int  hideRet   = ApplyHideAllState(!wasHidden);
+      bool nowHidden = IsIndicatorHidden();
+      DrawStripDiagEmit("[P-UI-160] hide was=" + IntegerToString(wasHidden ? 1 : 0) +
+                        " now=" + IntegerToString(nowHidden ? 1 : 0) +
+                        " ret=" + IntegerToString(hideRet));
+      RequestUISync();
+      RepaintForDiscreteAction();
+   }
+   else if(tfeat == CIR_BASEKNOT)
+   {
+      // UIBK-OFF: the measuring tool owns its ring slot; this cell is retired in place.
+   }
+   return tflags;
 }
 
 //+------------------------------------------------------------------+
@@ -4838,6 +4870,15 @@ int HandleButtonClick(const string clickedObject)
          PnlOpen(ToolPanel(tidx));
          return REFRESH_NONE;
       }
+      // P-UI-161: the membership star — a TOGGLE and nothing else. It sits before
+      // the long-press latch (like the badge): the star is its own control, and a
+      // stale latch from a previous gesture must not eat its click. No suppression
+      // either — nothing else acts on this release (the ring toggles' own rule).
+      if(StringFind(clickedObject, g_UI.btnPrefix + "ToolsStar") == 0)
+      {
+         CircStarToggle(tidx);
+         return REFRESH_NONE;
+      }
       if(g_LongPressFired)
       {
          g_LongPressFired = false;
@@ -4846,108 +4887,14 @@ int HandleButtonClick(const string clickedObject)
       }
       int tfeat = ToolFeature(tidx);
       int tflags = REFRESH_NONE;
-      if(tfeat == CIR_PIN)
-      {
-         // P-UI-45: THE BUTTON IS A TOGGLE. It used to ALWAYS re-arm: every press
-         // deleted the line and re-created it at the market price (and left it
-         // SELECTED), so the light could be switched ON and never OFF and the only
-         // way back to the default start point was the ESC key - a control that
-         // moves its own state in one direction only. OFF runs the SAME owner the
-         // ESC key does, so the two can never drift.
-         if(g_customPriceLineCreated || g_waitingForCustomPriceClick ||
-            g_customPriceKeyboardOverride)
-         {
-            DeactivateCustomPriceMode("ring PIN");
-            tflags = REFRESH_ALL;
-         }
-         else
-         {
-            g_waitingForCustomPriceClick = true;
-            g_customPriceKeyboardOverride = true;
-            ObjectDelete(0, g_customPriceHorizontalLineName);
-            g_customPriceLineCreated = false;
-            // P-UI-98d v2: the line is born where the user is LOOKING — the
-            // vertical middle of the visible chart, wherever they have scrolled
-            // («زمانی که فعال میشه هر جایی که کاربر هست وسط صفحه ظاهر بشه») —
-            // and the market's last price is only the fallback.
-            double currentPrice = ScreenMiddlePrice();
-            if(!(currentPrice > 0.0))
-                currentPrice = iClose(_Symbol, CompatTF(GetCachedPeriod()), 0);
-            g_customTHStartPrice = currentPrice;
-            g_thStartPointType = TH_START_POINT_CUSTOM_PRICE;
-            // P-UI-98e: a FRESH placement wakes the armed/set pair through its
-            // ONE owner - a line the user had SET must not come back inert.
-            HandsetPlacementArm();
-            // P-UI-56: the placement pair has ONE writer, in the domain layer
-            // (`EventHandlers`, included before this file). The keys are chart-scoped
-            // now, so pressing PIN on this chart can no longer move the ladder of
-            // another chart of the same symbol.
-            CustomPricePersistPlacement(currentPrice);
-            // P-UI-48: always grabbable, never pre-SELECTED - the line's drag IS
-            // its SELECTABLE flag, and the interference was a selection that
-            // outlived its gesture (see CreateCustomPriceLine).
-            CreateCustomPriceLine(currentPrice, Digits);
-            g_redrawTHLevelsNeeded = true;
-            tflags = REFRESH_ALL;
-         }
-      }
-       else if(tfeat == CIR_STEP_OVERRIDE)
-       {
-          // STEPOVERRIDE-OFF: single Step Mode — cycle the base 0..3 (same as
-          // the E key and the panel row). OV_ persist rides on REFRESH_ALL.
-          g_stepCalculationMode = (ENUM_STEP_CALCULATION_MODE)(((int)GetCurrentStepMode() + 1) % 4);
-          // P-UI-40b: this item is the SAME control as the E key (which asks, see
-          // EventHandlers) one surface over. The STEP card's mode row displays this
-          // value and the ring cannot repaint an open card from here.
-          RequestUISync();   // P-UI-40b: the STEP card's mode row displays this value
-          GlobalVariableDel("Biotak_StepMode_" + GetCachedChartIdStr());   // purge retired override key
-          UpdateStepModeLabel();   // same confirmation as E / panel (redraw below only repositions it)
-          g_forceClearOnNextDraw = true;
-          g_redrawTHLevelsNeeded = true;
-          tflags = REFRESH_ALL;
-       }
-       else if(tfeat == CIR_GENERAL)   // P-UI-131: a pure door — no switch to invert
-       {
-          // OPEN on the CLICK, the same act the HOLD performs (the long-press path
-          // asks ToolPanel too), so the one gesture the user already knows works and
-          // nothing else in the ladder changes state.
-          UISuppressNextClick();
-          PnlOpen(ToolPanel(tidx));
-          return REFRESH_NONE;
-       }
-        else if(tfeat == CIR_HRAY)   // P-HR-01: momentary toggle — the cell light is the session
-        {
-           tflags = CircArmHRay();
-        }
-        else if(tfeat == CIR_PATH)
-        {
-           tflags = CircArmPath();
-        }
-       else if(tfeat == CIR_BASEKNOT)
-       {
-          // UIBK-OFF (P-UI-95): the MEASURING tool has its own RING slot now
-          // (RING_BASEKNOT) and this cell is retired in place. It can no longer be
-          // reached (ToolFeature no longer maps TOOL_BASEKNOT), and the arm path it
-          // ran is `CircArmBaseKnot`'s own — restore the cell by counting
-          // TOOL_BASEKNOT back into TOOL_COUNT and uncommenting these two lines.
-          // UIBK-OFF: ToolsUpdateItemState(tidx);
-          // UIBK-OFF: return CircArmBaseKnot();
-       }
-      // FACTORBTN-OFF:
-      //else if(tfeat == CIR_FACTOR_OVERRIDE)
-      //{
-      //   if(g_factorValueOverride == 0) g_factorValueOverride = 25;
-      //   else if(g_factorValueOverride == 25) g_factorValueOverride = 50;
-      //   else if(g_factorValueOverride == 50) g_factorValueOverride = 100;
-      //   else if(g_factorValueOverride == 100) g_factorValueOverride = 144;
-      //   else g_factorValueOverride = 0;
-      //   string factorGvarName = "Biotak_Factor_" + GetCachedChartIdStr();
-      //   if(g_factorValueOverride == 0) GlobalVariableDel(factorGvarName);
-      //   else GlobalVariableSet(factorGvarName, g_factorValueOverride);
-      //   g_forceClearOnNextDraw = true;
-      //   g_redrawTHLevelsNeeded = true;
-      //   tflags = REFRESH_ALL;
-      //}
+      bool toolStopped = false;
+      if(tfeat == CIR_ZONES || tfeat == CIR_TRIGGER || tfeat == CIR_ATR ||
+         tfeat == CIR_TH    || tfeat == CIR_HTF     || tfeat == CIR_TH3 ||
+         tfeat == CIR_LEG   || tfeat == CIR_SESSIONS)
+         tflags = RingFeatureClick(tfeat);
+      else
+         tflags = ToolFeatureClick(tfeat, toolStopped);
+      if(toolStopped) return REFRESH_NONE;
       ToolsUpdateItemState(tidx);
       UpdateCircularBadges();
       SaveUIStates();
@@ -4979,6 +4926,41 @@ int HandleButtonClick(const string clickedObject)
       return REFRESH_NONE;
    }
 
+   // P-UI-161: the feature's own switch is ONE owner (`RingFeatureClick`) — the
+   // same body the Tools menu's feature cells run, so the two surfaces can never
+   // drift. The ring's own tail stays here (the Tools tail is ToolsUpdateItemState's).
+   int refreshFlags = RingFeatureClick(feat);
+   // P-UI-167's CLOSED/fan halves: the action above may hide the ring (BASEKNOT
+   // arms and calls DeleteMenu, for one). CircUpdateItemState create-if-missing
+   // then resurrected the tapped seat's glyph ALONE over a closed menu.
+   if(g_UI.menuVisible && !g_ToolsOpen)
+   {
+      CircUpdateItemState(idx);
+      UpdateCircularBadges();
+   }
+   SaveUIStates();
+   return refreshFlags;
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-161 — ONE OWNER for a ring feature's press.                  |
+//|                                                                  |
+//| The ring seat and the Tools cell are the SAME control one        |
+//| surface over (the 8 features are catalog cells too), so both     |
+//| routes run THIS body — a switch written twice is the drift this  |
+//| project keeps paying for. The caller owns the tail: the ring's   |
+//| (CircUpdateItemState) and the Tools menu's (ToolsUpdateItemState)|
+//| — this function touches neither.                                  |
+//+------------------------------------------------------------------+
+int RingFeatureClick(const int feat)
+{
+   if(feat == CIR_PIN || feat == CIR_STEP_OVERRIDE || feat == CIR_GENERAL ||
+      feat == CIR_HRAY || feat == CIR_PATH || feat == CIR_SCALE || feat == CIR_HIDE)
+   {
+      bool toolStopped = false;
+      return ToolFeatureClick(feat, toolStopped);
+   }
+
    // P-UI-93 — THE PRESS ANSWERS WHAT THE LIGHT SHOWED.
    //
    // While the chart is muted the four family lights read OFF (CircFeatureOn
@@ -4989,7 +4971,8 @@ int HandleButtonClick(const string clickedObject)
    // The mute is NOT a switch (P-PERF-41 stays intact: each light still owns one
    // switch), it is the whole-indicator master every family already shares.
    bool familyToggle = (feat == CIR_TRIGGER || feat == CIR_ZONES ||
-                        feat == CIR_ATR     || feat == CIR_TH);
+                        feat == CIR_ATR     || feat == CIR_TH ||
+                        feat == CIR_SESSIONS);   // P-SESS
    bool mutedPress   = (familyToggle && IsIndicatorHidden());
    bool wantOn       = (familyToggle && !mutedPress) ? !CircFeatureOn(feat) : mutedPress;
    if(mutedPress) ReleaseIndicatorMute();
@@ -5106,6 +5089,19 @@ int HandleButtonClick(const string clickedObject)
       RequestUISync();   // P-UI-40b: the HTF card's SHOW row displays this flag
       refreshFlags = REFRESH_NONE;   // P-HTF-KEY: the owner masked + painted; a refresh flag would rebuild the family it just kept
    }
+   else if(feat == CIR_SESSIONS)   // P-SESS
+   {
+      // A FAMILY SWITCH, like ZONES: one switch, and only its own. The renderer
+      // masks by g_sessMaster, so this is a state write + a persisted key + the
+      // tick that owns the pixels - no delete, no rebuild, the old frames sweep
+      // on the OFF edge. Refresh flags stay NONE: the master's own wing repaints
+      // its turn, and a builder flag would rebuild the family the switch kept.
+      g_sessMaster = wantOn;        // P-UI-93: what the light showed, inverted
+      RuntimeSettingsSaveOverridesThrottled();   // OV_SSON
+      SessionsTick();
+      RequestUISync();   // an open Sessions card's master row shows this switch
+      refreshFlags = REFRESH_NONE;
+   }
    else if(feat == CIR_BASEKNOT)
    {
       // P-UI-95: the MEASURING tool. It carries NO on/off state of its own — the light
@@ -5119,14 +5115,13 @@ int HandleButtonClick(const string clickedObject)
    {
       // Momentary: the light is LegMeasureSessionActive(). A press arms/cancels
       // the 2-click trendline session. No chart recalc needed.
+      // P-MT5-PARITY (2026-10-21) - PARITY (MT4 BiotakMenu_D.mqh:611-618): a bare toggle - MT5's own sweep
+      // tore a live ray/path/box session down on the press; MT4 never did that.
       LegMeasureToggle();
       refreshFlags = REFRESH_NONE;
    }
 #endif
 
-   CircUpdateItemState(idx);
-   UpdateCircularBadges();
-   SaveUIStates();
    return refreshFlags;
 }
 
@@ -5165,10 +5160,15 @@ void ToggleMenuVisibility()
    if(willShow)
    {
       // Same rule as CreateMenu: no ring behind an open Tools submenu.
+      // P-UI-161: the ring's seats are the PLACED ones (the star mask decides),
+      // the Tools menu's are the whole catalog.
       if(!g_ToolsOpen)
-         for(int i = 0; i < RING_COUNT; i++) CircCreateItem(i);
+      {
+         CircNoteBuilt();   // the create's n is the LIVE set - the opening press keeps the freeze on
+         for(int i = 0; i < CircPlacedCountLive(); i++) CircCreateItem(i);
+      }
       if(g_ToolsOpen)
-         for(int t = 0; t < TOOL_COUNT; t++) ToolsCreateItem(t);
+         for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
    }
    else
    {
@@ -5177,6 +5177,7 @@ void ToggleMenuVisibility()
    }
    CircRefreshOrbSkin();   // ORBSTATE's state edge — one read today
    SaveUIStates();
+   DrawStripDiagEmit(StringFormat("[P-UI-168] ring vis=%d tools=%d placed=%d built=%d", (g_UI.menuVisible ? 1 : 0), (g_ToolsOpen ? 1 : 0), CircPlacedCountLive(), s_circBuiltSeats));
    ChartRedraw();
 }
 

@@ -1085,6 +1085,16 @@ void CompatRefreshChartData(const int knownBars   = -1,
 #define OBJPROP_PRICE2 ((ENUM_OBJECT_PROPERTY_DOUBLE)2013)
 #endif
 
+// MQL4's OBJPROP_RAY (one bool, "ray both ways") has no MQL5 spelling -
+// MQL5 splits it into OBJPROP_RAY_LEFT / OBJPROP_RAY_RIGHT. Every shared
+// use writes the MQL4 name and BOTH halves in one breath (Sessions_Draw's
+// SessEdge/SessLine set RAY, RAY_LEFT and RAY_RIGHT to false in a row), so
+// the MQL4 name maps onto the RIGHT half and the same call site's own
+// OBJPROP_RAY_LEFT line spends the left.
+#ifndef OBJPROP_RAY
+#define OBJPROP_RAY OBJPROP_RAY_RIGHT
+#endif
+
 bool ObjectSetDoubleReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const double value)
 {
     return ObjectSetDouble(chart_id, name, prop, value);
@@ -1614,6 +1624,14 @@ bool ObjectCreateReal8(const long chart_id, const string name, const ENUM_OBJECT
    return ObjectCreate(chart_id, name, type, sub_window, time1, price1, time2, price2);
 }
 
+bool ObjectCreateReal10(const long chart_id, const string name, const ENUM_OBJECT type,
+                        const int sub_window, const datetime time1, const double price1,
+                        const datetime time2, const double price2,
+                        const datetime time3, const double price3)
+{
+   return ObjectCreate(chart_id, name, type, sub_window, time1, price1, time2, price2, time3, price3);
+}
+
 #define ObjectCreate ObjectCreateCompat
 
 bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJECT type,
@@ -1629,6 +1647,16 @@ bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJEC
                         const datetime time2, const double price2)
 {
    const bool r = ObjectCreateReal8(chart_id, name, type, sub_window, time1, price1, time2, price2);
+   if(r) CompatNoteObjOp(false, name);
+   return r;
+}
+
+bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJECT type,
+                        const int sub_window, const datetime time1, const double price1,
+                        const datetime time2, const double price2,
+                        const datetime time3, const double price3)
+{
+   const bool r = ObjectCreateReal10(chart_id, name, type, sub_window, time1, price1, time2, price2, time3, price3);
    if(r) CompatNoteObjOp(false, name);
    return r;
 }

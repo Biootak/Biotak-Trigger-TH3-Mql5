@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/PropertiesAndInputs.mqh
 //
@@ -101,9 +101,6 @@ input group "05) STYLE - COMBO STEP"
 input string S8 = "[05] STYLE / COMBO STEP";
 input ENUM_COMBO_MODE inpComboMode = COMBO_MODE_PRESET;
 input ENUM_COMBO_PRESET inpComboPreset = COMBO_PRESET_RATIO_4_3; // P-COMBO-01: shipped default is 4/3
-input color inpComboLevelColor = clrMagenta;
-input ENUM_LINE_STYLE inpComboLevelStyle = STYLE_DOT;
-input int inpComboLevelWidth = 1;
 input ENUM_COMBO_TIMEFRAME_TYPE inpComboComp1TF = COMBO_TF_PATTERN; // Advanced: Component 1 timeframe
 input ENUM_COMBO_STEP_TYPE inpComboComp1Step = COMBO_STEP_TH;       // Advanced: Component 1 step
 input ENUM_COMBO_OPERATION inpComboOp1 = COMBO_OP_AVERAGE;          // Advanced: operation
@@ -157,7 +154,6 @@ input group "08) LEVEL STYLE - LINES (ALL)"
 input string S16 = "[08] LEVEL STYLE / LINES";
 input group "08.1) LINES - BASE & TRIGGER"
 input string S15b = "[08.1] LINES / BASE & TRIGGER";
-input ENUM_LINE_STYLE inpTHLineStyle = STYLE_DOT;  // Base Line Style
 input color inpTriggerColor = clrBlack;            // Trigger Zone Color
 input ENUM_LINE_STYLE inpTriggerStyle = STYLE_DOT; // (legacy) Trigger Line Style — lines moved to [08.4]
 input int inpTriggerWidth = 1;                     // (legacy) Trigger Line Width — lines moved to [08.4]
@@ -231,15 +227,10 @@ input ENUM_STRUCTURE_BASE_MULTIPLIER inpStructureBase = BASE_MULTIPLIER_2; // St
 input group "09.2) STRUCTURE - LEVEL TOGGLES & LABEL COLORS"
 input string S16c = "[09.2] STRUCTURE / LEVEL TOGGLES & LABELS";
 input bool inpShowStructureL1 = true;                 // L1 Show
-input color inpStructureL1LabelColor = C'100,149,237'; // L1 Label Color
 input bool inpShowStructureL2 = true;                 // L2 Show
-input color inpStructureL2LabelColor = C'60,179,113'; // L2 Label Color
 input bool inpShowStructureL3 = true;                 // L3 Show
-input color inpStructureL3LabelColor = C'138,43,226'; // L3 Label Color
 input bool inpShowStructureL4 = true;                 // L4 Show
-input color inpStructureL4LabelColor = C'255,140,0';  // L4 Label Color
 input bool inpShowStructureL5 = true;                 // L5 Show
-input color inpStructureL5LabelColor = C'205,92,92';  // L5 Label Color
 
 input group "09.3) TRIGGER - ENABLE & LABEL"
 input string S15c = "[09.3] TRIGGER / ENABLE & LABEL";
@@ -382,7 +373,6 @@ input group "16) ALERTS"
 input string S17 = "[16] ALERTS";
 input bool inpEnableHighLowAlerts = false;        // High/Low Alerts
 input bool inpEnableTHAlerts = false;             // TH Alerts
-input bool inpEnableStructureTHAlerts = false;    // Structure Alerts
 input bool inpAlertOnce = true;                   // Once Per Bar
 input bool inpPlaySound = true;                   // Play Sound
 input string inpAlertSoundFile = "alert.wav";    // Sound File
@@ -432,6 +422,16 @@ input string S22 = "[19] ADVANCED / HISTORY & LOG";
 input ENUM_TIMEFRAMES inpHistoricalTimeframe = PERIOD_MN1;
 input int inpHistoricalPeriods = 0;
 input ENUM_LOG_LEVEL inpLogLevel = LOG_LEVEL_WARN;   // Minimum log level (TRACE=all, OFF=none)
+
+// P-BK-116 (2026-10-21) — THE LINE-END INK'S OWN BASIS, AND IT LIVES AT THE END ON PURPOSE.
+// MT4 keeps an indicator's parameters BY ORDER in the chart/template, so an input inserted
+// mid-list shifts every value below it on the next re-attach; the last slot shifts nothing.
+// The knot's STOP pips ARE its risk, so one percentage turns every Entry/SL/TP line into
+// money: lot = balance x this% / (stop pips x pip value), and each line's $ is its own pips
+// at that lot. 0 = the ink is off — the tool never guesses a size.
+input group "20) BASE BOX - LINE END (PIPS + MONEY)"
+input string S23 = "[20] BASE BOX / LINE END";
+input double inpBKRiskPct = 1.0;                         // Base Box Risk % of Balance (line ends: pips + money)
 
 //==============================================================================
 // This module ONLY declares the user-facing `input` parameters.

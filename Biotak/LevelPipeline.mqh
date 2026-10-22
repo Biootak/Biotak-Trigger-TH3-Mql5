@@ -1176,8 +1176,8 @@ int StructureRecolourWalk()
 //| the reported «الان step اول قابل درگ کردن نیستش»), and ONE small  |
 //| red dot at the chart's right edge (time 0 — the anchoring the pip  |
 //| labels used before their retirement, so it follows the market with |
-//| no per-bar write) marks                                             |
-//| them. The user's marker order: «خط کاستوم پرایس ... نشانه سبز و   |
+//| no per-bar write) marks them. The user's marker order:             |
+//| «خط کاستوم پرایس ... نشانه سبز و                                   |
 //| step اول ... نشانه قرمز ... یک نشانه باشه که خیلی مزاحم هم نباشه» |
 //| and «وقتی لاین ها رو خاموش میکنم نشان ها هم نباشه» — the dot      |
 //| wears the line family's mask, so the L switch owns it with the    |
@@ -1494,15 +1494,14 @@ void RenderTriggerLines(
         // The user's screenshot pointed at the "+7 | 4161.4" texts and the
         // order was to remove them («این پیپ لیبل ها رو کامل حذف کن») - they
         // were an extra surface per level, and the feature cost one object
-        // (or one canvas text) per rung plus its own lift/tofu machinery.
-        // Both feeders are gone: the object path (CreatePipDistanceLabel,
-        // deleted from ObjectFunctions) and the canvas path
-        // (RBridgeLevelLabel stays in the engine, dormant - nothing feeds
-        // it). The build no longer derives per-level label text either (see
+        // per rung plus its own row-lift machinery. Both feeders are gone:
+        // this level-family block (CreatePipDistanceLabel, deleted from
+        // ObjectFunctions) and the High/Low pair's blocks (Labels_A).
+        // The build no longer derives per-level label text either (see
         // GetLabelTextForLevel's seat). And the names are out of the ladder
-        // sweep's produced set, so the ONE handoff sweep (P-PERF-107) deletes
-        // every legacy `<line>_Label` object a previous build left on the
-        // chart - the upgrade cleans itself, once.
+        // sweep's produced set, so the ONE handoff sweep
+        // (P-LEVEL-FOREIGN-02) deletes every legacy `<line>_Label` object a
+        // previous build left on the chart - the upgrade cleans itself, once.
     }
 #ifdef BIOTAK_RENDER_ENGINE
     // MT5-ONLY (R-RENDER-ENGINE): close the pass - sweep the staged families,
@@ -1608,8 +1607,7 @@ void CleanupSurplusPipeline(
     }
 }
 
-#endif // LEVEL_PIPE_A_MQH
-// LevelPipe_B.mqh - LevelPipeline.mqh split 2026-09-29: exact lines 1439-2181, byte-identical, zero renames.
+#endif // LEVEL_PIPE_A_MQH// LevelPipe_B.mqh - LevelPipeline.mqh split 2026-09-29: exact lines 1439-2181, byte-identical, zero renames.
 #ifndef LEVEL_PIPE_B_MQH
 #define LEVEL_PIPE_B_MQH
 
@@ -1907,8 +1905,8 @@ int SweepForeignLevelObjects(const SModeConfig &config,
        // handle stays missing until an unrelated rebuild. The above handle
        // never blinks because it is deleted AND re-created in the same
        // frame; only the dragged one (here: the below handle) vanishes.
-        bool s1SkipSweep = (g_s1DragLive && g_s1DragName != "" &&
-                            lines[i].name == g_s1DragName);
+       bool s1SkipSweep = (g_s1DragLive && g_s1DragName != "" &&
+                           lines[i].name == g_s1DragName);
         // P-LBL-12 (2026-10-17): this pass used to probe the line's
         // pip-distance label too (pass 0/1 over `<name>` and `<name>_Label`).
         // The labels are retired and nothing produces the name, so the second
@@ -1922,7 +1920,7 @@ int SweepForeignLevelObjects(const SModeConfig &config,
           if(MathAbs(e.lastPrice - lines[i].price) <= tol) continue;   // ours
           if(DeleteIndicatorObjectManaged(nm, true)) removed++;
        }
-    }
+   }
 
    for(int i = 0; i < zoneCount; i++)
    {

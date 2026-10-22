@@ -352,6 +352,19 @@ int VisibilityShowAllCached(const bool atrShouldShow, const bool showAtrTargets,
         }
         touched++;
     }
+    // P-UI-194 (2026-10-20, ported 2026-10-21) — THE CACHE IS A WHITELIST, THE
+    // CHART IS THE TRUTH. MEASURED on MT4 «بعد از زدن دکمه f بعضی چیزها روی
+    // چارت میمونن»: the show walked the cache only, so families whose creators
+    // never registered (the Factor boundary and level lines, the pen's saved
+    // rows, session art) were never re-masked and survived F — while the G
+    // lock's own handler already walks EVERY prefixed object. The same walk now
+    // closes the SHOW half: every prefixed object is judged by the family tree
+    // above, `_BK_` excepted (P-BK-01). Cost: ONE ObjectsTotal+ObjectName pass
+    // per show TRANSITION (P-PERF-02 — the caller is the F edge, never the
+    // per-frame path), i.e. the same walk the lock pays, not the per-frame
+    // spray P-PERF-31 retired.
+    VisibilityShowAllLegacyScan(atrShouldShow, showAtrTargets, triggersEnabled,
+                                linesVisible, zonesVisible);
     return touched;
 }
 //|                                                                  |

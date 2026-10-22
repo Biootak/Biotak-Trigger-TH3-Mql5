@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/HRayTool.mqh
 //
@@ -39,6 +39,12 @@
 #define HRAY_DBL_MS 400   // double-click window for dot-delete
 #define HRAY_DBL_PX 6     // ... and its pixel travel
 
+#ifndef BUILD_LITE
+void HRayWitness(const string line) { DrawStripDiagEmit("[HRay] " + line); }
+#else
+void HRayWitness(const string line) { Print("[HRay] " + line); }
+#endif
+
 static bool   s_hrayArmed    = false;  // arm session live (the menu light reads this)
 static bool   s_hrayLeft     = false;  // mouse edge detector (P-LM-13: update on EVERY move)
 static string s_hrayDrag     = "";     // line name under the hand ("" = no drag)
@@ -64,6 +70,7 @@ bool HRayViewOwned() { return (s_hrayArmed || s_hrayDrag != ""); }
 void HRayArm()
 {
    if(s_hrayArmed) return;
+   if(IsIndicatorHidden()) return;   // P-UI-160b: the F mute owns the chart — no new ray under it
    GestureTakeRelease();   // P-UI-144: a NEW drawing is never gated by the last one
    s_hrayArmed = true; ChartViewLockAcquire(); ChartRedraw();
 }
@@ -126,6 +133,16 @@ void HRayHandleFollow(const string line)
 {
    string hn = HRayHandleName(line);
    if(line != s_hraySel || ObjectFind(0, line) < 0) { ObjectDelete(0, hn); return; }
+   // P-UI-160b (2026-10-16): the F mute parks the dot. It is a BITMAP_LABEL —
+   // no TF mask reaches it (the P-UI-98d fact) — so the pan stream, the
+   // chart-change follower and the hide pass all land HERE, and this one
+   // branch keeps every channel from re-placing it while hidden. Show
+   // re-follows through this same seat.
+   if(IsIndicatorHidden())
+   {
+      HandsetHandleAtXY(hn, HANDSET_HANDLE_PARK, HANDSET_HANDLE_PARK, CP_HANDLE_HALF, CP_HANDLE_RES);
+      return;
+   }
    datetime t1 = (datetime)ObjectGetInteger(0, line, OBJPROP_TIME, 0);
    double   p1 = ObjectGetDouble(0, line, OBJPROP_PRICE, 0);
    int x = 0, y = 0;
@@ -175,6 +192,41 @@ void HRayFollowAll()
       }
    }
 }
+
+// ── P-UI-160b (2026-10-16) — THE RAY FAMILY ANSWERS THE F MUTE ───────
+// The line is chart-space (mask), the dot is a BITMAP_LABEL (park) — the two
+// shapes the whole mute is made of. Once per transition; the riders
+// (HRayHandleFollow) carry the hidden term, so nothing re-places the dot
+// while hidden and the show path re-follows it through the same seat.
+int HRayHideAll()
+{
+   int n = 0;
+   for(int i = 0; i < ArraySize(s_hrayIds); i++)
+   {
+      string ln = HRayLineName(s_hrayIds[i]);
+      if(ObjectFind(0, ln) < 0) continue;
+      if((int)ObjectGetInteger(0, ln, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+         ObjectSetInteger(0, ln, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+      n++;
+   }
+   if(s_hraySel != "") HRayHandleFollow(s_hraySel);   // parks through its hidden branch
+   return n;
+}
+
+int HRayShowAll()
+{
+   int n = 0;
+   for(int i = 0; i < ArraySize(s_hrayIds); i++)
+   {
+      string ln = HRayLineName(s_hrayIds[i]);
+      if(ObjectFind(0, ln) < 0) continue;
+      if((int)ObjectGetInteger(0, ln, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS)
+         ObjectSetInteger(0, ln, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+      n++;
+   }
+   HRayFollowAll();   // re-place the selected ray's dot
+   return n;
+}
 // One price, one ray: t2 only gives the ray its rightward direction. The
 // line is born NON-selectable — no native grips, so no angle, ever.
 void HRayPlace(const datetime t, const double price)
@@ -209,7 +261,7 @@ void HRayPlace(const datetime t, const double price)
       HRayRegAdd(id);
       HRaySelect(ln);   // the fresh ray is selected, so its dot answers at once
       HRayHandleFollow(ln);
-      Print("[HRay] placed \"", ln, "\" at ", DoubleToString(price, Digits));
+      HRayWitness("placed \"" + ln + "\" at " + DoubleToString(price, Digits));
    }
 }
 // THE lock giver-backer for the carry — every path that drops the drag goes
@@ -222,7 +274,7 @@ void HRayDragRelease()
 }
 void HRayDelete(const string line, const string why)
 {
-   Print("[HRay] delete \"", line, "\" (", why, ")");
+   HRayWitness("delete \"" + line + "\" (" + why + ")");
    if(s_hrayDrag == line) HRayDragRelease();
    ObjectDelete(0, HRayHandleName(line));
    ObjectDelete(0, line);
@@ -239,6 +291,7 @@ void HRayDelete(const string line, const string why)
 bool HRayPressHit(const int mx, const int my, string &line)
 {
    line = "";
+   if(IsIndicatorHidden()) return false;   // P-UI-160b: no grabbing a hidden ray
    int best = 0x7fff;
    int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
    for(int i = 0; i < ArraySize(s_hrayIds); i++)
@@ -258,6 +311,7 @@ bool HRayPressHit(const int mx, const int my, string &line)
 bool HRayDotHit(const int mx, const int my, string &line)
 {
    line = "";
+   if(IsIndicatorHidden()) return false;   // P-UI-160b: no grabbing a hidden ray's dot
    if(s_hraySel == "" || ObjectFind(0, s_hraySel) < 0) return false;
    int x = 0, y = 0;
    if(!ChartTimePriceToXY(0, 0, (datetime)ObjectGetInteger(0, s_hraySel, OBJPROP_TIME, 0),
@@ -294,12 +348,12 @@ void HRayDragStart(const string line)
    s_hraySnapSpan = (int)((datetime)ObjectGetInteger(0, line, OBJPROP_TIME, 1) - s_hraySnapT);
    ChartViewLockAcquire();   // P-HR-03: the carry owns the view (named below)
    HRaySelect(line);
-   Print("[HRay] drag start \"", line, "\"");
+   HRayWitness("drag start \"" + line + "\"");
 }
 void HRayDragEnd()
 {
    if(s_hrayDrag == "") return;
-   Print("[HRay] drag end \"", s_hrayDrag, "\" moved=", (s_hrayMoved ? "yes" : "no"));
+   HRayWitness("drag end \"" + s_hrayDrag + "\" moved=" + (s_hrayMoved ? "yes" : "no"));
    if(s_hrayMoved) s_hrayEndMs = GetTickCount();   // trailing release-click is select-only
    HRayDragRelease();
    ChartRedraw();
@@ -337,7 +391,7 @@ bool HRayOnChartEvent(const int id, const long &lparam, const double &dparam, co
    if(id == CHARTEVENT_OBJECT_DELETE && pfx != "" && StringFind(sparam, pfx) == 0)
    {
       if(g_suppressDeleteEvents || TickDeadlinePending(g_suppressDeleteEventsUntilMs)) return false;   // bulk teardown — nothing to heal
-      Print("[HRay] object-delete seen \"", sparam, "\"");
+      HRayWitness("object-delete seen \"" + sparam + "\"");
       // P-HR-07 (2026-09-28, user: «روی استریپ کلیک میکنم همه پاک میشه»): the
       // cascade is ONE WAY. The dot is the ray's CHILD, so a deleted LINE takes
       // its dot with it — but a deleted DOT takes nothing, because the dot dies
@@ -440,7 +494,7 @@ bool HRayOnChartEvent(const int id, const long &lparam, const double &dparam, co
             }
             s_hrayPressX = (int)lparam; s_hrayPressY = (int)dparam;   // the carry's own origin
 HRayDragStart(ln);   // select + carry in one press
-             Print("[HRay] carry ", ln, " why=", GestureTakeWhy());   // P-UI-144: the carry's own half of the proof
+             HRayWitness("carry " + ln + " why=" + GestureTakeWhy());   // P-UI-144: the carry's own half of the proof
              return true;
          }
       }
@@ -496,7 +550,7 @@ HRayDragStart(ln);   // select + carry in one press
          {
             HRaySelect(ln);
             HRayHandleFollow(ln);
-            Print("[HRay] select \"", ln, "\"");
+            HRayWitness("select \"" + ln + "\"");
             s_hrayClick = ln; s_hrayClickMs = now;
             s_hrayClickX = (int)lparam; s_hrayClickY = (int)dparam;
          }
@@ -504,7 +558,7 @@ HRayDragStart(ln);   // select + carry in one press
       }
       if(s_hraySel != "")
       {
-         Print("[HRay] dismiss dot \"", s_hraySel, "\" (line stays)");
+         HRayWitness("dismiss dot \"" + s_hraySel + "\" (line stays)");
          HRaySelect(""); ChartRedraw();
       }
       s_hrayClick = "";
@@ -514,6 +568,11 @@ HRayDragStart(ln);   // select + carry in one press
 }
 // Fresh instance (attach / TF switch reuses the same chart): adopt the chart's
 // rays — statics may not know them yet, but the objects survived. Idempotent.
+void HRayHandlesWipe()
+{
+   for(int i = 0; i < ArraySize(s_hrayIds); i++)
+      ObjectDelete(0, HRayHandleName(HRayLineName(s_hrayIds[i])));
+}
 void HRayOnInit()
 {
    s_hrayArmed = false;
@@ -521,12 +580,19 @@ void HRayOnInit()
    s_hraySel = "";
    s_hrayClick = "";
    HRayAdoptOrphans();
+   HRayHandlesWipe();
 }
 // Deinit safety: a remove must never leave a stuck arm; committed rays are
 // chart objects, so only REASON_REMOVE sweeps them (a TF switch keeps them).
 void HRayOnDeinit(const int reason)
 {
-   s_hrayArmed = false;
+   if(s_hrayDrag != "") HRayDragRelease();
+   if(s_hrayArmed)
+   {
+      s_hrayArmed = false;
+      ChartViewLockRelease();
+   }
+   if(reason != REASON_REMOVE) HRayHandlesWipe();
    s_hrayDrag = "";
    s_hraySel = "";
    if(reason == REASON_REMOVE)

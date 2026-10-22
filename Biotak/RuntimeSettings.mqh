@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/RuntimeSettings.mqh
 //
@@ -128,7 +128,7 @@ static color g_lsLevelColor = clrOrange;                         // [04] inpLSLe
 static int g_lsTransparency = 0;                                 // palette TR (default solid)
 static bool g_lsFirst = true;                                    // [04] inpLSFirst
 static ENUM_STEP_CALCULATION_MODE g_stepCalculationMode = TH_STEP; // [01] inpStepCalculationMode
-static bool g_showLines = true;                                  // [03] inpShowLines
+static bool g_showLines = false;                                 // [03] inpShowLines (P-UI-119: the initial MATCHES the input's own default)
 static bool g_showTHLevels = true;                               // [03] inpShowTHLevels
 static bool g_showStructure = true;                              // [09.1] inpShowStructure
 static bool g_showStructureL1 = true;                            // [09.2] inpShowStructureL1
@@ -252,6 +252,35 @@ static ENUM_COMBO_OPERATION g_comboOp1 = COMBO_OP_AVERAGE;        // [05] inpCom
 static bool g_comboComp2Enabled = true;                           // [05] inpComboComp2Enabled
 static ENUM_COMBO_TIMEFRAME_TYPE g_comboComp2TF = COMBO_TF_TRIGGER;    // [05] inpComboComp2TF
 static ENUM_COMBO_STEP_TYPE g_comboComp2Step = COMBO_STEP_TH;     // [05] inpComboComp2Step
+
+//==============================================================================
+// [15] SESSIONS (P-SESS) — the session-box layer's mirrors.
+//
+// A slot is ONE packed double (codec in Sessions_Model.mqh): the terminal's
+// GlobalVariable table is doubles-only, and 18 new keys (10 display knobs +
+// 8 slots) is the whole persistence budget. A==0 decodes to the factory
+// preset, so a chart that never touched a slot carries the preset with no
+// init pass and no migration stamp.
+//
+// The bounds live HERE, with the settings: the loader's clamp and the
+// editor slider read the same numbers (contract: a value the control can
+// reproduce is the only value that may be saved).
+//==============================================================================
+#define SESS_SLOTS      8
+#define SESS_HIST_MAX   40     // boxes: 0..40 zone days back
+#define SESS_FUT_MAX    5      // ghosts: 0..5 upcoming sessions
+static bool   g_sessMaster = false;      // [15] master (ring cell + card 15 row 0)
+static int    g_sessHistDays = 5;        // [15] days that get a box
+static int    g_sessFutDays = 1;         // [15] upcoming-session ghosts
+static bool   g_sessHlLines = true;      // [15] H/L lines on the live/last window
+static bool   g_sessHlLabels = true;     // [15] their price labels
+static bool   g_sessRangeText = true;    // [15] range caption (pips)
+static bool   g_sessPrior = false;       // [15] prior session H/L (dashed)
+static bool   g_sessOverlap = true;      // [15] overlap rectangles (today)
+static bool   g_sessCountdown = true;    // [15] next-boundary countdown text
+static bool   g_sessAlerts = false;      // [15] open/close alerts
+static int    g_sessSlotsEdit = 0;       // [15] editor's picked slot (view only)
+static double g_sessSlot[SESS_SLOTS];    // [15] packed slot configs (0 = factory preset)
 
 //==============================================================================
 // FACTORY DEFAULTS — the raw Inputs-dialog values as attached, captured in
@@ -1194,6 +1223,20 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "ALG", g_useLegATR ? 1 : 0);   // P-LEGATR (appended LAST: the shadow is positional, older slots never move)
    RSSetNext(p + "TSH", g_triggerLevelsEnabled ? 1 : 0);   // P-UI-142: the T toggle rides the OV_ mirror home (was RAM + per-chart key only)
    RSSetNext(p + "TVN", g_thVolNorm ? 1 : 0);   // P-TH-VOLNORM (appended LAST: the shadow is positional, older slots never move)
+   // P-SESS (appended LAST: the shadow is positional, older slots never move).
+   // The slots go last of all: one packed double each (codec in Sessions_Model).
+   RSSetNext(p + "SSON", g_sessMaster ? 1 : 0);
+   RSSetNext(p + "SSHD", g_sessHistDays);
+   RSSetNext(p + "SSFD", g_sessFutDays);
+   RSSetNext(p + "SSHL", g_sessHlLines ? 1 : 0);
+   RSSetNext(p + "SSLL", g_sessHlLabels ? 1 : 0);
+   RSSetNext(p + "SSRT", g_sessRangeText ? 1 : 0);
+   RSSetNext(p + "SSPL", g_sessPrior ? 1 : 0);
+   RSSetNext(p + "SSOL", g_sessOverlap ? 1 : 0);
+   RSSetNext(p + "SSCD", g_sessCountdown ? 1 : 0);
+   RSSetNext(p + "SSAL", g_sessAlerts ? 1 : 0);
+   for(int ss = 0; ss < SESS_SLOTS; ss++)
+      RSSetNext(p + "SS" + IntegerToString(ss), g_sessSlot[ss]);
    RSShadowCommit();
 }
 
@@ -1406,8 +1449,23 @@ void RuntimeSettingsLoadOverrides()
    if(GlobalVariableCheck(p + "LMW")) g_maxLabelWidth = ClampSettingInt((int)GlobalVariableGet(p + "LMW"), 50, 600);
    if(GlobalVariableCheck(p + "ALG")) g_useLegATR = (GlobalVariableGet(p + "ALG") > 0.5);   // P-LEGATR (absent key = OFF, the shipped look)
    if(GlobalVariableCheck(p + "TSH")) g_triggerLevelsEnabled = (GlobalVariableGet(p + "TSH") > 0.5);   // P-UI-142: the T toggle's durable layer (per-chart key wins at restore)
-   if(GlobalVariableCheck(p + "TVN")) g_thVolNorm = (GlobalVariableGet(p + "TVN") > 0.5);   // P-TH-VOLNORM (absent key = OFF, the shipped look)
-   // P-PERF-27b: what was just read is what we would write back, so record it as
+    if(GlobalVariableCheck(p + "TVN")) g_thVolNorm = (GlobalVariableGet(p + "TVN") > 0.5);   // P-TH-VOLNORM (absent key = OFF, the shipped look)
+    // P-SESS — read beside the save block; an absent key IS the shipped
+    // default (master off: an untouched chart shows nothing new).
+    if(GlobalVariableCheck(p + "SSON")) g_sessMaster = (GlobalVariableGet(p + "SSON") > 0.5);
+    if(GlobalVariableCheck(p + "SSHD")) g_sessHistDays = ClampSettingInt((int)GlobalVariableGet(p + "SSHD"), 0, SESS_HIST_MAX);
+    if(GlobalVariableCheck(p + "SSFD")) g_sessFutDays  = ClampSettingInt((int)GlobalVariableGet(p + "SSFD"), 0, SESS_FUT_MAX);
+    if(GlobalVariableCheck(p + "SSHL")) g_sessHlLines  = (GlobalVariableGet(p + "SSHL") > 0.5);
+    if(GlobalVariableCheck(p + "SSLL")) g_sessHlLabels = (GlobalVariableGet(p + "SSLL") > 0.5);
+    if(GlobalVariableCheck(p + "SSRT")) g_sessRangeText = (GlobalVariableGet(p + "SSRT") > 0.5);
+    if(GlobalVariableCheck(p + "SSPL")) g_sessPrior    = (GlobalVariableGet(p + "SSPL") > 0.5);
+    if(GlobalVariableCheck(p + "SSOL")) g_sessOverlap  = (GlobalVariableGet(p + "SSOL") > 0.5);
+    if(GlobalVariableCheck(p + "SSCD")) g_sessCountdown = (GlobalVariableGet(p + "SSCD") > 0.5);
+    if(GlobalVariableCheck(p + "SSAL")) g_sessAlerts   = (GlobalVariableGet(p + "SSAL") > 0.5);
+    for(int ss = 0; ss < SESS_SLOTS; ss++)
+       if(GlobalVariableCheck(p + "SS" + IntegerToString(ss)))
+          g_sessSlot[ss] = GlobalVariableGet(p + "SS" + IntegerToString(ss));
+    // P-PERF-27b: what was just read is what we would write back, so record it as
    // "already on disk" and stop the teardown from re-writing it.
    RuntimeSettingsPrimeOverrideShadow();
 }

@@ -142,6 +142,9 @@
 #define Z_MENU_BADGE    1012    // item badge bodies + captions
 #define Z_MENU_BADGE_TX 1013    // badge ink
 #define Z_MENU_PAGER    1014    // grid pager
+#define Z_MENU_STAR     1015    // P-UI-161: the membership star — a distinct rung ABOVE
+                                // the badge (never a tie broken by birth order), so the
+                                // star's 16px corner box always owns its own click
 #define Z_MENU_ORB      1200    // the TRex orb (was 2000 — ABOVE the card)
 #define Z_MENU_TIP_BG   1300    // hover tip body
 #define Z_MENU_TIP      1302    // hover tip caption/header

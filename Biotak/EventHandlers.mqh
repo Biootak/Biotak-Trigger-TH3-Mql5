@@ -21,6 +21,10 @@
 #ifndef EVENT_HANDLERS_MQH
 #define EVENT_HANDLERS_MQH
 
+// P-BK-113: the selected knot's owner-TF ATRs (ATR is above BaseKnotTool, so the walk
+// lives here — MT5 keeps the MT4 include site, flattened into this hub).
+#include "BaseKnot_Owner.mqh"
+
 // P-SIZE-1500 (2026-10-04): the two owners that drifted back over the ceiling were
 // split along seams they already had. ORDER IS THE COMPILER'S: MQL4 resolves a call
 // top-down, so each new half is included ABOVE the file that calls it.
@@ -822,6 +826,19 @@ void HideAllTHObjectsPass()
     // A fresh instance with a cold cache falls back to one legacy chart
     // scan for the previous instance's leftovers; steady state never scans.
     VisibilityHideAllCached();
+    // P-UI-194 (2026-10-20, ported 2026-10-21) — THE CACHE IS A WHITELIST, THE
+    // CHART IS THE TRUTH. MEASURED on MT4 «بعد از زدن دکمه f بعضی چیزها روی چارت
+    // میمونن»: the cache walk above only masks the names LevelPipeline/Labels
+    // registered. Families whose creators never touch the cache (the Factor
+    // boundary/level lines, the pen's saved rows, session art) were never masked,
+    // so they survived the F press — while the G lock's own handler already walks
+    // EVERY prefixed object. This is that same walk, one MASK instead of a
+    // delete: every object carrying `inpObjectPrefix` is hidden, `_BK_` excepted
+    // (P-BK-01: the Base/Knot layer ignores F by design). Cost: one
+    // ObjectsTotal+ObjectName pass per hide TRANSITION (P-PERF-02 memoises the
+    // pass; a still frame pays nothing) — the same walk the lock pays today, not
+    // the per-frame spray P-PERF-31 retired.
+    VisibilityHideAllLegacyScan();
     // PERF: Batch special label hide - ObjectSetInteger is no-op if object doesn't exist
     long noPeriodsVal = OBJ_NO_PERIODS;
     ObjectSetInteger(0, g_stepModeLabelName, OBJPROP_TIMEFRAMES, noPeriodsVal);
@@ -839,7 +856,65 @@ void HideAllTHObjectsPass()
     HandsetHandlePark(g_cpMarkerName, CP_HANDLE_RES);
     HandsetHandlePark(S1MarkName(1), S1_HANDLE_RES);
     HandsetHandlePark(S1MarkName(-1), S1_HANDLE_RES);
-    // NOTE: ABCD pattern objects are NOT hidden by F key
+    // P-UI-160b (2026-10-16) — THE DRAWING FAMILIES RIDE THE SAME MUTE.
+    // The report: «دکمه f که فقط زون ها رو خاموش و روشن میکنه پیس همه رو باید
+    // خاموش بکنه». The cache walk above hides the level families; the drawing
+    // families never had a seat there (they are not in the object cache and
+    // their writers are action-driven), so F left them standing. Each family
+    // answers through its OWN owner — mask what a mask can reach, park what it
+    // cannot — and its riders carry the same hidden term, so no channel can
+    // re-show what the mute took (the P-PERF-02 law: hide is a STATE, once per
+    // transition). The TH3 family and the leg meter are guarded the same way
+    // the session cancel above is (Lite does not manage them).
+#ifndef BUILD_LITE
+    int drawPat = 0, drawLm = 0;
+    if(TH3BaseMarkArmed()) TH3BaseMarkCancel("hide all");
+    drawPat = TH3PatternsHideAll();
+    if(LegMeasureSessionActive()) LegMeasureToggle();
+    drawLm = LegMeasureHideAll();
+    if((int)ObjectGetInteger(0, TH3_BASE_EDITOR, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+        ObjectSetInteger(0, TH3_BASE_EDITOR, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+#endif
+    int drawHr = 0, drawPa = 0;
+    if(HRaySessionActive()) HRayCancel();
+    drawHr = HRayHideAll();
+    if(PathSessionActive()) { PathSessionClear(); PathCancel(); }
+    drawPa = PathHideAll();
+#ifndef BUILD_LITE
+    // P-UI-160b: the flush's own half of the proof (P-LOG-3's channel).
+    DrawStripDiagEmit("[P-UI-160b] drawings hide=1 pat=" + IntegerToString(drawPat) +
+                      " lm=" + IntegerToString(drawLm) +
+                      " hr=" + IntegerToString(drawHr) +
+                      " pa=" + IntegerToString(drawPa));
+    // P-UI-160c (2026-10-20, ported 2026-10-21) — THE MEASUREMENT BEHIND «بعضی
+    // چیزها رو جا میزاره». The hide pass is a whitelist: the object cache, five
+    // named labels, the handsets and the drawing families. Anything ELSE that
+    // carries our prefix was never masked, so it survives the press and the user
+    // reports it as "some things are left". This walks the chart ONCE PER HIDE
+    // TRANSITION (never per frame — P-PERF-02's law) and names every prefixed
+    // object still painted, so the fix is aimed by evidence instead of guessed.
+    // `_BK_` is reported separately: P-BK-01 says the Base/Knot layer ignores F
+    // BY DESIGN, so a surviving BK name is the contract working, not this defect.
+    {
+       const string wpfx = inpObjectPrefix;
+       const int    wlen = StringLen(wpfx);
+       const int    wtotal = ObjectsTotal(0, -1, -1);
+       int wleft = 0, wbk = 0, wshown = 0;
+       string wnames = "";
+       for(int wi = wtotal - 1; wi >= 0; wi--)
+       {
+          const string wn = ObjectName(0, wi, -1, -1);
+          if(wlen <= 0 || StringLen(wn) < wlen || StringSubstr(wn, 0, wlen) != wpfx) continue;
+          if((int)ObjectGetInteger(0, wn, OBJPROP_TIMEFRAMES) == (int)OBJ_NO_PERIODS) continue;
+          wleft++;
+          if(StringFind(wn, "_BK_") >= 0) { wbk++; continue; }
+          if(wshown < 24) { wnames = wnames + " \"" + wn + "\""; wshown++; }
+       }
+       DrawStripDiagEmit("[P-UI-160c] left=" + IntegerToString(wleft) +
+                         " bk=" + IntegerToString(wbk) + " chart=" + IntegerToString(wtotal) +
+                         " names:" + wnames);
+    }
+#endif
 }
 
 // Returns true when this call performed the (once per transition) pass.
@@ -851,6 +926,32 @@ bool HideAllTHObjects()
     // Written outside the visibility guard → invalidate every stored mask.
     BumpTfEpoch();
     return true;
+}
+
+// P-UI-160b (2026-10-16) — the SHOW half of the drawing families' mute answer.
+// Same owner as the hide half above (this file owns both ends of the F
+// transition), and P-SIZE-1500 is why it is a function here instead of the show
+// branch's own block: the Objects hub called it inline and crossed the ceiling.
+// Each family comes back through its own owner — the patterns re-assert their
+// ladders (one lit, P-TH3-P6f), the legs re-place their icons through the ride,
+// the rays/paths through their followers, the base band takes its mask off.
+void ShowAllDrawingFamilies()
+{
+#ifndef BUILD_LITE
+    int drawPat = TH3PatternsShowAll();
+    int drawLm = LegMeasureShowAll();
+    if((int)ObjectGetInteger(0, TH3_BASE_EDITOR, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS)
+        ObjectSetInteger(0, TH3_BASE_EDITOR, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+#endif
+    int drawHr = HRayShowAll();
+    int drawPa = PathShowAll();
+#ifndef BUILD_LITE
+    // P-UI-160b: the flush's own half of the proof (P-LOG-3's channel).
+    DrawStripDiagEmit("[P-UI-160b] drawings hide=0 pat=" + IntegerToString(drawPat) +
+                      " lm=" + IntegerToString(drawLm) +
+                      " hr=" + IntegerToString(drawHr) +
+                      " pa=" + IntegerToString(drawPa));
+#endif
 }
 #endif // EVENT_HANDLERS_CUSTOMPRICE_MQH
 // EventHandlers_Init.mqh - EventHandlers split 2026-09-29: exact lines 7-1496 of EventHandlers.mqh, byte-identical, zero renames.
@@ -1374,6 +1475,11 @@ int OnInitHandler() {
     // Seed runtime settings from the real MT4 Inputs-dialog values FIRST:
     // every inpX read from here on is the runtime copy (see RuntimeSettings.mqh).
     RuntimeSettingsInit();
+    CalcAnchorLoad();   // P-ANCHOR-LAST: the per-chart LAST OBJECT switch survives attach
+    //--- P-UI-185 (2026-10-20): the hotkeys are audited ONCE, here: a shortcut the
+    //--- terminal cannot deliver, or two shortcuts on one key, is named instead of
+    //--- being a key that silently does nothing.
+    HotkeyAudit();
     //--- P-BUILD-08 (2026-09-29, supersedes P-UI-134/134b/134c) — THE LINE IS THE
     //--- CODE, BEFORE ANY CLOCK OR TAG CAN LIE ABOUT IT.
     //--- The old tag was a hand-typed word ("T2") that stayed "T2" across every
@@ -1944,8 +2050,7 @@ int OnInitHandler() {
     // per-kind style memory and the preset slots (the built-in suggestions the
     // user overwrites). Seeded once per instance, before any drawing can exist.
     DrawStyleInit();
-    DrawPresetsInit();
-    DrawPresetsLoad();   // P-DRAW-05: the user's own templates survive the session
+    DrawTplBoot();   // P-DRAW-05/P-DRAW-132: seed, migrate, load the template rack
     //--- P-DRAW-128 (2026-10-13): every drawing already on the chart is witnessed
     //--- once, here, so the FIRST native colour change after a reload is recognised
     //--- as a change rather than mistaken for a move-drop. One bounded walk at attach
@@ -2797,6 +2902,7 @@ static bool g_renderAllNeeded = false;
 //==============================================================================
 #define COOP_WARN_MS        40   // a scheduled frame or coop job slower than this is logged
 #define BUILD_STAGE_GATE_MS 60   // P-PERF-34b: spacing between staged rebuild frames
+#define COOP_WAIT_WARN_MS   500   // P-PERF: a job that waited this long is named even if it ran fast
 
 // P-PERF-108 (2026-10-16) — HOW LONG AN ADOPTED FAMILY MAY HOLD THE PAINT WHILE
 // HISTORY IS STILL SYNTHETIC. `!g_initialized` means RedrawAllObjects is
@@ -3315,6 +3421,7 @@ void RedrawAllObjects(bool force_redraw=false)
     // Move outside needLabels block to ensure overlay labels are always correctly positioned
     g_modeLabelYOffset = g_currentLabelYOffset;
     RepositionAllOverlayLabels();
+    LabelPushBaseNoteSlotTop();   // BKCORNER-ON: the note's slot, after the mode rows' offset is known
     g_p3MsOverlay = GetTickCount() - g_p3MsLastTick;   // DrawMainLevels + overlay reposition
 
     g_dailyClosePriceForTH = thBasePrice;
@@ -3905,16 +4012,24 @@ void BaseKnotTypeWitness()
       s_bkTw[slot].used = true; s_bkTw[slot].id = id;
       s_bkTw[slot].kind = g_bkBoxes[i].nodeKind; s_bkTw[slot].tf = nodeTF;
       s_bkTw[slot].an = an; s_bkTw[slot].atr = atr; s_bkTw[slot].step = step;
-      DrawStripDiagEmit("[P-BK-107] box=" + id + " type=" + BaseKnotNodeShort(g_bkBoxes[i].nodeKind) +
+      DrawStripDiagEmit("[P-BK-107] box=" + id + " chart=" + BaseKnotTFName(Period()) +
+                        " commit=" + BaseKnotTFName(g_bkBoxes[i].tfMin) +
+                        " type=" + BaseKnotNodeShort(g_bkBoxes[i].nodeKind) +
                         " node=" + BaseKnotTFName(nodeTF) + " anchor=" +
                         (an > 0 ? TimeToString(an, TIME_DATE | TIME_MINUTES) : "live") +
                         " ATR=" + DoubleToString(warm ? BaseKnotToPips(atr) : 0.0, 1) +
+                        " pattern=" + DoubleToString(warm ? BaseKnotToPips(pat) : 0.0, 1) +
+                        " structure=" + DoubleToString(warm ? BaseKnotToPips(str) : 0.0, 1) +
                         " bands FTR<" + DoubleToString(BaseKnotToPips((atr + pat) * 0.5), 1) +
                         " ETR<" + DoubleToString(BaseKnotToPips((pat + str) * 0.5), 1) +
                         " CTR<" + DoubleToString(BaseKnotToPips(str), 1) +
                         " stepTH=" + DoubleToString(BaseKnotToPips(step), 1) +
                         " labelATR=" + DoubleToString(label, 1) +
-                        " gap=" + DoubleToString(label > 0.0 ? label - BaseKnotToPips(atr) : 0.0, 1));
+                        " gap=" + DoubleToString(label > 0.0 ? label - BaseKnotToPips(atr) : 0.0, 1) +
+                        " gv=" + (CalcAnchorAt() > 0 ? TimeToString(CalcAnchorAt(), TIME_DATE | TIME_MINUTES) : "live") +
+                        " owner=" + g_calcAnchorOwner +
+                        " last=" + (g_calcAnchorLastTime > 0 ? TimeToString(g_calcAnchorLastTime, TIME_DATE | TIME_MINUTES) : "live") +
+                        " lastOwner=" + g_calcAnchorLastOwner);
    }
 }
 
@@ -3941,6 +4056,43 @@ void BaseKnotDirWitness()
                         " read=" + (k < 0 ? "gone" : (g_bkBoxes[k].dir >= 0 ? "BUY" : "SELL")) +
                         " gv=" + DoubleToString(gv, 0));
    }
+}
+
+// P-BK-116 (2026-10-21): the line-end column's own arithmetic, on the flushed channel — the
+// lot the risk % bought, the pip's money, the balance it was sized from, and every leg's
+// pips + money. It reads the numbers the PAINT used (`BaseKnotPipWitTake`), so the log and the
+// ink can never describe different sizes, and a still frame says nothing (the string is
+// compared first). Emitted from both pumps, right after the note's own pulse.
+void BaseKnotPipWitness()
+{
+   string w = BaseKnotPipWitTake();
+   if(w == "") return;
+   DrawStripDiagEmit("[BK-PIP] " + w);
+}
+
+// P-BK-115a (2026-10-21): THE KEEPER'S OWN PULSE — AND IT IS SILENT WHEN THE CHART IS STILL.
+// «مدام روی چارت بیس نات حذف و رسم میشه و اپدیت میشه» is a claim about FREQUENCY, and the one
+// instrument that can settle it is the keeper's own count: `BaseKnotNoteCornerRefresh` shares
+// the 500 ms pump, so a tree that Syncs on every round prints two lines a second for ever
+// with nothing on the chart changing, and a tree that respects §5 prints NONE.
+// The read-back is the keeper's (`BaseKnotNoteSyncTake`, BaseKnotTool.mqh) and the line
+// carries what a reader needs to tell the two apart: how many Syncs, the worst one's ms (the
+// full family rewrite is the expensive half), the box, and whether a note is even supposed to
+// be up. Called AFTER the pump's own SyncBadges, from both entries' pump (BiotakKit / the Lite
+// tick pump) — the same place the keeper runs.
+void BaseKnotNoteWitness()
+{
+   uint ms = 0;
+   int  n  = BaseKnotNoteSyncTake(ms);
+   if(n <= 0) return;   // the still chart: no line, which IS the proof
+   string id = BaseKnotSelectedId();
+   DrawStripDiagEmit("[BK-NOTE] sync=" + IntegerToString(n) +
+                     " worstMs=" + IntegerToString((int)ms) +
+                     " armed=" + IntegerToString(BaseKnotCornerToastIsArmed() ? 1 : 0) +
+                     " boxes=" + IntegerToString(ArraySize(g_bkBoxes)) +
+                     " id=" + (id == "" ? "-" : id) +
+                     " rows=" + IntegerToString(ObjectFind(0, BaseKnotCornerRowName(0)) >= 0 ? 1 : 0) +
+                     " plate=" + IntegerToString(ObjectFind(0, BaseKnotCornerPlateName()) >= 0 ? 1 : 0));
 }
 
 #endif // BASE_KNOT_WITNESS_MQH
@@ -4278,39 +4430,38 @@ void BaseKnotEngPump()
    double   tp1[BK_ENG_ROW_MAX];
    double   tp2[BK_ENG_ROW_MAX];
    double   tp3[BK_ENG_ROW_MAX];
+   double   pric[BK_ENG_ROW_MAX], clas[BK_ENG_ROW_MAX];
     double   ab[BK_ENG_ROW_MAX];      // P-BK-106: that TF's ATR in PRICE units (the type's measure)
     double   st[BK_ENG_ROW_MAX];      // P-BK-106: that TF's TH in PRICE units (the step's own number)
     ArrayInitialize(ab, 0.0);      // explicit: the push below reads them for every `mins`
     ArrayInitialize(st, 0.0);
-   int n = BaseKnotEngNeeds(mins, anchors);
+    ArrayInitialize(pric, 0.0); ArrayInitialize(clas, 0.0);
+   BaseKnotOwnerATRPump(); int n = BaseKnotEngNeeds(mins, anchors);
    for(int i = 0; i < n && i < BK_ENG_ROW_MAX; i++)
    {
-      // P-BK-50: ONE plan call feeds all four pushes (it computes the strip ATRs
-      // this loop used to ask for), and a plan that is not warm pushes ZEROES — the
-      // absence the tool then reports instead of drawing a guessed level.
-      // P-BK-79: AND AT THE ROW'S OWN ANCHOR. `anchors[i]` is the box' `storyT` — the bar
-      // its story ended on — so the ATRs, the EngSL, the Hunter leg and the three targets
-      // are the ones THAT bar's market gave, not today's drifted ones («با گذشت زمان ممکن
-      // 40 بشه یا 10 بشه»). 0 stays the live row the sizing preview asks for.
-       STradePlan plan;
-       if(!TradePlanCompute(mins[i], plan, anchors[i]))
-       {
-          pips[i] = 0.0; hunts[i] = 0.0; tp1[i] = 0.0; tp2[i] = 0.0; tp3[i] = 0.0;
-          ab[i]   = 0.0; st[i] = 0.0;
-          continue;
-       }
+       // P-BK-50: one plan call feeds every push; a cold plan pushes ZEROES.
+       // P-BK-79: the row's own anchor — the bar the box' story ended on.
+        STradePlan plan;
+        if(!TradePlanCompute(mins[i], plan, anchors[i]))
+        {
+           pips[i] = 0.0; hunts[i] = 0.0; tp1[i] = 0.0; tp2[i] = 0.0; tp3[i] = 0.0;
+           pric[i] = 0.0; clas[i] = 0.0;
+           ab[i]   = 0.0; st[i] = 0.0;
+           continue;
+        }
       // P-TRADEPLAN-DEC (2026-09-16): the pushed risk is the CARD'S OWN NUMBER —
       // `plan.eng`, one decimal — not a second rounding of `engTrue`, so the box and the
       // `Eng.SL` row it is checked against cannot drift apart. A sub-pip size survives
       // the push (EURUSD M1: 0.3); only a TF the plan has no value for pushes 0, which
       // stays the tool's word for "never pushed" (BaseKnotEngPips).
       pips[i] = (plan.eng > 0.0 ? plan.eng : 0.0);
-      // P-BK-51: HUNTSL RIDES THE SAME ROW — the very leg the TRex card prints as
-      // `Hunter SL:`, which is what an ETR/CTR/OTR knot's entry waits for.
+      // P-BK-51: HuntSL rides the same row — the TRex card's Trigger.
       hunts[i] = (plan.hunter > 0.0 ? plan.hunter : 0.0);   // P-TRADEPLAN-DEC: 0.1 pip, same rule
-      tp1[i]  = (plan.tp1 > 0 ? (double)plan.tp1 : 0.0);
-      tp2[i]  = (plan.tp2 > 0 ? (double)plan.tp2 : 0.0);
-      tp3[i]  = (plan.tp3 > 0 ? (double)plan.tp3 : 0.0);
+       tp1[i]  = (plan.tp1 > 0 ? (double)plan.tp1 : 0.0);
+       tp2[i]  = (plan.tp2 > 0 ? (double)plan.tp2 : 0.0);
+       tp3[i]  = (plan.tp3 > 0 ? (double)plan.tp3 : 0.0);
+       pric[i] = (plan.pricicle > 0 ? (double)plan.pricicle : 0.0);
+       clas[i] = (plan.classic > 0 ? (double)plan.classic : 0.0);
        // P-BK-106 — THE TYPE'S OWN MEASURE IS BACK ON ATR (P-BK-92's TH reversal retired).
        // `plan.ownPips` is THIS TF's composite ATR at THIS ROW'S anchor (TradePlanStripPips ->
        // CalculateWeightedATR, the 5/10/21/66/132/264 blend the strip and the trade plan read),
@@ -4326,6 +4477,7 @@ void BaseKnotEngPump()
        st[i] = THAbilityPriceNorm(inpTHVolNorm, mins[i], anchors[i]);
    }
    BaseKnotEngPush(mins, anchors, pips, hunts, tp1, tp2, tp3, n);
+   BaseKnotPlanLegsPush(mins, anchors, pric, clas, n);
     // P-BK-92: P-BK-75's block below now hands TH per TF (reversed per user).
     // P-BK-75 — THE NODE'S TYPE IS ITS HEIGHT AGAINST THE MOVEMENT ABILITIES OF ITS OWN
     // TF (user: «به جای th از atr استفاده بشه»), so the pump hands ONE number per TF in —
@@ -4335,10 +4487,10 @@ void BaseKnotEngPump()
     // tool's own table, never here: a second place that halved an ATR would be a second
     // owner of the rule. A TF whose ATR is not warm pushes 0, which BaseKnotAbilityGet
     // reads as an ABSENCE: the type stays BK_NODE_NONE and the tooltip says so.
-    // P-BK-79: one row per (TF, anchor) — the same list, the same keys.
-    // P-BK-106: ONE row per box is asked for now (the class), not three — the type's two
-    // upper bands are that rung's ATR scaled by the ladder's √-law (BaseKnotAbilityGet),
-    // so no rung above is read and none is asked for. The STEP's TH rides the same row.
+     // P-BK-79: one row per (TF, anchor) — the same list, the same keys.
+     // P-BK-106b: the class AND the two rungs above it are asked for, each at the box' own
+     // anchor, so BaseKnotAbilityGet reads three REAL ATRs (the √-law is only the cold
+     // fallback). The STEP's TH rides the class row.
      BaseKnotAbilityReset();
     for(int i = 0; i < n && i < BK_ENG_ROW_MAX; i++)
        BaseKnotAbilityPush(mins[i], anchors[i], ab[i], st[i]);
@@ -4375,7 +4527,7 @@ int OnCalculateHandler(const int rates_total, const int prev_calculated, const d
        // TH is below BaseKnotTool (THCalculations, P-BK-92, was ATR), so Lite —
        // which has no RefreshOnBar — hands the same TH points in from its tick pump.
        // P-BK-46: and the same pump hands the knots' EngSL risk in (BaseKnotEngPump).
-        if(bkNow - s_bkLitePumpMs >= 500) { s_bkLitePumpMs = bkNow; BaseKnotStepPush(THAbilityPriceNorm(inpTHVolNorm, Period(), 0)); BaseKnotEngPump(); BaseKnotSyncBadges(); TradePlanLiveTick(); }
+        if(bkNow - s_bkLitePumpMs >= 500) { s_bkLitePumpMs = bkNow; BaseKnotStepPush(THAbilityPriceNorm(inpTHVolNorm, Period(), 0)); BaseKnotEngPump(); BaseKnotSyncBadges(); BaseKnotNoteWitness(); BaseKnotPipWitness(); TradePlanLiveTick(); }   // P-BK-115a/116: the keeper's and the column's pulses, on the flushed channel
     }
 #endif
 
@@ -5508,6 +5660,7 @@ int ApplyHideAllState(const bool hide)
         // the only thing keeping that corner shut.
         int trigSeen = 0;
         TriggerFamilyWalk(g_triggerLevelsEnabled, trigSeen);
+        ShowAllDrawingFamilies();   // P-UI-160b: the show half (CustomPrice owns both ends)
     }
     // P-PERF-02: masks written directly above → every stored mask is now
     // stale; the guarded writers must re-assert once on the next frame.
@@ -6050,9 +6203,32 @@ void RoutCustomPriceGesture(const int id, const long &lparam, const double &dpar
 #ifndef EVENT_HANDLERS_ROUTER_MQH
 #define EVENT_HANDLERS_ROUTER_MQH
 
+#ifndef BUILD_LITE
+//--- P-UI-170 (2026-10-20): the strip's OWN text fields take the keyboard too.
+//--- MT4 delivers the key stream to a focused OBJ_EDIT (the house says so in
+//--- BiotakPanels_PalB.mqh:527), so every letter hotkey fired while the user
+//--- typed a level, a caption, a template name or a level note. The object's
+//--- own STATE is the terminal's answer to "does this field hold the keyboard
+//--- RIGHT NOW" - a latched flag would swallow F/E/hide-all for as long as the
+//--- panel stayed open (P-UI-130's own lesson).
+bool AnyStripTextFieldFocused()
+{
+   for(int e = 1; e < 5; e++)
+   {
+      string nm = DrawStripEditName(e);
+      if(ObjectFind(0, nm) < 0) continue;
+      if((int)ObjectGetInteger(0, nm, OBJPROP_STATE) != 0) return true;
+   }
+   return false;
+}
+#endif
+
 void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-    // P-UI-114 (2026-09-23): right-click era deleted — terminal menu untouched,
+    // BKCORNER-TOAST: the note's clock stops while the cursor is on it. One int
+    // compare per event; the callee returns on one flag when no toast is up.
+    if(id == CHARTEVENT_MOUSE_MOVE) BaseKnotCornerToastHover((int)lparam, (int)dparam);
+    // P-UI-114 (2026-09-23): right-click era deleted - terminal menu untouched,
     // strip toggles on a single click of a drawing (DrawStripClickToggle in DrawStrip.mqh).
 
     // Base / Knot tool FIRST: while armed it owns every mouse gesture (no
@@ -6211,7 +6387,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         // user types. ESC/ENTER still reach the palette via HandleUIChartEvent.
         // Same for the Base Box TEXT field (TV-parity 2026-09-07 — any letter
         // is valid box text).
-        if(g_PalHexFocus || g_BkTextFocus) return;
+        if(g_PalHexFocus || g_BkTextFocus || AnyStripTextFieldFocused()) return;
 #endif
         // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
 #ifndef BUILD_LITE
@@ -6294,6 +6470,22 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //  
         if(IsHotkeyPressed(lparam, sparam, inpCustomPriceKey))
         {
+            // P-UI-193 (2026-10-20, ported 2026-10-21) — THE KEY IS THE SAME TOGGLE
+            // THE CELL IS. MEASURED on MT4: the C key could only ARM. Its body
+            // re-armed on every press (deleted the line and re-created it at the
+            // middle price), so a chart with the custom-price line ON had no way
+            // out from the keyboard short of ESC — the exact one-way defect
+            // P-UI-45 fixed for the ring's PIN cell, still live on the key door.
+            // The ON test is the PIN branch's own triple, and the OFF runs the ONE
+            // owner ESC and the PIN cell share.
+            bool pinActive = (g_customPriceLineCreated || g_waitingForCustomPriceClick ||
+                              g_customPriceKeyboardOverride);
+            if(pinActive)
+            {
+                DeactivateCustomPriceMode("C key");
+                ThrottledChartRedraw();
+                return;
+            }
             g_waitingForCustomPriceClick = true;
             g_customPriceKeyboardOverride = true;
             _LOG_GATE_D Print("[D][GEN] Press anywhere on the chart to set custom TH start price");
@@ -6465,6 +6657,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 #ifndef BUILD_LITE
         if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
         {
+            // P-MT5-PARITY (2026-10-21) - PARITY (MT4 EventHandlers_Router.mqh:460): the key is a bare
+            // toggle. MT5's own "cancel every other tool" sweep tore a live
+            // ray/path/box/leg session down on the press; MT4 never did that.
             ToggleTH3Tool();
             ThrottledChartRedraw();
             return;
@@ -6480,6 +6675,8 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 #ifndef BUILD_LITE
         if((int)lparam == 80)   // 'P' — toggle Leg Measure session (same as ring CIR_LEG)
         {
+            // P-MT5-PARITY (2026-10-21) - PARITY (MT4 EventHandlers_Router.mqh:478): a bare toggle - MT5's
+            // own sweep tore a live ray/path/box session down on the press.
             LegMeasureToggle();
             ThrottledChartRedraw();
             return;
@@ -6493,6 +6690,10 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 #ifndef BUILD_LITE
         if((int)lparam == 66)   // 'B' — arm/cancel the base mark
         {
+            // P-MT5-PARITY (2026-10-21) - PARITY (MT4 EventHandlers_Router.mqh:490): a bare toggle. The
+            // base mark REFUSES to arm under a live TH3/leg session (that rule
+            // lives in TH3BaseMarkToggle itself) - it never tears another
+            // session down to make room for itself.
             TH3BaseMarkToggle();
             ThrottledChartRedraw();
             return;
@@ -6724,11 +6925,20 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             }
             g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
             g_suppressDeleteEvents = false;
+            // P-MT5-PARITY (2026-10-21) - PARITY (MT4 EventHandlers_Router.mqh:713-717): THE LOCK PINS THE
+            // CHART'S OWN PERIOD. MT4's GetCachedPeriod() is lock-blind, so it
+            // answered with the chart's period. MT5's GetCachedPeriod() HONOURS
+            // the lock (BUG-03), so asking it AFTER the flip answered with the
+            // PREVIOUS lock's period: lock H1 -> chart M15 -> unlock -> lock
+            // pinned H1 again, and the stale value was written to the GV, so it
+            // survived a restart. The chart's own period is read BEFORE the
+            // flip - the same answer MT4 gave, in the same unit (minutes).
+            int chartPeriodForLock = Period();
             g_timeframeLocked = !g_timeframeLocked;
             RequestUISync();   // P-UI-40: the lock badge is derived from this state
             if(g_timeframeLocked)
             {
-                g_lockedPeriod = GetCachedPeriod();
+               g_lockedPeriod = chartPeriodForLock;
                 LOG_I(LOG_CAT_KEYS, "Timeframe LOCKED to: " + GetCurrentTimeframe());
                 _LOG_GATE_D Print("[D][GEN] [LOCK] Timeframe locked to: ", GetCurrentTimeframe());
             }
@@ -7308,6 +7518,7 @@ bool IsHotkeyPressed(const long lparam, const string sparam, const string hotkey
     if(StringLen(hotkey) <= 0) return false;
     string k = hotkey;
     StringToUpper(k);
+    if(StringLen(k) != 1) return false;   // not one key: the terminal cannot deliver it
     int code = (int)StringGetCharacter(k, 0);
     if((int)lparam == code) return true;
     if(StringLen(sparam) > 0) {
@@ -7316,6 +7527,56 @@ bool IsHotkeyPressed(const long lparam, const string sparam, const string hotkey
         if((int)StringGetCharacter(sp, 0) == code) return true;
     }
     return false;
+}
+
+//--- P-UI-185: the hotkeys are ONE key each, and a conflict is named. A hotkey
+//--- longer than one character can never be delivered (the key stream carries ONE
+//--- virtual key), and two inputs sharing a key leave the second one dead. The
+//--- audit runs ONCE per attach and says which key is shared by what - so the
+//--- user is not left with a key that does nothing.
+#ifndef BUILD_LITE
+void HotkeyWitness(const string line) { DrawStripDiagEmit("[keys] " + line); }
+#else
+void HotkeyWitness(const string line) { Print("[keys] " + line); }
+#endif
+void HotkeyAudit()
+{
+   string keys[16], names[16];
+   int n = 0;
+   keys[n] = inpHideKey;         names[n] = "Hide/Show all";   n++;
+   keys[n] = inpLinesToggleKey;  names[n] = "Level lines";      n++;
+   keys[n] = inpLockKey;         names[n] = "Timeframe lock";   n++;
+   keys[n] = inpCustomPriceKey;  names[n] = "Custom price";     n++;
+   keys[n] = inpTriggerLevelsKey;names[n] = "Trigger levels";   n++;
+   keys[n] = inpStepModeKey;     names[n] = "Step mode";        n++;
+#ifndef BUILD_LITE
+   keys[n] = inpTH3ToolKey;      names[n] = "TH3 tool";         n++;
+   keys[n] = inpHTFKey;          names[n] = "HTF candles";      n++;
+#endif
+   keys[n] = inpATRLabelsKey;    names[n] = "ATR labels";       n++;
+   keys[n] = inpTHLabelsKey;     names[n] = "TH labels";        n++;
+   keys[n] = inpShowStatusKey;   names[n] = "Show status";      n++;
+   keys[n] = inpResetKey;        names[n] = "Reset overrides";  n++;
+   keys[n] = inpLogDumpKey;      names[n] = "Log dump";         n++;
+   keys[n] = inpCountdownKey;    names[n] = "Countdown tag";    n++;
+   for(int i = 0; i < n; i++)
+   {
+      string k = keys[i];
+      StringToUpper(k);
+      if(StringLen(k) != 1)
+      {
+         HotkeyWitness(names[i] + " key=\"" + keys[i] + "\" is not ONE key - the terminal delivers one virtual key, so this shortcut never fires");
+         continue;
+      }
+      for(int j = i + 1; j < n; j++)
+      {
+         string k2 = keys[j];
+         StringToUpper(k2);
+         if(k2 != k) continue;
+         HotkeyWitness("hotkey \"" + k + "\" is bound twice: " + names[i] + " and " + names[j] +
+                       " - the second one never answers");
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -7599,6 +7860,7 @@ void RedrawLabelsOnly() {
     LblSweepEnd(objectPrefix);
     g_modeLabelYOffset = g_currentLabelYOffset;
     RepositionAllOverlayLabels();
+    LabelPushBaseNoteSlotTop();   // BKCORNER-ON: the note's slot, after the mode rows' offset is known
     ThrottledChartRedraw();
     uint p49tail = GetTickCount() - p49t;
 
@@ -7633,6 +7895,16 @@ void RedrawLabelsOnly() {
 void RepaintLabelsForSwitch()
 {
     const uint t0 = GetTickCount();
+    // P-MT5-PARITY (2026-10-21) - PARITY (MT4 BiotakPanels_Apply.mqh / BiotakMenu_D.mqh): every one of
+    // these label switches answered `g_labelsRelayoutNeeded=true; flags=
+    // REFRESH_ALL;` in MT4, and the REFRESH_ALL dispatcher ended in
+    // RuntimeSettingsSaveOverridesThrottled() - so the press wrote the OV_
+    // mirror. P-PERF-117 narrowed the flags to REFRESH_NONE, and with the
+    // dispatcher out of the loop the mirror stopped being written: a hard kill
+    // between the press and the teardown lost the setting. The mirror is the
+    // switch's own business, so it is written HERE - the one owner the narrowed
+    // flags share.
+    RuntimeSettingsSaveOverridesThrottled();
     if(IsIndicatorHidden())
     {
         g_labelsRelayoutNeeded = true;   // the SHOW path owes the relayout
@@ -7826,6 +8098,10 @@ void CoopPump()
          case COOP_JOB_STATUS_TEXT:
             RefreshVisibleStatusLabels();
             RefreshComboLabelExtraInfo();
+            // P-SESS: the sessions family's one tick (engine query + chart
+            // objects only; no UI reads, so Lite runs it too). Idle ticks
+            // compare a hash and one high/low per open session - no writes.
+            SessionsTick();
             s_coopOwed[job] = false;
             break;
          case COOP_JOB_HEAVY_FRAME:
@@ -7840,7 +8116,7 @@ void CoopPump()
 
       uint spent  = GetTickCount() - t0;
       uint waited = t0 - s_coopOwedMs[job];
-      if(waited >= COOP_WARN_MS || spent >= COOP_WARN_MS)
+      if(waited >= COOP_WAIT_WARN_MS || spent >= COOP_WARN_MS)
          _LOG_GATE_W Print("[W][PERF] coop job=", CoopJobName(job), " waited=", (int)waited,
                            "ms ran=", (int)spent, "ms stillOwed=", (CoopOwes(job) ? 1 : 0));
 

@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>گزارش کامل شکاف منطق و رفتار — MT5 ↔ MT4</title>
+<style>
+*{box-sizing:border-box}
+:root{
+ --bg:#eef1f7;--card:#ffffff;--ink:#18203a;--muted:#5b6580;--line:#e2e7f2;
+ --accent:#2f6fed;--accent2:#7a3ff2;--code-bg:#0e1526;--code-ink:#dbe4f5;
+}
+html{scroll-behavior:smooth}
+body{margin:0;color:var(--ink);line-height:1.95;font-size:15.5px;
+ font-family:"Vazirmatn","Segoe UI",Tahoma,"Noto Sans Arabic",sans-serif;
+ background:radial-gradient(1200px 500px at 85% -100px,#dfe8ff 0%,transparent 60%),
+           radial-gradient(900px 400px at -10% -50px,#efe4ff 0%,transparent 55%),var(--bg);}
+.page{max-width:1060px;margin:0 auto;padding:28px 22px 70px}
+.hero{background:linear-gradient(135deg,#1d2b64 0%,#2f6fed 55%,#7a3ff2 120%);color:#fff;
+ border-radius:18px;padding:30px 32px 24px;box-shadow:0 18px 40px -18px rgba(29,43,100,.55)}
+.hero-kicker{font-size:.8rem;letter-spacing:.04em;opacity:.85}
+.hero h1{margin:.15em 0 .1em;font-size:1.7rem;line-height:1.5}
+.hero-sub{opacity:.92;font-size:.92rem}
+.hero-chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);
+ border-radius:999px;padding:4px 12px;font-size:.82rem}
+.chip.red{background:#ffe4e0;color:#a51c10;border-color:#ffc9c2;font-weight:700}
+.chip.green{background:#dcfae6;color:#05603a;border-color:#a6f4c5;font-weight:700}
+.chip.amber{background:#fef0c7;color:#93370d;border-color:#fadf8f;font-weight:700}
+.toc{margin:22px 0;background:var(--card);border:1px solid var(--line);border-radius:16px;
+ padding:18px 22px;box-shadow:0 6px 24px -18px rgba(24,32,58,.35)}
+.toc-title{font-weight:700;margin-bottom:8px;color:var(--accent2)}
+.toc ol{margin:0;padding-inline-start:22px;columns:2;column-gap:34px}
+.toc li{margin:2px 0;break-inside:avoid}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px dotted #b9c3dd}
+.toc a:hover{color:var(--accent)}
+main{background:var(--card);border:1px solid var(--line);border-radius:16px;
+ padding:26px 30px 34px;box-shadow:0 10px 34px -24px rgba(24,32,58,.45)}
+h2{font-size:1.25rem;margin:1.7em 0 .6em;padding-inline-start:14px;
+ border-inline-start:5px solid var(--accent);line-height:1.6}
+h3{font-size:1.06rem;margin:1.4em 0 .5em;color:#2a3a66}
+p{margin:.55em 0}
+a{color:var(--accent)}
+hr{border:0;height:1px;background:linear-gradient(90deg,transparent,#c9d4ec,transparent);margin:1.8em 0}
+ul,ol{margin:.5em 0 .9em;padding-inline-start:24px}
+li{margin:.28em 0}
+li>ul{margin:.25em 0}
+code{direction:ltr;unicode-bidi:isolate;font-family:"Cascadia Mono",Consolas,"Courier New",monospace;
+ font-size:.86em;background:#edf1fa;border:1px solid #e0e6f4;border-radius:6px;padding:.5px 6px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);color:var(--code-ink);border-radius:14px;padding:16px 18px;overflow:auto;
+ direction:ltr;text-align:left;font-size:12.3px;line-height:1.55;border:1px solid #22305a}
+pre code{background:none;border:0;padding:0;white-space:pre;color:inherit;font-size:inherit}
+blockquote{margin:1em 0;padding:12px 18px;background:linear-gradient(90deg,#f4f0ff,#f8f6ff);
+ border-inline-start:5px solid var(--accent2);border-radius:12px;color:#3a3457}
+blockquote p{margin:0}
+strong{color:#111a33}
+.table-wrap{overflow-x:auto;margin:1em 0;border:1px solid var(--line);border-radius:14px}
+table{width:100%;border-collapse:collapse;background:#fff;font-size:.94rem}
+thead th{background:#eef3ff;color:#25355f;text-align:right;font-weight:700}
+th,td{padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:top;text-align:right}
+tbody tr:nth-child(even) td{background:#fafbfe}
+tbody tr:last-child td{border-bottom:0}
+footer{margin-top:22px;color:var(--muted);font-size:.82rem;text-align:center}
+footer code{font-size:.8rem}
+@media (max-width:760px){.toc ol{columns:1}main{padding:20px 16px}.hero{padding:22px}}
+@media print{body{background:#fff}.page{max-width:none}main,.toc,.hero{box-shadow:none}pre{white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<div class="page" id="top">
+<header class="hero">
+  <div class="hero-kicker">Biotak Trigger TH3 — اسنپ‌شات مقایسهٔ MT5 ↔ MT4</div>
+  <h1>گزارش کامل شکاف منطق و رفتار — MT5 ↔ MT4</h1>
+  <div class="hero-sub">خودتولید از <code style="direction:ltr">tools/parity/module-report.py</code> و <code style="direction:ltr">tools/parity/gap-report.py</code> — 2026-10-18</div>
+  <div class="hero-chips">
+    <span class="chip red">۱۳ ماژول RED</span>
+    <span class="chip">۶۴ ماژول GREEN</span>
+    <span class="chip amber">۴۲ نماد MISSING</span>
+    <span class="chip">۱۱۶ نماد DRIFT</span>
+    <span class="chip">۴۷ نماد EXTRA</span>
+    <span class="chip green">هر دو entry — بیلد 0/0</span>
+  </div>
+</header>
+<nav class="toc"><div class="toc-title">فهرست مطالب</div><ol><li><a href="#sec-1">۰) خلاصهٔ اجرایی</a></li><li><a href="#sec-2">۱) روش، برچسب‌ها و معنی‌شان</a></li><li><a href="#sec-3">۲) تصویر عددی — ماژول‌های RED</a></li><li><a href="#sec-4">۳) شکاف قابلیت — MT4 دارد، MT5 ندارد (MISSING = ۴۲)</a></li><li><a href="#sec-5">۴) تفاوت رفتارِ نمادهای هم‌نام (DRIFT = ۱۱۶)</a></li><li><a href="#sec-6">۵) موارد فقط-MT5 (EXTRA = ۴۷) — دسته‌بندی</a></li><li><a href="#sec-7">۶) لایهٔ سازگاری MT5Compat/MQL5Compat.mqh — فهرست کامل شیم‌ها</a></li><li><a href="#sec-8">۷) ریسک‌ها و «پیاده‌سازی ناقص / وابستگی بررسی‌نشده»</a></li><li><a href="#sec-9">۸) بازتولید</a></li><li><a href="#sec-10">پیوست الف — خروجی خام gap-report.py --tags (2026-10-18)</a></li><li><a href="#sec-11">پیوست ب — خروجی خام module-report.py (2026-10-18)</a></li></ol></nav>
+<main>
+<p><strong>تاریخ اسنپ‌شات:</strong> 2026-10-18 (سنجش و بیلد در ساعت ۱۷:۳۶ به بعد) <strong>ابزار:</strong> <code>tools/parity/module-report.py</code> + <code>tools/parity/gap-report.py</code> (هر دو read-only) <strong>وضعیت بیلد این اسنپ‌شات:</strong> هر دو entry سبز — <code>Biotak Trigger TH3.mq5</code> → <code>0 errors, 0 warnings</code> (log: <code>build-logs/Biotak-Trigger-TH3-20261018-173642.log</code>) <code>Biotak Trigger TH3 Lite.mq5</code> → <code>0 errors, 0 warnings</code> (log: <code>build-logs/Biotak-Trigger-TH3-Lite-20261018-173753.log</code>)</p>
+<blockquote><strong>این سند «همه‌چیز» را لیست می‌کند:</strong> ۴۲ نماد MISSING، ۱۱۶ نماد DRIFT، ۴۷ نماد/بلوک EXTRA، به‌علاوهٔ لایهٔ سازگاری MT5Compat و ریسک‌های «پیاده‌سازی‌شده ولی وابستگی‌بررسی‌نشده». خروجی خام هر دو ابزار عیناً در پیوست الف و ب آمده است.</blockquote>
+<hr>
+<h2 id="sec-1">۰) خلاصهٔ اجرایی</h2>
+<div class="table-wrap"><table><thead><tr><th>سنجه</th><th>مقدار</th></tr></thead><tbody><tr><td>ماژول‌های محصول</td><td>۷۳ فایل <code>.mqh</code> + هر دو entry</td></tr><tr><td>ماژول‌های GREEN (رفتار هم‌ارز)</td><td>۶۴</td></tr><tr><td>ماژول‌های RED (کار باقی است)</td><td><strong>۱۳</strong> = ۱۱ ماژول محصول + ENTRY + ENTRY-LITE</td></tr><tr><td>نمادهایی که MT4 دارد و MT5 ندارد</td><td><strong>۴۲</strong> — تماماً در <code>DrawToolbar</code> (۲۷) و <code>DrawStrip</code> (۱۵)</td></tr><tr><td>نمادهای هم‌نام با بدنهٔ متفاوت</td><td><strong>۱۱۶</strong></td></tr><tr><td>نماد/بلوک‌های فقط-MT5</td><td><strong>۴۷</strong></td></tr><tr><td>زیرسیستم محاسبه/رسم با عدد متفاوت</td><td><code>LevelPipeline</code> و <code>TH3Renderer</code> → RED</td></tr></tbody></table></div>
+<p><strong>بزرگ‌ترین شکاف کارکردی (کارِ اصلی باقی‌مانده):</strong> بازنویسی کامل سیستم <strong>تمپلیت نقشه‌کشی</strong> در MT4 (<code>P-DRAW-132</code> / <code>P-DRAW-135</code> — «مثل تریدینگ‌ویو: تمپلیت‌های نام‌دار per-kind، سیو/اپلای/حذف/پیجر») که معماری قدیمی preset را رسماً حذف کرده است. MT5 هنوز روی معماری <strong>قدیمی preset</strong> (<code>DrawPreset*</code>) + look سه‌بعدی (<code>P-LOOK-3D</code>) کار می‌کند که در MT4 وجود ندارند.</p>
+<p><strong>صحت بیلد ⇒ ناقص‌بودن معنایی، نه شکست کامپایل:</strong> هر دو entry صفر خطا می‌گیرند؛ یعنی هیچ نامِ آویزانِ کامپایلی نداریم. شکاف‌ها همه از جنس «رفتار/وابستگی» هستند، نه ارجاع حل‌نشده.</p>
+<p><strong>هشدار درخت کاری:</strong> هر دو مخزن dirty هستند. مقایسهٔ این سند بین «working tree» هر دو درخت انجام شده:</p>
+<ul><li>MT5: شاخهٔ <code>sync-mt4-reference</code>، HEAD <code>151aac8</code> (2026-10-17)؛ ۱۴ فایل ردیابی‌شدهٔ ویرایش‌شده + ۷ ماژول جدید untracked + ۲۰ آیکون untracked (پورت در جریانِ P-SESS/P-UI-16x).</li><li>MT4: شاخهٔ <code>main</code>، HEAD <code>a00c267</code> (2026-10-17)؛ ۳۵ فایل ویرایش‌شدهٔ uncommitted (کار جاری روی DrawStrip/DrawToolbar/…).</li></ul>
+<hr>
+<h2 id="sec-2">۱) روش، برچسب‌ها و معنی‌شان</h2>
+<ul><li><strong>GREEN</strong> — هیچ خط یک‌طرفهٔ «اعلام‌نشده» ندارد؛ هر تفاوت با آیدیاوم‌های اعلام‌شده (پلتفورم/واحد زمان) توضیح داده می‌شود (<code>BAD=0</code>).</li><li><strong>RED</strong> — خطوط یک‌طرفه‌ای دارد که نه MT4-twin دارند نه آیدیاومِ اعلام‌شده ⇒ پورت/تأیید لازم است.</li><li><strong>MISSING</strong> (در گزارش نمادها) — نماد در MT4 هست، در MT5 نیست ⇒ قابلیت/منطق گم‌شده.</li><li><strong>DRIFT</strong> (در گزارش نمادها) — نماد هم‌نام است ولی بدنه متفاوت ⇒ تفاوت رفتار؛ اندازهٔ diff + درصد + تگ‌های <code>P-*</code> هر طرف.</li><li><strong>EXTRA</strong> — نماد فقط در MT5 ⇒ یا مخصوص پلتفورم/موتور/پرف (مشروع)، یا بازماندهٔ معماری قدیمی (کاندید حذف).</li><li><strong>MT5-ONLY / R-TF-UNIT</strong> — مارکرهای درون‌کد برای تفاوت‌های عامدانهٔ پلتفورمی.</li></ul>
+<p><code>module-report.py</code> تفاوت‌ها را با آیدیاوم‌های اعلام‌شده تطبیق می‌دهد؛ <code>gap-report.py</code> حتی آیدیاوم‌ها را هم لیست می‌کند (بنابراین DRIFT در یک ماژول GREEN یعنی «آیدیاومِ واحد زمان/پلتفورم»، نه رفتار متفاوت).</p>
+<hr>
+<h2 id="sec-3">۲) تصویر عددی — ماژول‌های RED</h2>
+<div class="table-wrap"><table><thead><tr><th>ماژول</th><th>خط بد (BAD)</th><th>سمت MT4</th><th>سمت MT5</th><th>نمادهای کلیدی متفاوت</th></tr></thead><tbody><tr><td><code>DrawToolbar.mqh</code></td><td>۴۸۷</td><td>۳۱۵</td><td>۱۷۲</td><td><code>DrawTpl*</code> ↔ <code>DrawPreset*</code>، <code>FibPen*</code>، <code>DRAW_*</code></td></tr><tr><td><code>DrawStrip.mqh</code></td><td>۲۳۵</td><td>۱۹۲</td><td>۴۳</td><td><code>DrawStripGear*</code>، <code>DrawStripTpl*</code> (MISSING)، <code>DrawStripMore*</code>، <code>DrawStripPick*</code></td></tr><tr><td><code>TH3Tool.mqh</code></td><td>۱۳۶</td><td>۳۰</td><td>۱۰۹</td><td><code>OnABCDMouseEvent</code>، بلوک‌ها، <code>TH3RestorePatternsFromChart</code>، <code>TH3ReadPatternAnchors</code> (extra)</td></tr><tr><td><code>TH3Renderer.mqh</code></td><td>۱۰۹</td><td>۱۹</td><td>۱۵۳</td><td><code>DrawABCDPattern</code> (۲۰۵ خط)، <code>TH3PivotMarkersClear</code>، پل RBridge</td></tr><tr><td><code>EventHandlers.mqh</code></td><td>۱۰۳</td><td>۷</td><td>۹۶</td><td><code>RedrawAllObjects</code>، <code>OnInitHandler</code>، <code>OnChartEventHandler</code>، <code>P4*Census</code>/teardown stamps (extra)</td></tr><tr><td><code>LevelPipeline.mqh</code></td><td>۶۶</td><td>۶۷</td><td>۱۲۷</td><td><code>SweepForeignLadderObjects</code> (۶۰٪)، <code>RenderZones</code>، <code>ExecutePipeline</code>، <code>RenderTriggerLines</code>، پل RBridge</td></tr><tr><td><code>BiotakPanels.mqh</code></td><td>۳۸</td><td>۱۳</td><td>۲۵</td><td><code>PnlApplySet</code> (37 خط)، <code>UISyncDrain</code></td></tr><tr><td><code>BiotakMenu.mqh</code></td><td>۳۲</td><td>۱۸</td><td>۱۴</td><td><code>DeleteMenu</code> (۷۲٪)، <code>DeleteLegacyMenuObjects</code>، <code>RingFeatureClick</code>، <code>CircTipDragTo</code></td></tr><tr><td><code>HTFCandles.mqh</code></td><td>۲۳</td><td>۳</td><td>۲۶</td><td><code>DrawHTFCandles</code>، <code>HTFProbe*</code> ↔ <code>HTFAdoptKeptFamily</code>/handoff (extra)</td></tr><tr><td><code>BiotakKit.mqh</code></td><td>۱۴</td><td>۰</td><td>۱۴</td><td><code>SetMidZonesVisible</code> (extra)، <code>ApplyRefreshFlags</code> (extra)</td></tr><tr><td><code>GlobalVariables.mqh</code></td><td>۱۱</td><td>۰</td><td>۱۱</td><td>شمارنده‌های <code>g_pInitMs*</code> + <code>attachTailPending</code> (extra)</td></tr><tr><td><code>ENTRY</code> (<code>.mq5</code>)</td><td>۲۲</td><td>۱</td><td>۲۱</td><td>بلوک‌های MT5-ONLY: RBridge، CompatRefreshChartData، census</td></tr><tr><td><code>ENTRY-LITE</code></td><td>۸</td><td>۰</td><td>۸</td><td>همان بلوک‌ها در نسخهٔ Lite</td></tr></tbody></table></div>
+<p><strong>ماژول‌های عددساز:</strong> از ۱۶ ماژول «عدد/رسم»، فقط <code>LevelPipeline</code> و <code>TH3Renderer</code> قرمز شده‌اند؛ بقیه GREEN ⇒ ریاضیات TH/ATR/Zone/TradePlan عیناً هم‌ارز است (شامل <code>TH3Math</code>, <code>TH3Pivots</code>, <code>THCalculations</code>, <code>TradePlanFormulas</code>, <code>ZoneCalculator/Factory/Validator</code>).</p>
+<hr>
+<h2 id="sec-4">۳) شکاف قابلیت — MT4 دارد، MT5 ندارد (MISSING = ۴۲)</h2>
+<h3>۳.۱ سیستم تمپلیت نقشه‌کشی (کارِ پورت‌نشدهٔ اصلی)</h3>
+<p>در MT4 این سیستم جایگزین معماری preset شده است (<code>Toolbar_Tpl.mqh</code> — درخواست کاربر: «می‌خوام تمپلت‌های مختلف رو سیو کنم و به راحتی هرکدوم خواستم فعال کنم بشه… معمارشو از نو بنویس و معماری قبلی رو حذف کن»).</p>
+<p><strong>مدل رفتاری MT4:</strong></p>
+<ul><li>هر نوع ابزار (per-kind) تا <code>DRAW_TPL_MAX</code> تمپلیت <strong>نام‌دار</strong> دارد؛ سیو زیر اسم تکراری = جایگزینی، اسم نو = append، رک پر = <strong>ردّ با ویتنس</strong> (بجای overwrite خاموش).</li><li>حذف = فشرده‌سازی لیست؛ ایندکس ردیف همان ردیف است.</li><li>اپلای = کل look (۹ مقدار: رنگ/ضخامت/استایل/fill/ray/کپشن/گلیف/لایه/رنگ داخل) + <strong>learning</strong> (طراحی بعدی همان نوع آن را می‌پوشد).</li><li>برای فبیوها <strong>سطح‌ها هم ذخیره می‌شوند</strong> (<code>DRAW_TPL_LVL_ROW</code> — ردیف اختصاصی در باند 100+slot، جدا از باند ۰..۱۱ و صندلی‌های رزرو 254/255).</li><li>صندلی‌های رزرو فایل: look ماندگار (P-DRAW-09c) + «آخرین جوهر مشترک» (P-DRAW-INK).</li><li>خانهٔ فایل یکی است: <code>DRAW_TPL_FILE</code> + مهاجرت از فایل legacy (<code>DRAW_TPL_LEGACY</code>، <code>DrawTplMigrate</code>)، seed اولین اجرا (<code>DrawTplSeed</code>/<code>DrawTplSeedOne</code>)، بوت (<code>DrawTplBoot</code> — از init در <code>EventHandlers</code> صدا زده می‌شود).</li></ul>
+<p><strong>نمادهای غایب در MT5 — <code>DrawToolbar</code> (۲۷):</strong> <code>DRAW_TPL_FILE, DRAW_TPL_LEGACY, DRAW_TPL_LVL_ROW, DRAW_TPL_MAX, DRAW_TPL_PAGE,</code> <code>DrawLook, DrawLookPackA, DrawLookPackB, DrawLookUnpackA, DrawLookUnpackB,</code> <code>DrawTpl, DrawTplApply, DrawTplBoot, DrawTplCount, DrawTplDelete, DrawTplIndex, DrawTplLevelsOf, DrawTplLevelsTo, DrawTplLoad, DrawTplMigrate, DrawTplName, DrawTplPath, DrawTplPut, DrawTplSave, DrawTplSaveAs, DrawTplSeed, DrawTplSeedOne</code></p>
+<p><strong>نمادهای غایب در MT5 — <code>DrawStrip</code> (۱۵):</strong> <code>DSTRIP_MK_TPLNAV, DSTRIP_PICK_DEL_W,</code> <code>DrawStripPickDelFaceName, DrawStripPickDelName, DrawStripPickTapDel,</code> <code>DrawStripTplApplyGroup, DrawStripTplCommit, DrawStripTplNameFocus, DrawStripTplNavText, DrawStripTplRowDelete, DrawStripTplSaveHit, DrawStripTplSaveName, DrawStripTplSavePaint, DrawStripTplSaveSweep, DrawStripTplSaveW</code></p>
+<p><strong>معادل فعلی MT5 (معماری قدیمی):</strong> <code>DrawPreset*</code> — سه اسلات builtin + سه اسلات کاربری بی‌نام، و در استریپ فقط یک ردیف quick-save («Save current look») بدون ادیتور اسم، بدون حذف، بدون پیجر. ⇒ <strong>نتیجهٔ رفتاری برای کاربر MT5 امروز:</strong> نه می‌تواند تمپلیت را نام‌گذاری کند، نه حذف کند، نه بین صفحه‌ها بچرخد، نه سطح‌های فبیو را با تمپلیت ذخیره کند، و رکِ پر آخرین را بی‌صدا overwrite می‌کند.</p>
+<h3>۳.۲ فهرست کامل هر ۴۲ MISSING</h3>
+<p>همان دو گروه بالا؛ جمع = ۲۷ + ۱۵ = ۴۲. جایی دیگری MISSING وجود ندارد (سایر ۷۳ ماژول هیچ نماد گم‌شده ندارند).</p>
+<hr>
+<h2 id="sec-5">۴) تفاوت رفتارِ نمادهای هم‌نام (DRIFT = ۱۱۶)</h2>
+<h3>۴.۱ ماژول‌های RED — تفاوت‌هایی که باید پورت/تأیید شوند</h3>
+<p><strong><code>DrawToolbar.mqh</code></strong> (diff ~۵۰۰ خط):</p>
+<ul><li><code>FibPenSync</code> (۴۵ خط، ۶٪) و <code>FibPenDragFollow</code>، <code>FibPenPreviewArm/End</code>، <code>DrawSlotWrite</code>، <code>FillChildEnsure</code> — خانوادهٔ look/قلم فبیو؛ MT5 نسخهٔ ۳D را دارد و MT4 نه (بخش ۵.۴).</li><li>ردیف‌های style: MT5 <code>DRAW_SLOT_STYLE = 9</code> (سه neon/caps/wash + 3D)، MT4 <code>= 8</code>. <code>FIBPEN_STYLE_3D</code> در MT5 ردیف نهم است.</li></ul>
+<p><strong><code>DrawStrip.mqh</code></strong>:</p>
+<ul><li><code>DrawStripGearObjectsPurge</code> (۸۰ خط، ۹۳٪)، <code>DrawStripClose</code> (44)، <code>DrawStripOnEvent</code>، <code>DrawStripPaint</code>، <code>DrawStripMoreTap/Build/Tip/Text</code> — ساخت منوی چرخ‌دنده/رک تمپلیت.</li><li><code>DrawStripGearRowTap/Content/Tip/Text/Close/GroupDigest</code> + <code>DrawStripDiagEmit/Close</code> (extra) — ردیف‌ها و دیالوگ‌ها.</li><li><code>DrawStripLevelsToggle</code>/<code>DrawStripLevelsRewrite</code> [P-LVL-SCALE, P-LVL-TEXT] — رندر سطح‌ها.</li><li><code>DrawStripEditEnd</code>، <code>DrawStripPickTap/Count/ClosePicker/PopRowRes</code>، <code>DrawStripDuplicate</code>، <code>DrawStripFootTap</code>، <code>DrawStripHoldLatch</code> — تعاملات پیکر/فوتر.</li></ul>
+<p><strong><code>BiotakMenu.mqh</code></strong>:</p>
+<ul><li><code>DeleteMenu</code> (۲۶ خط، ۷۲٪) و <code>DeleteLegacyMenuObjects</code> (۷۵٪): MT5 کل خانواده را با یک sweep پیشوندی <code>ObjectsDeleteAll(0, "BiotakMenu_&lt;chart&gt;_")</code> پاک می‌کند؛ MT4 نام‌به‌نام (CircIcon/CircBg/CircBadge/CircBadgeTxt/ToolsBg/ToolsIcon/…) حذف می‌کند. مکانیزم حذف رویدادهای برنامه‌ای در MT5 (بخش ۶) این تفاوت را پوشش می‌دهد، ولی دامنهٔ sweep دیگر «دقیقاً همان مجموعهٔ کلاسیک» نیست.</li><li><code>RingFeatureClick</code>، <code>InitializeUIStates</code>، <code>SetHTFVisible</code>، <code>CircTipDragTo</code> — بودجهٔ redraw درگ رینگ (<code>CIRC_DRAG_REDRAW_INTERVAL</code>) + <code>CircReassertLock</code> فقط در MT5؛ در MT4 <code>g_redrawTHLevelsNeeded</code> و redraw مستقیم.</li></ul>
+<p><strong><code>BiotakPanels.mqh</code></strong>:</p>
+<ul><li><code>PnlApplySet</code> (۳۷ خط): MT4 علم‌ها را <code>flags=REFRESH_BUFFERS</code> یا <code>g_labelsRelayoutNeeded=true; flags=REFRESH_ALL</code> می‌گذارد؛ MT5 <code>RequestUISync()</code> صدا می‌زند و <code>flags=REFRESH_NONE</code> برمی‌گرداند (تأخیر تا درینِ UISync). مسیر پایانِ کار باید یکی باشد — تأیید لازم.</li><li><code>UISyncDrain</code> (۱ خط).</li></ul>
+<p><strong><code>EventHandlers.mqh</code></strong> (۹۶ خط فقط-MT5 در همین فایل):</p>
+<ul><li><code>RedrawAllObjects</code> (۶۴ خط)، <code>OnInitHandler</code> (۳۵)، <code>OnChartEventHandler</code>، <code>ResolveTopologyAdoption</code>، <code>RunIncrementalObjectCleanup</code>، <code>SetTriggerLevelsVisible</code>، <code>DrawLevelsBasedOnMode</code>، <code>OnCalculateHandler</code>، <code>OnDeinitHandler</code>، <code>P4ReportSlow</code>.</li><li>MT4-Only داخل همین‌ها: <code>ThrottledChartRedraw()</code> (۲ بار)، GV با نام <code>Biotak_TH3_NeedsUpdate_&lt;chart&gt;</code>، و <strong><code>DrawTplBoot()</code> در init</strong> — یعنی وابستگی بوت تمپلیت‌ها هم اینجاست.</li><li>MT5-Only: <code>P4ObjectCensus</code>، <code>P4LeftoverCensus</code>، <code>RepaintLabelsForSwitch</code>، <code>AttachToolRestoreLegacy</code>، <code>TailRestoreDeferred</code>، <code>ResolvePeriodChangeAttach</code>، <code>ConsumeCleanUITeardownStamp</code>/<code>StampCleanUITeardown</code>/<code>UITearStampName</code>، <code>SavePeriodStamp</code>/<code>LastPeriodStampName</code> (۲۲+۱۳+۱۳+۱۵+۱۶+۲۱+۲۲ خط) — مخصوص ترتیب رویداد/attach در MT5.</li></ul>
+<p><strong><code>GlobalVariables.mqh</code></strong> — فقط-MT5: ۱۰ شمارندهٔ <code>g_pInitMs*</code> (پروفایل init) + <code>g_attachTailPending</code>؛ <code>ChartViewRestoreUser</code> [P-UI-114] ۲ خط.</p>
+<p><strong><code>HTFCandles.mqh</code></strong> — <code>DrawHTFCandles</code> [P-HTF-TOP, P-PERF-08]، <code>HTFProbeCull</code>/<code>HTFProbeSettings</code> [P-HTF]؛ فقط-MT5: <code>SaveHTFHandoffStamp</code>/<code>HTFAdoptKeptFamily</code>/<code>HTFKeptStampName</code> (تحویل خانوادهٔ HTF بین attachها).</p>
+<p><strong><code>LevelPipeline.mqh</code></strong> (کل خط لولهٔ سطوح/زون‌ها — RED عددی):</p>
+<ul><li><code>SweepForeignLadderObjects</code> (۷۵ خط، ۶۰٪) [P-LBL-12, P-PERF-55]، <code>RenderZones</code> (۴۱ خط، ۲۷٪)، <code>ExecutePipeline</code> (۳۲)، <code>RenderTriggerLines</code> (۲۵، ۲۴٪)، <code>BuildZonesAndLines</code>، <code>StructureRecolourWalk</code>، <code>PipelineGeometryKey</code>، <code>TriggerFamilyWalk</code>، <code>LevelSplitCounts</code>، <code>SZoneDefinition</code>، <code>STriggerLine</code>، <code>CleanupSurplusPipeline</code>.</li><li>فقط-MT5: <code>RBridgeZoneFamilyMask/ZonesBegin/ZonesMarkStale/ZonesStale/ZoneRecolour/TriggerWalk/Pinned/End</code> + محاسبهٔ <code>rbPxPerPrice</code> از ChartGet* — پل موتور رندر.</li><li>فقط-MT4: مسیر <code>HideAllZoneFamilyObjects</code> مستقیم، مجموعهٔ <code>produced[]</code>/<code>LadderSetBuild</code>، ترتیب حذف <code>for(int i = total - 1; …)</code>.</li></ul>
+<p>⇒ وقتی <code>BIOTAK_RENDER_ENGINE</code> خاموش شود (A/B آبجکتی)، مسیر آبجکتی MT5 باید با منطق MT4 هم‌ارز باشد — نقطهٔ بازبینی.</p>
+<p><strong><code>TH3Tool.mqh</code></strong>:</p>
+<ul><li><code>OnABCDMouseEvent</code> (۷۴ خط، ۲۴٪) [P-TH3-PERF-05, P-TH3-PB-DRAG, P-TH3-BAND-PRESS, P-TH3-PB-OFF, P-LM-13]، بلوک ۵۱ خطی ۵۵٪ [P-LM-20, P-TH3-PB-LOCK, P-BK-03]، <code>TH3RestorePatternsFromChart</code> (۲۶٪)، <code>SetActiveABCDPattern</code>، <code>LegMeasureUpgradeLegacy</code>، <code>TH3_ExportCurrentSample</code>، <code>TH3BaseEditorSync</code>.</li><li>فقط-MT5: <code>TH3ReadPatternAnchors</code> (۴۹ خط)، <code>TH3LiveDragUnlatch</code>، <code>TH3LiveDragHeartbeat</code> — درگ زندهٔ TH3.</li><li>نسخهٔ کاری MT5 (uncommitted) گاردهای mute (<code>P-UI-160b</code>) و بازنویسی خواندن LEG (<code>P-LM-25</code>) را اضافه کرده است — با MT4 HEAD هم‌راستا می‌شود ولی drift باقی است.</li></ul>
+<p><strong><code>TH3/TH3Renderer.mqh</code></strong>:</p>
+<ul><li><code>DrawABCDPattern</code> (۲۰۵ خط، ۱۰٪) [P-UI-160, P-TH3-INFO-01, P-TH3-STEP-16, P-TH3-PB-MAN, P-TH3-STEP-04] — بزرگ‌ترین تابع متفاوت محصول.</li><li><code>TH3PivotMarkersClear</code> (۵۰٪)، <code>TH3InfoOrphanPlateSweep</code>، <code>TH3FamilyAnchorsAlive</code>، <code>TH3InfoCaptionHeal</code>، <code>TH3HitPivotForward</code>.</li><li>فقط-MT5: <code>if(RBridgeActive()) return true;</code> + <code>RBridgePatternDropBase</code> — «فاز A موتور رندر: خانوادهٔ پترن به کانواس می‌رود» (کامیت <code>151aac8</code>).</li><li>فقط-MT4: سه گارد <code>if(IsIndicatorHidden()) return;</code> + <code>bool isActive = (g_activeABCDPattern == mainObjName)</code> — یعنی MT4 مخفی‌بودن (mute F) را در همین توابع مستقیم گارد می‌کند؛ MT5 مسیرش از پل/ماسک می‌گذرد. <strong>هم‌ارزی در حالت hide باید تأیید شود.</strong></li></ul>
+<p><strong><code>ENTRY</code> / <code>ENTRY-LITE</code></strong> (بلوک‌های MT5-ONLY — از AGENTS.md و کامنت‌ها): <code>ArraySetAsSeries</code> روی آرایه‌های <code>OnCalculate</code>، <code>CompatRefreshChartData()</code>، <code>RBridgeInit/RBridgeShutdown</code>، <code>RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones)</code> در <code>OnChartEvent</code>/<code>OnTimer</code>، <code>P4LeftoverCensus("oninit"/"remove")</code>، <code>TailRestoreDeferred()</code>، و منطق <code>p116keep = (reason == REASON_CHARTCHANGE)</code> (نگه‌داشتن TF). سمت MT4 فقط یک خط اضافه در لاگ <code>OnDeinit</code> (<code>ms handler=…</code>) دارد.</p>
+<h3>۴.۲ ماژول‌های GREEN — driftهای ایدیاومی (رفتار عامدانه، بدون تفاوت)</h3>
+<p>این‌ها در گزارش gap می‌آیند ولی <code>BAD=0</code> دارند؛ همه عبور واحد زمان (R-TF-UNIT) یا پل پلتفورم‌اند:</p>
+<div class="table-wrap"><table><thead><tr><th>ماژول</th><th>نماد</th><th>توضیح</th></tr></thead><tbody><tr><td><code>TimeframeFunctions</code></td><td><code>GetCurrentTimeframe</code> (۳۳٪)</td><td>MT5: <code>CompatTF(...)</code>؛ MT4: مقدار خام دقیقه</td></tr><tr><td><code>LabelFunctions</code></td><td><code>PeriodToString</code> (۳۱٪)</td><td>همان عبور واحد</td></tr><tr><td><code>BuildConfig</code></td><td><code>CompatPeriodMinutes</code> (۵۰٪)</td><td>پین W1=10080 / MN1=43200 (R-TF-UNIT)</td></tr><tr><td><code>PerformanceOptimizations</code></td><td><code>GetCachedPeriod</code></td><td>lock تایم‌فریم در MT5 (<code>CompatTimeframeLockActive</code>)</td></tr><tr><td><code>DynamicTradingDayDetector</code></td><td><code>DetectFetchBarTimes</code></td><td><code>(ENUM_TIMEFRAMES)</code> ↔ <code>CompatTF</code></td></tr><tr><td><code>HistoricalDataFunctions</code></td><td><code>UpdateHistoricalValues</code> [P-MT5-01]</td><td>خواندن سری‌ها از آینهٔ <code>Time[]</code></td></tr><tr><td><code>InputValidator</code></td><td><code>ValidateInputs</code> (۰٪ — فقط خط‌بندی)</td><td>—</td></tr><tr><td><code>ATRCalculations</code></td><td><code>CalculateWeightedATR</code>، <code>ReleaseATRHandle</code> (+<code>WeightedATRWasProvisional</code> extra)</td><td>موتور iATR سنکرون MT5 (بخش ۶)</td></tr><tr><td><code>AdaptiveScaling</code></td><td><code>UpdateATRScalingFactor</code> [P-BE-02]</td><td>همان خانواده</td></tr><tr><td><code>BasePriceManager</code></td><td><code>GetSymbolStateIndex</code> [P-BE-05]</td><td>—</td></tr><tr><td><code>ObjectCache</code></td><td><code>DeleteIndicatorObjectManaged</code> [P-PERF-13]</td><td>—</td></tr><tr><td><code>ExtendedDrawingFunctions</code></td><td><code>CreateOrUpdateHLine</code>، <code>CleanupSurplusObjects</code></td><td>—</td></tr><tr><td><code>ZoneRenderer</code></td><td><code>ResolveZoneStyles</code>، <code>RenderLines</code></td><td>[P-PERF-41…]</td></tr><tr><td><code>PathTool</code></td><td><code>PathWitness</code></td><td>—</td></tr><tr><td><code>THVolNorm</code></td><td><code>THVolNormDrawnV</code>، <code>THVolNormColumnV</code> [P-LBL]</td><td>—</td></tr><tr><td><code>HTFCandles</code></td><td>بلوک، <code>InitializeHTFCandles</code>، <code>HTFProbe*</code></td><td>ماسک/پروب HTF</td></tr></tbody></table></div>
+<hr>
+<h2 id="sec-6">۵) موارد فقط-MT5 (EXTRA = ۴۷) — دسته‌بندی</h2>
+<h3>۵.۱ موتور رندر کانواس و پل RBridge (عامدانه، R-RENDER-ENGINE)</h3>
+<ul><li><code>Engine/RenderPlatform.mqh</code>، <code>Engine/RenderCore.mqh</code>، <code>Engine/RenderBridge.mqh</code> — فقط MT5 (بدون twin در MT4).</li><li><code>#define BIOTAK_RENDER_ENGINE</code> در هر دو entry + include <code>Engine\RenderBridge.mqh</code> + <code>RBridgeInit/Shutdown/Pump</code>.</li><li>فراخوانی‌های محصول: <code>LevelPipeline</code> (ماسک/بیلد/رنگ‌آمیزی زون‌ها، <code>RBridgeTriggerWalk</code>)، <code>TH3Renderer</code> (<code>RBridgePatternDropBase</code>)، <code>BiotakKit.SetMidZonesVisible</code> (<code>RBridgeZoneFamilyMask</code> + <code>ScheduleHeavyFrame</code>).</li><li>خاموش‌کردن = کامنت‌کردن همان یک خط define (مسیر آبجکتی A/B). <strong>هر بازبینی رفتار باید در هر دو حالت انجام شود.</strong></li></ul>
+<h3>۵.۲ سازگاری/پایداری مخصوص MT5 (عامدانه — نیازمند مراقبت)</h3>
+<ul><li><code>EventHandlers</code>: <code>ConsumeCleanUITeardownStamp</code>/<code>StampCleanUITeardown</code>/<code>UITearStampName</code> (پاک‌سازی UI بین attach)، <code>TailRestoreDeferred</code>/<code>AttachToolRestoreLegacy</code>/<code>RepaintLabelsForSwitch</code>/<code>ResolvePeriodChangeAttach</code>/<code>SavePeriodStamp</code>/<code>LastPeriodStampName</code>.</li><li><code>HTFCandles</code>: <code>SaveHTFHandoffStamp</code>/<code>HTFAdoptKeptFamily</code>/<code>HTFKeptStampName</code>.</li><li><code>TH3Tool</code>: <code>TH3ReadPatternAnchors</code>/<code>TH3LiveDragUnlatch</code>/<code>TH3LiveDragHeartbeat</code>.</li><li><code>BiotakKit</code>: <code>ApplyRefreshFlags</code>.</li><li><code>GlobalVariables</code>/<code>PerformanceOptimizations</code>: <code>CompatTimeframeLockActive</code>/<code>CompatLockedPeriod</code>.</li><li>این‌ها twin در MT4 ندارند چون ترتیب رویداد/چرخهٔ عمر در MT5 فرق دارد؛ هر پورت مشترک باید آن‌ها را در معادله نگه دارد.</li></ul>
+<h3>۵.۳ تلمتری و پروفایل (هزینه‌دار — کاندید گیت/حذف در ریلیز)</h3>
+<ul><li><code>g_pInitMs*</code> (۱۰ شمارنده) در <code>GlobalVariables</code> + ثبت در entry (<code>g_pInitMsStates/Kit/HTF/Menu/Adopt/Tail/Front/…)</code>.</li><li><code>P4LeftoverCensus</code>/<code>P4ObjectCensus</code> در <code>EventHandlers</code> + صدا‌زنی در entry (<code>P4LeftoverCensus("oninit")</code>).</li><li><code>ATRCalculations.WeightedATRWasProvisional</code>.</li></ul>
+<h3>۵.۴ بازماندهٔ معماری قدیمی MT4 (کاندید حذف هنگامِ پورت تمپلیت)</h3>
+<ul><li><code>DrawToolbar</code>: <code>DRAW_PRESET_BUILTIN/DIR/FILE/MAX</code> + <code>DrawPreset, DrawPresetApply, DrawPresetCapture, DrawPresetCaptureAndSave, DrawPresetClear, DrawPresetCount, DrawPresetIsBuiltin, DrawPresetName, DrawPresetPack, DrawPresetPath, DrawPresetSet, DrawPresetUnpack, DrawPresetsInit, DrawPresetsLoad, DrawPresetsSave</code> — MT4 این معماری را <strong>حذف</strong> کرده است.</li><li><code>DrawStrip</code>: <code>DrawStripPresetApplyGroup</code> (معادل MT4: <code>DrawStripTplApplyGroup</code>)، <code>DrawStripDiagClose</code>.</li><li>look سه‌بعدی فبیو: <code>FIBPEN_LOOK_3D</code>، <code>FIBPEN_STYLE_3D</code>، <code>FibPenShwOffPx</code>، ردیف style نهم — <strong>این‌ها در MT4 وجود ندارند</strong> (شکاف معکوس: MT5 جلوتر است یا MT4 حذف کرده — باید تعیین تکلیف شود).</li></ul>
+<hr>
+<h2 id="sec-7">۶) لایهٔ سازگاری <code>MT5Compat/MQL5Compat.mqh</code> — فهرست کامل شیم‌ها</h2>
+<h3>۶.۱ مقادیر و واحدها</h3>
+<div class="table-wrap"><table><thead><tr><th>شیم</th><th>رفتار</th></tr></thead><tbody><tr><td><code>#define Period()</code> → <code>CompatPeriodMinutes()</code></td><td>R-TF-UNIT: Period() در MT5 به «دقیقه» برمی‌گردد (MQL4-meaning) تا ~۶۰ مصرف‌کنندهٔ مشترک درست بمانند؛ W1=10080 / MN1=43200 پین‌شده.</td></tr><tr><td><code>CompatTF()</code></td><td>تنها عبور مجاز دقیقه↔enum.</td></tr><tr><td><code>#define iBars/iTime/iHigh/iLow/iOpen/iClose</code></td><td>عبور از <code>CompatTF</code>.</td></tr><tr><td><code>iBarShift</code> (دو overload + <code>iBarShiftReal</code>)</td><td>فرم «دقیقه» و فرم enum؛ built-in با نام واقعی قابل دسترسی.</td></tr><tr><td><code>PeriodMinutes()</code></td><td><strong>بدون مصرف‌کننده (dormant)</strong> — کامنت خودش این را می‌گوید؛ W1/MN1 پین شده تا کسی دوباره گاف واحد را کشف نکند.</td></tr><tr><td><code>TimeHour/Minute/Seconds/Day/Month/Year/DayOfWeek</code></td><td>معادل <code>TimeToStruct</code>.</td></tr><tr><td><code>MarketInfo</code></td><td>نقشهٔ ۱۹ مود به SymbolInfo*.</td></tr><tr><td><code>Bid</code>/<code>Ask</code>/<code>Symbol()</code>/<code>Digits</code>/<code>Point</code></td><td>شمارشی <code>CompatBid/Ask</code> + ماکرو.</td></tr><tr><td><code>WindowPriceMin/Max</code>, <code>WindowFirstVisibleBar</code>, <code>WindowBarsPerChart</code>, <code>ObjectType</code>, <code>ObjectSetText</code>, <code>DoubleToStr</code>, <code>StringGetChar</code></td><td>معادل‌های مستقیم.</td></tr><tr><td><code>StringTrimLeft/Right</code></td><td><strong>شیم معنایی</strong>: MQL4 رشتهٔ trim‌شده برمی‌گرداند، MQL5 تعداد حذف‌شده — اینجا فرم رشته‌ای احیا شده (۸ محل مصرف در BasePriceHistoryManager).</td></tr></tbody></table></div>
+<h3>۶.۲ آینهٔ آرایه‌های سری پیش‌فرض (MQL4 emulation)</h3>
+<ul><li><code>Time[]/Open[]/High[]/Low[]/Close[]/Bars</code> → آرایه‌های گلوبال؛ نگهداری با <code>CompatRefreshChartData(knownBars, livClose, livHigh, livLow, livTime, livOpen)</code>.</li><li>مسیر داغ: اگر بار فقط +۱ شده ⇒ <strong>شیفت O(n) در حافظه</strong> بدون CopyRates؛ وگرنه کپی کل تاریخچه (عمدی: <code>Bars</code> به‌عنوان «مقدار» مصرف می‌شود — BaseKnotTool/ZoneFactory/ExtendedDrawingFunctions) + throttle 500ms بعد از موفقیت.</li><li>تیک MT5-ONLY (2026-10-13): <code>livTime/livOpen</code> هم روی شیفت bar-new نوشته می‌شوند (باگ off-by-one قبلی).</li><li>ورودی‌ها: مقادیر زنده از <code>OnCalculate</code> (بدون کراس کرنل)، <code>OnTimer/OnInit</code> می‌گذارند <code>-1/EMPTY_VALUE</code> و fallback کرنل می‌شود.</li></ul>
+<h3>۶.۳ موتور ATR (P-ATR-SYNC)</h3>
+<ul><li><code>iATR</code> → <code>iATRMQL4</code> با memo (۱۰۲۴ اسلات، کلید symbol/tf/period/shift/bar-count) که هر بار کندل عوض شود باطل است؛ مقدار «provisional» هرگز memo نمی‌شود.</li><li>پیاده‌سازی فقط <code>iATRRatesFallback</code> (CopyRates + بازگشت Wilder از قدیمی‌ترین بار، پنجره ۳۰۰۰+ یا کل تاریخچه) — <strong>هیچ هندلی ساخته نمی‌شود</strong>؛ <code>ReleaseATRHandleCache</code> فقط کش را ریست و لجر را چاپ می‌کند.</li><li>هدف اعلام‌شده: هم‌ارزی MT4 با باقیماندهٔ &lt;1e-5 برای همهٔ پریودهای پروژه (پایین‌تر از کامنت خط ۴۲۴).</li></ul>
+<h3>۶.۴ API آبجکت</h3>
+<ul><li><code>OBJPROP_TIME1/2</code>, <code>OBJPROP_PRICE1/2</code> → <code>OBJPROP_TIME/PRICE</code> + modifier؛ خواندن و نوشتن.</li><li><code>OBJPROP_RAY</code> → <code>OBJPROP_RAY_RIGHT</code> (کد مشترک هر بار RAY+RAY_LEFT+RAY_RIGHT را با هم می‌نویسد).</li><li>overloadهای <code>int prop</code> برای ObjectGet/SetInteger/String (فرم MQL4).</li><li><code>ObjectsTotal</code> — فرم‌های ۰/۲/۳ آرگومان با عبور کامل (رفع باگ تاریخی که فقط OBJ_HLINE می‌شمرد)، <code>ObjectName</code>/<code>ObjectFind</code> فرم‌های MQL4.</li><li><code>ObjectCreate</code> (۲ فرم) و <code>ObjectDelete</code> و <code>ObjectsDeleteAll</code> — همگی توکن ثبت می‌کنند (بخش ۶.۵).</li></ul>
+<h3>۶.۵ فیلتر «طوفان رویداد برنامه‌ای»</h3>
+<ul><li>ایجاد/حذف برنامه‌ای در MT4 رویداد <code>CHARTEVENT_OBJECT_*</code> تولید نمی‌کند؛ در MT5 می‌کند. این لایه معنای MT4 را برمی‌گرداند:</li></ul>
+<p>  - جدول توکن per-name (۱۶۳۸۴ اسلات، ۸ پروب، TTL ۱۰ ثانیه) برای create/delete تک‌شیء.</p>
+<p>  - ثبت پیشوند برای sweepها (۶۴ رکورد، TTL ۱۰ ثانیه؛ sweep بی‌پیشوند = wildcard).</p>
+<p>  - مصرف در entry: <code>CompatConsumeObjEvent(id, name)</code> قبل از هر دیسپچ ⇒ رویداد خودمان drop، رویداد کاربر dispatch.</p>
+<ul><li><code>CompatDeinitBegin</code> ثبت‌ها را در teardown خاموش می‌کند (P-PERF-99).</li></ul>
+<h3>۶.۶ لجر اندازه‌گیری (وضعیت فعلی: <strong>روشن</strong>)</h3>
+<ul><li><code>#define COMPAT_LEDGER 1</code> در خط ۲۵ — یعنی شمارنده‌ها + دوتا <code>GetTickCount</code> روی مسیرهای داغ (iBarShift/iATR/MarketInfo/Bid/Ask/Refresh) زنده‌اند و در <code>ReleaseATRHandleCache</code> (مسیر deinit) یک خط <code>[MT5-COMPAT] session …</code> چاپ می‌شود.</li><li>کامنت بالای همین خط می‌گوید برای ریلیز باید «کامنت» باشد (خاموش). <strong>این مورد یک تصمیم باز است: یا آگاهانه در حالت سنجش مانده، یا برای ریلیز خاموش شود.</strong></li></ul>
+<hr>
+<h2 id="sec-8">۷) ریسک‌ها و «پیاده‌سازی ناقص / وابستگی بررسی‌نشده»</h2>
+<ol><li><strong>پورت تمپلیت، یک پورت زنجیره‌ای است، نه یک فایل:</strong> حذف <code>DrawPreset*</code> + افزودن <code>DrawTpl*</code> هم‌زمان باید شامل این وابستگی‌ها باشد:<ul><li><code>DrawStripMoreBuild/Tap/Paint</code> (ردیف‌های <code>DSTRIP_MK_PRESET/SAVE</code> → <code>TPLNAV</code> + ادیتور اسم + ردیف حذف)،</li><li><code>DSTRIP_PICK_*</code> (<code>DSTRIP_PICK_DEL_W</code>، <code>DrawStripPickTapDel/DelName/DelFaceName</code>)،</li><li><code>DrawTplBoot()</code> در مسیر init (<code>EventHandlers</code>)،</li><li>کدگذاری «سطح‌های فبیو» که به خوانندهٔ سطح فبیو در <code>FibPen</code> نیاز دارد،</li><li>و مهاجرت فایل legacy (<code>DRAW_TPL_LEGACY</code>).</li></ul></li><li><strong>look ۳D فبیو فقط در MT5 است</strong> (<code>P-LOOK-3D</code>) و در MT4 کوچک‌ترین اثری ندارد؛ ردیف style و رنگ‌بندی استایل‌ها (۸ ↔ ۹) هم همین‌جا فرق دارند. تعیین تکلیف: حذف از MT5 یا پورت به MT4.</li><li><strong><code>COMPAT_LEDGER=1</code></strong> روی بیلد فعلی: هزینهٔ اندازه‌گیری روی مسیرهای داغ + چاپ deinit. اگر این بیلد ریلیز است، باید خاموش شود (بخش ۶.۶).</li><li><strong><code>PeriodMinutes()</code> کد مرده</strong> است (no caller) — نگه‌داشتنش فقط به‌خاطر پین واحد است؛ هنگام پاک‌سازی کد نادیده گرفته نشود.</li><li><strong>درخت کاری میانی است:</strong> ۷ ماژول جدید untracked وابستگی بیلد شده‌اند —</li></ol>
+<p>   <code>BiotakHomes.mqh</code> (include در <code>BiotakMenu</code>)، <code>BiotakMenu_Ring.mqh</code> (include در <code>BiotakMenu</code>)،    <code>PenStack.mqh</code> + <code>BoxPreview.mqh</code> (include در <code>DrawToolbar</code>)، <code>Sessions_Time/Model/Draw.mqh</code> (include در هر دو entry).    به‌علاوهٔ ۲۰ آیکون جدید (<code>circ_on/off_*</code>, <code>eye_on/off</code>, <code>scale_on/off</code>, <code>sessions_on/off</code>, <code>star_on/off</code>) که در <code>Files/Icons</code> untracked هستند.    <strong>بدون <code>git add</code>، یک کلون تازه یا CI نمی‌تواند بیلد کند</strong> (metaeditor از includeهای untracked استفاده می‌کند چون همه در همان دیسک هستند).</p>
+<ol><li><strong>هم‌ارزی hide (mute F) در مسیر موتور:</strong> MT4 در <code>TH3Renderer</code> سه گارد مستقیم <code>IsIndicatorHidden()</code> دارد؛ MT5 از <code>RBridgePump(IsIndicatorHidden(), …)</code> + ماسک استفاده می‌کند. برای خانوادهٔ پترن ABCD، پلن‌های LegMeasure (که WIP گارد گرفت) و زون‌ها این هم‌ارزی باید با تست بصری تأیید شود.</li><li><strong>هم‌ارزی مسیر آبجکتی (engine off):</strong> با کامنت‌کردن <code>BIOTAK_RENDER_ENGINE</code>، انتظار داریم <code>LevelPipeline</code>/<code>TH3Renderer</code> عیناً مثل MT4 رفتار کنند؛ ولی drift فعلی (مثلاً <code>SweepForeignLadderObjects</code> ۶۰٪) نشان می‌دهد نسخهٔ آبجکتی MT5 با بهبودهای MT4 (P-LBL-12، P-PERF-55) هم‌راستا نیست. قبل از A/B باید این مسیر بازبینی شود.</li><li><strong>مکانیزم census/teardown فقط در MT5:</strong> اگر از MT5 حذف شوند تا «شبیه MT4» شود، نسبت به ترتیب رویداد MT5 پسرفت می‌شود؛ اگر بمانند، هر پورت آیندهٔ MT4 باید drift آن‌ها را بشناسد (لیست کامل در ۵.۲).</li><li><strong>هم‌ارزی سطوح خارجی/Geometery:</strong> <code>docs/LEVELS-FOREIGN-GEOMETRY_FA.md</code> مرجع این‌جاست؛ drift <code>SweepForeignLadderObjects</code> دقیقاً همین سطح را لمس می‌کند.</li><li><strong>درخت MT4 هم dirty است (۳۵ فایل)</strong> — این گزارش نسبت به همان working tree است؛ بعد از commit شدن هر دو طرف باید دوباره اجرا شود (هر دو ابزار read-only و ارزان‌اند).</li></ol>
+<hr>
+<h2 id="sec-9">۸) بازتولید</h2>
+<pre><code># نمای ماژول‌به‌ماژول (GREEN/RED + خطوط بی‌توضیح)
+python tools/parity/module-report.py
+
+# نمای نمادبه‌نماد (MISSING/DRIFT/EXTRA + تگ‌های P-*)
+python tools/parity/gap-report.py --tags
+
+# فقط یک ماژول
+python tools/parity/gap-report.py --only DrawToolbar.mqh --tags
+
+# بیلد هر دو entry (0/0 لازم است)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 -Source "Biotak Trigger TH3.mq5" -ErrorsOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 -Source "Biotak Trigger TH3 Lite.mq5" -ErrorsOnly</code></pre>
+<hr>
+<h2 id="sec-10">پیوست الف — خروجی خام gap-report.py --tags (2026-10-18)</h2>
+<pre><code>  !!  Biotak/ATRCalculations.mqh                 missing=0 drift=2 extra=1
+        DRIFT    CalculateWeightedATR                         DRIFT     4 lines,   7% different
+        DRIFT    ReleaseATRHandle                             DRIFT     3 lines,  33% different
+        EXTRA    WeightedATRWasProvisional                    EXTRA     1 lines
+  !!  Biotak/AdaptiveScaling.mqh                 missing=0 drift=1 extra=0
+        DRIFT    UpdateATRScalingFactor                       DRIFT     2 lines,   1% different   [P-BE-02]
+  OK  Biotak/AlertFunctions.mqh                 
+  OK  Biotak/BaseKnotTool.mqh                   
+  OK  Biotak/BasePriceHistoryManager.mqh        
+  !!  Biotak/BasePriceManager.mqh                missing=0 drift=1 extra=0
+        DRIFT    GetSymbolStateIndex                          DRIFT     2 lines,   1% different   [P-BE-05 P-BE-03]
+  OK  Biotak/BiotakHomes.mqh                    
+  !!  Biotak/BiotakKit.mqh                       missing=0 drift=1 extra=1
+        DRIFT    (block)                                      DRIFT    44 lines,  74% different   [P-PERF-06 P-PERF-30 P-PERF-24 P-PERF-40 P-PERF-34]
+        EXTRA    ApplyRefreshFlags                            EXTRA    42 lines
+  !!  Biotak/BiotakMenu.mqh                      missing=0 drift=7 extra=0
+        DRIFT    DeleteMenu                                   DRIFT    26 lines,  72% different
+        DRIFT    DeleteLegacyMenuObjects                      DRIFT    18 lines,  75% different   [P-UI-161]
+        DRIFT    RingFeatureClick                             DRIFT    12 lines,   7% different   [P-UI-93 P-PERF-41 P-SESS P-UI-40 P-PERF-32 P-PERF-21]
+        DRIFT    CircTipDragTo                                DRIFT     5 lines,  15% different   [P-UI-158]
+        DRIFT    InitializeUIStates                           DRIFT     4 lines,   6% different   [P-UI-131 P-UI-144 P-PERF-44]
+        DRIFT    (block)                                      DRIFT     2 lines,   1% different   [P-UI-147 P-UI-14 P-UI-90 P-UI-92 P-OFF P-UI-71]
+        DRIFT    SetHTFVisible                                DRIFT     2 lines,  10% different   [P-PERF-24]
+  OK  Biotak/BiotakMenu_Ring.mqh                
+  !!  Biotak/BiotakPanels.mqh                    missing=0 drift=2 extra=0
+        DRIFT    PnlApplySet                                  DRIFT    37 lines,   6% different   [P-UI-93 P-UI-131 P-PERF-32 P-PERF-21 P-PERF-41 P-PERF-29]
+        DRIFT    UISyncDrain                                  DRIFT     1 lines,   6% different
+  OK  Biotak/BoxPreview.mqh                     
+  !!  Biotak/BuildConfig.mqh                     missing=0 drift=1 extra=0
+        DRIFT    CompatPeriodMinutes                          DRIFT     2 lines,  50% different
+  !!  Biotak/BuildHash.mqh                       missing=0 drift=3 extra=0
+        DRIFT    TH3_SRC_HASH                                 DRIFT     2 lines, 100% different
+        DRIFT    TH3_SRC_SHORT                                DRIFT     2 lines, 100% different
+        DRIFT    TH3_SRC_FILES                                DRIFT     2 lines, 100% different
+  OK  Biotak/CalculationCache.mqh               
+  OK  Biotak/CardMetrics.mqh                    
+  OK  Biotak/ComboEngine.mqh                    
+  OK  Biotak/ConstantsAndEnums.mqh              
+  !!  Biotak/DrawStrip.mqh                       missing=15 drift=30 extra=2
+        DRIFT    DrawStripGearObjectsPurge                    DRIFT    80 lines,  93% different   [P-DRAW-117 P-DRAW-33 P-DRAW-131]
+        DRIFT    DrawStripClose                               DRIFT    37 lines,  44% different   [P-DRAW-64 P-DRAW-66 P-DRAW-33 P-DRAW-134 P-DRAW-29 P-DRAW-31]
+        DRIFT    DrawStripOnEvent                             DRIFT    25 lines,   4% different   [P-UI-113 P-DRAGF3 P-DRAW-64 P-UI-130 P-DRAW-74 P-DRAW-128]
+        EXTRA    DrawStripPresetApplyGroup                    EXTRA    23 lines
+        DRIFT    DrawStripPaint                               DRIFT    21 lines,   3% different   [P-LOG-8 P-DRAW-120 P-DRAW-42 P-DRAW-08 P-LOG-10 P-DRAW-29]
+        MISSING  DrawStripTplSavePaint                        MISSING  19 lines
+        MISSING  DrawStripTplApplyGroup                       MISSING  17 lines   [P-DRAW-132 P-DRAW-134 P-DRAW-64]
+        MISSING  DrawStripTplCommit                           MISSING  16 lines   [P-DRAW-131]
+        DRIFT    DrawStripMoreTap                             DRIFT    15 lines,   8% different   [P-DRAW-132 P-UI-131 P-DRAW-25 P-DRAW-131 P-DRAW-64]
+        DRIFT    DrawStripGearRowTap                          DRIFT    14 lines,   9% different   [P-DRAW-117 P-DRAW-84 P-DRAW-21 P-DRAW-64 P-UI-132 P-UI-131]
+        MISSING  DrawStripTplRowDelete                        MISSING  13 lines   [P-DRAW-132 P-LOG-3]
+        DRIFT    DrawStripDiagEmit                            DRIFT    13 lines,  57% different
+        MISSING  DrawStripTplSaveHit                          MISSING  11 lines   [P-UI-131]
+        MISSING  DrawStripPickTapDel                          MISSING  11 lines   [P-UI-131]
+        DRIFT    DrawStripGearPaint                           DRIFT    11 lines,   3% different   [P-DRAW-99 P-DRAW-117 P-DRAW-118 P-DRAW-33 P-DRAW-124 P-DRAW-42]
+        MISSING  DrawStripTplSaveSweep                        MISSING  10 lines
+        DRIFT    DrawStripMoreBuild                           DRIFT    10 lines,  19% different   [P-DRAW-132 P-DRAW-21 P-DRAW-64]
+        DRIFT    DrawStripGearContent                         DRIFT     9 lines,   4% different   [P-DRAW-99 P-DRAW-117 P-DRAW-30 P-DRAW-44 P-DRAW-39 P-DRAW-64]
+        DRIFT    DrawStripGearRowTip                          DRIFT     9 lines,  14% different   [P-DRAW-117]
+        MISSING  DrawStripTplNameFocus                        MISSING   8 lines
+        DRIFT    DrawStripMoreTip                             DRIFT     8 lines,  14% different
+        MISSING  DrawStripTplNavText                          MISSING   7 lines
+        DRIFT    DrawStripLevelsToggle                        DRIFT     6 lines,  10% different   [P-LVL-SCALE P-DRAW-135 P-LOG-3]
+        DRIFT    DrawStripMoreText                            DRIFT     5 lines,  13% different   [P-DRAW-09]
+        DRIFT    DrawStripGearRowText                         DRIFT     5 lines,  10% different   [P-DRAW-117]
+        DRIFT    DrawStripEditEnd                             DRIFT     5 lines,   4% different   [P-DRAW-118 P-DRAW-100 P-LVL-SCALE P-LVL-TEXT P-UI-131 P-DRAW-25]
+        EXTRA    DrawStripDiagClose                           EXTRA     5 lines
+        DRIFT    DrawStripGearHit                             DRIFT     4 lines,   3% different   [P-DRAW-103 P-DRAW-36 P-DRAW-85 P-DRAW-117 P-DRAW-84 P-DRAW-48]
+        DRIFT    DrawStripLevelsRewrite                       DRIFT     4 lines,  10% different   [P-LVL-TEXT P-DRAW-74 P-LOG-3]
+        DRIFT    DrawStripPickTap                             DRIFT     3 lines,   4% different   [P-DRAW-64 P-LOG-3 P-DRAW-48]
+        DRIFT    DrawStripPickCount                           DRIFT     2 lines,   9% different   [P-PAL-21 P-LOOK P-DRAW-BODY-UI]
+        DRIFT    DrawStripPopRowRes                           DRIFT     2 lines,   5% different   [P-LOOK]
+        DRIFT    DrawStripClosePicker                         DRIFT     2 lines,   4% different   [P-PAL-21 P-DRAW-75 P-DRAW-33 P-DRAW-134]
+        DRIFT    DrawStripGearClose                           DRIFT     2 lines,   8% different   [P-DRAW-131 P-DRAW-84 P-DRAW-88 P-LVL-TEXT]
+        DRIFT    DrawStripGearGroupDigest                     DRIFT     2 lines,   2% different   [P-DRAW-117]
+        DRIFT    DrawStripDuplicate                           DRIFT     2 lines,   1% different   [P-DRAW-74 P-DRAW-23 P-LVL-TEXT]
+        DRIFT    DrawStripFootTap                             DRIFT     2 lines,   5% different   [P-DRAW-96 P-DRAW-64 P-DRAW-21]
+        DRIFT    DrawStripHoldLatch                           DRIFT     2 lines,   5% different   [P-UI-130 P-UI-113 P-UI-115 P-DRAW-04]
+        MISSING  DSTRIP_PICK_DEL_W                            MISSING   1 lines   [P-DRAW-134]
+        MISSING  DSTRIP_MK_TPLNAV                             MISSING   1 lines   [P-DRAW-132]
+  !!  Biotak/DrawToolbar.mqh                     missing=27 drift=10 extra=22
+        MISSING  DrawTplLevelsTo                              MISSING  46 lines   [P-DRAW-74]
+        DRIFT    FibPenSync                                   DRIFT    45 lines,   6% different   [P-DRAGF3 P-LOOK P-LOOK-RAY2 P-LOOK-ALL P-LOOK-RAY5 P-LOOK-ANCHOR]
+        EXTRA    DrawPresetsInit                              EXTRA    42 lines
+        MISSING  DrawTplApply                                 MISSING  32 lines   [P-DRAW-135]
+        MISSING  DrawTplSeed                                  MISSING  31 lines
+        MISSING  DrawTplMigrate                               MISSING  30 lines
+        MISSING  DrawTplLevelsOf                              MISSING  25 lines
+        MISSING  DrawTplLoad                                  MISSING  25 lines   [P-DRAW-135 P-UI-133]
+        MISSING  DrawTplSaveAs                                MISSING  23 lines   [P-DRAW-74 P-DRAW-135]
+        MISSING  DrawTplSave                                  MISSING  23 lines   [P-DRAW-135 P-DRAW-09 P-DRAW-INK]
+        MISSING  DrawTplBoot                                  MISSING  22 lines
+        MISSING  DrawTplDelete                                MISSING  21 lines   [P-DRAW-135]
+        EXTRA    DrawPresetsSave                              EXTRA    20 lines
+        EXTRA    DrawPresetsLoad                              EXTRA    20 lines
+        EXTRA    DrawPresetCapture                            EXTRA    19 lines
+        MISSING  DrawTplPut                                   MISSING  18 lines   [P-DRAW-135]
+        MISSING  DrawTplSeedOne                               MISSING  15 lines
+        EXTRA    DrawPresetApply                              EXTRA    15 lines
+        MISSING  DrawLookPackA                                MISSING  13 lines
+        EXTRA    DrawPresetSet                                EXTRA    13 lines
+        MISSING  DrawLook                                     MISSING  12 lines
+        MISSING  DrawLookUnpackA                              MISSING  12 lines
+        DRIFT    FibPenDragFollow                             DRIFT    11 lines,   4% different   [P-DRAGF3 P-LOOK-RAY2 P-LOOK-RAY5 P-LOOK-ANCHOR P-DRAW-74]
+        EXTRA    DrawPreset                                   EXTRA    10 lines
+        EXTRA    DrawPresetUnpack                             EXTRA    10 lines
+        EXTRA    DrawPresetClear                              EXTRA    10 lines
+        EXTRA    DrawPresetPack                               EXTRA     9 lines
+        MISSING  DrawTpl                                      MISSING   8 lines   [P-DRAW-135]
+        MISSING  DrawTplIndex                                 MISSING   8 lines
+        MISSING  DrawTplCount                                 MISSING   7 lines
+        EXTRA    DrawPresetCount                              EXTRA     7 lines
+        MISSING  DrawLookPackB                                MISSING   6 lines
+        MISSING  DrawLookUnpackB                              MISSING   6 lines
+        MISSING  DrawTplName                                  MISSING   6 lines
+        EXTRA    DrawPresetName                               EXTRA     6 lines
+        EXTRA    DrawPresetCaptureAndSave                     EXTRA     6 lines
+        DRIFT    DrawSlotWrite                                DRIFT     4 lines,   1% different   [P-HR-04 P-UI-136 P-UI-137 P-DRAW-48 P-DRAW-BODY P-DRAW-128]
+        DRIFT    FibPenPreviewArm                             DRIFT     3 lines,   4% different   [P-DRAGF3 P-DRAW-74]
+        DRIFT    FibPenPreviewEnd                             DRIFT     3 lines,   4% different   [P-DRAGF3]
+        DRIFT    FillChildEnsure                              DRIFT     2 lines,   2% different   [P-DRAW-64]
+  !!  Biotak/DynamicTradingDayDetector.mqh       missing=0 drift=1 extra=0
+        DRIFT    DetectFetchBarTimes                          DRIFT     2 lines,   6% different
+  OK  Biotak/ErrorCodes.mqh                     
+  !!  Biotak/EventHandlers.mqh                   missing=0 drift=11 extra=11
+        DRIFT    RedrawAllObjects                             DRIFT    64 lines,   9% different   [P-PERF-02 P-PERF-03 P-PERF-49 P-KEY-01 P-PERF-34 P-UI-98]
+        DRIFT    OnInitHandler                                DRIFT    35 lines,   6% different   [P-ARCH-03 P-PERF-38 P-PERF-10 P-BUILD-08 P-UI-134 P-DRAW-89]
+        EXTRA    P4ObjectCensus                               EXTRA    22 lines
+        EXTRA    P4LeftoverCensus                             EXTRA    21 lines
+        EXTRA    RepaintLabelsForSwitch                       EXTRA    16 lines
+        EXTRA    AttachToolRestoreLegacy                      EXTRA    15 lines
+        DRIFT    OnChartEventHandler                          DRIFT    14 lines,   1% different   [P-UI-114 P-HR-01 P-UI-136 P-UI-100 P-UI-142 P-DRAW-01]
+        DRIFT    P4InitLedgerTag                              DRIFT    13 lines,  45% different
+        EXTRA    ResolvePeriodChangeAttach                    EXTRA    13 lines
+        EXTRA    TailRestoreDeferred                          EXTRA    13 lines
+        EXTRA    ConsumeCleanUITeardownStamp                  EXTRA     8 lines
+        DRIFT    ResolveTopologyAdoption                      DRIFT     6 lines,  14% different   [P-PERF-38 P-VIEW]
+        DRIFT    RunIncrementalObjectCleanup                  DRIFT     6 lines,   6% different   [P-BK-01 P-HR-05]
+        DRIFT    SetTriggerLevelsVisible                      DRIFT     5 lines,  15% different   [P-UI-93 P-PERF-21 P-PERF-32 P-KEY-01 P-PERF-24 P-KEY-PROBE]
+        DRIFT    DrawLevelsBasedOnMode                        DRIFT     4 lines,   6% different   [P-UI-98]
+        DRIFT    OnCalculateHandler                           DRIFT     4 lines,   2% different   [P-UI-98 P-BK-13 P-BK-29 P-BK-92 P-BK-46 P-UI-53]
+        EXTRA    SavePeriodStamp                              EXTRA     4 lines
+        EXTRA    StampCleanUITeardown                         EXTRA     4 lines
+        DRIFT    OnDeinitHandler                              DRIFT     3 lines,   1% different   [P-PERF-49 P-PERF-02 P-TH3-P6 P-BUILD-01 P-BK-02 P-HR-01]
+        DRIFT    P4ReportSlow                                 DRIFT     1 lines,   6% different
+        EXTRA    LastPeriodStampName                          EXTRA     1 lines
+        EXTRA    UITearStampName                              EXTRA     1 lines
+  !!  Biotak/ExtendedDrawingFunctions.mqh        missing=0 drift=2 extra=0
+        DRIFT    CreateOrUpdateHLine                          DRIFT     9 lines,   9% different
+        DRIFT    CleanupSurplusObjects                        DRIFT     6 lines,  17% different
+  OK  Biotak/FactorMode.mqh                     
+  OK  Biotak/FloatingPointHelper.mqh            
+  OK  Biotak/FractalTimeframes.mqh              
+  OK  Biotak/FrequencyOptimizer.mqh             
+  !!  Biotak/GlobalVariables.mqh                 missing=0 drift=2 extra=2
+        DRIFT    (block)                                      DRIFT    11 lines,   5% different   [P-UI-65 P-UI-98 P-LM-21 P-UI-31 P-LM-15 P-UI-149]
+        DRIFT    ChartViewRestoreUser                         DRIFT     2 lines,  17% different   [P-UI-114]
+        EXTRA    CompatTimeframeLockActive                    EXTRA     1 lines
+        EXTRA    CompatLockedPeriod                           EXTRA     1 lines
+  OK  Biotak/HRayTool.mqh                       
+  !!  Biotak/HTFCandles.mqh                      missing=0 drift=5 extra=3
+        DRIFT    DrawHTFCandles                               DRIFT     7 lines,   4% different   [P-HTF-TOP P-PERF-08 P-UI-68 P-HTF-SLOT P-HTF-SYN P-PERF-02]
+        EXTRA    HTFAdoptKeptFamily                           EXTRA     7 lines
+        EXTRA    SaveHTFHandoffStamp                          EXTRA     5 lines
+        DRIFT    (block)                                      DRIFT     2 lines,   2% different   [P-UI-92 P-HTF-PROBE P-HTF P-HTF-SLOT]
+        DRIFT    HTFProbeCull                                 DRIFT     2 lines,  12% different   [P-HTF]
+        DRIFT    HTFProbeSettings                             DRIFT     2 lines,   7% different   [P-HTF]
+        DRIFT    InitializeHTFCandles                         DRIFT     1 lines,   1% different   [P-DRAW-87 P-UI-142 P-UI-92 P-UI-68 P-PERF-08 P-PERF-44]
+        EXTRA    HTFKeptStampName                             EXTRA     1 lines
+  !!  Biotak/HistoricalDataFunctions.mqh         missing=0 drift=1 extra=0
+        DRIFT    UpdateHistoricalValues                       DRIFT     2 lines,   2% different   [P-MT5-01 P-UI-57]
+  OK  Biotak/InputValidationEnhanced.mqh        
+  !!  Biotak/InputValidator.mqh                  missing=0 drift=1 extra=0
+        DRIFT    ValidateInputs                               DRIFT     2 lines,   0% different   [P-UI-57 P-UI-63 P-TH3-PB-MAN]
+  !!  Biotak/LabelFunctions.mqh                  missing=0 drift=2 extra=0
+        DRIFT    PeriodToString                               DRIFT    10 lines,  31% different
+        DRIFT    SetTHLabelsVisibility                        DRIFT     2 lines,   2% different   [P-PERF-02 P-TH-02 P-LBL]
+  !!  Biotak/LevelPipeline.mqh                   missing=0 drift=12 extra=0
+        DRIFT    SweepForeignLadderObjects                    DRIFT    75 lines,  60% different   [P-LBL-12 P-PERF-55]
+        DRIFT    RenderZones                                  DRIFT    41 lines,  27% different   [P-PERF-41 P-PERF-04 P-VIEW-01 P-VIEW-03 P-UI-62 P-PERF-32]
+        DRIFT    ExecutePipeline                              DRIFT    32 lines,  11% different   [P-PERF-06 P-PERF-18 P-LEVEL-FOREIGN-01 P-LEVEL-FOREIGN-02 P-UI-153 P-UI-152]
+        DRIFT    RenderTriggerLines                           DRIFT    25 lines,  24% different   [P-UI-98 P-UI-66 P-PERF-03 P-BK-15 P-VIEW-01 P-VIEW-03]
+        DRIFT    BuildZonesAndLines                           DRIFT    10 lines,   3% different   [P-UI-59 P-UI-57 P-BE-02 P-UI-58 P-UI-62]
+        DRIFT    StructureRecolourWalk                        DRIFT     3 lines,   4% different   [P-UI-62 P-UI-131]
+        DRIFT    PipelineGeometryKey                          DRIFT     3 lines,   3% different   [P-PERF-21 P-UI-131 P-UI-66 P-PERF-23]
+        DRIFT    TriggerFamilyWalk                            DRIFT     3 lines,   6% different   [P-UI-62 P-BK-01]
+        DRIFT    LevelSplitCounts                             DRIFT     2 lines,   4% different
+        DRIFT    SZoneDefinition                              DRIFT     1 lines,   3% different   [P-UI-62]
+        DRIFT    STriggerLine                                 DRIFT     1 lines,   3% different
+        DRIFT    CleanupSurplusPipeline                       DRIFT     1 lines,   2% different   [P-UI-98 P-PERF-36 P-PERF-41]
+  OK  Biotak/Logger.mqh                         
+  OK  Biotak/MarketHoursDetector.mqh            
+  OK  Biotak/MathConstants.mqh                  
+  OK  Biotak/ModeDefinitions.mqh                
+  !!  Biotak/ObjectCache.mqh                     missing=0 drift=1 extra=0
+        DRIFT    DeleteIndicatorObjectManaged                 DRIFT     5 lines,  11% different   [P-PERF-13 P-PERF-07 P-UI-62]
+  OK  Biotak/ObjectCountManager.mqh             
+  OK  Biotak/ObjectFunctions.mqh                
+  !!  Biotak/PathTool.mqh                        missing=0 drift=1 extra=0
+        DRIFT    PathWitness                                  DRIFT     2 lines,  50% different
+  OK  Biotak/PenStack.mqh                       
+  !!  Biotak/PerformanceOptimizations.mqh        missing=0 drift=1 extra=2
+        DRIFT    GetCachedPeriod                              DRIFT     2 lines,  17% different
+        EXTRA    CompatTimeframeLockActive                    EXTRA     1 lines
+        EXTRA    CompatLockedPeriod                           EXTRA     1 lines
+  OK  Biotak/Profiler.mqh                       
+  OK  Biotak/ProjectConstants.mqh               
+  OK  Biotak/PropertiesAndInputs.mqh            
+  OK  Biotak/PropertyChangeDetector.mqh         
+  OK  Biotak/RuntimeSettings.mqh                
+  OK  Biotak/Sessions_Draw.mqh                  
+  OK  Biotak/Sessions_Model.mqh                 
+  OK  Biotak/Sessions_Time.mqh                  
+  OK  Biotak/StandardTimeframes.mqh             
+  !!  Biotak/TH3Tool.mqh                         missing=0 drift=7 extra=3
+        DRIFT    OnABCDMouseEvent                             DRIFT    74 lines,  24% different   [P-TH3-PERF-05 P-TH3-PB-DRAG P-TH3-BAND-PRESS P-TH3-PB-OFF P-TH3-PB-UI P-LM-13]
+        DRIFT    (block)                                      DRIFT    51 lines,  55% different   [P-LM-20 P-TH3-PB-LOCK P-TH3-PB-DRAG-LOCK P-BK-03 P-LM-13 P-TH3-BAND-PRESS]
+        EXTRA    TH3ReadPatternAnchors                        EXTRA    49 lines
+        DRIFT    TH3RestorePatternsFromChart                  DRIFT    23 lines,  26% different   [P-TH3-INFO-06 P-TH3-PB-OFF]
+        DRIFT    SetActiveABCDPattern                         DRIFT     8 lines,  11% different   [P-TH3-P6 P-TH3-INFO-01 P-TH3-INFO-04 P-TH3-INFO-10]
+        EXTRA    TH3LiveDragUnlatch                           EXTRA     6 lines
+        EXTRA    TH3LiveDragHeartbeat                         EXTRA     5 lines
+        DRIFT    LegMeasureUpgradeLegacy                      DRIFT     4 lines,   3% different   [P-LM-11 P-LM-09 P-LM-04 P-LM-07]
+        DRIFT    TH3_ExportCurrentSample                      DRIFT     4 lines,   1% different   [P-TH3-STEP-16 P-UI-142 P-TH3-DB P-TH3-REC-02 P-TH3-REC-04 P-TH3-REC-06]
+        DRIFT    TH3BaseEditorSync                            DRIFT     2 lines,   3% different
+  OK  Biotak/THCalculations.mqh                 
+  !!  Biotak/THVolNorm.mqh                       missing=0 drift=2 extra=0
+        DRIFT    THVolNormDrawnV                              DRIFT     4 lines,   4% different   [P-LBL]
+        DRIFT    THVolNormColumnV                             DRIFT     2 lines,   1% different   [P-LBL]
+  !!  Biotak/TimeframeFunctions.mqh              missing=0 drift=1 extra=0
+        DRIFT    GetCurrentTimeframe                          DRIFT    10 lines,  33% different
+  OK  Biotak/TradePlanFormulas.mqh              
+  OK  Biotak/UtilityFunctions.mqh               
+  OK  Biotak/VisibilityManager.mqh              
+  OK  Biotak/WaveAnalysis.mqh                   
+  OK  Biotak/ZoneCalculator.mqh                 
+  OK  Biotak/ZoneConfig.mqh                     
+  OK  Biotak/ZoneConstants.mqh                  
+  OK  Biotak/ZoneFactory.mqh                    
+  !!  Biotak/ZoneRenderer.mqh                    missing=0 drift=2 extra=0
+        DRIFT    ResolveZoneStyles                            DRIFT    12 lines,   9% different
+        DRIFT    RenderLines                                  DRIFT     9 lines,   9% different
+  OK  Biotak/ZoneValidator.mqh                  
+  OK  Biotak/TH3/TH3Controller.mqh              
+  OK  Biotak/TH3/TH3Math.mqh                    
+  OK  Biotak/TH3/TH3PatternStore.mqh            
+  OK  Biotak/TH3/TH3Pivots.mqh                  
+  !!  Biotak/TH3/TH3Renderer.mqh                 missing=0 drift=6 extra=0
+        DRIFT    DrawABCDPattern                              DRIFT   205 lines,  10% different   [P-UI-160 P-TH3-INFO-01 P-TH3-STEP-16 P-TH3-PB-MAN P-TH3-PB-RET8 P-TH3-STEP-04]
+        DRIFT    TH3InfoOrphanPlateSweep                      DRIFT     6 lines,  16% different
+        DRIFT    TH3PivotMarkersClear                         DRIFT     6 lines,  50% different
+        DRIFT    TH3FamilyAnchorsAlive                        DRIFT     3 lines,  14% different
+        DRIFT    TH3InfoCaptionHeal                           DRIFT     1 lines,   2% different   [P-UI-160 P-TH3-INFO-13 P-LM-09 P-TIME-01]
+        DRIFT    TH3HitPivotForward                           DRIFT     1 lines,   1% different   [P-UI-160 P-TH3-STEP-08 P-TH3-STEP-09]
+  OK  Biotak/TH3/TH3Types.mqh                   
+  ?? ENTRY                                      (not on both sides)
+  ?? ENTRY-LITE                                 (not on both sides)
+
+TOTAL symbols: MISSING=42 DRIFT=116 EXTRA=47</code></pre>
+<h2 id="sec-11">پیوست ب — خروجی خام module-report.py (2026-10-18)</h2>
+<pre><code>==============================================================================
+MODULE BY MODULE:   MT4 (reference)   vs   MT5
+==============================================================================
+Biotak/ATRCalculations.mqh             lines mt4=  909 mt5=  914  shared=  908  mt4-only=   1 mt5-only=   6  BAD=  0  sym mt4= 57/mt5= 58  GREEN
+Biotak/AdaptiveScaling.mqh             lines mt4=  164 mt5=  166  shared=  164  mt4-only=   0 mt5-only=   2  BAD=  0  sym mt4=  9/mt5=  9  GREEN
+Biotak/AlertFunctions.mqh              lines mt4=   72 mt5=   72  shared=   72  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  6/mt5=  6  GREEN
+Biotak/BaseKnotTool.mqh                lines mt4= 3600 mt5= 3600  shared= 3600  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=293/mt5=293  GREEN
+Biotak/BasePriceHistoryManager.mqh     lines mt4=  682 mt5=  682  shared=  682  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 28/mt5= 28  GREEN
+Biotak/BasePriceManager.mqh            lines mt4= 1237 mt5= 1237  shared= 1236  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4= 44/mt5= 44  GREEN
+Biotak/BiotakHomes.mqh                 lines mt4=  165 mt5=  165  shared=  165  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 30/mt5= 30  GREEN
+Biotak/BiotakKit.mqh                   lines mt4=  238 mt5=  252  shared=  238  mt4-only=   0 mt5-only=  14  BAD= 14  sym mt4= 66/mt5= 67  RED
+      MT5-only lines with no declared idiom: 14
+        + {
+        + {
+        + }
+        + }
+        + int SetMidZonesVisible(const bool on)
+        + g_showMidZones = on;
+        + RuntimeSettingsSaveOverridesThrottled();
+        + if(RBridgeActive())
+        + RBridgeZoneFamilyMask(on);
+        + if(on &amp;&amp; RBridgeZonesStale()) ScheduleHeavyFrame("zone-build");
+        + RepaintForDiscreteAction();
+        + return REFRESH_NONE;
+      MT5-only symbols: ApplyRefreshFlags
+Biotak/BiotakMenu.mqh                  lines mt4= 3041 mt5= 3043  shared= 3009  mt4-only=  32 mt5-only=  34  BAD= 32  sym mt4=289/mt5=289  RED
+      MT4-only lines with no declared idiom: 18
+        - string legacy = "BiotakMenu_" + IntegerToString(ChartID()) + "_";
+        - for(int i = 0; i &lt; RING_MAX_SEATS; i++)
+        - ObjectDelete(0, legacy + "CircIcon" + IntegerToString(i));
+        - ObjectDelete(0, legacy + "CircBg" + IntegerToString(i));
+        - ObjectDelete(0, legacy + "CircBadge" + IntegerToString(i));
+        - ObjectDelete(0, legacy + "CircBadgeTxt" + IntegerToString(i));
+        - for(int t = 0; t &lt; CAT_COUNT; t++)
+        - ObjectDelete(0, legacy + "ToolsBg" + IntegerToString(t));
+        - ObjectDelete(0, legacy + "ToolsIcon" + IntegerToString(t));
+        - ObjectDelete(0, legacy + "ToolsBadge" + IntegerToString(t));
+        - ObjectDelete(0, legacy + "ToolsBadgeTxt" + IntegerToString(t));
+        - g_redrawTHLevelsNeeded = true;
+      MT5-only lines with no declared idiom: 14
+        + ObjectsDeleteAll(0, "BiotakMenu_" + IntegerToString(ChartID()) + "_");
+        + const bool uiFamiliesClean = ConsumeCleanUITeardownStamp();
+        + if(!uiFamiliesClean)
+        + static uint s_TipLastRedrawTick = 0;
+        + CircReassertLock();
+        + uint now = GetTickCount();
+        + if(now - s_TipLastRedrawTick &lt; CIRC_DRAG_REDRAW_INTERVAL) return;
+        + s_TipLastRedrawTick = now;
+        + ChartRedraw();
+        + refreshFlags = REFRESH_NONE;
+        + refreshFlags = REFRESH_NONE;
+        + refreshFlags = SetMidZonesVisible(wantOn);
+Biotak/BiotakMenu_Ring.mqh             lines mt4=  231 mt5=  231  shared=  231  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 35/mt5= 35  GREEN
+Biotak/BiotakPanels.mqh                lines mt4= 7184 mt5= 7196  shared= 7171  mt4-only=  13 mt5-only=  25  BAD= 38  sym mt4=458/mt5=458  RED
+      MT4-only lines with no declared idiom: 13
+        - if(row==0) { g_showMidZones=(v&gt;0.5);
+        - flags=REFRESH_BUFFERS; }
+        - flags=REFRESH_BUFFERS; }
+        - flags=REFRESH_BUFFERS; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+        - g_labelsRelayoutNeeded=true; flags=REFRESH_ALL;
+      MT5-only lines with no declared idiom: 25
+        + flags=REFRESH_NONE; }
+        + flags=REFRESH_NONE; }
+        + flags=REFRESH_NONE; }
+        + if(row==0) {
+        + RequestUISync();
+        + RequestUISync();
+        + RequestUISync();
+        + RequestUISync();
+        + RequestUISync();
+        + RequestUISync();
+        + RequestUISync();
+        + RequestUISync();
+Biotak/BoxPreview.mqh                  lines mt4=   67 mt5=   67  shared=   67  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  5/mt5=  5  GREEN
+Biotak/BuildConfig.mqh                 lines mt4=  133 mt5=  133  shared=  132  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4= 33/mt5= 33  GREEN
+Biotak/BuildHash.mqh                   lines mt4=    3 mt5=    3  shared=    0  mt4-only=   3 mt5-only=   3  BAD=  0  sym mt4=  4/mt5=  4  GREEN
+Biotak/CalculationCache.mqh            lines mt4=  279 mt5=  279  shared=  279  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 30/mt5= 30  GREEN
+Biotak/CardMetrics.mqh                 lines mt4=   83 mt5=   83  shared=   83  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 80/mt5= 80  GREEN
+Biotak/ComboEngine.mqh                 lines mt4=  343 mt5=  343  shared=  343  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 21/mt5= 21  GREEN
+Biotak/ConstantsAndEnums.mqh           lines mt4=  672 mt5=  672  shared=  672  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=208/mt5=208  GREEN
+Biotak/DrawStrip.mqh                   lines mt4= 6369 mt5= 6088  shared= 6024  mt4-only= 345 mt5-only=  64  BAD=235  sym mt4=513/mt5=500  RED
+      MT4-only lines with no declared idiom: 192
+        - static int s_dsTplPage[DK_COUNT];
+        - return true;
+        - return true;
+        - if(ObjectFind(0, nm) &lt; 0) return;
+        - if(!s_dsOpen || s_dsObj == "") return false;
+        - if(mx &gt;= ex &amp;&amp; mx &lt; ex + ew &amp;&amp; my &gt;= ey &amp;&amp; my &lt; ey + DSTRIP_GEAR_EDIT_H)
+        - if(DrawStripTplSaveHit(e, mx, ex, ew)) return true;
+        - if(slot == DRAW_SLOT_STYLE) return ((k == DK_FIBO || k == DK_FIBOFAN) ? 8 : 5);
+        - ChartRedraw();
+        - ChartRedraw();
+        - ChartRedraw();
+        - string DrawStripTplNavText(const EDrawKind k)
+      MT5-only lines with no declared idiom: 43
+        + if(mx &gt;= ex &amp;&amp; mx &lt; ex + ew &amp;&amp;
+        + my &gt;= ey &amp;&amp; my &lt; ey + DSTRIP_GEAR_EDIT_H)
+        + if(st == FIBPEN_STYLE_3D) return "3D";
+        + if(slot == DRAW_SLOT_STYLE) return ((k == DK_FIBO || k == DK_FIBOFAN) ? 9 : 5);
+        + if(row == FIBPEN_STYLE_3D &amp;&amp; (k == DK_FIBO || k == DK_FIBOFAN)) return "3D";
+        + for(int i = 0; i &lt; DRAW_PRESET_MAX &amp;&amp; r &lt; DSTRIP_PICK_MAX; i++)
+        + { if(DrawPresetName(k, i) == "") continue; s_dsMoreKind[r] = DSTRIP_MK_PRESET; s_dsMoreArg[r] = i; r++; 
+        + if(kind == DSTRIP_MK_PRESET) return DrawPresetName(s_dsKind, arg);
+        + if(kind == DSTRIP_MK_SAVE) return "Save current look";
+        + return "Template: " + DrawPresetName(s_dsKind, arg) +
+        + return "Template: " + DrawPresetName(s_dsKind, arg) +
+        + (DrawPresetIsBuiltin(arg) ? " (built-in)" : " (mine)") +
+      MT4-only symbols: DSTRIP_MK_TPLNAV, DSTRIP_PICK_DEL_W, DrawStripPickDelFaceName, DrawStripPickDelName, DrawStripPickTapDel, DrawStripTplApplyGroup, DrawStripTplCommit, DrawStripTplNameFocus, DrawStripTplNavText, DrawStripTplRowDelete, DrawStripTplSaveHit, DrawStripTplSaveName
+      MT5-only symbols: DrawStripPresetApplyGroup
+Biotak/DrawToolbar.mqh                 lines mt4= 2813 mt5= 2673  shared= 2491  mt4-only= 322 mt5-only= 182  BAD=487  sym mt4=222/mt5=217  RED
+      MT4-only lines with no declared idiom: 315
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+        - {
+      MT5-only lines with no declared idiom: 172
+        + return true;
+        + if(k == DK_NONE) return false;
+        + if(name == "" || ObjectFind(0, name) &lt; 0) return false;
+        + if(lk &lt; FIBPEN_LOOK_NEON || lk &gt; FIBPEN_LOOK_3D) return 0;
+        + if(lk &lt; FIBPEN_LOOK_NEON || lk &gt; FIBPEN_LOOK_3D) return;
+        + int FibPenShwOffPx(const int w) { return ((w &gt; 0 ? w : 1) / 2) + 1; }
+        + string sn = FibPenShwName(fibo, l);
+        + string sn = FibPenShwName(fibo, l);
+        + if(ObjectFind(0, sn) &gt;= 0 &amp;&amp; (int)ObjectGetInteger(0, sn, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+        + { ObjectSetInteger(0, sn, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS); nH++; }
+        + if(ObjectFind(0, sn) &gt;= 0 &amp;&amp; (int)ObjectGetInteger(0, sn, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS)
+        + { ObjectSetInteger(0, sn, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS); nU++; }
+      MT4-only symbols: DRAW_TPL_FILE, DRAW_TPL_LEGACY, DRAW_TPL_LVL_ROW, DRAW_TPL_MAX, DRAW_TPL_PAGE, DrawLook, DrawLookPackA, DrawLookPackB, DrawLookUnpackA, DrawLookUnpackB, DrawTpl, DrawTplApply
+      MT5-only symbols: DRAW_PRESET_BUILTIN, DRAW_PRESET_DIR, DRAW_PRESET_FILE, DRAW_PRESET_MAX, DrawPreset, DrawPresetApply, DrawPresetCapture, DrawPresetCaptureAndSave, DrawPresetClear, DrawPresetCount, DrawPresetIsBuiltin, DrawPresetName
+Biotak/DynamicTradingDayDetector.mqh   lines mt4=  137 mt5=  137  shared=  136  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4=  7/mt5=  7  GREEN
+Biotak/ErrorCodes.mqh                  lines mt4=   55 mt5=   55  shared=   55  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 24/mt5= 24  GREEN
+Biotak/EventHandlers.mqh               lines mt4= 3534 mt5= 3712  shared= 3497  mt4-only=  37 mt5-only= 215  BAD=103  sym mt4=128/mt5=139  RED
+      MT4-only lines with no declared idiom: 7
+        - ThrottledChartRedraw();
+        - ThrottledChartRedraw();
+        - string th3UpdateFlag = "Biotak_TH3_NeedsUpdate_" + chartIdStr;
+        - DrawTplBoot();
+        - " atr=" + IntegerToString((int)g_pInitMsAtr) + "]";
+        - g_labelsRelayoutNeeded = true;
+        - RedrawLabelsOnly();
+      MT5-only lines with no declared idiom: 96
+        + else
+        + else
+        + string nm = ObjectName(0, i, -1, -1);
+        + uint _adoptT = GetTickCount();
+        + g_pInitMsAdopt += GetTickCount() - _adoptT;
+        + uint _adoptT2 = GetTickCount();
+        + g_pInitMsAdopt += GetTickCount() - _adoptT2;
+        + string names = "";
+        + if(nm == "") continue;
+        + names += nm;
+        + uint pFrontTick = GetTickCount();
+        + g_pInitMsFront = GetTickCount() - pFrontTick;
+      MT5-only symbols: AttachToolRestoreLegacy, ConsumeCleanUITeardownStamp, P4LeftoverCensus, P4ObjectCensus, RepaintLabelsForSwitch, StampCleanUITeardown, TailRestoreDeferred, UITearStampName
+Biotak/ExtendedDrawingFunctions.mqh    lines mt4= 1270 mt5= 1285  shared= 1270  mt4-only=   0 mt5-only=  15  BAD=  0  sym mt4= 41/mt5= 41  GREEN
+Biotak/FactorMode.mqh                  lines mt4=  101 mt5=  101  shared=  101  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  7/mt5=  7  GREEN
+Biotak/FloatingPointHelper.mqh         lines mt4=  148 mt5=  148  shared=  148  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 30/mt5= 30  GREEN
+Biotak/FractalTimeframes.mqh           lines mt4=  192 mt5=  192  shared=  192  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 18/mt5= 18  GREEN
+Biotak/FrequencyOptimizer.mqh          lines mt4=  671 mt5=  671  shared=  671  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 21/mt5= 21  GREEN
+Biotak/GlobalVariables.mqh             lines mt4=  671 mt5=  685  shared=  669  mt4-only=   2 mt5-only=  16  BAD= 11  sym mt4= 74/mt5= 76  RED
+      MT5-only lines with no declared idiom: 11
+        + static uint g_pInitMsStates = 0;
+        + static uint g_pInitMsKit = 0;
+        + static uint g_pInitMsHTF = 0;
+        + static uint g_pInitMsMenu = 0;
+        + static uint g_pInitMsAdopt = 0;
+        + static uint g_pInitMsTail = 0;
+        + static uint g_pInitMsFront = 0;
+        + static uint g_pInitMsTailLeg = 0;
+        + static uint g_pInitMsTailTh3 = 0;
+        + static uint g_pInitMsInk = 0;
+        + static bool g_attachTailPending = false;
+Biotak/HRayTool.mqh                    lines mt4=  473 mt5=  473  shared=  473  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 40/mt5= 40  GREEN
+Biotak/HTFCandles.mqh                  lines mt4= 1048 mt5= 1071  shared= 1045  mt4-only=   3 mt5-only=  26  BAD= 23  sym mt4= 88/mt5= 91  RED
+      MT5-only lines with no declared idiom: 23
+        + {
+        + {
+        + {
+        + }
+        + }
+        + }
+        + if(g_HTFDrawnCount &gt; 0)
+        + string HTFKeptStampName() { return "Biotak_HTFKept_" + GetCachedChartIdStr(); }
+        + const int HTF_KEPT_NONE = -1;
+        + static int s_HTFKeptCount = HTF_KEPT_NONE;
+        + void SaveHTFHandoffStamp()
+        + GlobalVariableSet(HTFKeptStampName(), (double)g_HTFDrawnCount);
+      MT5-only symbols: HTFAdoptKeptFamily, HTFKeptStampName, SaveHTFHandoffStamp
+Biotak/HistoricalDataFunctions.mqh     lines mt4=   99 mt5=   99  shared=   98  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4=  3/mt5=  3  GREEN
+Biotak/InputValidationEnhanced.mqh     lines mt4=  167 mt5=  167  shared=  167  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  9/mt5=  9  GREEN
+Biotak/InputValidator.mqh              lines mt4=  311 mt5=  311  shared=  310  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4=  3/mt5=  3  GREEN
+Biotak/LabelFunctions.mqh              lines mt4= 1476 mt5= 1476  shared= 1470  mt4-only=   6 mt5-only=   6  BAD=  0  sym mt4= 59/mt5= 59  GREEN
+Biotak/LevelPipeline.mqh               lines mt4= 1221 mt5= 1281  shared= 1154  mt4-only=  67 mt5-only= 127  BAD= 66  sym mt4= 47/mt5= 47  RED
+      MT4-only lines with no declared idiom: 27
+        - if(!config.zonesEnabled) { HideAllZoneFamilyObjects(); return; }
+        - const bool makeLines,
+        - int removed = 0;
+        - if(!(vpTop &gt; vpBottom) || vpBottom &lt;= 0) return 0;
+        - if(lineCount &lt;= 0) return 0;
+        - string produced[];
+        - ArrayResize(produced, lineCount + zoneCount);
+        - produced[pc++] = lines[l].name;
+        - produced[pc++] = zones[z].name;
+        - const string fam = config.objectPrefix + config.modeName + "_";
+        - const bool producedSet = LadderSetBuild(produced, pc);
+        - for(int i = total - 1; i &gt;= 0; i--)
+      MT5-only lines with no declared idiom: 39
+        + if(!config.zonesEnabled)
+        + if(RBridgeActive()) { RBridgeZoneFamilyMask(false); RBridgeZonesMarkStale(); return; }
+        + HideAllZoneFamilyObjects(); return;
+        + if(RBridgeActive())
+        + if(RBridgeActive())
+        + RBridgeZoneFamilyMask(true);
+        + RBridgeZonesBegin();
+        + double rbPxPerPrice = 0.0;
+        + int rbH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+        + double rbPmax = ChartGetDouble(0, CHART_PRICE_MAX);
+        + double rbPmin = ChartGetDouble(0, CHART_PRICE_MIN);
+        + if(rbH &gt; 0 &amp;&amp; rbPmax &gt; 0 &amp;&amp; rbPmin &gt; 0 &amp;&amp; rbPmax &gt; rbPmin)
+Biotak/Logger.mqh                      lines mt4=  236 mt5=  236  shared=  235  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4= 55/mt5= 55  GREEN
+Biotak/MarketHoursDetector.mqh         lines mt4=   89 mt5=   89  shared=   89  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  6/mt5=  6  GREEN
+Biotak/MathConstants.mqh               lines mt4=    2 mt5=    2  shared=    2  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  3/mt5=  3  GREEN
+Biotak/ModeDefinitions.mqh             lines mt4=  152 mt5=  152  shared=  152  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  8/mt5=  8  GREEN
+Biotak/ObjectCache.mqh                 lines mt4=  527 mt5=  530  shared=  526  mt4-only=   1 mt5-only=   4  BAD=  0  sym mt4= 43/mt5= 43  GREEN
+Biotak/ObjectCountManager.mqh          lines mt4=  175 mt5=  175  shared=  175  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 11/mt5= 11  GREEN
+Biotak/ObjectFunctions.mqh             lines mt4=   72 mt5=   72  shared=   72  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  3/mt5=  3  GREEN
+Biotak/PathTool.mqh                    lines mt4=  887 mt5=  887  shared=  886  mt4-only=   1 mt5-only=   1  BAD=  0  sym mt4= 73/mt5= 73  GREEN
+Biotak/PenStack.mqh                    lines mt4=  537 mt5=  537  shared=  537  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 26/mt5= 26  GREEN
+Biotak/PerformanceOptimizations.mqh    lines mt4=  329 mt5=  331  shared=  328  mt4-only=   1 mt5-only=   3  BAD=  0  sym mt4= 37/mt5= 39  GREEN
+Biotak/Profiler.mqh                    lines mt4=   78 mt5=   78  shared=   78  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 11/mt5= 11  GREEN
+Biotak/ProjectConstants.mqh            lines mt4=  126 mt5=  126  shared=  126  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 18/mt5= 18  GREEN
+Biotak/PropertiesAndInputs.mqh         lines mt4=  286 mt5=  286  shared=  286  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  3/mt5=  3  GREEN
+Biotak/PropertyChangeDetector.mqh      lines mt4=   77 mt5=   77  shared=   77  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 11/mt5= 11  GREEN
+Biotak/RuntimeSettings.mqh             lines mt4= 1223 mt5= 1223  shared= 1223  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=173/mt5=173  GREEN
+Biotak/Sessions_Draw.mqh               lines mt4=  507 mt5=  507  shared=  507  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 26/mt5= 26  GREEN
+Biotak/Sessions_Model.mqh              lines mt4=  238 mt5=  238  shared=  238  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 31/mt5= 31  GREEN
+Biotak/Sessions_Time.mqh               lines mt4=  271 mt5=  271  shared=  271  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 36/mt5= 36  GREEN
+Biotak/StandardTimeframes.mqh          lines mt4=   25 mt5=   25  shared=   25  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  2/mt5=  2  GREEN
+Biotak/TH3Tool.mqh                     lines mt4= 2960 mt5= 3039  shared= 2930  mt4-only=  30 mt5-only= 109  BAD=136  sym mt4=176/mt5=179  RED
+      MT4-only lines with no declared idiom: 29
+        - datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
+        - double pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
+        - datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
+        - double pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
+        - datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
+        - double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
+        - if(ObjectFind(0, base + "_Line_AB") &lt; 0) { TH3InfoFamilyDelete(base); continue; }
+        - if(ObjectFind(0, base + "_Line_BC") &lt; 0) { TH3InfoFamilyDelete(base); continue; }
+        - datetime tA = (datetime)ObjectGetInteger(0, base + "_Line_AB", OBJPROP_TIME, 0);
+        - double pA = ObjectGetDouble(0, base + "_Line_AB", OBJPROP_PRICE, 0);
+        - datetime tB = (datetime)ObjectGetInteger(0, base + "_Line_AB", OBJPROP_TIME, 1);
+        - double pB = ObjectGetDouble(0, base + "_Line_AB", OBJPROP_PRICE, 1);
+      MT5-only lines with no declared idiom: 107
+        + {
+        + {
+        + {
+        + {
+        + {
+        + }
+        + }
+        + }
+        + }
+        + }
+        + }
+        + }
+      MT5-only symbols: TH3LiveDragHeartbeat, TH3LiveDragUnlatch, TH3ReadPatternAnchors
+Biotak/THCalculations.mqh              lines mt4=  170 mt5=  170  shared=  170  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 17/mt5= 17  GREEN
+Biotak/THVolNorm.mqh                   lines mt4=  326 mt5=  326  shared=  323  mt4-only=   3 mt5-only=   3  BAD=  0  sym mt4= 32/mt5= 32  GREEN
+Biotak/TimeframeFunctions.mqh          lines mt4=   52 mt5=   52  shared=   47  mt4-only=   5 mt5-only=   5  BAD=  0  sym mt4=  4/mt5=  4  GREEN
+Biotak/TradePlanFormulas.mqh           lines mt4=  256 mt5=  256  shared=  256  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 41/mt5= 41  GREEN
+Biotak/UtilityFunctions.mqh            lines mt4=  732 mt5=  732  shared=  732  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 62/mt5= 62  GREEN
+Biotak/VisibilityManager.mqh           lines mt4=  337 mt5=  337  shared=  337  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 23/mt5= 23  GREEN
+Biotak/WaveAnalysis.mqh                lines mt4=  268 mt5=  268  shared=  268  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 16/mt5= 16  GREEN
+Biotak/ZoneCalculator.mqh              lines mt4=  219 mt5=  219  shared=  219  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  4/mt5=  4  GREEN
+Biotak/ZoneConfig.mqh                  lines mt4=   36 mt5=   36  shared=   36  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  3/mt5=  3  GREEN
+Biotak/ZoneConstants.mqh               lines mt4=   93 mt5=   93  shared=   93  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 15/mt5= 15  GREEN
+Biotak/ZoneFactory.mqh                 lines mt4=  366 mt5=  366  shared=  366  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 13/mt5= 13  GREEN
+Biotak/ZoneRenderer.mqh                lines mt4=  197 mt5=  196  shared=  192  mt4-only=   5 mt5-only=   4  BAD=  0  sym mt4=  7/mt5=  7  GREEN
+Biotak/ZoneValidator.mqh               lines mt4=  138 mt5=  138  shared=  138  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  7/mt5=  7  GREEN
+Biotak/TH3/TH3Controller.mqh           lines mt4=  233 mt5=  233  shared=  233  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 29/mt5= 29  GREEN
+Biotak/TH3/TH3Math.mqh                 lines mt4=  651 mt5=  651  shared=  651  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 42/mt5= 42  GREEN
+Biotak/TH3/TH3PatternStore.mqh         lines mt4=   70 mt5=   70  shared=   70  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4=  9/mt5=  9  GREEN
+Biotak/TH3/TH3Pivots.mqh               lines mt4= 1226 mt5= 1226  shared= 1226  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 84/mt5= 84  GREEN
+Biotak/TH3/TH3Renderer.mqh             lines mt4= 1549 mt5= 1683  shared= 1530  mt4-only=  19 mt5-only= 153  BAD=109  sym mt4= 55/mt5= 55  RED
+      MT4-only lines with no declared idiom: 4
+        - if(IsIndicatorHidden()) return;
+        - if(IsIndicatorHidden()) return;
+        - if(IsIndicatorHidden()) return;
+        - bool isActive = (g_activeABCDPattern == mainObjName);
+      MT5-only lines with no declared idiom: 105
+        + if(RBridgeActive()) return true;
+        + bool rbr = false;
+        + rbr = RBridgeActive();
+        + const bool patActive = (g_activeABCDPattern == mainObjName);
+        + if(rbr) RBridgePatternDropBase(mainObjName);
+        + if(rbr)
+        + if(rbr)
+        + if(rbr)
+        + if(rbr)
+        + if(rbr)
+        + if(rbr)
+        + if(rbr)
+Biotak/TH3/TH3Types.mqh                lines mt4=   71 mt5=   71  shared=   71  mt4-only=   0 mt5-only=   0  BAD=  0  sym mt4= 13/mt5= 13  GREEN
+ENTRY                                  lines mt4=  126 mt5=  164  shared=  125  mt4-only=   1 mt5-only=  39  BAD= 22  sym mt4=  6/mt5=  7  RED
+      includes MT5 has, MT4 lacks: renderbridge.mqh
+      MT4-only lines with no declared idiom: 1
+        - "ms handler=", (int)p15Handler, "ms | ovr w=", RSSaveWrites(), "/",
+      MT5-only lines with no declared idiom: 21
+        + P4LeftoverCensus("oninit");
+        + uint p4q = GetTickCount();
+        + g_pInitMsStates = GetTickCount() - p4q; p4q = GetTickCount();
+        + g_pInitMsKit = GetTickCount() - p4q; p4q = GetTickCount();
+        + g_pInitMsHTF = GetTickCount() - p4q; p4q = GetTickCount();
+        + g_pInitMsMenu = GetTickCount() - p4q;
+        + RBridgeInit();
+        + RBridgeShutdown();
+        + const bool p116keep = (reason == REASON_CHARTCHANGE);
+        + if(!p116keep)
+        + if(!p116keep)
+        + else
+      MT5-only symbols: BIOTAK_RENDER_ENGINE
+ENTRY-LITE                             lines mt4=   59 mt5=   84  shared=   59  mt4-only=   0 mt5-only=  25  BAD=  8  sym mt4=  7/mt5=  8  RED
+      includes MT5 has, MT4 lacks: renderbridge.mqh
+      MT5-only lines with no declared idiom: 8
+        + P4LeftoverCensus("oninit");
+        + RBridgeInit();
+        + RBridgeShutdown();
+        + if(reason == REASON_REMOVE) P4LeftoverCensus("remove");
+        + if(id == CHARTEVENT_CHART_CHANGE || id == CHARTEVENT_KEYDOWN || id == CHARTEVENT_OBJECT_CLICK)
+        + RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
+        + RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
+        + TailRestoreDeferred();
+      MT5-only symbols: BIOTAK_RENDER_ENGINE
+==============================================================================
+SUMMARY
+==============================================================================
+UNJUSTIFIED one-sided lines: 15 modules affected
+  !! Biotak/BiotakKit.mqh                    14 bad lines   (mt4-only 0, mt5-only 14)
+      symbols: mt4 - | mt5 (block), ApplyRefreshFlags, ClampInt, NativeStyleFromIdx, RefreshDisplay, UIDragBudgetBegin
+  !! Biotak/BiotakMenu.mqh                   32 bad lines   (mt4-only 18, mt5-only 14)
+      symbols: mt4 DeleteLegacyMenuObjects, CreateToolsMenu, DeleteRing, DeleteMenu, RingFeatureClick, FeaturePanel | mt5 CircTipDragTo, CircHandleMouseMove, DeleteMenu, RingFeatureClick, InitializeUIStates, SetHTFVisible
+  !! Biotak/BiotakPanels.mqh                 38 bad lines   (mt4-only 13, mt5-only 25)
+      symbols: mt4 PnlApplySet | mt5 PnlApplySet, PnlCloseAll, PnlOpen, PnlSkinButtonAct, UIRebuildForMetrics, UISyncDrain
+  !! Biotak/DrawStrip.mqh                   235 bad lines   (mt4-only 192, mt5-only 43)
+      symbols: mt4 DrawStripLevelsToggle, DrawStripOnEvent, DrawStripPickTap, DrawStripMoreBuild, DrawStripGearObjectsPurge, DrawStripTplCommit | mt5 DrawStripGearHit, DrawStripMoreTap, DrawStripGearRowTap, DrawStripClose, DrawStripPresetApplyGroup, DrawStripGearRowTip
+  !! Biotak/DrawToolbar.mqh                 487 bad lines   (mt4-only 315, mt5-only 172)
+      symbols: mt4 DrawTplLoad, DrawTplApply, DRAW_TPL_MAX, DrawTplIndex, DrawTplDelete, DrawTplSeed | mt5 FibPenSync, DrawPresetsInit, FibPenPreviewArm, DrawPresetCapture, FibPenLookSet, DrawPresetSet
+  !! Biotak/EventHandlers.mqh               103 bad lines   (mt4-only 7, mt5-only 96)
+      symbols: mt4 ResolveTopologyAdoption, P4InitLedgerTag, DrawLevelsBasedOnMode, OnInitHandler, OnChartEventHandler, RedrawAllObjects | mt5 DrawLevelsBasedOnMode, OnInitHandler, RepaintLabelsForSwitch, RedrawAllObjects, ResolvePeriodChangeAttach, TailRestoreDeferred
+  !! Biotak/GlobalVariables.mqh              11 bad lines   (mt4-only 0, mt5-only 11)
+      symbols: mt4 - | mt5 (block), ChartViewRestoreUser, CompatLockedPeriod, CompatTimeframeLockActive
+  !! Biotak/HTFCandles.mqh                   23 bad lines   (mt4-only 0, mt5-only 23)
+      symbols: mt4 (block), HTFProbeSettings, HTFProbeCull | mt5 DrawHTFCandles, HTFAdoptKeptFamily, InitializeHTFCandles, (block), HTFRefreshBlendBackground, HTFBlendBackgroundColor
+  !! Biotak/LevelPipeline.mqh                66 bad lines   (mt4-only 27, mt5-only 39)
+      symbols: mt4 ExecutePipeline, ClassifyLevels, ClassifyLevelsAlternating, BuildZonesAndLines, RenderZones, RenderTriggerLines | mt5 ExecutePipeline, SweepForeignLadderObjects, RenderTriggerLines, RenderZones, Step1HandleOwnFace, CleanupSurplusPipeline
+  !! Biotak/TH3Tool.mqh                     136 bad lines   (mt4-only 29, mt5-only 107)
+      symbols: mt4 TH3RestorePatternsFromChart, OnABCDMouseEvent, AutoSelectBestFrequency, TH3BaseEditorSync | mt5 OnABCDMouseEvent, TH3ReadPatternAnchors, TH3LiveDragUnlatch, TH3RestorePatternsFromChart, TH3BaseEditorSync, LegMeasureUpgradeLegacy
+  !! Biotak/TH3/TH3Renderer.mqh             109 bad lines   (mt4-only 4, mt5-only 105)
+      symbols: mt4 TH3InfoOrphanPlateSweep, TH3PivotMarkersClear, DrawABCDPattern, TH3InfoCaptionHeal, TH3HitPivotForward | mt5 DrawABCDPattern, TH3InfoOrphanPlateSweep, TH3FamilyAnchorsAlive, TH3LogFileAppend, TH3AvgCandleSize, TH3ROPlateH
+  !! ENTRY                                   22 bad lines   (mt4-only 1, mt5-only 21)
+      symbols: mt4 OnDeinit | mt5 OnDeinit, OnCalculate, OnInit, OnTimer, OnChartEvent
+  !! ENTRY                                   22 bad lines   (mt4-only 1, mt5-only 21)
+      symbols: mt4 OnDeinit | mt5 OnDeinit, OnCalculate, OnInit, OnTimer, OnChartEvent
+  !! ENTRY-LITE                               8 bad lines   (mt4-only 0, mt5-only 8)
+      symbols: mt4 - | mt5 OnCalculate, OnInit, OnDeinit, OnTimer, OnChartEvent
+  !! ENTRY-LITE                               8 bad lines   (mt4-only 0, mt5-only 8)
+      symbols: mt4 - | mt5 OnCalculate, OnInit, OnDeinit, OnTimer, OnChartEvent
+
+MT4-ONLY SYMBOLS (lost logic): 2
+   - Biotak/DrawStrip.mqh :: DSTRIP_MK_TPLNAV, DSTRIP_PICK_DEL_W, DrawStripPickDelFaceName, DrawStripPickDelName, DrawStripPickTapDel, DrawStripTplApplyGroup, DrawStripTplCommit, DrawStripTplNameFocus, DrawStripTplNavText, DrawStripTplRowDelete, DrawStripTplSaveHit, DrawStripTplSaveName, DrawStripTplSavePaint, DrawStripTplSaveSweep, DrawStripTplSaveW
+   - Biotak/DrawToolbar.mqh :: DRAW_TPL_FILE, DRAW_TPL_LEGACY, DRAW_TPL_LVL_ROW, DRAW_TPL_MAX, DRAW_TPL_PAGE, DrawLook, DrawLookPackA, DrawLookPackB, DrawLookUnpackA, DrawLookUnpackB, DrawTpl, DrawTplApply, DrawTplBoot, DrawTplCount, DrawTplDelete, DrawTplIndex, DrawTplLevelsOf, DrawTplLevelsTo, DrawTplLoad, DrawTplMigrate, DrawTplName, DrawTplPath, DrawTplPut, DrawTplSave, DrawTplSaveAs, DrawTplSeed, DrawTplSeedOne
+
+MT5-ONLY SYMBOLS (extras to remove): 8
+   + Biotak/BiotakKit.mqh               ApplyRefreshFlags
+   + Biotak/DrawStrip.mqh               DrawStripPresetApplyGroup
+   + Biotak/DrawToolbar.mqh             DRAW_PRESET_BUILTIN, DRAW_PRESET_DIR, DRAW_PRESET_FILE, DRAW_PRESET_MAX, DrawPreset, DrawPresetApply, DrawPresetCapture, DrawPresetCaptureAndSave, DrawPresetClear, DrawPresetCount, DrawPresetIsBuiltin, DrawPresetName, DrawPresetPack, DrawPresetPath, DrawPresetSet, DrawPresetUnpack, DrawPresetsInit, DrawPresetsLoad, DrawPresetsSave, FIBPEN_LOOK_3D, FIBPEN_STYLE_3D, FibPenShwOffPx
+   + Biotak/EventHandlers.mqh           AttachToolRestoreLegacy, ConsumeCleanUITeardownStamp, P4LeftoverCensus, P4ObjectCensus, RepaintLabelsForSwitch, StampCleanUITeardown, TailRestoreDeferred, UITearStampName
+   + Biotak/HTFCandles.mqh              HTFAdoptKeptFamily, HTFKeptStampName, SaveHTFHandoffStamp
+   + Biotak/TH3Tool.mqh                 TH3LiveDragHeartbeat, TH3LiveDragUnlatch, TH3ReadPatternAnchors
+   + ENTRY                              BIOTAK_RENDER_ENGINE
+   + ENTRY-LITE                         BIOTAK_RENDER_ENGINE
+
+MT5-ONLY MODULE FILES (extras left in the build): 0
+MT5 platform layer (declared, required by MQL5): MT5Compat/MQL5Compat.mqh
+
+==============================================================================
+DO THE NUMBERS MATCH?  modules that draw / compute what the user sees
+==============================================================================
+  Biotak/ATRCalculations.mqh           mt4-only lines=   1 mt5-only lines=   6 BAD=  0   -&gt; GREEN
+  Biotak/AdaptiveScaling.mqh           mt4-only lines=   0 mt5-only lines=   2 BAD=  0   -&gt; GREEN
+  Biotak/BasePriceManager.mqh          mt4-only lines=   1 mt5-only lines=   1 BAD=  0   -&gt; GREEN
+  Biotak/ComboEngine.mqh               mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/FractalTimeframes.mqh         mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/LabelFunctions.mqh            mt4-only lines=   6 mt5-only lines=   6 BAD=  0   -&gt; GREEN
+  Biotak/LevelPipeline.mqh             mt4-only lines=  67 mt5-only lines= 127 BAD= 66   -&gt; RED
+  Biotak/THCalculations.mqh            mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/TradePlanFormulas.mqh         mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/ZoneCalculator.mqh            mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/ZoneFactory.mqh               mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/ZoneRenderer.mqh              mt4-only lines=   5 mt5-only lines=   4 BAD=  0   -&gt; GREEN
+  Biotak/ZoneValidator.mqh             mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/TH3/TH3Math.mqh               mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/TH3/TH3Pivots.mqh             mt4-only lines=   0 mt5-only lines=   0 BAD=  0   -&gt; GREEN
+  Biotak/TH3/TH3Renderer.mqh           mt4-only lines=  19 mt5-only lines= 153 BAD=109   -&gt; RED
+
+VERDICT: 13 RED, 0 YELLOW, 64 GREEN, 0 MT5-only files   -&gt;  WORK REMAINS</code></pre>
+</main>
+<footer>
+  ساخته‌شده از <code>docs/MT4-MT5-GAP-REPORT-2026-10-18_FA.md</code> — خواندنی‌ها read-only هستند؛ اعداد این سند اسنپ‌شات working tree در 2026-10-18 است.
+  <div><a href="#top">↑ بازگشت به بالا</a></div>
+</footer>
+</div>
+</body>
+</html>

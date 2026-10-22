@@ -53,6 +53,7 @@ void PathWitness(const string line) { }
 #endif
 
 static bool   s_pathArmed       = false;
+static bool   s_pathDeleting    = false;   // P-DEL-ATOMIC: our own sweep must not re-enter the watcher
 static bool   s_pathLeft        = false;
 static string s_pathDrag        = "";      // path id under the hand ("" = no drag)
 static bool   s_pathMoved       = false;
@@ -103,6 +104,7 @@ bool PathViewOwned() { return (s_pathArmed || s_pathDrag != ""); }
 void PathArm()
 {
    if(s_pathArmed) return;
+   if(IsIndicatorHidden()) return;   // P-UI-160b: the F mute owns the chart — no new path under it
    GestureTakeRelease();   // P-UI-144: a NEW drawing is never gated by the last one — the
                            // arbiter's ONE question is per drawing, so arming clears it
    s_pathArmed = true; ChartViewLockAcquire(); ChartRedraw();
@@ -214,6 +216,15 @@ void PathHandleAt(const string id, const int k)
 {
    string hn = PathHandleName(id, k);
    if(id == "" || id != s_pathSel) { ObjectDelete(0, hn); return; }
+   // P-UI-160b (2026-10-16): the F mute parks the vertex circles. They are
+   // BITMAP_LABELs — no TF mask reaches them — so the pan stream, the
+   // chart-change follower and the hide pass all land HERE, and this one
+   // branch keeps every channel from re-placing them while hidden.
+   if(IsIndicatorHidden())
+   {
+      HandsetHandleAtXY(hn, HANDSET_HANDLE_PARK, HANDSET_HANDLE_PARK, CP_HANDLE_HALF, CP_HANDLE_RES);
+      return;
+   }
    datetime t = 0; double p = 0.0;
    if(!PathVertex(id, k, t, p)) { ObjectDelete(0, hn); return; }
    int x = 0, y = 0;
@@ -241,6 +252,7 @@ void PathHandlesFollowAll(const string id)
 bool PathDotHit(const int mx, const int my, string &id, int &k)
 {
    id = ""; k = -1;
+   if(IsIndicatorHidden()) return false;   // P-UI-160b: no grabbing a hidden path's dot
    if(s_pathSel == "") return false;
    int n = PathSegCount(s_pathSel);
    int best = 0x7fff;
@@ -276,10 +288,14 @@ bool PathIdOfName(const string nm, string &id)
 }
 string PathTooltip(const int segs)
 {
+   // P-MT5-PARITY (2026-10-21) - PARITY (MT4 PathTool.mqh:276-279): the tooltip is MT4's string, word for
+   // word. The two builds must show the same label on the same object.
    return "Path · " + IntegerToString(segs + 1) + " points — click to select, drag to move — double-click the dot to remove";
 }
 void PathDelete(const string id, const string why)
 {
+   if(s_pathDeleting) return;
+   s_pathDeleting = true;
    PathWitness("delete id=" + id + " segs=" + IntegerToString(PathSegCount(id)) + " why=" + why);
    if(s_pathDrag == id) PathDragRelease();
    PathSelect("");                       // every handle is the path's CHILD (P-HR-07's rule, one way)
@@ -290,14 +306,22 @@ void PathDelete(const string id, const string why)
    PathMidDrop(id);              // P-UI-139: ...and its 50 % markers with it (one sweep)
    if(s_pathDrag == id) s_pathDrag = "";
    if(s_pathClick == id) s_pathClick = "";
+   // P-DEL-ATOMIC: the terminal queues one event per deleted segment; the family is
+   // already gone, so the rest of those events must not re-enter and redraw.
+   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+   s_pathDeleting = false;
    ChartRedraw();
 }
 void PathSessionClear()
 {
+   bool deleting = s_pathDeleting;
+   s_pathDeleting = true;
    string pfx = PathPrefix();
    if(pfx != "" && s_pathSessionId != "")
       for(int i = 0; i < s_pathSegCount; i++) ObjectDelete(0, PathSegName(s_pathSessionId, i));
    ObjectDelete(0, PathPreviewName());
+   g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
+   s_pathDeleting = deleting;
    s_pathAnchorT = 0; s_pathAnchorP = 0;
    s_pathSegCount = 0;
    s_pathSessionId = "";
@@ -318,6 +342,7 @@ int PathPointToSegPx(const int mx, const int my, const datetime t1, const double
 }
 bool PathPressHit(const int mx, const int my, string &id)
 {
+   if(IsIndicatorHidden()) return false;   // P-UI-160b: no grabbing a hidden path
    int best = 0x7fff;
    for(int i = 0; i < ArraySize(s_pathIds); i++)
    {
@@ -569,6 +594,16 @@ void PathMidApply(const string id)
       datetime t2 = (datetime)ObjectGetInteger(0, seg, OBJPROP_TIME, 1);
       double   p2 = ObjectGetDouble(0, seg, OBJPROP_PRICE, 1);
       if(t1 <= 0 || t2 <= 0 || !(p1 > 0) || !(p2 > 0)) { ObjectDelete(0, nm); continue; }
+      // P-UI-160b (2026-10-16): the F mute parks the 50% discs. They are
+      // BITMAP_LABELs — no TF mask reaches them — so the hide pass and the
+      // chart-change channel both come through here; the validity check above
+      // still runs (a dead segment still takes its marker with it), a live one
+      // parks instead of projecting.
+      if(IsIndicatorHidden())
+      {
+         HandsetHandleAtXY(nm, HANDSET_HANDLE_PARK, HANDSET_HANDLE_PARK, PATH_MID_HALF, PATH_MID_RES);
+         continue;
+      }
       //--- P-UI-141 (2026-10-02, user: "it came, but it is not in the middle of the
       //--- line") — THE MIDDLE IS A PIXEL FACT, NOT A PRICE ONE. The marker used the
       //--- arithmetic mean of TIME and PRICE and handed it back to the terminal, which
@@ -665,6 +700,56 @@ void PathFollowAll()
          PathRegDel(id);   // P-UI-146: the sweep is inside — its handles die with it
       }
    }
+}
+
+// ── P-UI-160b (2026-10-16) — THE PATH FAMILY ANSWERS THE F MUTE ──────
+// Segments are chart-space (mask); vertex handles and the 50% discs are
+// BITMAP_LABELs (park, through their own seats' hidden branches). Once per
+// transition; the riders (PathHandleAt / PathMidApply) carry the hidden term,
+// so the pan stream and the chart-change follower cannot re-place a disc while
+// hidden and the show path re-places them through the same seats.
+int PathHideAll()
+{
+   int n = 0;
+   for(int i = 0; i < ArraySize(s_pathIds); i++)
+   {
+      string id = s_pathIds[i];
+      int m = PathSegCount(id);
+      if(m <= 0) continue;
+      for(int k = 0; k < m; k++)
+      {
+         string nm = PathSegName(id, k);
+         if(ObjectFind(0, nm) < 0) continue;
+         if((int)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+            ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+      }
+      PathMidApply(id);                              // parks (its own hidden branch)
+      if(id == s_pathSel) PathHandlesFollowAll(id);  // parks (its own hidden branch)
+      n++;
+   }
+   return n;
+}
+
+int PathShowAll()
+{
+   int n = 0;
+   for(int i = 0; i < ArraySize(s_pathIds); i++)
+   {
+      string id = s_pathIds[i];
+      int m = PathSegCount(id);
+      if(m <= 0) continue;
+      for(int k = 0; k < m; k++)
+      {
+         string nm = PathSegName(id, k);
+         if(ObjectFind(0, nm) < 0) continue;
+         if((int)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS)
+            ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+      }
+      PathMidApply(id);   // re-places the discs (visible branch)
+      n++;
+   }
+   PathFollowAll();   // re-place the selected path's vertex handles
+   return n;
 }
 void PathMakeSegment(const string id, const int idx, const datetime t1, const double p1, const datetime t2, const double p2)
 {
@@ -846,10 +931,17 @@ bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, co
    }
    if(id == CHARTEVENT_OBJECT_DELETE && pfx != "" && StringFind(sparam, pfx) == 0)
    {
+      if(s_pathDeleting) return false;
       if(g_suppressDeleteEvents || TickDeadlinePending(g_suppressDeleteEventsUntilMs)) return false;
       string pid;
       if(PathIdOfName(sparam, pid))
       {
+         // P-MT5-PARITY (2026-10-21) - PARITY (MT4 PathTool.mqh:907-924): A NATIVE DELETE OF ONE SEGMENT
+         // TAKES THAT SEGMENT, NOT THE WHOLE PATH. MT5's P-DEL-ATOMIC swept the
+         // entire path (segments + vertex handles + the ink row + the 50 %
+         // markers) instead, so deleting one leg from the terminal's own object
+         // list destroyed a drawing the user had not touched. The strip bin is
+         // the door that takes a whole path (P-UI-136) and it still does.
          if(PathSegCount(pid) == 0) PathRegDel(pid);
          if(s_pathDrag == pid) PathDragRelease();
          // The handles follow their path: a segment gone RE-PLACES the vertex set,
@@ -1117,6 +1209,11 @@ if(pressed && pfx != "")
    }
    return false;
 }
+void PathHandlesWipe()
+{
+   for(int i = 0; i < ArraySize(s_pathIds); i++)
+      PathHandlesDrop(s_pathIds[i]);
+}
 void PathOnInit()
 {
    s_pathArmed = false;
@@ -1124,12 +1221,23 @@ void PathOnInit()
    s_pathClick = "";
    s_pathSel = "";      // a fresh attach owns no selection: the dot is drawn, not adopted
    PathAdoptOrphans();
+   PathHandlesWipe();
 }
 void PathOnDeinit(const int reason)
 {
-   s_pathArmed = false;
+   if(s_pathDrag != "") PathDragRelease();
+   if(s_pathArmed)
+   {
+      s_pathArmed = false;
+      ChartViewLockRelease();
+   }
+   if(reason != REASON_REMOVE) PathHandlesWipe();
    s_pathDrag = "";
    s_pathSel = "";
+   //--- P-UI-180 (2026-10-20): the PREVIEW and the half-drawn session die with
+   //--- EVERY reason, not only with the indicator's removal: a timeframe switch
+   //--- leaves the preview line and the session's segments on the chart forever.
+   PathSessionClear();
    if(reason == REASON_REMOVE)
    {
       string pfx = PathPrefix();

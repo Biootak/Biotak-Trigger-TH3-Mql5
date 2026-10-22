@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/BiotakPanels.mqh
 //
@@ -481,6 +481,12 @@ bool PnlCardFade(const int item)
 #define PNL_CSET_W       38      // .ccell i
 #define PNL_CSET_H       20
 #define PNL_CSET_GAP     6
+// P-SESS (kind 10): the session chips — smaller cells than CSET (seven day
+// boxes or eight swatches fit the 280px content column right-aligned, beside
+// no caption: the caption sits ABOVE them like CSET's, so the numbers live here).
+#define PNL_SCHIP_W      30      // .chip i
+#define PNL_SCHIP_H      20
+#define PNL_SCHIP_GAP    4
 #define PNL_SEC_CNT_W    24      // .row.sec .cnt pill
 //--- tallest NARROW card skin the generator bakes (tools/gen-th3-icons.js
 //--- PNL_CARD_ROWS_MAX). Narrow cards are those below PNL_WIDE_MIN_ROWS rows,
@@ -511,6 +517,12 @@ bool PnlCardFade(const int item)
 #define PNL_K_SEC    7    // SECTION BAND — itself a 42px row (hit maths intact)
 #define PNL_K_CSET   8    // N colours in ONE 42px row (preview .cset)
 #define PNL_K_DUAL   9    // two switches in one 42px row (preview .dual)
+// P-SESS (cards 15/16): a row of small value CELLS — one per choice, tapped
+// directly (no popup). The payload (`opts` of the setting) says which table
+// the taps write: "days" = the 7-bit weekday mask (tap = XOR its bit),
+// "color" = the 8-swatch session ink (tap = pick, one lit). One kind, two
+// tables — the session editor's two grid rows.
+#define PNL_K_CHIPS  10
 #define PNL_K_LEGACY (-1) // "whatever the setting's own def says"
 
 //--- P-UI-67: the SS/LS sequence-order caption. ONE string, because the row is
@@ -558,7 +570,13 @@ bool PnlCardFade(const int item)
 // because MAX LEVELS left only card 9's DISPLAY (its address keeps its branch),
 // and [2]/[3] keep their numbers the same way while TRADE CARD and MARGIN BOTTOM
 // left THEIR displays. The moved rows never took a setting with them.
-int g_PnlRows[PNL_COUNT] = {5,18,11,6,1,8,11,6,4,2,7,7,1,7,15};
+// P-SESS: [15] the Sessions card (11 addresses: master · two day sliders · seven
+// switches · the editor NAV) and [16] the Session Editor (13 addresses: the slot
+// pick · preset · timezone · offset · HH/MM pairs · days mask · colour · style ·
+// active · the overview NAV). Both are WIDE (> PNL_WIDE_MIN_ROWS 10), so their
+// bodies compose — the OVERVIEW card pairs its sliders and switches, and the
+// editor pairs each HH/MM slider with its sibling.
+int g_PnlRows[PNL_COUNT] = {5,18,11,6,1,8,11,6,4,2,7,7,1,7,15,11,13};
 
 // g_PnlRows[12] is the BASE (TAB row only) — PnlRowsCount(12) returns
 // 1 + the open tab's section rows (6 each tab), the same dynamic pattern
@@ -587,6 +605,10 @@ string PnlMarkIcon(const int item)
    // P-UI-131: a frame with a header — the card is the cross-card surface, and
    // "steps"/"layers" already mark the Step and Zones cards.
    if(item==14) return "template";
+   // P-SESS: the session clock (15) and its editor (16) — one clock face and one
+   // stopwatch, so the pair reads as "what · when".
+   if(item==15) return "clock";
+   if(item==16) return "timer";
    if(item==12)                       // Base Box — the mark follows the tab
    {
       if(g_BkTab==1) return "type";
@@ -608,6 +630,9 @@ string PnlHeaderSub(const int item)
    if(item==10) return "AUTO / MANUAL STEP ENGINE";
    if(item==11) return "L1 - L5 ZONE TOGGLES";
    if(item==14) return "ENGINE · LABEL GRID · TRADE CARD · INTERFACE";   // P-UI-131
+   // P-SESS: what each card's rows answer, in the one line the header carries.
+   if(item==15) return "WORLD CLOCK · BOXES · COUNTDOWN · ALERTS";
+   if(item==16) return "SLOT · HOURS · DAYS · COLOR";
    if(item==12)                       // Base Box — the subtitle follows the tab
    {
       if(g_BkTab==1) return "TEXT TAB · OBJ_EDIT FIELD";
@@ -1043,8 +1068,7 @@ color PnlDefColorSet(const int item,const int row)
 color g_PalRecent[PAL_RECENT_MAX];
 int   g_PalRecentCount = 0;
 
-#endif // BIOTAK_PANELS_STATE_MQH
-// BiotakPanels_PalA.mqh - BiotakPanels split 2026-09-29: exact lines 1098-2441 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_STATE_MQH// BiotakPanels_PalA.mqh - BiotakPanels split 2026-09-29: exact lines 1098-2441 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_PALA_MQH
 #define BIOTAK_PANELS_PALA_MQH
 
@@ -1395,10 +1419,11 @@ string PalHexByte(const int v)
    return StringSubstr(digits,(v>>4)&15,1) + StringSubstr(digits,v&15,1);
 }
 
-//--- DISPLAY-row spec machinery lives HERE (not beside the renderer) because
-//--- MQL4 is define-before-use: the palette section below (PalKindRow /
-//--- PalOpenForItem / PalUpdateLive) converts setting rows to display rows.
-//--- Moved as one block 2026-09-11; no logic changed.
+//--- DISPLAY-row spec machinery lives in BiotakPanels_PalSpec.mqh (included right
+//--- after this file) because MQL4 is define-before-use for globals: the palette
+//--- section below (PalOpenForItem / PalUpdateLive) converts setting rows to
+//--- display rows through PalSpecCard / PalKindRow, now in the spec file.
+//--- Moved as one block 2026-09-11; split by owner 2026-10-17 (P-SIZE-1500).
 
 //+------------------------------------------------------------------+
 //| STEP card (9) inline mode section — the SELECTED step mode's own  |
@@ -1452,6 +1477,561 @@ int  g_PnlSpecStamp[PNL_COUNT];
 //--- g_PnlCollapsed[item] hides band b's members (the band row itself stays).
 //--- Session-only, all open by default = the preview. Max 4 bands per card.
 int  g_PnlCollapsed[PNL_COUNT];
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-UI-131h — THE COLOUR GRID PREVIEWS UNDER THE POINTER, AT ZERO READ COST.
+//
+// «موس که روی رنگها رفت اعمال بشه سریع ... که کاربر سریع تغییرات ببینه و فکر نکنه که
+// درست کار نمیکنه»: the grid answered only on a PRESS, so sweeping it showed nothing
+// until the click. It is P-DRAW-27's one-event preview on the cards' palette: hit-test
+// the ALREADY-PAINTED cells, apply there, write NOTHING while the pointer stays on the
+// same cell, and put back the colour that was there when it leaves — so a sweep is a
+// preview and a CLICK is the commitment.
+//
+// The cell geometry is RECORDED BY THE PAINT (P-UI-79: the pixels that were painted
+// answer where they are), so a moving pointer costs ZERO chart reads — the hit-test is
+// integer arithmetic over at most two regions.
+// ══════════════════════════════════════════════════════════════════════════
+#define PAL_HOVER_REGIONS 2
+struct SPalHoverRegion { int x, y, cols, rows, size, pitch, tab, src; };
+static SPalHoverRegion s_palRegion[PAL_HOVER_REGIONS];
+static int   s_palRegionN   = 0;
+static int   s_palHoverCell = -1;      // -1 = nothing is being previewed
+static color s_palHoverWas  = clrNONE; // the colour the preview must put back
+static int   s_palHoverKind = -1;
+
+//--- called by the PAINT, once per painted block of cells. `src`: 0 = the colour grid,
+//--- 1 = the recents strip. `tab` = the palette tab the grid belongs to (a stale tab's
+//--- recorded geometry must never answer for the open one).
+void PalHoverRegionAdd(const int x,const int y,const int cols,const int rows,
+                       const int size,const int pitch,const int tab,const int src)
+{
+   if(s_palRegionN >= PAL_HOVER_REGIONS) return;
+   s_palRegion[s_palRegionN].x=x;       s_palRegion[s_palRegionN].y=y;
+   s_palRegion[s_palRegionN].cols=cols; s_palRegion[s_palRegionN].rows=rows;
+   s_palRegion[s_palRegionN].size=size; s_palRegion[s_palRegionN].pitch=pitch;
+   s_palRegion[s_palRegionN].tab=tab;   s_palRegion[s_palRegionN].src=src;
+   s_palRegionN++;
+}
+
+//--- the cell under the pointer → the region index, or -1 when the pointer is in a gap,
+//--- off the grid, or over a tab that did not paint this geometry.
+int PalHoverCellAt(const int mx,const int my,int &col,int &rowv)
+{
+   for(int i=0;i<s_palRegionN;i++)
+   {
+      if(s_palRegion[i].tab != g_PalTab) continue;
+      int dx=mx-s_palRegion[i].x, dy=my-s_palRegion[i].y;
+      if(dx < 0 || dy < 0) continue;
+      int c=dx/s_palRegion[i].pitch, r=dy/s_palRegion[i].pitch;
+      if(c >= s_palRegion[i].cols || r >= s_palRegion[i].rows) continue;
+      if(dx-c*s_palRegion[i].pitch >= s_palRegion[i].size) continue;   // the seam between cells
+      if(dy-r*s_palRegion[i].pitch >= s_palRegion[i].size) continue;
+      col=c; rowv=r; return i;
+   }
+   return -1;
+}
+
+//--- the colour the PAINT put in that cell, by the same two mappings it used.
+color PalHoverColorAt(const int region,const int c,const int r)
+{
+   if(s_palRegion[region].src == 1)                   // recents: the list is the paint
+   {
+      int i=r*s_palRegion[region].cols+c;
+      return (i < g_PalRecentCount) ? g_PalRecent[i] : clrNONE;
+   }
+   // P-DRAW-50: row from y, column from x — the paint's own mapping, on the
+   // PAGE the paint showed (the ids and the regions are both page-local).
+   return PalPickColor(BioPickPageRow0()+r, c);
+}
+
+//--- a CLICK is the commitment: the previewed value stays and nothing is put back.
+void PalHoverCommit() { s_palHoverCell=-1; s_palHoverKind=-1; }
+
+void PalMoveDisarm()
+{
+   if(!s_palMoveArmed) return;
+   s_palMoveArmed=false; s_palMoveMoved=false;
+   DragReleaseIf(DRAG_PANEL_MOVE);
+   CircUnlockChart();
+}
+void PalMovePark()
+{
+   s_palManual=true; s_palMX=g_PalX; s_palMY=g_PalY; s_palMAnchor=g_PalAnchorItem;
+}
+// Press in the title band (close seat keeps its click) arms the carry.
+bool PalTitleGrab(const int mx,const int my)
+{
+   if(!g_PalOpen || s_palMoveArmed) return false;
+   //--- one move at a time: a live card move owns DRAG_PANEL_MOVE already, and a
+   //--- knob/mixer/menu gesture owns the pointer — arming a second carry would
+   //--- starve the first and jump it on finish (stale anchor).
+   if(g_PnlMoveItem>=0 || !DragCanGrab(DRAG_PANEL_MOVE)) return false;
+   int w=PalW();
+   if(mx < g_PalX || mx > g_PalX+w || my < g_PalY || my > g_PalY+PAL_HEAD) return false;
+   // P-UI-150 (2026-10-13): the close seat is READ, never re-derived. This used to be
+   // `my >= g_PalY+3 && my <= g_PalY+21` while the button paints py+5..py+23, so the
+   // button's own bottom 2 px armed the carry instead of closing the popup.
+   int ccx = 0, ccy = 0, ccw = 0, cch = 0;
+   PalCloseSeat(g_PalX, g_PalY, w, ccx, ccy, ccw, cch);
+   if(mx >= ccx && mx <= ccx + ccw && my >= ccy && my <= ccy + cch) return false;
+   s_palMoveArmed=true;
+   s_palMoveGX=mx; s_palMoveGY=my; s_palMoveLX=mx; s_palMoveLY=my;
+   s_palMoveMoved=false; s_palMoveTick=0;
+   DragClaim(DRAG_PANEL_MOVE);
+   CircLockChart();
+   return true;
+}
+void PalMoveStep(const int mx,const int my)
+{
+   if(!s_palMoveArmed || !g_PalOpen) return;
+   uint now=GetTickCount();
+   if(s_palMoveTick != 0 && now-s_palMoveTick < (uint)s_PnlMoveFrameMs) return;
+   if(mx == s_palMoveLX && my == s_palMoveLY) return;
+   if(!s_palMoveMoved &&
+      MathAbs(mx-s_palMoveGX) <= PnlDragThreshPx() &&
+      MathAbs(my-s_palMoveGY) <= PnlDragThreshPx())
+   {
+      s_palMoveLX=mx; s_palMoveLY=my;
+      return;
+   }
+   s_palMoveTick=now;
+   int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0); if(cw<=0) cw=1920;
+   int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0); if(ch<=0) ch=1080;
+   int nx=g_PalX+mx-s_palMoveLX, ny=g_PalY+my-s_palMoveLY;
+   int w=PalW(), h=PalH();
+   if(nx<4) nx=4; if(ny<4) ny=4;
+   if(nx>cw-w-4) nx=MathMax(4,cw-w-4);
+   if(ny>ch-h-4) ny=MathMax(4,ch-h-4);
+   s_palMoveLX=mx; s_palMoveLY=my;
+   if(nx==g_PalX && ny==g_PalY) return;
+   g_PalX=nx; g_PalY=ny;
+   if(!s_palMoveMoved) PalMovePark();
+   s_palMoveMoved=true;
+   PalDraw();
+}
+void PalMoveFinish()
+{
+   if(!s_palMoveArmed) return;
+   bool mv=s_palMoveMoved;
+   if(mv) PalMovePark();
+   PalMoveDisarm();
+   if(mv) UISuppressNextClick();
+}
+
+void PalComputePos()
+{
+   int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+   int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   if(cw<=0) cw=1920;
+   if(ch<=0) ch=1080;
+   int w=PalW(), h=PalH();
+   // Anchor to the OPEN panel (the strip opens the fill palette with anchor
+   // item 12 while item 13 is open — stale g_PnlX[12] would park it top-left).
+   int ai = (g_PnlOpen >= 0 ? g_PnlOpen : g_PalAnchorItem);
+   if(g_PalKind == PAL_DRAW_BORDER || g_PalKind == PAL_DRAW_FILL)
+      ai = -1;   // P-PAL-19: a drawing has no card row; the strip's spot is the anchor
+   if(s_palManual && s_palMAnchor == ai)   // hand spot wins while the anchor matches
+    {
+       int mx2=MathMax(4,MathMin(s_palMX,cw-PalW()-4));
+       int my2=MathMax(4,MathMin(s_palMY,ch-PalH()-4));
+       g_PalX=mx2; g_PalY=my2;
+       return;
+    }
+   //--- P-PAL-19b (2026-10-02) — A DRAWING HAS NO CARD ROW, AND INDEXING ONE IS A
+   //--- CRASH, NOT A BAD POSITION. `g_PnlX`/`g_PnlY` are `static int[…]` arrays, so
+   //--- `g_PnlX[-1]` is an out-of-range read: MEASURED, the first bridge build died
+   //--- on the tap («پالت باز نمیشه کرش میکنه») with the indicator gone from the
+   //--- chart. The anchor for a drawing is therefore NEVER an index — it is the
+   //--- STRIP's own rect, read through the accessors the bridge added, and the
+   //--- hand's spot still wins when it matches. ONE owner for the placement: the
+   //--- caller sets the KIND, this decides where.
+   if(ai < 0)
+   {
+      int sw = DrawStripPlateW();
+      int dx = (sw > 0) ? DrawStripPlateX() + sw + 8 : MathMax(4, cw - w - 24);
+      if(dx + w > cw - 4) dx = MathMax(4, (sw > 0 ? DrawStripPlateX() : cw - w - 24) - w - 8);
+      int dy = (sw > 0) ? DrawStripPlateY() : MathMax(4, (ch - h) / 2);
+      //--- P-UI-188: the floating popup keeps its FOOT on the chart too (the head
+      //--- leaves the top on a chart shorter than the popup - the buttons stay).
+      int maxDy = ch - PalFootY() - PAL_FOOT - 8;
+      if(dy > maxDy) dy = MathMax(4, maxDy);
+      g_PalX = MathMax(4, dx); g_PalY = dy;
+      return;
+   }
+    s_palManual=false;
+    int px=g_PnlX[ai]+PnlPanelW(ai)+8;                    // right of the panel
+   if(px+w>cw-4) px=g_PnlX[ai]-w-8;                      // flip left on overflow
+   px=MathMax(4,px);
+   int py=g_PnlY[ai];
+   //--- P-UI-188 (2026-10-20): the popup keeps its FOOT on the chart now (on a
+   //--- chart shorter than the popup the head leaves the top - the buttons stay).
+   int maxY=ch-PalFootY()-PAL_FOOT-8;
+   if(py>maxY) py=MathMax(4,maxY);
+   g_PalX=px; g_PalY=py;
+}
+
+//--- P-UI-137 (2026-10-02) — THE CENSUS EPOCH. One popup census per OPEN, never per
+//--- repaint (MEASURED: on every pass the popup walked the chart and wrote ~55
+//--- flushed lines, and PalDraw runs on every chip / tab / pager click — the popup
+//--- became visibly slow). Paint order and ink are identical in every pass, so one
+//--- answer per open is the whole answer. The flag lives HERE because PalA is
+//--- compiled before PalB, where the census reads it.
+static bool s_palDiagDone = false;
+void PalDiagEpoch() { s_palDiagDone = false; }
+
+void PalClose()
+{
+    UIDragBudgetEnd();   // P-UI-33: a mixer gesture cannot outlive its palette (idempotent)
+    PalMoveDisarm();     // the title carry ends with its popup (spot stays parked)
+    PalHoverRestore();   // P-UI-131h: a close while previewing must not leave the colour picked
+   if(!g_PalOpen) return;
+   SavePalRecentDurable();   // P-PERF-44: flush the throttled mixer drag tail (own transaction)
+   ObjectsDeleteAll(0, g_UI.btnPrefix+"Pal_", 0, -1);
+   // P-UI-145c (2026-10-13): AND THE SEATS THIS POPUP TAUGHT GO WITH IT. The cards
+   // had their `PnlSeatForget` at `PnlDestroy`, the palette had NONE — so every
+   // popup open left ~44 permanently dead entries in the registry (its own seats
+   // were never handed back), and those entries are exactly what pushed the
+   // 192-slot pool full. Same owner law as the wipe above: the family that died
+   // releases its slots, so a later card or popup is taught by its OWN paint.
+   PnlSeatForget(g_UI.btnPrefix+"Pal_");
+   PalDiagEpoch();   // P-UI-137: the next open is a new census
+   g_PalOpen=false; g_PalMixDrag=0; g_PalHexFocus=false;
+   // P-UI-98r: palette gone - republish (invalidates) and uncover now.
+   PnlPublishCover();
+   HTFCardCullRefresh();
+   ChartRedraw();
+}
+
+//--- P-UI-69: ONE owner for the RECENT strip. It was painted inline inside
+//--- PalDraw() only, so applying a colour that was not already in the list left
+//--- the strip SHOWING A DIFFERENT SET than the picker had just produced - the
+//--- "I picked a color and nothing in here changed" half of «رنگ ها کار نمی‌کنه».
+//--- The strip is now a function of the list (colour + legibility border per
+//--- cell), the list is the only thing PushPalRecent mutates, and the paint
+//--- records the list it painted so a repaint can be skipped when nothing moved.
+int PalRecentsSig()
+{
+   int s=g_PalRecentCount;
+   for(int i=0;i<PAL_RECENT_MAX;i++) s=s*31+(int)g_PalRecent[i];
+   return s;
+}
+
+//--- TV parity board: the face one colour CELL wears. The colour the target
+//--- holds now gets the RING bake, every other the flat cell bake — one asset
+//--- each, baked at BOTH cell sizes (MT4 crops a bitmap label, never scales it,
+//--- so 22px and 26px are two files and not one scaled).
+string PalCellFaceRes(const color sw, const color cur)
+{
+   string big = "::Files\\Icons\\pal_cell26.bmp";
+   string bigR= "::Files\\Icons\\pal_ring26.bmp";
+   string sml = "::Files\\Icons\\pal_cell22.bmp";
+   string smlR= "::Files\\Icons\\pal_ring22.bmp";
+   bool sel = (cur != clrNONE && sw == cur);
+   if(PalCellSize() >= PAL_CELL_BIG) return sel ? bigR : big;
+   return sel ? smlR : sml;
+}
+
+void PalPaintRecents(const int px,const int syTop)
+{
+   string p=g_UI.btnPrefix+"Pal_";
+   color cur=PaletteKindColor(g_PalKind);
+   int cell=PAL_REC, pitch=cell+PAL_CELLGAP;
+   int nshow=MathMin(g_PalRecentCount,PAL_RSHOW);
+   for(int i=0;i<PAL_RSHOW;i++)
+   {
+      string n=p+"r"+IntegerToString(i);
+       // prune past the end (the strip can only shrink on a load)
+       if(i>=nshow) { ObjectDelete(0,n); ObjectDelete(0,n+"G"); continue; }
+      int sx=px+PAL_PAD+i*pitch;
+      int sy=syTop;
+      if(i == 0) PalHoverRegionAdd(px+PAL_PAD, sy, PAL_RSHOW, 1, cell, pitch, 0, 1);
+       PnlSetButton(n, sx, sy, cell, cell, "", g_PalRecent[i],
+                    PnlSwatchBorder(g_PalRecent[i],PNL_CLR_FIELD), true);
+       ObjectSetInteger(0,n,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
+       ObjectSetString(0,n,OBJPROP_TOOLTIP, "#"+PalHexText(g_PalRecent[i])+"  ("+PalColorText(g_PalRecent[i])+")");
+       string nr=n+"G";
+       PnlSetBitmap(nr, sx, sy, cell, cell, PalCellFaceRes(g_PalRecent[i], cur), Z_PANEL_POP_FG);
+       ObjectSetString(0,nr,OBJPROP_TOOLTIP, "#"+PalHexText(g_PalRecent[i])+"  ("+PalColorText(g_PalRecent[i])+")");
+   }
+   if(nshow==0)
+   {
+      PnlSetLabel(p+"rempty", px+PAL_PAD, syTop+4, "Pick any color — it appears here for reuse.", PNL_CLR_MUTED, 7);
+      ObjectSetInteger(0,p+"rempty",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   }
+   else ObjectDelete(0,p+"rempty");
+   s_PalRecentPainted=PalRecentsSig();
+}
+
+//--- repaint the strip when its LIST moved. Coalesced ONLY while a mixer drag
+//--- is live (there the list can change on every 30 ms tick); the release path
+//--- flushes the tail, so a click is never left one colour behind.
+void PalRefreshRecents(const bool force)
+{
+   if(!g_PalOpen || g_PalTab!=0) return;
+   if(!force && PalRecentsSig()==s_PalRecentPainted) return;
+   uint now=GetTickCount();
+   if(!force && g_PalMixDrag>0 && now-s_PalRecentAt<PAL_RECENTS_MS) return;
+   s_PalRecentAt=now;
+   PalPaintRecents(g_PalX, g_PalY+PalRecY());
+}
+
+//--- open the palette on an explicit kind (cset cells address their own
+//--- target; the anchor item only positions the popup)
+//--- P-PAL-19 (2026-10-02) — OPEN ON A DRAWING. The strip has no board of its own any
+//--- more, so its colour tap lands here: the same popup every card opens, the same
+//--- recents, the same mixer, the same hex field. `slot` is DRAW_SLOT_COLOR or
+//--- DRAW_SLOT_FILLCLR — the strip's OWN vocabulary, read through its two accessors,
+//--- so the panels never name a drawing slot directly. The anchor is the STRIP's own
+//--- plate: a drawing is not a card, so `g_PnlX[]` has no row for it, and a stale
+//--- index parked the popup top-left (P-UI-98r's own finding, one surface over).
+void PalOpenDraw(const int stripX,const int stripY,const int stripW)
+{
+   //--- P-PAL-19: the placement is NOT this function's business — `PalComputePos`
+   //--- owns it and reads the strip's own rect (P-PAL-19b). Passing the rect here and
+   //--- re-solving it would be a second grid, which is the class this whole move
+   //--- deletes; the three parameters stay because the bridge already has them, and
+   //--- they are the fallback a future caller may need. One owner, one answer.
+   PalOpenKind(-1, (DrawStripPalTargetSlot() == DRAW_SLOT_FILLCLR) ? PAL_DRAW_FILL
+                                                                   : PAL_DRAW_BORDER);
+}
+
+void PalOpenKind(const int anchorItem,const int kind)
+{
+   PalClose();
+   BkDdClose();   // mutually exclusive floaters — a hanging dropdown never survives under the palette
+   g_PalOpen=true;
+   g_PalAnchorItem=anchorItem;
+   g_PalKind=kind;
+   g_PalTgt=PalTgtIndexOfKind(g_PalKind);
+   g_PalTab=0;
+   g_PalMixDrag=0; g_PalHexFocus=false;
+   PalComputePos();
+   PalDraw();
+   // P-UI-98r: the palette hangs next to the card - same cover rule.
+   PnlPublishCover();
+   HTFCardCullRefresh();
+   ChartRedraw();
+}
+
+//--- open the palette on an explicit kind (cset cells address their own
+//--- target; the anchor item only positions the popup)
+void PalOpen(const int item, const int row)
+{
+   int k=PnlColorKind(item,row);
+   PalOpenKind(item,(k>=0)?k:PAL_TRIGGER);
+}
+
+//--- header picker button → open with the panel's primary COLOR target
+//--- (setting rows → display rows; PnlColorKind is display-keyed)
+void PalOpenForItem(const int item)
+{
+   int srow=-1;
+   if(item==0)       srow=1;   // Trigger COLOR
+   else if(item==2)  srow=1;   // Countdown COLOR
+   else if(item==5)  srow=5;   // TH3 COLOR
+   else if(item==6)  srow=3;   // HTF Bull COLOR
+   else if(item==7)  srow=5;   // Lines COLOR
+   else if(item==8)  srow=1;   // Custom Price COLOR
+   else if(item==10) srow=6;  // Factor COLOR
+   else if(item==12) srow=(g_BkTab==0 ? 1 : (g_BkTab==1 ? 6 : 2));   // open tab's first COLOR
+   else if(item==13) srow=0;  // Mini BORDER COLOR
+   // P-UI-131h: card 1 had NO entry here, so its header palette button was DEAD (the
+   // handler found the button, pressed it, and `PalOpenForItem` returned). The main card
+   // now owns colours of its own — the edge's two halves — so the button opens on the
+   // first of them.
+   else if(item==1)  srow=14; // MID ZONE EDGE TOP
+   if(srow<0) return;
+   int drow=PnlDispRowOfSet(item,srow);
+   if(drow<0) return;
+   PalOpen(item,drow);
+}
+
+//--- TV parity board: THE HEX ROW (P-UI-91's field, drawn and applied once). The
+//--- reference keeps the exact value beside the grid, so BOTH tabs seat it: the
+//--- mixer under its tracks, the palette tab in the band above APPLY TO. An AUTO
+//--- target shows an EMPTY field — FFFFFF would claim a colour nobody chose.
+//--- P-DRAW-49: the field is 88 wide and its value is #RRGGBB, the order
+//--- `ParseHexColor` reads — the two ends used to disagree (see `PalHexText`).
+void PalDrawHexRow(const int px,const int hy)
+{
+   string p=g_UI.btnPrefix+"Pal_";
+   color cur=PaletteKindColor(g_PalKind);
+   int fx=px+PAL_PAD+PAL_LBLW;   // P-UI-152: the palette's label column, not a fourth literal
+   PnlSetLabel(p+"hl", px+PAL_PAD, hy+6, "HEX", PNL_CLR_LABEL, 7);
+   ObjectSetInteger(0,p+"hl",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   string en=p+"hex";
+   ObjectCreate(0,en,OBJ_EDIT,0,0,0);
+   ObjectSetInteger(0,en,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,en,OBJPROP_XDISTANCE,fx);
+   ObjectSetInteger(0,en,OBJPROP_YDISTANCE,hy+3);
+   ObjectSetInteger(0,en,OBJPROP_XSIZE,88);
+   ObjectSetInteger(0,en,OBJPROP_YSIZE,20);
+   ObjectSetString(0,en,OBJPROP_TEXT,(cur==clrNONE ? "" : PalHexText(cur)));
+   ObjectSetString(0,en,OBJPROP_FONT,BIO_FONT_MONO);
+   ObjectSetInteger(0,en,OBJPROP_FONTSIZE,PnlPt(PNL_PT_CTL));   // P-UI-30
+   ObjectSetInteger(0,en,OBJPROP_COLOR,PNL_CLR_TITLE);
+   //--- P-UI-137 (2026-10-02, user: the HEX field's value is not visible): the ink is
+   //--- PNL_CLR_TITLE = #F3F6FB, near-WHITE. This row was the ONE OBJ_EDIT in the
+   //--- product born on a pure-white face (`C'255,255,255'`), so the value was
+   //--- near-white ink on white — invisible for every target, not just a drawing.
+   //--- Every other field in the product wears PNL_CLR_FIELD (#181D27) under the
+   //--- same light ink (BiotakPanels_Build:288, DrawStrip_GearB:718); this one does
+   //--- too now. One ink, one face, every field.
+   ObjectSetInteger(0,en,OBJPROP_BGCOLOR,PNL_CLR_FIELD);
+   ObjectSetInteger(0,en,OBJPROP_BORDER_COLOR,PNL_CLR_FIELD_BD);
+   ObjectSetInteger(0,en,OBJPROP_ALIGN,ALIGN_CENTER);
+   ObjectSetInteger(0,en,OBJPROP_ZORDER,Z_PANEL_POP_FG);
+   ObjectSetInteger(0,en,OBJPROP_HIDDEN,true);
+   PnlSetLabel(p+"hl2", fx+96, hy+8, "ENTER applies", PNL_CLR_MUTED, 7);
+   ObjectSetInteger(0,p+"hl2",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+}
+
+//--- flush a pending hex edit (called before focus is lost)
+void FlushPalHex()
+{
+   if(!g_PalHexFocus) return;
+   g_PalHexFocus=false;
+   string t=ObjectGetString(0, g_UI.btnPrefix+"Pal_hex", OBJPROP_TEXT);
+   color c=ParseHexColor(t);
+   if(c!=clrNONE)
+   {
+      int flags=PaletteApplyColor(g_PalKind,c);
+      PalUpdateLive();
+      if(flags!=REFRESH_NONE) RefreshDisplay(flags);
+   }
+}
+
+//--- the mixer's four rows, ONE geometry for paint + hit + knob: the rows are
+//--- centred in the band the tabs leave above the HEX row, 30px apart. The hit
+//--- test used to re-derive this as +i*26 from the tabs, so R/G/B/TR grabbed
+//--- each other's channel («اشتباهی درگ میکنه»).
+int PalMixTop()
+{
+   int contY=g_PalY+PalTabsY()+PAL_TABS;
+   int bandH=PAL_HX+10+(PalHxY()-(contY+2));
+   return contY+2+MathMax(0,(bandH-4*30)/2);
+}
+int PalMixRowY(const int i){ return PalMixTop()+i*30; }
+
+//--- P-DRAW-49: the MIXER keeps its four channels (R · G · B · TR) and gains the
+//--- popup's new room: the block is CENTRED in the band between the tabs and the
+//--- HEX row instead of hanging from the tabs with a hole under it, and the HEX
+//--- row is seated on the SAME band the palette tab uses (`PalHxY`) so the two
+//--- tabs share the bottom three bands — the mixer is the same card with a
+//--- different middle, not a different card.
+void PalDrawMixer(const int contY)
+{
+   int px=g_PalX;
+   string p=g_UI.btnPrefix+"Pal_";
+   color cur=PaletteKindColor(g_PalKind);
+   int cv=(int)cur;
+   int comps[3];
+   comps[0]=cv%256; comps[1]=(cv/256)%256; comps[2]=cv/65536;
+   string cl[3]={"R","G","B"};
+   color fill[3]={C'255,99,99',C'102,187,106',C'92,145,255'};
+   int trackX=PalMixTrackX();
+   int trackW=PalMixTrackW();
+    //--- the four rows, centred in the band the tabs leave above the HEX row
+    const int PITCH=30;
+    int top=PalMixTop();
+    for(int i=0;i<3;i++)
+    {
+       int y=PalMixRowY(i);
+
+      PnlSetLabel(p+"ml"+IntegerToString(i), px+PAL_PAD, y, cl[i], PNL_CLR_LABEL, PNL_PT_PAL);
+      ObjectSetInteger(0,p+"ml"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_BG);
+      PnlSetRect(p+"mtg"+IntegerToString(i), trackX, y+2, trackW, 8, PNL_CLR_TRACK_BD);
+      ObjectSetInteger(0,p+"mtg"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_BG);
+      int kx=trackX+(int)MathRound(comps[i]/255.0*(trackW-10));
+      PnlSetRect(p+"mf"+IntegerToString(i), trackX, y+2, kx-trackX+10, 8, fill[i]);
+      ObjectSetInteger(0,p+"mf"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_CTL);
+       PnlSetButton(p+"mknb"+IntegerToString(i), kx, y, 10, 12, "", fill[i], PNL_CLR_TRACK_BD, true);
+      ObjectSetInteger(0,p+"mknb"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_FG);
+       PnlSetLabel(p+"mv"+IntegerToString(i), px+PalW()-PAL_PAD, y, IntegerToString(comps[i]), PNL_CLR_VALUE, PNL_PT_PAL);
+       // P-UI-26: ANCHOR_RIGHT_UPPER, not ANCHOR_RIGHT (middle-right sat a
+       // half line below its label — every other right-aligned panel text
+       // uses RIGHT_UPPER).
+       ObjectSetInteger(0,p+"mv"+IntegerToString(i),OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
+      ObjectSetInteger(0,p+"mv"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   }
+   // 4th channel: TRANSPARENCY (percent; 0=solid, 100=invisible —
+   // same language as the panel TRANSPARENCY sliders).
+   // Targets without a transparency setting show it greyed.
+   int tr = PaletteKindTransparency(g_PalKind);
+   bool trOk = (tr >= 0);
+    int oy = PalMixRowY(3);
+   PnlSetLabel(p+"ml3", px+PAL_PAD, oy, "TR", PNL_CLR_LABEL, PNL_PT_PAL);
+   ObjectSetInteger(0,p+"ml3",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   ObjectSetString(0,p+"ml3",OBJPROP_TOOLTIP,"Transparency — blends the color toward the chart background");
+   color trFill = trOk ? PNL_CLR_ACCENT : PNL_CLR_DISABLED;
+   PnlSetRect(p+"mtg3", trackX, oy+2, trackW, 8, PNL_CLR_TRACK_BD);
+   ObjectSetInteger(0,p+"mtg3",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   int tkx = trackX + (int)MathRound((trOk ? ClampInt(tr,0,100) : 0) / 100.0 * (trackW-10));
+   PnlSetRect(p+"mf3", trackX, oy+2, MathMax(0, tkx-trackX+10), 8, trFill);
+   ObjectSetInteger(0,p+"mf3",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
+   PnlSetButton(p+"mknb3", tkx, oy, 10, 12, "", trFill, trOk ? PNL_CLR_ACCENT : PNL_CLR_DIS_BD, true);
+   ObjectSetInteger(0,p+"mknb3",OBJPROP_ZORDER,Z_PANEL_POP_FG);
+    PnlSetLabel(p+"mv3", px+PalW()-PAL_PAD, oy, trOk ? IntegerToString(tr)+"%" : "--", PNL_CLR_VALUE, PNL_PT_PAL);
+    ObjectSetInteger(0,p+"mv3",OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
+   ObjectSetInteger(0,p+"mv3",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+
+   // TV parity board: the HEX row, seated on the band the palette tab uses
+   // (one owner, one seat — see PalDrawHexRow). It used to hang 4px under the
+   // last track, which on the taller card left a hole between them.
+   PalDrawHexRow(px, g_PalY+PalHxY());
+}
+
+//--- P-DRAW-50 caption deleted by user order 2026-09-27: the 8-family
+//--- string overflowed the 268px card — pager + tooltips keep the names.
+
+//--- P-DRAW-49: THE READOUT, ONE OWNER. It answers "what am I about to pick",
+//--- and it takes the HOVERED cell when there is one: the hover state is already
+//--- current by the time any caller gets here (a preview applies the colour, then
+//--- asks for the live paint), so the band costs three compares and no new state.
+//--- An AUTO target has no colour of its own and wears the AUTO face, exactly as
+//--- the row and the cset cells do (P-UI-131h) — clrNONE would paint ink-black
+//--- and claim a colour nobody chose.
+void PalPaintReadout(const color cur)
+{
+   string p=g_UI.btnPrefix+"Pal_";
+   color show=cur;
+   if(s_palHoverCell >= 0)
+   {
+      int cell=s_palHoverCell;
+      int reg=cell/1000, row=(cell-reg*1000)/100, col=cell%100;
+      if(reg>=0 && reg<s_palRegionN)
+      {
+         color h=PalHoverColorAt(reg,col,row);
+         if(h!=clrNONE) show=h;
+      }
+   }
+   color vis=(show==clrNONE)?PNL_CLR_AUTO_CELL:show;
+   int ry=g_PalY+PalReadY();
+   PnlSetRect(p+"cur", g_PalX+PAL_PAD, ry+4, 24, 24, vis);
+   ObjectSetInteger(0,p+"cur",OBJPROP_BORDER_COLOR,PnlSwatchBorder(vis,PNL_CLR_FIELD));
+   ObjectSetInteger(0,p+"cur",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   string hx=(show==clrNONE)?"AUTO":("#"+PalHexText(show));
+   PnlSetLabel(p+"curtx", g_PalX+PAL_PAD+32, ry+8, hx, PNL_CLR_TITLE, PNL_PT_PAL);
+   ObjectSetInteger(0,p+"curtx",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+   //--- the RGB line is RIGHT-aligned on the band's own edge, so the two texts
+   //--- can never collide however long the target's name is.
+   string rgt=(show==clrNONE)?"follows the card":PalColorText(show);
+   PnlSetLabel(p+"curtr", g_PalX+PalW()-PAL_PAD, ry+10, rgt, PNL_CLR_MUTED, 7);
+   ObjectSetInteger(0,p+"curtr",OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
+   ObjectSetInteger(0,p+"curtr",OBJPROP_ZORDER,Z_PANEL_POP_BG);
+}
+
+#endif // BIOTAK_PANELS_PALA_MQH
+// BiotakPanels_PalSpec.mqh - split from BiotakPanels_PalA.mqh 2026-10-17 (P-SIZE-1500,
+// contract item 7 "one file = one owner"): the DISPLAY-ROW SPEC owner - the spec
+// table builder, the per-card spec gate, the band collapse and the palette
+// kind-to-row map. Moved byte-identical, zero renames. The spec globals it reads
+// are declared in PalA, so this include stays AFTER it; every CALLER sits later
+// in the chain than either.
+#ifndef BIOTAK_PANELS_PALSPEC_MQH
+#define BIOTAK_PANELS_PALSPEC_MQH
 
 // ══════════════════════════════════════════════════════════════════════════
 // THE DISPLAY-ROW SPEC — one entry per row the user SEES, transcribed 1:1
@@ -1581,8 +2161,9 @@ void PnlSpecBuild(const int item)
       // read/apply branches all stay (MIDPOINT precedent, P-UI-47).
       // P-LEGATR: the plan's ATR source, APPENDED in its own band (14→16 display
       // rows, still wide). Address 19 renders here and nowhere else.
-      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "PLAN ATR", 1);
+      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "PLAN ATR", 2);
       PnlSpecAdd(2, PNL_K_LEGACY, 19, 1, "gauge");
+      PnlSpecAdd(2, PNL_K_LEGACY, 20, 1, "gauge");   // P-ANCHOR-LAST
       // P-UI-70d: the trade card's personalisation band. The four rows below
       // write the SAME settings the group-13 dialog inputs write (ROW GAP ->
       // P-UI-131: the whole TRADE CARD band moved to the GENERAL card (ROW GAP,
@@ -1784,8 +2365,7 @@ void PnlSpecBuild(const int item)
          PnlSpecAdd(12, PNL_K_LEGACY, 1, 1, "target");
          PnlSpecAdd(12, PNL_K_SEC, -1, 0, "", "", "LEG COLORS", 3, "strip");
          PnlSpecAdd(12, PNL_K_CSET, 2, 3);
-         PnlSpecAdd(12, PNL_K_SEC, -1, 0, "", "", "EXTRAS", 3);
-         PnlSpecAdd(12, PNL_K_LEGACY, 5, 1, "info");
+         PnlSpecAdd(12, PNL_K_SEC, -1, 0, "", "", "EXTRAS", 2);
          PnlSpecAdd(12, PNL_K_LEGACY, 7, 1, "textsize");   // P-BK-27 INFO SIZE
          PnlSpecAdd(12, PNL_K_LEGACY, 6, 1, "template");
       }
@@ -1830,6 +2410,43 @@ void PnlSpecBuild(const int item)
       // keeps ONE home for the mode and makes card 4 reachable from here too.
       PnlSpecAdd(14, PNL_K_LEGACY, 14, 1, "tag", "", "", 0, "HOVER CHIP");
    }
+   // P-SESS — SESSIONS (15): the overview. 11 rows, WIDE (two columns): the
+   // master and its door first, then every drawn family as one switch, its two
+   // reach sliders paired. Row order = address order (spec order is the paint).
+   else if(item == 15)
+   {
+      PnlSpecAdd(15, PNL_K_LEGACY, 0, 1, "power");
+      PnlSpecAdd(15, PNL_K_LEGACY, 1, 1, "back");     // past days  (paired with FUTURE)
+      PnlSpecAdd(15, PNL_K_LEGACY, 2, 1, "nav");      // future days
+      PnlSpecAdd(15, PNL_K_LEGACY, 3, 1, "line");     // H/L lines
+      PnlSpecAdd(15, PNL_K_LEGACY, 4, 1, "type");     // line labels
+      PnlSpecAdd(15, PNL_K_LEGACY, 5, 1, "ruler");    // range text
+      PnlSpecAdd(15, PNL_K_LEGACY, 6, 1, "flag");     // prior day
+      PnlSpecAdd(15, PNL_K_LEGACY, 7, 1, "layers");   // overlap
+      PnlSpecAdd(15, PNL_K_LEGACY, 8, 1, "timer");    // countdown
+      PnlSpecAdd(15, PNL_K_LEGACY, 9, 1, "sparkles"); // alerts
+      PnlSpecAdd(15, PNL_K_LEGACY, 10, 1, "tag");     // EDIT SESSIONS nav
+   }
+   // P-SESS — SESSION EDITOR (16): one slot at a time, chosen at row 0. 13 rows,
+   // WIDE. The NAMED rows (preset/zone/style) are dropdowns by option count
+   // (>=4 opts → the generic select engine asks no card-specific question); the
+   // two grid rows are the chips kind with their table named in `opts`.
+   else if(item == 16)
+   {
+      PnlSpecAdd(16, PNL_K_LEGACY, 0, 1, "tag");       // SESSION (which slot)
+      PnlSpecAdd(16, PNL_K_LEGACY, 1, 1, "template");  // PRESET (factory fill)
+      PnlSpecAdd(16, PNL_K_LEGACY, 2, 1, "clock");     // TIMEZONE
+      PnlSpecAdd(16, PNL_K_LEGACY, 3, 1, "gap");       // UTC OFFSET
+      PnlSpecAdd(16, PNL_K_LEGACY, 4, 1, "timer");     // START HOUR (paired with MIN)
+      PnlSpecAdd(16, PNL_K_LEGACY, 5, 1, "timer");     // START MIN
+      PnlSpecAdd(16, PNL_K_LEGACY, 6, 1, "timer");     // END HOUR (paired with MIN)
+      PnlSpecAdd(16, PNL_K_LEGACY, 7, 1, "timer");     // END MIN
+      PnlSpecAdd(16, PNL_K_LEGACY, 8, 1, "flag");      // DAYS chips
+      PnlSpecAdd(16, PNL_K_LEGACY, 9, 1, "droplet");   // COLOR chips
+      PnlSpecAdd(16, PNL_K_LEGACY, 10, 1, "linestyle");// STYLE
+      PnlSpecAdd(16, PNL_K_LEGACY, 11, 1, "power");    // ACTIVE
+      PnlSpecAdd(16, PNL_K_LEGACY, 12, 1, "back");     // OVERVIEW nav
+   }
 }
 
 //--- which cards have a display spec at all (item 13 is the mini STRIP — it
@@ -1843,6 +2460,7 @@ bool PnlSpecCard(const int item)
    if(item==6 || item==7 || item==8) return true;
    if(item==9 || item==10 || item==11 || item==12) return true;
    if(item==14) return true;   // P-UI-131: the GENERAL card
+   if(item==15 || item==16) return true;   // P-SESS: the Sessions pair
    return false;
 }
 
@@ -1980,547 +2598,7 @@ bool PalKindRow(const int kind,int &item,int &row)
    return false;
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// P-UI-131h — THE COLOUR GRID PREVIEWS UNDER THE POINTER, AT ZERO READ COST.
-//
-// «موس که روی رنگها رفت اعمال بشه سریع ... که کاربر سریع تغییرات ببینه و فکر نکنه که
-// درست کار نمیکنه»: the grid answered only on a PRESS, so sweeping it showed nothing
-// until the click. It is P-DRAW-27's one-event preview on the cards' palette: hit-test
-// the ALREADY-PAINTED cells, apply there, write NOTHING while the pointer stays on the
-// same cell, and put back the colour that was there when it leaves — so a sweep is a
-// preview and a CLICK is the commitment.
-//
-// The cell geometry is RECORDED BY THE PAINT (P-UI-79: the pixels that were painted
-// answer where they are), so a moving pointer costs ZERO chart reads — the hit-test is
-// integer arithmetic over at most two regions.
-// ══════════════════════════════════════════════════════════════════════════
-#define PAL_HOVER_REGIONS 2
-struct SPalHoverRegion { int x, y, cols, rows, size, pitch, tab, src; };
-static SPalHoverRegion s_palRegion[PAL_HOVER_REGIONS];
-static int   s_palRegionN   = 0;
-static int   s_palHoverCell = -1;      // -1 = nothing is being previewed
-static color s_palHoverWas  = clrNONE; // the colour the preview must put back
-static int   s_palHoverKind = -1;
-
-//--- called by the PAINT, once per painted block of cells. `src`: 0 = the colour grid,
-//--- 1 = the recents strip. `tab` = the palette tab the grid belongs to (a stale tab's
-//--- recorded geometry must never answer for the open one).
-void PalHoverRegionAdd(const int x,const int y,const int cols,const int rows,
-                       const int size,const int pitch,const int tab,const int src)
-{
-   if(s_palRegionN >= PAL_HOVER_REGIONS) return;
-   s_palRegion[s_palRegionN].x=x;       s_palRegion[s_palRegionN].y=y;
-   s_palRegion[s_palRegionN].cols=cols; s_palRegion[s_palRegionN].rows=rows;
-   s_palRegion[s_palRegionN].size=size; s_palRegion[s_palRegionN].pitch=pitch;
-   s_palRegion[s_palRegionN].tab=tab;   s_palRegion[s_palRegionN].src=src;
-   s_palRegionN++;
-}
-
-//--- the cell under the pointer → the region index, or -1 when the pointer is in a gap,
-//--- off the grid, or over a tab that did not paint this geometry.
-int PalHoverCellAt(const int mx,const int my,int &col,int &rowv)
-{
-   for(int i=0;i<s_palRegionN;i++)
-   {
-      if(s_palRegion[i].tab != g_PalTab) continue;
-      int dx=mx-s_palRegion[i].x, dy=my-s_palRegion[i].y;
-      if(dx < 0 || dy < 0) continue;
-      int c=dx/s_palRegion[i].pitch, r=dy/s_palRegion[i].pitch;
-      if(c >= s_palRegion[i].cols || r >= s_palRegion[i].rows) continue;
-      if(dx-c*s_palRegion[i].pitch >= s_palRegion[i].size) continue;   // the seam between cells
-      if(dy-r*s_palRegion[i].pitch >= s_palRegion[i].size) continue;
-      col=c; rowv=r; return i;
-   }
-   return -1;
-}
-
-//--- the colour the PAINT put in that cell, by the same two mappings it used.
-color PalHoverColorAt(const int region,const int c,const int r)
-{
-   if(s_palRegion[region].src == 1)                   // recents: the list is the paint
-   {
-      int i=r*s_palRegion[region].cols+c;
-      return (i < g_PalRecentCount) ? g_PalRecent[i] : clrNONE;
-   }
-   // P-DRAW-50: row from y, column from x — the paint's own mapping, on the
-   // PAGE the paint showed (the ids and the regions are both page-local).
-   return PalPickColor(BioPickPageRow0()+r, c);
-}
-
-//--- a CLICK is the commitment: the previewed value stays and nothing is put back.
-void PalHoverCommit() { s_palHoverCell=-1; s_palHoverKind=-1; }
-
-void PalMoveDisarm()
-{
-   if(!s_palMoveArmed) return;
-   s_palMoveArmed=false; s_palMoveMoved=false;
-   DragReleaseIf(DRAG_PANEL_MOVE);
-   CircUnlockChart();
-}
-void PalMovePark()
-{
-   s_palManual=true; s_palMX=g_PalX; s_palMY=g_PalY; s_palMAnchor=g_PalAnchorItem;
-}
-// Press in the title band (close seat keeps its click) arms the carry.
-bool PalTitleGrab(const int mx,const int my)
-{
-   if(!g_PalOpen || s_palMoveArmed) return false;
-   //--- one move at a time: a live card move owns DRAG_PANEL_MOVE already, and a
-   //--- knob/mixer/menu gesture owns the pointer — arming a second carry would
-   //--- starve the first and jump it on finish (stale anchor).
-   if(g_PnlMoveItem>=0 || !DragCanGrab(DRAG_PANEL_MOVE)) return false;
-   int w=PalW();
-   if(mx < g_PalX || mx > g_PalX+w || my < g_PalY || my > g_PalY+PAL_HEAD) return false;
-   // P-UI-150 (2026-10-13): the close seat is READ, never re-derived. This used to be
-   // `my >= g_PalY+3 && my <= g_PalY+21` while the button paints py+5..py+23, so the
-   // button's own bottom 2 px armed the carry instead of closing the popup.
-   int ccx = 0, ccy = 0, ccw = 0, cch = 0;
-   PalCloseSeat(g_PalX, g_PalY, w, ccx, ccy, ccw, cch);
-   if(mx >= ccx && mx <= ccx + ccw && my >= ccy && my <= ccy + cch) return false;
-   s_palMoveArmed=true;
-   s_palMoveGX=mx; s_palMoveGY=my; s_palMoveLX=mx; s_palMoveLY=my;
-   s_palMoveMoved=false; s_palMoveTick=0;
-   DragClaim(DRAG_PANEL_MOVE);
-   CircLockChart();
-   return true;
-}
-void PalMoveStep(const int mx,const int my)
-{
-   if(!s_palMoveArmed || !g_PalOpen) return;
-   uint now=GetTickCount();
-   if(s_palMoveTick != 0 && now-s_palMoveTick < (uint)s_PnlMoveFrameMs) return;
-   if(mx == s_palMoveLX && my == s_palMoveLY) return;
-   if(!s_palMoveMoved &&
-      MathAbs(mx-s_palMoveGX) <= PnlDragThreshPx() &&
-      MathAbs(my-s_palMoveGY) <= PnlDragThreshPx())
-   {
-      s_palMoveLX=mx; s_palMoveLY=my;
-      return;
-   }
-   s_palMoveTick=now;
-   int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0); if(cw<=0) cw=1920;
-   int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0); if(ch<=0) ch=1080;
-   int nx=g_PalX+mx-s_palMoveLX, ny=g_PalY+my-s_palMoveLY;
-   int w=PalW(), h=PalH();
-   if(nx<4) nx=4; if(ny<4) ny=4;
-   if(nx>cw-w-4) nx=MathMax(4,cw-w-4);
-   if(ny>ch-h-4) ny=MathMax(4,ch-h-4);
-   s_palMoveLX=mx; s_palMoveLY=my;
-   if(nx==g_PalX && ny==g_PalY) return;
-   g_PalX=nx; g_PalY=ny;
-   if(!s_palMoveMoved) PalMovePark();
-   s_palMoveMoved=true;
-   PalDraw();
-}
-void PalMoveFinish()
-{
-   if(!s_palMoveArmed) return;
-   bool mv=s_palMoveMoved;
-   if(mv) PalMovePark();
-   PalMoveDisarm();
-   if(mv) UISuppressNextClick();
-}
-
-void PalComputePos()
-{
-   int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
-   int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
-   if(cw<=0) cw=1920;
-   if(ch<=0) ch=1080;
-   int w=PalW(), h=PalH();
-   // Anchor to the OPEN panel (the strip opens the fill palette with anchor
-   // item 12 while item 13 is open — stale g_PnlX[12] would park it top-left).
-   int ai = (g_PnlOpen >= 0 ? g_PnlOpen : g_PalAnchorItem);
-   if(g_PalKind == PAL_DRAW_BORDER || g_PalKind == PAL_DRAW_FILL)
-      ai = -1;   // P-PAL-19: a drawing has no card row; the strip's spot is the anchor
-   if(s_palManual && s_palMAnchor == ai)   // hand spot wins while the anchor matches
-    {
-       int mx2=MathMax(4,MathMin(s_palMX,cw-PalW()-4));
-       int my2=MathMax(4,MathMin(s_palMY,ch-PalH()-4));
-       g_PalX=mx2; g_PalY=my2;
-       return;
-    }
-   //--- P-PAL-19b (2026-10-02) — A DRAWING HAS NO CARD ROW, AND INDEXING ONE IS A
-   //--- CRASH, NOT A BAD POSITION. `g_PnlX`/`g_PnlY` are `static int[…]` arrays, so
-   //--- `g_PnlX[-1]` is an out-of-range read: MEASURED, the first bridge build died
-   //--- on the tap («پالت باز نمیشه کرش میکنه») with the indicator gone from the
-   //--- chart. The anchor for a drawing is therefore NEVER an index — it is the
-   //--- STRIP's own rect, read through the accessors the bridge added, and the
-   //--- hand's spot still wins when it matches. ONE owner for the placement: the
-   //--- caller sets the KIND, this decides where.
-   if(ai < 0)
-   {
-      int sw = DrawStripPlateW();
-      int dx = (sw > 0) ? DrawStripPlateX() + sw + 8 : MathMax(4, cw - w - 24);
-      if(dx + w > cw - 4) dx = MathMax(4, (sw > 0 ? DrawStripPlateX() : cw - w - 24) - w - 8);
-      int dy = (sw > 0) ? DrawStripPlateY() : MathMax(4, (ch - h) / 2);
-      int maxDy = ch - h - 16;
-      if(dy > maxDy) dy = MathMax(4, maxDy);
-      g_PalX = MathMax(4, dx); g_PalY = dy;
-      return;
-   }
-    s_palManual=false;
-    int px=g_PnlX[ai]+PnlPanelW(ai)+8;                    // right of the panel
-   if(px+w>cw-4) px=g_PnlX[ai]-w-8;                      // flip left on overflow
-   px=MathMax(4,px);
-   int py=g_PnlY[ai];
-   int maxY=ch-h-16;
-   if(py>maxY) py=MathMax(4,maxY);
-   g_PalX=px; g_PalY=py;
-}
-
-//--- P-UI-137 (2026-10-02) — THE CENSUS EPOCH. One popup census per OPEN, never per
-//--- repaint (MEASURED: on every pass the popup walked the chart and wrote ~55
-//--- flushed lines, and PalDraw runs on every chip / tab / pager click — the popup
-//--- became visibly slow). Paint order and ink are identical in every pass, so one
-//--- answer per open is the whole answer. The flag lives HERE because PalA is
-//--- compiled before PalB, where the census reads it.
-static bool s_palDiagDone = false;
-void PalDiagEpoch() { s_palDiagDone = false; }
-
-void PalClose()
-{
-    UIDragBudgetEnd();   // P-UI-33: a mixer gesture cannot outlive its palette (idempotent)
-    PalMoveDisarm();     // the title carry ends with its popup (spot stays parked)
-    PalHoverRestore();   // P-UI-131h: a close while previewing must not leave the colour picked
-   if(!g_PalOpen) return;
-   SavePalRecentDurable();   // P-PERF-44: flush the throttled mixer drag tail (own transaction)
-   ObjectsDeleteAll(0, g_UI.btnPrefix+"Pal_", 0, -1);
-   // P-UI-145c (2026-10-13): AND THE SEATS THIS POPUP TAUGHT GO WITH IT. The cards
-   // had their `PnlSeatForget` at `PnlDestroy`, the palette had NONE — so every
-   // popup open left ~44 permanently dead entries in the registry (its own seats
-   // were never handed back), and those entries are exactly what pushed the
-   // 192-slot pool full. Same owner law as the wipe above: the family that died
-   // releases its slots, so a later card or popup is taught by its OWN paint.
-   PnlSeatForget(g_UI.btnPrefix+"Pal_");
-   PalDiagEpoch();   // P-UI-137: the next open is a new census
-   g_PalOpen=false; g_PalMixDrag=0; g_PalHexFocus=false;
-   // P-UI-98r: palette gone - republish (invalidates) and uncover now.
-   PnlPublishCover();
-   HTFCardCullRefresh();
-   ChartRedraw();
-}
-
-//--- P-UI-69: ONE owner for the RECENT strip. It was painted inline inside
-//--- PalDraw() only, so applying a colour that was not already in the list left
-//--- the strip SHOWING A DIFFERENT SET than the picker had just produced - the
-//--- "I picked a color and nothing in here changed" half of «رنگ ها کار نمی‌کنه».
-//--- The strip is now a function of the list (colour + legibility border per
-//--- cell), the list is the only thing PushPalRecent mutates, and the paint
-//--- records the list it painted so a repaint can be skipped when nothing moved.
-int PalRecentsSig()
-{
-   int s=g_PalRecentCount;
-   for(int i=0;i<PAL_RECENT_MAX;i++) s=s*31+(int)g_PalRecent[i];
-   return s;
-}
-
-//--- TV parity board: the face one colour CELL wears. The colour the target
-//--- holds now gets the RING bake, every other the flat cell bake — one asset
-//--- each, baked at BOTH cell sizes (MT4 crops a bitmap label, never scales it,
-//--- so 22px and 26px are two files and not one scaled).
-string PalCellFaceRes(const color sw, const color cur)
-{
-   string big = "::Files\\Icons\\pal_cell26.bmp";
-   string bigR= "::Files\\Icons\\pal_ring26.bmp";
-   string sml = "::Files\\Icons\\pal_cell22.bmp";
-   string smlR= "::Files\\Icons\\pal_ring22.bmp";
-   bool sel = (cur != clrNONE && sw == cur);
-   if(PalCellSize() >= PAL_CELL_BIG) return sel ? bigR : big;
-   return sel ? smlR : sml;
-}
-
-void PalPaintRecents(const int px,const int syTop)
-{
-   string p=g_UI.btnPrefix+"Pal_";
-   color cur=PaletteKindColor(g_PalKind);
-   int cell=PAL_REC, pitch=cell+PAL_CELLGAP;
-   int nshow=MathMin(g_PalRecentCount,PAL_RSHOW);
-   for(int i=0;i<PAL_RSHOW;i++)
-   {
-      string n=p+"r"+IntegerToString(i);
-       // prune past the end (the strip can only shrink on a load)
-       if(i>=nshow) { ObjectDelete(0,n); ObjectDelete(0,n+"G"); continue; }
-      int sx=px+PAL_PAD+i*pitch;
-      int sy=syTop;
-      if(i == 0) PalHoverRegionAdd(px+PAL_PAD, sy, PAL_RSHOW, 1, cell, pitch, 0, 1);
-       PnlSetButton(n, sx, sy, cell, cell, "", g_PalRecent[i],
-                    PnlSwatchBorder(g_PalRecent[i],PNL_CLR_FIELD), true);
-       ObjectSetInteger(0,n,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
-       ObjectSetString(0,n,OBJPROP_TOOLTIP, "#"+PalHexText(g_PalRecent[i])+"  ("+PalColorText(g_PalRecent[i])+")");
-       string nr=n+"G";
-       PnlSetBitmap(nr, sx, sy, cell, cell, PalCellFaceRes(g_PalRecent[i], cur), Z_PANEL_POP_FG);
-       ObjectSetString(0,nr,OBJPROP_TOOLTIP, "#"+PalHexText(g_PalRecent[i])+"  ("+PalColorText(g_PalRecent[i])+")");
-   }
-   if(nshow==0)
-   {
-      PnlSetLabel(p+"rempty", px+PAL_PAD, syTop+4, "Pick any color — it appears here for reuse.", PNL_CLR_MUTED, 7);
-      ObjectSetInteger(0,p+"rempty",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   }
-   else ObjectDelete(0,p+"rempty");
-   s_PalRecentPainted=PalRecentsSig();
-}
-
-//--- repaint the strip when its LIST moved. Coalesced ONLY while a mixer drag
-//--- is live (there the list can change on every 30 ms tick); the release path
-//--- flushes the tail, so a click is never left one colour behind.
-void PalRefreshRecents(const bool force)
-{
-   if(!g_PalOpen || g_PalTab!=0) return;
-   if(!force && PalRecentsSig()==s_PalRecentPainted) return;
-   uint now=GetTickCount();
-   if(!force && g_PalMixDrag>0 && now-s_PalRecentAt<PAL_RECENTS_MS) return;
-   s_PalRecentAt=now;
-   PalPaintRecents(g_PalX, g_PalY+PalRecY());
-}
-
-//--- open the palette on an explicit kind (cset cells address their own
-//--- target; the anchor item only positions the popup)
-//--- P-PAL-19 (2026-10-02) — OPEN ON A DRAWING. The strip has no board of its own any
-//--- more, so its colour tap lands here: the same popup every card opens, the same
-//--- recents, the same mixer, the same hex field. `slot` is DRAW_SLOT_COLOR or
-//--- DRAW_SLOT_FILLCLR — the strip's OWN vocabulary, read through its two accessors,
-//--- so the panels never name a drawing slot directly. The anchor is the STRIP's own
-//--- plate: a drawing is not a card, so `g_PnlX[]` has no row for it, and a stale
-//--- index parked the popup top-left (P-UI-98r's own finding, one surface over).
-void PalOpenDraw(const int stripX,const int stripY,const int stripW)
-{
-   //--- P-PAL-19: the placement is NOT this function's business — `PalComputePos`
-   //--- owns it and reads the strip's own rect (P-PAL-19b). Passing the rect here and
-   //--- re-solving it would be a second grid, which is the class this whole move
-   //--- deletes; the three parameters stay because the bridge already has them, and
-   //--- they are the fallback a future caller may need. One owner, one answer.
-   PalOpenKind(-1, (DrawStripPalTargetSlot() == DRAW_SLOT_FILLCLR) ? PAL_DRAW_FILL
-                                                                   : PAL_DRAW_BORDER);
-}
-
-void PalOpenKind(const int anchorItem,const int kind)
-{
-   PalClose();
-   BkDdClose();   // mutually exclusive floaters — a hanging dropdown never survives under the palette
-   g_PalOpen=true;
-   g_PalAnchorItem=anchorItem;
-   g_PalKind=kind;
-   g_PalTgt=PalTgtIndexOfKind(g_PalKind);
-   g_PalTab=0;
-   g_PalMixDrag=0; g_PalHexFocus=false;
-   PalComputePos();
-   PalDraw();
-   // P-UI-98r: the palette hangs next to the card - same cover rule.
-   PnlPublishCover();
-   HTFCardCullRefresh();
-   ChartRedraw();
-}
-
-//--- open the palette on an explicit kind (cset cells address their own
-//--- target; the anchor item only positions the popup)
-void PalOpen(const int item, const int row)
-{
-   int k=PnlColorKind(item,row);
-   PalOpenKind(item,(k>=0)?k:PAL_TRIGGER);
-}
-
-//--- header picker button → open with the panel's primary COLOR target
-//--- (setting rows → display rows; PnlColorKind is display-keyed)
-void PalOpenForItem(const int item)
-{
-   int srow=-1;
-   if(item==0)       srow=1;   // Trigger COLOR
-   else if(item==2)  srow=1;   // Countdown COLOR
-   else if(item==5)  srow=5;   // TH3 COLOR
-   else if(item==6)  srow=3;   // HTF Bull COLOR
-   else if(item==7)  srow=5;   // Lines COLOR
-   else if(item==8)  srow=1;   // Custom Price COLOR
-   else if(item==10) srow=6;  // Factor COLOR
-   else if(item==12) srow=(g_BkTab==0 ? 1 : (g_BkTab==1 ? 6 : 2));   // open tab's first COLOR
-   else if(item==13) srow=0;  // Mini BORDER COLOR
-   // P-UI-131h: card 1 had NO entry here, so its header palette button was DEAD (the
-   // handler found the button, pressed it, and `PalOpenForItem` returned). The main card
-   // now owns colours of its own — the edge's two halves — so the button opens on the
-   // first of them.
-   else if(item==1)  srow=14; // MID ZONE EDGE TOP
-   if(srow<0) return;
-   int drow=PnlDispRowOfSet(item,srow);
-   if(drow<0) return;
-   PalOpen(item,drow);
-}
-
-//--- TV parity board: THE HEX ROW (P-UI-91's field, drawn and applied once). The
-//--- reference keeps the exact value beside the grid, so BOTH tabs seat it: the
-//--- mixer under its tracks, the palette tab in the band above APPLY TO. An AUTO
-//--- target shows an EMPTY field — FFFFFF would claim a colour nobody chose.
-//--- P-DRAW-49: the field is 88 wide and its value is #RRGGBB, the order
-//--- `ParseHexColor` reads — the two ends used to disagree (see `PalHexText`).
-void PalDrawHexRow(const int px,const int hy)
-{
-   string p=g_UI.btnPrefix+"Pal_";
-   color cur=PaletteKindColor(g_PalKind);
-   int fx=px+PAL_PAD+PAL_LBLW;
-   PnlSetLabel(p+"hl", px+PAL_PAD, hy+6, "HEX", PNL_CLR_LABEL, 7);
-   ObjectSetInteger(0,p+"hl",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   string en=p+"hex";
-   ObjectCreate(0,en,OBJ_EDIT,0,0,0);
-   ObjectSetInteger(0,en,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-   ObjectSetInteger(0,en,OBJPROP_XDISTANCE,fx);
-   ObjectSetInteger(0,en,OBJPROP_YDISTANCE,hy+3);
-   ObjectSetInteger(0,en,OBJPROP_XSIZE,88);
-   ObjectSetInteger(0,en,OBJPROP_YSIZE,20);
-   ObjectSetString(0,en,OBJPROP_TEXT,(cur==clrNONE ? "" : PalHexText(cur)));
-   ObjectSetString(0,en,OBJPROP_FONT,BIO_FONT_MONO);
-   ObjectSetInteger(0,en,OBJPROP_FONTSIZE,PnlPt(PNL_PT_CTL));   // P-UI-30
-   ObjectSetInteger(0,en,OBJPROP_COLOR,PNL_CLR_TITLE);
-   //--- P-UI-137 (2026-10-02, user: the HEX field's value is not visible): the ink is
-   //--- PNL_CLR_TITLE = #F3F6FB, near-WHITE. This row was the ONE OBJ_EDIT in the
-   //--- product born on a pure-white face (`C'255,255,255'`), so the value was
-   //--- near-white ink on white — invisible for every target, not just a drawing.
-   //--- Every other field in the product wears PNL_CLR_FIELD (#181D27) under the
-   //--- same light ink (BiotakPanels_Build:288, DrawStrip_GearB:718); this one does
-   //--- too now. One ink, one face, every field.
-   ObjectSetInteger(0,en,OBJPROP_BGCOLOR,PNL_CLR_FIELD);
-   ObjectSetInteger(0,en,OBJPROP_BORDER_COLOR,PNL_CLR_FIELD_BD);
-   ObjectSetInteger(0,en,OBJPROP_ALIGN,ALIGN_CENTER);
-   ObjectSetInteger(0,en,OBJPROP_ZORDER,Z_PANEL_POP_FG);
-   ObjectSetInteger(0,en,OBJPROP_HIDDEN,true);
-   PnlSetLabel(p+"hl2", fx+96, hy+8, "ENTER applies", PNL_CLR_MUTED, 7);
-   ObjectSetInteger(0,p+"hl2",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-}
-
-//--- flush a pending hex edit (called before focus is lost)
-void FlushPalHex()
-{
-   if(!g_PalHexFocus) return;
-   g_PalHexFocus=false;
-   string t=ObjectGetString(0, g_UI.btnPrefix+"Pal_hex", OBJPROP_TEXT);
-   color c=ParseHexColor(t);
-   if(c!=clrNONE)
-   {
-      int flags=PaletteApplyColor(g_PalKind,c);
-      PalUpdateLive();
-      if(flags!=REFRESH_NONE) RefreshDisplay(flags);
-   }
-}
-
-//--- the mixer's four rows, ONE geometry for paint + hit + knob: the rows are
-//--- centred in the band the tabs leave above the HEX row, 30px apart. The hit
-//--- test used to re-derive this as +i*26 from the tabs, so R/G/B/TR grabbed
-//--- each other's channel («اشتباهی درگ میکنه»).
-int PalMixTop()
-{
-   int contY=g_PalY+PalTabsY()+PAL_TABS;
-   int bandH=PAL_HX+10+(PalHxY()-(contY+2));
-   return contY+2+MathMax(0,(bandH-4*30)/2);
-}
-int PalMixRowY(const int i){ return PalMixTop()+i*30; }
-
-//--- P-DRAW-49: the MIXER keeps its four channels (R · G · B · TR) and gains the
-//--- popup's new room: the block is CENTRED in the band between the tabs and the
-//--- HEX row instead of hanging from the tabs with a hole under it, and the HEX
-//--- row is seated on the SAME band the palette tab uses (`PalHxY`) so the two
-//--- tabs share the bottom three bands — the mixer is the same card with a
-//--- different middle, not a different card.
-void PalDrawMixer(const int contY)
-{
-   int px=g_PalX;
-   string p=g_UI.btnPrefix+"Pal_";
-   color cur=PaletteKindColor(g_PalKind);
-   int cv=(int)cur;
-   int comps[3];
-   comps[0]=cv%256; comps[1]=(cv/256)%256; comps[2]=cv/65536;
-   string cl[3]={"R","G","B"};
-   color fill[3]={C'255,99,99',C'102,187,106',C'92,145,255'};
-   int trackX=PalMixTrackX();
-   int trackW=PalMixTrackW();
-    //--- the four rows, centred in the band the tabs leave above the HEX row
-    const int PITCH=30;
-    int top=PalMixTop();
-    for(int i=0;i<3;i++)
-    {
-       int y=PalMixRowY(i);
-
-      PnlSetLabel(p+"ml"+IntegerToString(i), px+PAL_PAD, y, cl[i], PNL_CLR_LABEL, PNL_PT_PAL);
-      ObjectSetInteger(0,p+"ml"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_BG);
-      PnlSetRect(p+"mtg"+IntegerToString(i), trackX, y+2, trackW, 8, PNL_CLR_TRACK_BD);
-      ObjectSetInteger(0,p+"mtg"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_BG);
-      int kx=trackX+(int)MathRound(comps[i]/255.0*(trackW-10));
-      PnlSetRect(p+"mf"+IntegerToString(i), trackX, y+2, kx-trackX+10, 8, fill[i]);
-      ObjectSetInteger(0,p+"mf"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_CTL);
-       PnlSetButton(p+"mknb"+IntegerToString(i), kx, y, 10, 12, "", fill[i], PNL_CLR_TRACK_BD, true);
-      ObjectSetInteger(0,p+"mknb"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_FG);
-       PnlSetLabel(p+"mv"+IntegerToString(i), px+PalW()-PAL_PAD, y, IntegerToString(comps[i]), PNL_CLR_VALUE, PNL_PT_PAL);
-       // P-UI-26: ANCHOR_RIGHT_UPPER, not ANCHOR_RIGHT (middle-right sat a
-       // half line below its label — every other right-aligned panel text
-       // uses RIGHT_UPPER).
-       ObjectSetInteger(0,p+"mv"+IntegerToString(i),OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
-      ObjectSetInteger(0,p+"mv"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   }
-   // 4th channel: TRANSPARENCY (percent; 0=solid, 100=invisible —
-   // same language as the panel TRANSPARENCY sliders).
-   // Targets without a transparency setting show it greyed.
-   int tr = PaletteKindTransparency(g_PalKind);
-   bool trOk = (tr >= 0);
-    int oy = PalMixRowY(3);
-   PnlSetLabel(p+"ml3", px+PAL_PAD, oy, "TR", PNL_CLR_LABEL, PNL_PT_PAL);
-   ObjectSetInteger(0,p+"ml3",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   ObjectSetString(0,p+"ml3",OBJPROP_TOOLTIP,"Transparency — blends the color toward the chart background");
-   color trFill = trOk ? PNL_CLR_ACCENT : PNL_CLR_DISABLED;
-   PnlSetRect(p+"mtg3", trackX, oy+2, trackW, 8, PNL_CLR_TRACK_BD);
-   ObjectSetInteger(0,p+"mtg3",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   int tkx = trackX + (int)MathRound((trOk ? ClampInt(tr,0,100) : 0) / 100.0 * (trackW-10));
-   PnlSetRect(p+"mf3", trackX, oy+2, MathMax(0, tkx-trackX+10), 8, trFill);
-   ObjectSetInteger(0,p+"mf3",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
-   PnlSetButton(p+"mknb3", tkx, oy, 10, 12, "", trFill, trOk ? PNL_CLR_ACCENT : PNL_CLR_DIS_BD, true);
-   ObjectSetInteger(0,p+"mknb3",OBJPROP_ZORDER,Z_PANEL_POP_FG);
-    PnlSetLabel(p+"mv3", px+PalW()-PAL_PAD, oy, trOk ? IntegerToString(tr)+"%" : "--", PNL_CLR_VALUE, PNL_PT_PAL);
-    ObjectSetInteger(0,p+"mv3",OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
-   ObjectSetInteger(0,p+"mv3",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-
-   // TV parity board: the HEX row, seated on the band the palette tab uses
-   // (one owner, one seat — see PalDrawHexRow). It used to hang 4px under the
-   // last track, which on the taller card left a hole between them.
-   PalDrawHexRow(px, g_PalY+PalHxY());
-}
-
-//--- P-DRAW-50 caption deleted by user order 2026-09-27: the 8-family
-//--- string overflowed the 268px card — pager + tooltips keep the names.
-
-//--- P-DRAW-49: THE READOUT, ONE OWNER. It answers "what am I about to pick",
-//--- and it takes the HOVERED cell when there is one: the hover state is already
-//--- current by the time any caller gets here (a preview applies the colour, then
-//--- asks for the live paint), so the band costs three compares and no new state.
-//--- An AUTO target has no colour of its own and wears the AUTO face, exactly as
-//--- the row and the cset cells do (P-UI-131h) — clrNONE would paint ink-black
-//--- and claim a colour nobody chose.
-void PalPaintReadout(const color cur)
-{
-   string p=g_UI.btnPrefix+"Pal_";
-   color show=cur;
-   if(s_palHoverCell >= 0)
-   {
-      int cell=s_palHoverCell;
-      int reg=cell/1000, row=(cell-reg*1000)/100, col=cell%100;
-      if(reg>=0 && reg<s_palRegionN)
-      {
-         color h=PalHoverColorAt(reg,col,row);
-         if(h!=clrNONE) show=h;
-      }
-   }
-   color vis=(show==clrNONE)?PNL_CLR_AUTO_CELL:show;
-   int ry=g_PalY+PalReadY();
-   PnlSetRect(p+"cur", g_PalX+PAL_PAD, ry+4, 24, 24, vis);
-   ObjectSetInteger(0,p+"cur",OBJPROP_BORDER_COLOR,PnlSwatchBorder(vis,PNL_CLR_FIELD));
-   ObjectSetInteger(0,p+"cur",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   string hx=(show==clrNONE)?"AUTO":("#"+PalHexText(show));
-   PnlSetLabel(p+"curtx", g_PalX+PAL_PAD+32, ry+8, hx, PNL_CLR_TITLE, PNL_PT_PAL);
-   ObjectSetInteger(0,p+"curtx",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-   //--- the RGB line is RIGHT-aligned on the band's own edge, so the two texts
-   //--- can never collide however long the target's name is.
-   string rgt=(show==clrNONE)?"follows the card":PalColorText(show);
-   PnlSetLabel(p+"curtr", g_PalX+PalW()-PAL_PAD, ry+10, rgt, PNL_CLR_MUTED, 7);
-   ObjectSetInteger(0,p+"curtr",OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
-   ObjectSetInteger(0,p+"curtr",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-}
-
-#endif // BIOTAK_PANELS_PALA_MQH
+#endif
 // BiotakPanels_PalB.mqh - BiotakPanels split 2026-09-29: exact lines 2442-3818 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_PALB_MQH
 #define BIOTAK_PANELS_PALB_MQH
@@ -3266,6 +3344,526 @@ int LockOptFromPeriod(const int p)
 //}
 
 //+------------------------------------------------------------------+
+//| PnlSetDef — the SETTING-level descriptor of one row.             |
+//| Address space = the legacy per-card row index (what PnlDefVal /  |
+//| PnlCurrent / PnlApply / the palette tables all speak). The      |
+//| DISPLAY row the renderer uses is translated by PnlRowDef below.  |
+//| Rule from here on: NEVER call this with a display row.           |
+//+------------------------------------------------------------------+
+void PnlSetDef(const int item,const int row,int &kind,string &label,
+               int &minV,int &maxV,double &step,string &unit,string &opts)
+{
+   kind=0; label=""; minV=0; maxV=100; step=1; unit=""; opts="";
+   if(item==0)   // TRIGGER ZONES — zone appearance only. Unified line look
+                 // lives on the LINES card (7); MAX LEVELS lives on STEP MODE.
+   {
+      if(row==0)       { label="TRANSPARENCY"; unit="%"; }
+      else if(row==1)  { kind=4; label="COLOR"; }
+      else if(row==2)  { kind=4; label="LABEL COLOR"; }
+      // P-UI-131j: the LABEL's opacity, minV -1 = the AUTO end (PnlFormat prints it):
+      // -1 follows the Lines transparency, 0 stays a real, deliberate "solid".
+      else if(row==4)  { label="LABEL OPACITY"; unit="%"; minV=-1; maxV=100; }
+      else             { kind=1; label="SHOW"; }
+   }
+   else if(item==1)   // ZONES & LEVELS — the MAIN card. Row 0 = MID ZONES,
+                      // the same master the ring item toggles; zone appearance
+                      // grouped, then step order/midpoint, then sub-card navs
+                      // (STRUCTURE zones + unified LINES).
+   {
+      if(row==0)       { kind=1; label="MID ZONES"; }
+      else if(row==1)  { kind=1; label="SHOW LINES"; }
+      // P-UI-62: three PICTURES, not two pictures and a second visibility switch.
+      // "Hidden" was the MID ZONES master above under another name (it deleted the
+      // family), so the third slot is the state that shows BOTH halves at once - the
+      // band AND its edge - which is what makes the GEOMETRY card's BORDER and
+      // BORDER WIDTH rows act on something the user can see.
+      // P-UI-131d: "ZONE STYLE" (≈91px with the glyph chip) did NOT fit in the space
+      // the three pills leave (≈87px) — the caption was eating the gap to pay for
+      // itself. The band above already says ZONES, so the caption is "STYLE" now.
+      else if(row==2)  { kind=2; label="STYLE"; opts="Filled|Empty|Outlined"; minV=0; maxV=2; }
+      else if(row==3)  { label="TRANSPARENCY"; unit="%"; minV=0; maxV=100; }
+      else if(row==4)  { label="HEIGHT"; unit="%"; minV=1; maxV=100; }
+      else if(row==5)  { kind=2; label="BORDER"; opts="Solid|Dash|Dot|DashDot|DashDotDot"; minV=0; maxV=ILS_COUNT-1; }
+      else if(row==6)  { label="BORDER WIDTH"; minV=1; maxV=5; }
+      // P-UI-63: the EDGE's transparency. `TRANSPARENCY` above is the BAND's - one row
+      // per half of the picture, so «شفافیت خط و زون جدا از هم» needs no other control.
+      else if(row==7)  { label="BORDER TRANSPARENCY"; unit="%"; minV=0; maxV=100; }
+      else if(row==8)  { kind=1; label=PNL_LBL_SSLS_ORDER; }
+      // MIDPOINT-OFF (2026-09-13, P-UI-47): the midpoint line is deleted every
+      // render by the pipeline's legacy cleanup — row kept for the address space
+      // only, no display row renders it.
+      else if(row==9)  { kind=1; label="MIDPOINT"; }
+      else if(row==10) { kind=5; label="STRUCTURE L1-L5"; opts="11"; }   // NAV → structure sub-card
+      // P-UI-126: the chip's card, reached from here (NAV rows are the only door a
+      // card without a ring item has).
+      else if(row==12) { kind=5; label="HOVER CHIP"; opts="4"; }
+      // P-UI-131: the GENERAL card's door, APPENDED (row 13) so no address moved.
+      else if(row==13) { kind=5; label="GENERAL"; opts="14"; }
+      // P-UI-131h: the MID ZONE edge's two halves, each a colour and an opacity of its
+      // own. minV -1 on the sliders is the AUTO end (see PnlFormat): -1 = follow BORDER
+      // TRANSPARENCY above, and 0 stays a real, deliberate "solid".
+      else if(row==14) { kind=4; label="EDGE TOP"; }         // lit/top line
+      else if(row==15) { kind=4; label="EDGE BOTTOM"; }      // shaded/bottom line
+      else if(row==16) { label="TOP OPACITY"; unit="%"; minV=-1; maxV=100; }
+      else if(row==17) { label="BOTTOM OPACITY"; unit="%"; minV=-1; maxV=100; }
+      else             { kind=5; label="LINES"; opts="7"; }              // NAV → unified lines card
+   }
+   else if(item==2)   // ATR LABELS — the chart-labels card (High/Low
+                      // pip-distance labels were retired by P-LBL-12; this
+                      // card keeps the countdown, ATR and trade-plan labels)
+   {
+      // Rows 0-3 = the countdown tag's OWN settings (independent of the ATR
+      // block — turning the ATR labels off keeps the countdown).
+      if(row==0)       { kind=1; label="COUNTDOWN"; }
+      else if(row==1)  { kind=4; label="COUNT COLOR"; }
+      else if(row==2)  { label="COUNT SIZE"; minV=0; maxV=24; unit="pt"; }
+      else if(row==3)  { label="COUNT GAP"; minV=0; maxV=40; unit="px"; }
+      else if(row==4)  { kind=1; label="ATR LABELS"; }
+      else if(row==5)  { kind=1; label="ATR TARGETS"; }
+      else if(row==6)  { kind=1; label="TRADE LABELS"; }
+      else if(row==7)  { kind=1; label="HUNTER ROW"; }
+      else if(row==8)  { kind=1; label="TP ROW"; }
+      // P-UI-70c: «این pip label چیه؟» — the caption was the problem, not the
+      // setting: it toggles the pip-DISTANCE labels ON THE HIGH/LOW LINES
+      // (`inpShowPipDistanceLabels`, read by LabelFunctions AND LevelPipeline),
+      // which no two-word caption in a corner card can convey. Renamed to say
+      // WHERE those labels live; the setting address is untouched.
+      // P-LBL-12 (2026-10-17): the pip labels themselves are retired, so this
+      // row is off the card (see the spec table). The branch stays as the
+      // address stub - `row_arms` counts branches, not displays, and a
+      // renumbered fallthrough below would misland the proof (P-TH3-PB-MAN).
+      else if(row==9)  { kind=1; label="H/L PIP LABELS"; }
+      // ROW-GAP-OFF is OVER (P-UI-70c): the row was retired because its runtime
+      // copy `g_atrLabelRowGap` was dead, and the trade card has consumed that
+      // copy since P-LBL-09 (the settings layer redirects
+      // `inpATRTradeLabelRowGap` to it) — so the slider moves the card's seam
+      // for real and is rendered again. Its range is the CARD's clamp
+      // (`TREX_CARD_MAX_ROW_GAP`), never a number of its own: a slider whose max
+      // is past the engine's clamp stops responding at the end of its travel.
+      else if(row==10) { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
+      // P-UI-70d: the trade card's OWN personalisation, in the panel (user:
+      // «تنظیمات شخصی سازی این trex sl , tp ها چرا در پنل نیستش»). Every row here
+      // writes the same setting the group-13 dialog input writes, so a panel row
+      // can never disagree with the chart.
+      else if(row==11) { label="TRADE SIZE"; minV=0; maxV=24; unit="pt"; }
+      else if(row==12) { label="STAMP GAP"; minV=0; maxV=TREX_CARD_MAX_GAP_ROWS; unit="rows"; }
+      else if(row==13) { label="CARD MARGIN"; minV=0; maxV=TREX_CARD_MAX_MARGIN_BOTTOM; unit="px"; }
+      // P-UI-70d: the five colour cells of the CARD COLORS row. `PnlCsetKey`
+      // strips " COLOR" for the cell tooltip, so the captions read as the piece
+      // they paint (the palette header names the same piece via PalTgtLabel).
+      else if(row==14) { kind=4; label="TR COLOR"; }
+      else if(row==15) { kind=4; label="EX COLOR"; }
+      else if(row==16) { kind=4; label="HUNTER COLOR"; }
+      else if(row==17) { kind=4; label="TRADE COLOR"; }
+      else if(row==18) { kind=4; label="SPREAD COLOR"; }
+       // P-LEGATR: APPENDED (row 19), so rows 0..18 keep their addresses and the
+       // persisted OV_ keys keep their meaning. P-ANCHOR-LAST is row 20.
+      else if(row==19) { kind=1; label="PRE-CP ATR"; }
+      else             { kind=1; label="LAST OBJECT"; }
+   }
+    else if(item==3)   // TH LABELS
+    {
+       if(row==0)       { kind=1; label="TH LABELS"; }
+       else if(row==1)  { kind=1; label="FRACTAL THs"; }
+       else if(row==2)  { kind=1; label="STANDARD THs"; }
+       else if(row==3)  { kind=1; label="TH TARGETS"; }
+        else if(row==4)  { label="MARGIN BOTTOM"; minV=10; maxV=200; }
+        // P-TH-VOLNORM: the price-only scale switch, as the block's trailing
+       // fallthrough (the simulator counts preceding branches, so the appended
+       // setting takes the trailing slot and every address above keeps its
+       // number). Switch defaults (kind=1, 0/100): ON/OFF. OFF = classic TH.
+       //
+       // (Never write a COMPLETE row-branch test in this comment: `row_arms` in
+       // panel-wiring-audit.py scans the raw text for the whole `if(`+`row`+`==`
+       // shape, so a branch spelled here becomes a phantom arm with no caption
+       // and the audit reports a blank control. This cost one red run already.)
+        else             { kind=1; label="VOL NORM"; }
+     }
+    // P-UI-154 (2026-10-13) — THE HOVER CHIP'S ROW HAD NO DEFINITION.
+    // MEASURED: this function carries a branch for every card EXCEPT 4, so the
+    // chip's one row fell through to the opening defaults set at the top of it —
+    // `kind=0` (PNL_K_SL, a slider) and `label=""`. The card the user opens to
+    // configure the chip therefore showed a NAMELESS 0..100 SLIDER where its
+    // single ON/OFF switch belongs («چرا تنظیماتش ناقص هستش»). OFF = «با موس»
+    // (the hover tip, the shipped default), ON = «همیشه فعال» (the banner kept up
+    // at its place). Every OTHER path already knew the setting: `PnlCurrent`
+    // (case 4) reads it, `PnlApply` (case 4) writes it and calls
+    // `CircTipModeChanged`, and `PnlDefValSet` falls through to `return 0` —
+    // which IS that default. Only this descriptor was missing, which is exactly
+    // why nothing else noticed. kind=1 (PNL_K_SW) is the switch the apply path
+    // implements; the icon stays the spec's own "tag" (BiotakPanels_PalA).
+    else if(item==4)   // HOVER CHIP — the chip's MODE (the card's only setting)
+    {
+       if(row==0)       { kind=1; label="ALWAYS SHOWN"; }
+    }
+    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
+    // P-TH3-PB-MAN (2026-09-21): BASE PIPS is the trailing fallthrough, like
+    // VOL NORM on card 3 — `tools/panel-mt4-sim.py` derives the
+    // fallthrough's row as "how many row branches preceded it", so it MUST be
+    // the LAST branch or the simulator drops a row from the proof. SHOW LABELS
+    // therefore gets its own EXPLICIT branch above (the wiring audit also
+    // needs it: it reads the trailing statement as answering only row 8).
+    else if(item==5)   // TH3 TOOL
+    {
+       if(row==0)       { kind=1; label="ENABLED"; }
+       else if(row==1)  { kind=2; label="MODE"; opts="Steps|AB=CD"; }
+       // "MOVEMENT STEP", not "BASE STEP": this slider is the step of the move
+       // (its old label sat next to nothing called a "base", and the tool also
+       // called the same number a "frequency" on the chart — one value, one name).
+       else if(row==2)  { label="MOVEMENT STEP"; minV=1; maxV=100; step=0.5; unit="%"; }
+       else if(row==3)  { label="WIDTH"; minV=1; maxV=5; }
+       else if(row==4)  { label="STYLE"; minV=0; maxV=ILS_COUNT-1; }
+       else if(row==5)  { kind=4; label="COLOR"; }
+       else if(row==6)  { kind=4; label="PIP COLOR"; }
+       else if(row==7)  { kind=1; label="SHOW LABELS"; }
+       // 0 = OFF: the pattern timeframe's own ATR answers (the shipped default
+       // before this knob). Same bound the load clamp reads, so the slider can
+       // always reproduce what it saved.
+       else             { label="BASE PIPS"; minV=0; maxV=2000; step=1; unit="p"; }
+    }
+   else if(item==6)   // HTF CANDLES
+   {
+       if(row==0)       { kind=1; label="ENABLED"; }
+       else if(row==1)  { kind=2; label="TIMEFRAME"; opts="Structure|Pattern|H4|H1|M30|M15|D1|W1|MN1"; }
+       else if(row==2)  { label="TRANSPARENCY"; unit="%"; }
+      else if(row==3)  { kind=4; label="BULL COLOR"; }
+      else if(row==4)  { kind=4; label="BEAR COLOR"; }
+      else if(row==5)  { kind=4; label="WICK COLOR"; }
+      else if(row==6)  { kind=4; label="BORDER COLOR"; }
+      // P-UI-68: this slider is the shadow box's PIXEL FLOOR (the old WICK
+      // WIDTH semantics, kept alive instead of retired): a percentage width
+      // collapses to nothing when the chart is zoomed out, and this is what
+      // guarantees the shadow stays visible. The label names the shadow, the
+      // other two rows of the trio live in the CANDLE band with the body.
+      // The slider RANGES are literals (this file declares no engine bounds) and
+      // the engine's clamps are the named ones in HTFCandles.mqh — two places
+      // that must agree, so write-budget-audit's `htf-geometry` group reads both
+      // and fails if they drift (P-UI-68).
+      else if(row==7)  { label="SHADOW MIN"; minV=1; maxV=5; }
+      else if(row==8)  { label="BORDER WIDTH"; minV=1; maxV=5; }
+      else if(row==9)  { kind=1; label="SHOW WICKS"; }
+      // P-UI-131d: the caption sizes itself against the pills now, and at a 120-DPI
+      // chart "BOX MODE" needs 81px of the 69 the three pills leave — it read as
+      // glued. The card IS the candle's box, so "BOX" says the same thing.
+      else if(row==10) { kind=2; label="BOX"; opts="Hollow|Filled|Both"; }
+      else if(row==11) { label="SHADOW WIDTH"; unit="%"; minV=6; maxV=100; }
+      else             { label="SHADOW GAP"; unit="%"; minV=0; maxV=40; }
+   }
+   else if(item==7)   // LINES — the unified [08.4] line appearance card.
+                      // ONE color/style/width/transparency for ALL pipeline
+                      // lines (trigger-subdivision + structure-interval).
+                      // Row 1 SHOW mirrors the Zones card row 1 (same g_showLines).
+   {
+      if(row==0)       { kind=5; label="BACK"; opts="1"; }   // NAV → Zones & Levels card
+      else if(row==1)  { kind=1; label="SHOW"; }
+      else if(row==2)  { label="WIDTH"; minV=1; maxV=5; }
+      else if(row==3)  { kind=2; label="STYLE"; opts="Solid|Dash|Dot|DashDot|DashDotDot"; minV=0; maxV=ILS_COUNT-1; }   // redesign: dropdown, not a slider
+      else if(row==4)  { label="TRANSPARENCY"; unit="%"; minV=0; maxV=100; }
+      else             { kind=4; label="COLOR"; }
+   }
+   // item==7 retired Tools/Misc rows are gone (were duplicates of CustomPrice,
+   // Zones & the STRUCTURE card) — the slot now hosts the LINES card above.
+    else if(item==8)   // CUSTOM PRICE PIN — the pin only (the pip-distance
+                       // labels that used to live on the ATR LABELS card are
+                       // retired, P-LBL-12)
+    {
+       if(row==0)       { label="WIDTH"; minV=1; maxV=5; }
+       else if(row==1)  { kind=4; label="COLOR"; }
+       // P-UI-101 (2026-09-22): row 2 is the LOCK now (the magnet's retired row).
+       // Row 3 stays for the address space only — no display row renders it
+       // (P-UI-47's convention); the engine that read it is commented.
+       else if(row==2)  { kind=1; label="LOCK"; }
+       else if(row==3)  { label="MAGNET SENS"; minV=0; maxV=100; unit="p"; }
+       // P-UI-154: the START POINT as the block's trailing fallthrough (four
+       // preceding branches, so the simulator reads row four). kind=2 options
+       // run in enum order (ConstantsAndEnums.mqh:370): the press lands 0..4
+       // and the apply writes the same number back — no index table to drift.
+       else             { kind=2; label="START POINT"; opts="Midpoint|High|Low|Custom|Prev Close"; minV=0; maxV=4; }
+    }
+    else if(item==9)   // STEP MODE — mode segments + the SELECTED mode's
+                       // own settings inline below + MAX LEVELS last.
+    {
+       if(row==0) { kind=2; label="STEP MODE"; opts="TH|SS-LS|Combo|Factor"; minV=0; maxV=3; }
+       else if(row==PnlStepMaxLevelsRow()) { label="MAX LEVELS"; minV=1; maxV=MAX_SAFE_LEVELS; }
+       else PnlStepSectionRowDef(row-1, kind, label, minV, maxV, step, unit, opts);
+    }
+   else if(item==11)  // STRUCTURE — sub-card opened from the Zones & Levels card
+   {
+      if(row==0)       { kind=5; label="BACK"; opts="1"; }   // NAV → Zones & Levels card
+      else if(row==1)  { kind=1; label="SHOW STRUCTURE"; }
+      else if(row==2)  { kind=1; label="STRUCTURE L1"; }
+      else if(row==3)  { kind=1; label="STRUCTURE L2"; }
+      else if(row==4)  { kind=1; label="STRUCTURE L3"; }
+      else if(row==5)  { kind=1; label="STRUCTURE L4"; }
+      else             { kind=1; label="STRUCTURE L5"; }
+   }
+   else if(item==10)  // FACTOR
+   {
+      if(row==0)       { kind=2; label="MODE"; opts="Auto|Manual"; minV=0; maxV=1; }
+      else if(row==1)  { kind=2; label="DISPLAY"; opts="Classic|Direct"; minV=0; maxV=1; }
+      else if(row==2)  { kind=2; label="BASIS"; opts="Control|SS|LS|TH|Trigger|Pattern|Structure|Combo"; minV=0; maxV=7; }
+      else if(row==3)  { label="VALUE"; minV=1; maxV=500; }
+      else if(row==4)  { label="WIDTH"; minV=1; maxV=5; }
+      else if(row==5)  { kind=2; label="STYLE"; opts="Solid|Dash|Dot|DashDot|DashDotDot"; minV=0; maxV=ILS_COUNT-1; }   // redesign: dropdown, not a slider
+      else             { kind=4; label="COLOR"; }
+   }
+   else if(item==12)  // BASE BOX — TV-parity 2026-09-07 tabbed card (row 0 =
+                      // Style|Text|Setup segments, like the Step card's mode row).
+                      // Style = border + fill (TV Style tab) · Text = user text
+                      // inside the box (TV Text tab: content + size + B/I +
+                      // align + color; coords are edited by dragging, shown in
+                      // the box tooltip = TV Coordinates) · Setup = R:R +
+                      // Entry/SL/TP + INFO + INFO SIZE (P-BK-27) + TEMPLATE
+                      // (= TV Template dropdown; visibility is automatic:
+                      // commit TF + lower, tooltip).
+   {
+      if(row==0) { kind=2; label="TAB"; opts="Style|Text|Setup"; minV=0; maxV=2; }
+      else BkSecRowDef(row-1, kind, label, minV, maxV, step, unit, opts);
+   }
+   else   if(item==13)  // BASE BOX MINI — the row defs below are LEGACY: item 13 no
+                      // longer renders as a row-card. PnlCreate(13) draws the
+                      // compact TV-style strip (BkMiniStripCreate) and all
+                      // presses route to BkMiniStripPress. Only row 0 (BORDER
+                      // COLOR / PAL_BOX palette binding) is still consulted by
+                      // the palette code. R-BKSTRIP (2026-09-07).
+   {
+      if(row==0)       { kind=4; label="BORDER COLOR"; }
+      else if(row==1)  { label="TP COUNT"; minV=1; maxV=BK_TP_PLAN_MAX; }   // P-BK-50
+      else if(row==2)  { kind=2; label="INFO"; opts="Auto|Show|Corner"; minV=0; maxV=2; }   // P-BK-58 (same mirror as card 12)
+      else if(row==3)  { kind=2; label="PRESET"; opts="Navy|Ocean|Mono|Custom"; minV=0; maxV=3; }
+      else if(row==4)  { kind=2; label="LOCK"; opts="Off|On"; minV=0; maxV=1; }
+      else if(row==5)  { kind=5; label="DELETE"; opts="DEL"; }   // ACTION → delete held box
+      else             { kind=5; label="MORE"; opts="12"; }      // NAV → full Base Box card
+   }
+   else if(item==14)  // P-UI-131 — GENERAL SETTINGS (cross-card). Every bound here is
+   {                  // the SAME number the loader clamps with, so a saved value is
+                      // one this control can reproduce.
+      if(row==0)       { label="MAX LEVELS"; minV=1; maxV=MAX_SAFE_LEVELS; }
+      else if(row==1)  { label="LABEL SIZE"; minV=4; maxV=24; unit="pt"; }
+      else if(row==2)  { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
+      else if(row==3)  { kind=2; label="FONT"; opts=LabelFontOpts(); minV=0; maxV=LABEL_FONT_N-1; }
+      else if(row==4)  { label="MARGIN TOP"; minV=0; maxV=200; unit="px"; }
+      else if(row==5)  { label="MARGIN LEFT"; minV=0; maxV=300; unit="px"; }
+      else if(row==6)  { label="COLUMN GAP"; minV=0; maxV=200; unit="px"; }
+      else if(row==7)  { label="SECTION GAP"; minV=0; maxV=200; unit="px"; }
+      else if(row==8)  { label="MAX WIDTH"; minV=50; maxV=600; unit="px"; }
+      else if(row==9)  { label="CARD MARGIN"; minV=0; maxV=TREX_CARD_MAX_MARGIN_BOTTOM; unit="px"; }
+      else if(row==10) { label="TH MARGIN"; minV=10; maxV=200; unit="px"; }   // card 3's own bounds
+      else if(row==11) { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
+      else if(row==12) { label="TRADE SIZE"; minV=0; maxV=24; unit="pt"; }
+      else if(row==13) { label="STAMP GAP"; minV=0; maxV=TREX_CARD_MAX_GAP_ROWS; unit="rows"; }
+      else             { kind=5; label="HOVER CHIP"; opts="4"; }   // NAV → the chip's own card
+   }
+   else if(item==15)  // P-SESS — SESSIONS: the overview. Every bound is the same
+   {                  // named number the loader clamps with (Runtime_A), so a
+                      // saved value is one this control can reproduce.
+      if(row==0)       { kind=1; label="SESSIONS"; }        // master (mute-gated, F)
+      else if(row==1)  { label="PAST DAYS"; minV=0; maxV=SESS_HIST_MAX; }
+      else if(row==2)  { label="FUTURE DAYS"; minV=0; maxV=SESS_FUT_MAX; }
+      else if(row==3)  { kind=1; label="H/L LINES"; }
+      else if(row==4)  { kind=1; label="LINE LABELS"; }
+      else if(row==5)  { kind=1; label="RANGE TEXT"; }
+      else if(row==6)  { kind=1; label="PRIOR DAY"; }
+      else if(row==7)  { kind=1; label="OVERLAP"; }
+      else if(row==8)  { kind=1; label="COUNTDOWN"; }
+      else if(row==9)  { kind=1; label="ALERTS"; }
+      else             { kind=5; label="EDIT SESSIONS"; opts="16"; }   // NAV → the editor
+   }
+   else if(item==16)  // P-SESS — SESSION EDITOR: one slot at a time (row 0 picks
+   {                  // it, view-only). Time rows read/write the slot's minutes;
+                      // the HH/MM pair splits one startMin into the two sliders.
+      if(row==0)       { kind=2; label="SESSION"; opts="Tokyo|London|New York|Sydney|Frankfurt|Dubai|Chicago|Custom"; minV=0; maxV=SESS_SLOTS-1; }
+      else if(row==1)  { kind=2; label="PRESET"; opts="Tokyo|London|New York|Sydney|Frankfurt|Dubai|Chicago|Custom"; minV=0; maxV=SESS_SLOTS-1; }
+      else if(row==2)  { kind=2; label="TIMEZONE"; opts="Server|UTC|Tokyo|London|Frankfurt|New York|Chicago|Sydney|Dubai|Istanbul|Custom"; minV=0; maxV=SZ_CUSTOM; }
+      // the offset slider is in HOURS (what a user says); the codec carries minutes
+      else if(row==3)  { label="UTC OFFSET"; minV=SESS_CUSTOM_OFF_LO/60; maxV=SESS_CUSTOM_OFF_HI/60; unit="h"; }
+      else if(row==4)  { label="START HOUR"; minV=0; maxV=23; }
+      else if(row==5)  { label="START MIN"; minV=0; maxV=55; step=5; }
+      else if(row==6)  { label="END HOUR"; minV=0; maxV=23; }
+      else if(row==7)  { label="END MIN"; minV=0; maxV=55; step=5; }
+      // the two grid rows: `opts` names the table the chips kind taps write
+      else if(row==8)  { kind=PNL_K_CHIPS; label="DAYS"; opts="days"; }
+      else if(row==9)  { kind=PNL_K_CHIPS; label="COLOR"; opts="color"; }
+      else if(row==10) { kind=2; label="STYLE"; opts="Filled|Outline|Mid"; minV=0; maxV=2; }
+      else if(row==11) { kind=1; label="ACTIVE"; }
+      else             { kind=5; label="OVERVIEW"; opts="15"; }   // NAV → back to 15
+   }
+}
+
+
+//--- how many SETTINGS this display row folds in (1 normally)
+int PnlRowMembers(const int item,const int dispRow)
+{
+   int si = PnlSpecIdx(item,dispRow);
+   if(si < 0) return 1;
+   int n = g_PnlSpec[si].n;
+   return (n < 1) ? 1 : n;
+}
+
+//--- the SETTING row behind the k-th member of a multi-setting display row
+int PnlMemberRow(const int item,const int dispRow,const int k)
+{
+   int s0 = PnlSetRow(item,dispRow);
+   if(s0 < 0) return -1;
+   int n = PnlRowMembers(item,dispRow);
+   if(k < 0 || k >= n) return -1;
+   return s0 + k;
+}
+
+string PnlRowIcon(const int item,const int dispRow)
+{
+   int si = PnlSpecIdx(item,dispRow);
+   if(si < 0) return "";
+   return g_PnlSpec[si].ico;
+}
+string PnlRowKey(const int item,const int dispRow)
+{
+   int si = PnlSpecIdx(item,dispRow);
+   if(si < 0) return "";
+   return g_PnlSpec[si].key;
+}
+string PnlRowExt(const int item,const int dispRow)
+{
+   int si = PnlSpecIdx(item,dispRow);
+   if(si < 0) return "";
+   return g_PnlSpec[si].ext;
+}
+int PnlSecCount(const int item,const int dispRow)
+{
+   int si = PnlSpecIdx(item,dispRow);
+   if(si < 0) return 0;
+   return g_PnlSpec[si].cnt;
+}
+
+//--- the DISPLAY kind of a row (PNL_K_*). PNL_K_LEGACY defers to PnlSetDef.
+int PnlRowKind(const int item,const int dispRow)
+{
+   int rk; string l,u,o; int mn,mx; double st;
+   if(item < 0 || item >= PNL_COUNT) return PNL_K_SEC;
+   PnlEnsureSpec(item);
+   if(g_PnlSpecCount[item] == 0)                    // no spec -> the setting's kind
+   {
+      PnlSetDef(item,dispRow,rk,l,mn,mx,st,u,o);
+      return rk;
+   }
+   int si = PnlSpecIdx(item,dispRow);
+   if(si < 0) return PNL_K_SEC;
+   int k = g_PnlSpec[si].kind;
+   if(k != PNL_K_LEGACY) return k;
+   PnlSetDef(item,g_PnlSpec[si].s0,rk,l,mn,mx,st,u,o);
+   return rk;
+}
+
+//--- the k-th MEMBER's own setting kind (a .cset cell is a colour row, ...)
+int PnlMemberKind(const int item,const int dispRow,const int k)
+{
+   int r = PnlMemberRow(item,dispRow,k);
+   if(r < 0) return -1;
+   int rk; string l,u,o; int mn,mx; double st;
+   PnlSetDef(item,r,rk,l,mn,mx,st,u,o);
+   return rk;
+}
+
+//--- .cset cell caption: "BULL COLOR" -> "BULL" (preview cell key)
+string PnlCsetKey(const string lbl)
+{
+   int p = StringFind(lbl," COLOR");
+   if(p > 0) return StringSubstr(lbl,0,p);
+   return lbl;
+}
+
+//+------------------------------------------------------------------+
+//| PnlRowDef — the DISPLAY-row descriptor every renderer / hit-test  |
+//| uses. `row` is a display row (0 .. PnlRowsCount(item)-1).        |
+//| A section band yields kind=PNL_K_SEC with the band title in        |
+//| `label`; every other row yields the member settings' own kind /   |
+//| label / range, so all existing callers keep working unchanged.    |
+//+------------------------------------------------------------------+
+void PnlRowDef(const int item,const int row,int &kind,string &label,
+               int &minV,int &maxV,double &step,string &unit,string &opts)
+{
+   kind=PNL_K_SEC; label=""; minV=0; maxV=100; step=1; unit=""; opts="";
+   if(item < 0 || item >= PNL_COUNT) return;
+   PnlEnsureSpec(item);
+   if(g_PnlSpecCount[item] == 0)            // no spec card (13) -> the legacy def
+   {
+      PnlSetDef(item,row,kind,label,minV,maxV,step,unit,opts);
+      return;
+   }
+   int si = PnlSpecIdx(item,row);
+   if(si < 0) return;                       // out of range -> a band that renders nothing
+   if(g_PnlSpec[si].s0 < 0)                 // section band
+   {
+      label = g_PnlSpec[si].sec;
+      return;
+   }
+   PnlSetDef(item,g_PnlSpec[si].s0,kind,label,minV,maxV,step,unit,opts);
+   if(g_PnlSpec[si].kind != PNL_K_LEGACY) kind = g_PnlSpec[si].kind;
+}
+
+string PnlTitleText(const int item)
+{
+   if(item==1)  return "Zones & Levels";
+   if(item==0)  return "Trigger Zones";
+   if(item==2)  return "ATR Labels";
+   if(item==3)  return "TH Labels";
+   if(item==4)  return "Hover Chip";   // P-UI-126 (was the retired View Lock)
+   if(item==5)  return "TH3 Tool";   // TH3TOOL-ON (2026-09-19)
+   if(item==6)  return "HTF Candles";
+   if(item==7)  return "Lines";
+   if(item==8)  return "Custom Price";
+   if(item==9)  return "Step Mode";
+   if(item==11) return "Structure Levels";
+   if(item==12) return "Base Box";
+   if(item==13) return "Base Box";
+   if(item==14) return "General Settings";   // P-UI-131
+   if(item==15) return "Sessions";           // P-SESS
+   if(item==16) return "Session Editor";
+   return "Factor";
+}
+
+//--- Cycle options (P-UI-92): 0=Structure (16x — two fractal steps up, the
+//--- shipped "Auto"), 1=Pattern (4x — one step up), 2..8 = fixed TFs.
+//--- The two DYNAMIC entries are the Factor card's BASIS names, and W1/MN1
+//--- close the ladder the overlay is most often asked for (a D1/H4 candle on
+//--- an intraday chart). The MODE is the engine's state (HTFCandles.mqh) —
+//--- these two functions only translate between an option INDEX and it, so a
+//--- reordering here can never rename a rung.
+int HTFOptionFromPeriod(const int p)
+{
+   if(g_HTFTfMode == HTF_TF_STRUCTURE) return 0;
+   if(g_HTFTfMode == HTF_TF_PATTERN)   return 1;
+   int vals[7]={240,60,30,15,1440,10080,43200};
+   for(int i=0;i<7;i++) if(vals[i]==p) return i+2;
+   // Manual TF outside the cycle list → snap display to the closest option
+   int best=2; double bestD=1e18;
+   for(int i=0;i<7;i++)
+   {
+      double d=MathAbs(MathLog((double)p/(double)vals[i]));
+      if(d<bestD) { bestD=d; best=i+2; }
+   }
+   return best;
+}
+int HTFPeriodFromOption(const int idx)
+{
+   int vals[7]={240,60,30,15,1440,10080,43200};
+   int i=idx-2;
+   if(i<0) i=0; if(i>6) i=6;
+   return vals[i];
+}
+
+//--- mini strip (item 13) target: the held committed box its LOCK/✕ buttons
+//--- act on. Set by BkHoldFire, validated on every use.
+#endif // BIOTAK_PANELS_PALB_MQH
+// BiotakPanels_DynDef.mqh - split from BiotakPanels_PalB.mqh 2026-10-17 (P-SIZE-1500,
+// contract item 7 "one file = one owner"): the DYNAMIC cards' row mints - the Step
+// card's synthesized section rows and the Base Box tabs' row definitions (kind,
+// label, value per section). Moved byte-identical, zero renames. The static 17-card
+// table (PnlSetDef) and the display-row translation (PnlRowDef) stay in PalB.
+#ifndef BIOTAK_PANELS_DYNDEF_MQH
+#define BIOTAK_PANELS_DYNDEF_MQH
+
+//+------------------------------------------------------------------+
 //| Row descriptor — settings panels (0=Trigger Zones, 1=ZONES &     |
 //| LEVELS, 2=ATR, 3=TH, 4=retired (was View Lock), 5=TH3, 6=HTF, 7=LINES (unified), |
 //| 8=Custom price, 9=Step mode, 10=Factor, 11=STRUCTURE sub-card)    |
@@ -3287,13 +3885,13 @@ void PnlStepSectionRowDef(const int s,int &kind,string &label,
    else if(mode==2)   // COMBO — preset or advanced components
    {
       if(s==0)      { kind=2; label="MODE"; opts="Preset|Advanced"; minV=0; maxV=1; }
-      else if(s==1) { kind=2; label="PRESET"; opts="B-Med|B-Long|B-Trip|Cons|Aggr|Trend|SS|4/3|5/3"; minV=0; maxV=8; }
-      else if(s==2) { kind=2; label="COMP1 TF"; opts="Sub|Trigger|Pattern|Struct"; minV=0; maxV=3; }
-      else if(s==3) { kind=2; label="COMP1 STEP"; opts="TH|SS|LS|4/3|5/3"; minV=0; maxV=4; }
+       else if(s==1) { kind=2; label="PRESET"; opts="B-Med|B-Long|B-Trip|Cons|Aggr|Trend|SS|4/3|5/3"; minV=0; maxV=8; }
+       else if(s==2) { kind=2; label="COMP1 TF"; opts="Sub|Trigger|Pattern|Struct"; minV=0; maxV=3; }
+       else if(s==3) { kind=2; label="COMP1 STEP"; opts="TH|SS|LS|4/3|5/3"; minV=0; maxV=4; }
       else if(s==4) { kind=2; label="OP"; opts="Avg|Add|Sub|Mul|Min|Max|Wtd"; minV=0; maxV=6; }
       else if(s==5) { kind=1; label="COMP2"; }
       else if(s==6) { kind=2; label="COMP2 TF"; opts="Sub|Trigger|Pattern|Struct"; minV=0; maxV=3; }
-      else          { kind=2; label="COMP2 STEP"; opts="TH|SS|LS|4/3|5/3"; minV=0; maxV=4; }
+       else          { kind=2; label="COMP2 STEP"; opts="TH|SS|LS|4/3|5/3"; minV=0; maxV=4; }
    }
    else   // FACTOR — same rows as FACTOR card 10 rows 0..6
    {
@@ -3531,481 +4129,8 @@ color BkSecDefColor(const int row)
    return clrNONE;
 }
 
-//+------------------------------------------------------------------+
-//| PnlSetDef — the SETTING-level descriptor of one row.             |
-//| Address space = the legacy per-card row index (what PnlDefVal /  |
-//| PnlCurrent / PnlApply / the palette tables all speak). The      |
-//| DISPLAY row the renderer uses is translated by PnlRowDef below.  |
-//| Rule from here on: NEVER call this with a display row.           |
-//+------------------------------------------------------------------+
-void PnlSetDef(const int item,const int row,int &kind,string &label,
-               int &minV,int &maxV,double &step,string &unit,string &opts)
-{
-   kind=0; label=""; minV=0; maxV=100; step=1; unit=""; opts="";
-   if(item==0)   // TRIGGER ZONES — zone appearance only. Unified line look
-                 // lives on the LINES card (7); MAX LEVELS lives on STEP MODE.
-   {
-      if(row==0)       { label="TRANSPARENCY"; unit="%"; }
-      else if(row==1)  { kind=4; label="COLOR"; }
-      else if(row==2)  { kind=4; label="LABEL COLOR"; }
-      // P-UI-131j: the LABEL's opacity, minV -1 = the AUTO end (PnlFormat prints it):
-      // -1 follows the Lines transparency, 0 stays a real, deliberate "solid".
-      else if(row==4)  { label="LABEL OPACITY"; unit="%"; minV=-1; maxV=100; }
-      else             { kind=1; label="SHOW"; }
-   }
-   else if(item==1)   // ZONES & LEVELS — the MAIN card. Row 0 = MID ZONES,
-                      // the same master the ring item toggles; zone appearance
-                      // grouped, then step order/midpoint, then sub-card navs
-                      // (STRUCTURE zones + unified LINES).
-   {
-      if(row==0)       { kind=1; label="MID ZONES"; }
-      else if(row==1)  { kind=1; label="SHOW LINES"; }
-      // P-UI-62: three PICTURES, not two pictures and a second visibility switch.
-      // "Hidden" was the MID ZONES master above under another name (it deleted the
-      // family), so the third slot is the state that shows BOTH halves at once - the
-      // band AND its edge - which is what makes the GEOMETRY card's BORDER and
-      // BORDER WIDTH rows act on something the user can see.
-      // P-UI-131d: "ZONE STYLE" (≈91px with the glyph chip) did NOT fit in the space
-      // the three pills leave (≈87px) — the caption was eating the gap to pay for
-      // itself. The band above already says ZONES, so the caption is "STYLE" now.
-      else if(row==2)  { kind=2; label="STYLE"; opts="Filled|Empty|Outlined"; minV=0; maxV=2; }
-      else if(row==3)  { label="TRANSPARENCY"; unit="%"; minV=0; maxV=100; }
-      else if(row==4)  { label="HEIGHT"; unit="%"; minV=1; maxV=100; }
-      else if(row==5)  { kind=2; label="BORDER"; opts="Solid|Dash|Dot|DashDot|DashDotDot"; minV=0; maxV=ILS_COUNT-1; }
-      else if(row==6)  { label="BORDER WIDTH"; minV=1; maxV=5; }
-      // P-UI-63: the EDGE's transparency. `TRANSPARENCY` above is the BAND's - one row
-      // per half of the picture, so «شفافیت خط و زون جدا از هم» needs no other control.
-      else if(row==7)  { label="BORDER TRANSPARENCY"; unit="%"; minV=0; maxV=100; }
-      else if(row==8)  { kind=1; label=PNL_LBL_SSLS_ORDER; }
-      // MIDPOINT-OFF (2026-09-13, P-UI-47): the midpoint line is deleted every
-      // render by the pipeline's legacy cleanup — row kept for the address space
-      // only, no display row renders it.
-      else if(row==9)  { kind=1; label="MIDPOINT"; }
-      else if(row==10) { kind=5; label="STRUCTURE L1-L5"; opts="11"; }   // NAV → structure sub-card
-      // P-UI-126: the chip's card, reached from here (NAV rows are the only door a
-      // card without a ring item has).
-      else if(row==12) { kind=5; label="HOVER CHIP"; opts="4"; }
-      // P-UI-131: the GENERAL card's door, APPENDED (row 13) so no address moved.
-      else if(row==13) { kind=5; label="GENERAL"; opts="14"; }
-      // P-UI-131h: the MID ZONE edge's two halves, each a colour and an opacity of its
-      // own. minV -1 on the sliders is the AUTO end (see PnlFormat): -1 = follow BORDER
-      // TRANSPARENCY above, and 0 stays a real, deliberate "solid".
-      else if(row==14) { kind=4; label="EDGE TOP"; }         // lit/top line
-      else if(row==15) { kind=4; label="EDGE BOTTOM"; }      // shaded/bottom line
-      else if(row==16) { label="TOP OPACITY"; unit="%"; minV=-1; maxV=100; }
-      else if(row==17) { label="BOTTOM OPACITY"; unit="%"; minV=-1; maxV=100; }
-      else             { kind=5; label="LINES"; opts="7"; }              // NAV → unified lines card
-   }
-   else if(item==2)   // ATR LABELS — the chart-labels card (High/Low
-                      // pip-distance labels were retired by P-LBL-12; this
-                      // card keeps the countdown, ATR and trade-plan labels)
-   {
-      // Rows 0-3 = the countdown tag's OWN settings (independent of the ATR
-      // block — turning the ATR labels off keeps the countdown).
-      if(row==0)       { kind=1; label="COUNTDOWN"; }
-      else if(row==1)  { kind=4; label="COUNT COLOR"; }
-      else if(row==2)  { label="COUNT SIZE"; minV=0; maxV=24; unit="pt"; }
-      else if(row==3)  { label="COUNT GAP"; minV=0; maxV=40; unit="px"; }
-      else if(row==4)  { kind=1; label="ATR LABELS"; }
-      else if(row==5)  { kind=1; label="ATR TARGETS"; }
-      else if(row==6)  { kind=1; label="TRADE LABELS"; }
-      else if(row==7)  { kind=1; label="HUNTER ROW"; }
-      else if(row==8)  { kind=1; label="TP ROW"; }
-      // P-UI-70c: «این pip label چیه؟» — the caption was the problem, not the
-      // setting: it toggles the pip-DISTANCE labels ON THE HIGH/LOW LINES
-      // (`inpShowPipDistanceLabels`, read by LabelFunctions AND LevelPipeline),
-      // which no two-word caption in a corner card can convey. Renamed to say
-      // WHERE those labels live; the setting address is untouched.
-      // P-LBL-12 (2026-10-17): the pip labels themselves are retired, so this
-      // row is off the card (see the spec table). The branch stays as the
-      // address stub - `row_arms` counts branches, not displays, and a
-      // renumbered fallthrough below would misland the proof (P-TH3-PB-MAN).
-      else if(row==9)  { kind=1; label="H/L PIP LABELS"; }
-      // ROW-GAP-OFF is OVER (P-UI-70c): the row was retired because its runtime
-      // copy `g_atrLabelRowGap` was dead, and the trade card has consumed that
-      // copy since P-LBL-09 (the settings layer redirects
-      // `inpATRTradeLabelRowGap` to it) — so the slider moves the card's seam
-      // for real and is rendered again. Its range is the CARD's clamp
-      // (`TREX_CARD_MAX_ROW_GAP`), never a number of its own: a slider whose max
-      // is past the engine's clamp stops responding at the end of its travel.
-      else if(row==10) { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
-      // P-UI-70d: the trade card's OWN personalisation, in the panel (user:
-      // «تنظیمات شخصی سازی این trex sl , tp ها چرا در پنل نیستش»). Every row here
-      // writes the same setting the group-13 dialog input writes, so a panel row
-      // can never disagree with the chart.
-      else if(row==11) { label="TRADE SIZE"; minV=0; maxV=24; unit="pt"; }
-      else if(row==12) { label="STAMP GAP"; minV=0; maxV=TREX_CARD_MAX_GAP_ROWS; unit="rows"; }
-      else if(row==13) { label="CARD MARGIN"; minV=0; maxV=TREX_CARD_MAX_MARGIN_BOTTOM; unit="px"; }
-      // P-UI-70d: the five colour cells of the CARD COLORS row. `PnlCsetKey`
-      // strips " COLOR" for the cell tooltip, so the captions read as the piece
-      // they paint (the palette header names the same piece via PalTgtLabel).
-      else if(row==14) { kind=4; label="TR COLOR"; }
-      else if(row==15) { kind=4; label="EX COLOR"; }
-      else if(row==16) { kind=4; label="HUNTER COLOR"; }
-      else if(row==17) { kind=4; label="TRADE COLOR"; }
-      else if(row==18) { kind=4; label="SPREAD COLOR"; }
-       // P-LEGATR: APPENDED (row 19), so rows 0..18 keep their addresses and the
-       // persisted OV_ keys keep their meaning.
-      else             { kind=1; label="PRE-CP ATR"; }
-   }
-    else if(item==3)   // TH LABELS
-    {
-       if(row==0)       { kind=1; label="TH LABELS"; }
-       else if(row==1)  { kind=1; label="FRACTAL THs"; }
-       else if(row==2)  { kind=1; label="STANDARD THs"; }
-       else if(row==3)  { kind=1; label="TH TARGETS"; }
-        else if(row==4)  { label="MARGIN BOTTOM"; minV=10; maxV=200; }
-        // P-TH-VOLNORM: the price-only scale switch, as the block's trailing
-       // fallthrough (the simulator counts preceding branches, so the appended
-       // setting takes the trailing slot and every address above keeps its
-       // number). Switch defaults (kind=1, 0/100): ON/OFF. OFF = classic TH.
-       //
-       // (Never write a COMPLETE row-branch test in this comment: `row_arms` in
-       // panel-wiring-audit.py scans the raw text for the whole `if(`+`row`+`==`
-       // shape, so a branch spelled here becomes a phantom arm with no caption
-       // and the audit reports a blank control. This cost one red run already.)
-        else             { kind=1; label="VOL NORM"; }
-     }
-    // P-UI-154 (2026-10-13) — THE HOVER CHIP'S ROW HAD NO DEFINITION.
-    // MEASURED: this function carries a branch for every card EXCEPT 4, so the
-    // chip's one row fell through to the opening defaults set at the top of it —
-    // `kind=0` (PNL_K_SL, a slider) and `label=""`. The card the user opens to
-    // configure the chip therefore showed a NAMELESS 0..100 SLIDER where its
-    // single ON/OFF switch belongs («چرا تنظیماتش ناقص هستش»). OFF = «با موس»
-    // (the hover tip, the shipped default), ON = «همیشه فعال» (the banner kept up
-    // at its place). Every OTHER path already knew the setting: `PnlCurrent`
-    // (case 4) reads it, `PnlApply` (case 4) writes it and calls
-    // `CircTipModeChanged`, and `PnlDefValSet` falls through to `return 0` —
-    // which IS that default. Only this descriptor was missing, which is exactly
-    // why nothing else noticed. kind=1 (PNL_K_SW) is the switch the apply path
-    // implements; the icon stays the spec's own "tag" (BiotakPanels_PalA).
-    else if(item==4)   // HOVER CHIP — the chip's MODE (the card's only setting)
-    {
-       if(row==0)       { kind=1; label="ALWAYS SHOWN"; }
-    }
-    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-    // P-TH3-PB-MAN (2026-09-21): BASE PIPS is the trailing fallthrough, like
-    // VOL NORM on card 3 — `tools/panel-mt4-sim.py` derives the
-    // fallthrough's row as "how many row branches preceded it", so it MUST be
-    // the LAST branch or the simulator drops a row from the proof. SHOW LABELS
-    // therefore gets its own EXPLICIT branch above (the wiring audit also
-    // needs it: it reads the trailing statement as answering only row 8).
-    else if(item==5)   // TH3 TOOL
-    {
-       if(row==0)       { kind=1; label="ENABLED"; }
-       else if(row==1)  { kind=2; label="MODE"; opts="Steps|AB=CD"; }
-       // "MOVEMENT STEP", not "BASE STEP": this slider is the step of the move
-       // (its old label sat next to nothing called a "base", and the tool also
-       // called the same number a "frequency" on the chart — one value, one name).
-       else if(row==2)  { label="MOVEMENT STEP"; minV=1; maxV=100; step=0.5; unit="%"; }
-       else if(row==3)  { label="WIDTH"; minV=1; maxV=5; }
-       else if(row==4)  { label="STYLE"; minV=0; maxV=ILS_COUNT-1; }
-       else if(row==5)  { kind=4; label="COLOR"; }
-       else if(row==6)  { kind=4; label="PIP COLOR"; }
-       else if(row==7)  { kind=1; label="SHOW LABELS"; }
-       // 0 = OFF: the pattern timeframe's own ATR answers (the shipped default
-       // before this knob). Same bound the load clamp reads, so the slider can
-       // always reproduce what it saved.
-       else             { label="BASE PIPS"; minV=0; maxV=2000; step=1; unit="p"; }
-    }
-   else if(item==6)   // HTF CANDLES
-   {
-       if(row==0)       { kind=1; label="ENABLED"; }
-       else if(row==1)  { kind=2; label="TIMEFRAME"; opts="Structure|Pattern|H4|H1|M30|M15|D1|W1|MN1"; }
-       else if(row==2)  { label="TRANSPARENCY"; unit="%"; }
-      else if(row==3)  { kind=4; label="BULL COLOR"; }
-      else if(row==4)  { kind=4; label="BEAR COLOR"; }
-      else if(row==5)  { kind=4; label="WICK COLOR"; }
-      else if(row==6)  { kind=4; label="BORDER COLOR"; }
-      // P-UI-68: this slider is the shadow box's PIXEL FLOOR (the old WICK
-      // WIDTH semantics, kept alive instead of retired): a percentage width
-      // collapses to nothing when the chart is zoomed out, and this is what
-      // guarantees the shadow stays visible. The label names the shadow, the
-      // other two rows of the trio live in the CANDLE band with the body.
-      // The slider RANGES are literals (this file declares no engine bounds) and
-      // the engine's clamps are the named ones in HTFCandles.mqh — two places
-      // that must agree, so write-budget-audit's `htf-geometry` group reads both
-      // and fails if they drift (P-UI-68).
-      else if(row==7)  { label="SHADOW MIN"; minV=1; maxV=5; }
-      else if(row==8)  { label="BORDER WIDTH"; minV=1; maxV=5; }
-      else if(row==9)  { kind=1; label="SHOW WICKS"; }
-      // P-UI-131d: the caption sizes itself against the pills now, and at a 120-DPI
-      // chart "BOX MODE" needs 81px of the 69 the three pills leave — it read as
-      // glued. The card IS the candle's box, so "BOX" says the same thing.
-      else if(row==10) { kind=2; label="BOX"; opts="Hollow|Filled|Both"; }
-      else if(row==11) { label="SHADOW WIDTH"; unit="%"; minV=6; maxV=100; }
-      else             { label="SHADOW GAP"; unit="%"; minV=0; maxV=40; }
-   }
-   else if(item==7)   // LINES — the unified [08.4] line appearance card.
-                      // ONE color/style/width/transparency for ALL pipeline
-                      // lines (trigger-subdivision + structure-interval).
-                      // Row 1 SHOW mirrors the Zones card row 1 (same g_showLines).
-   {
-      if(row==0)       { kind=5; label="BACK"; opts="1"; }   // NAV → Zones & Levels card
-      else if(row==1)  { kind=1; label="SHOW"; }
-      else if(row==2)  { label="WIDTH"; minV=1; maxV=5; }
-      else if(row==3)  { kind=2; label="STYLE"; opts="Solid|Dash|Dot|DashDot|DashDotDot"; minV=0; maxV=ILS_COUNT-1; }   // redesign: dropdown, not a slider
-      else if(row==4)  { label="TRANSPARENCY"; unit="%"; minV=0; maxV=100; }
-      else             { kind=4; label="COLOR"; }
-   }
-   // item==7 retired Tools/Misc rows are gone (were duplicates of CustomPrice,
-   // Zones & the STRUCTURE card) — the slot now hosts the LINES card above.
-    else if(item==8)   // CUSTOM PRICE PIN — the pin only (the pip-distance
-                       // labels that used to live on the ATR LABELS card are
-                       // retired, P-LBL-12)
-    {
-       if(row==0)       { label="WIDTH"; minV=1; maxV=5; }
-       else if(row==1)  { kind=4; label="COLOR"; }
-       // P-UI-101 (2026-09-22): row 2 is the LOCK now (the magnet's retired row).
-       // Row 3 stays for the address space only — no display row renders it
-       // (P-UI-47's convention); the engine that read it is commented.
-       else if(row==2)  { kind=1; label="LOCK"; }
-       else if(row==3)  { label="MAGNET SENS"; minV=0; maxV=100; unit="p"; }
-       // P-UI-154: the START POINT as the block's trailing fallthrough (four
-       // preceding branches, so the simulator reads row four). kind=2 options
-       // run in enum order (ConstantsAndEnums.mqh:370): the press lands 0..4
-       // and the apply writes the same number back — no index table to drift.
-       else             { kind=2; label="START POINT"; opts="Midpoint|High|Low|Custom|Prev Close"; minV=0; maxV=4; }
-    }
-    else if(item==9)   // STEP MODE — mode segments + the SELECTED mode's
-                       // own settings inline below + MAX LEVELS last.
-    {
-       if(row==0) { kind=2; label="STEP MODE"; opts="TH|SS-LS|Combo|Factor"; minV=0; maxV=3; }
-       else if(row==PnlStepMaxLevelsRow()) { label="MAX LEVELS"; minV=1; maxV=MAX_SAFE_LEVELS; }
-       else PnlStepSectionRowDef(row-1, kind, label, minV, maxV, step, unit, opts);
-    }
-   else if(item==11)  // STRUCTURE — sub-card opened from the Zones & Levels card
-   {
-      if(row==0)       { kind=5; label="BACK"; opts="1"; }   // NAV → Zones & Levels card
-      else if(row==1)  { kind=1; label="SHOW STRUCTURE"; }
-      else if(row==2)  { kind=1; label="STRUCTURE L1"; }
-      else if(row==3)  { kind=1; label="STRUCTURE L2"; }
-      else if(row==4)  { kind=1; label="STRUCTURE L3"; }
-      else if(row==5)  { kind=1; label="STRUCTURE L4"; }
-      else             { kind=1; label="STRUCTURE L5"; }
-   }
-   else if(item==10)  // FACTOR
-   {
-      if(row==0)       { kind=2; label="MODE"; opts="Auto|Manual"; minV=0; maxV=1; }
-      else if(row==1)  { kind=2; label="DISPLAY"; opts="Classic|Direct"; minV=0; maxV=1; }
-      else if(row==2)  { kind=2; label="BASIS"; opts="Control|SS|LS|TH|Trigger|Pattern|Structure|Combo"; minV=0; maxV=7; }
-      else if(row==3)  { label="VALUE"; minV=1; maxV=500; }
-      else if(row==4)  { label="WIDTH"; minV=1; maxV=5; }
-      else if(row==5)  { kind=2; label="STYLE"; opts="Solid|Dash|Dot|DashDot|DashDotDot"; minV=0; maxV=ILS_COUNT-1; }   // redesign: dropdown, not a slider
-      else             { kind=4; label="COLOR"; }
-   }
-   else if(item==12)  // BASE BOX — TV-parity 2026-09-07 tabbed card (row 0 =
-                      // Style|Text|Setup segments, like the Step card's mode row).
-                      // Style = border + fill (TV Style tab) · Text = user text
-                      // inside the box (TV Text tab: content + size + B/I +
-                      // align + color; coords are edited by dragging, shown in
-                      // the box tooltip = TV Coordinates) · Setup = R:R +
-                      // Entry/SL/TP + INFO + INFO SIZE (P-BK-27) + TEMPLATE
-                      // (= TV Template dropdown; visibility is automatic:
-                      // commit TF + lower, tooltip).
-   {
-      if(row==0) { kind=2; label="TAB"; opts="Style|Text|Setup"; minV=0; maxV=2; }
-      else BkSecRowDef(row-1, kind, label, minV, maxV, step, unit, opts);
-   }
-   else   if(item==13)  // BASE BOX MINI — the row defs below are LEGACY: item 13 no
-                      // longer renders as a row-card. PnlCreate(13) draws the
-                      // compact TV-style strip (BkMiniStripCreate) and all
-                      // presses route to BkMiniStripPress. Only row 0 (BORDER
-                      // COLOR / PAL_BOX palette binding) is still consulted by
-                      // the palette code. R-BKSTRIP (2026-09-07).
-   {
-      if(row==0)       { kind=4; label="BORDER COLOR"; }
-      else if(row==1)  { label="TP COUNT"; minV=1; maxV=BK_TP_PLAN_MAX; }   // P-BK-50
-      else if(row==2)  { kind=2; label="INFO"; opts="Auto|Show|Corner"; minV=0; maxV=2; }   // P-BK-58 (same mirror as card 12)
-      else if(row==3)  { kind=2; label="PRESET"; opts="Navy|Ocean|Mono|Custom"; minV=0; maxV=3; }
-      else if(row==4)  { kind=2; label="LOCK"; opts="Off|On"; minV=0; maxV=1; }
-      else if(row==5)  { kind=5; label="DELETE"; opts="DEL"; }   // ACTION → delete held box
-      else             { kind=5; label="MORE"; opts="12"; }      // NAV → full Base Box card
-   }
-   else if(item==14)  // P-UI-131 — GENERAL SETTINGS (cross-card). Every bound here is
-   {                  // the SAME number the loader clamps with, so a saved value is
-                      // one this control can reproduce.
-      if(row==0)       { label="MAX LEVELS"; minV=1; maxV=MAX_SAFE_LEVELS; }
-      else if(row==1)  { label="LABEL SIZE"; minV=4; maxV=24; unit="pt"; }
-      else if(row==2)  { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
-      else if(row==3)  { kind=2; label="FONT"; opts=LabelFontOpts(); minV=0; maxV=LABEL_FONT_N-1; }
-      else if(row==4)  { label="MARGIN TOP"; minV=0; maxV=200; unit="px"; }
-      else if(row==5)  { label="MARGIN LEFT"; minV=0; maxV=300; unit="px"; }
-      else if(row==6)  { label="COLUMN GAP"; minV=0; maxV=200; unit="px"; }
-      else if(row==7)  { label="SECTION GAP"; minV=0; maxV=200; unit="px"; }
-      else if(row==8)  { label="MAX WIDTH"; minV=50; maxV=600; unit="px"; }
-      else if(row==9)  { label="CARD MARGIN"; minV=0; maxV=TREX_CARD_MAX_MARGIN_BOTTOM; unit="px"; }
-      else if(row==10) { label="TH MARGIN"; minV=10; maxV=200; unit="px"; }   // card 3's own bounds
-      else if(row==11) { label="ROW GAP"; minV=0; maxV=TREX_CARD_MAX_ROW_GAP; unit="px"; }
-      else if(row==12) { label="TRADE SIZE"; minV=0; maxV=24; unit="pt"; }
-      else if(row==13) { label="STAMP GAP"; minV=0; maxV=TREX_CARD_MAX_GAP_ROWS; unit="rows"; }
-      else             { kind=5; label="HOVER CHIP"; opts="4"; }   // NAV → the chip's own card
-   }
-}
 
-
-//--- how many SETTINGS this display row folds in (1 normally)
-int PnlRowMembers(const int item,const int dispRow)
-{
-   int si = PnlSpecIdx(item,dispRow);
-   if(si < 0) return 1;
-   int n = g_PnlSpec[si].n;
-   return (n < 1) ? 1 : n;
-}
-
-//--- the SETTING row behind the k-th member of a multi-setting display row
-int PnlMemberRow(const int item,const int dispRow,const int k)
-{
-   int s0 = PnlSetRow(item,dispRow);
-   if(s0 < 0) return -1;
-   int n = PnlRowMembers(item,dispRow);
-   if(k < 0 || k >= n) return -1;
-   return s0 + k;
-}
-
-string PnlRowIcon(const int item,const int dispRow)
-{
-   int si = PnlSpecIdx(item,dispRow);
-   if(si < 0) return "";
-   return g_PnlSpec[si].ico;
-}
-string PnlRowKey(const int item,const int dispRow)
-{
-   int si = PnlSpecIdx(item,dispRow);
-   if(si < 0) return "";
-   return g_PnlSpec[si].key;
-}
-string PnlRowExt(const int item,const int dispRow)
-{
-   int si = PnlSpecIdx(item,dispRow);
-   if(si < 0) return "";
-   return g_PnlSpec[si].ext;
-}
-int PnlSecCount(const int item,const int dispRow)
-{
-   int si = PnlSpecIdx(item,dispRow);
-   if(si < 0) return 0;
-   return g_PnlSpec[si].cnt;
-}
-
-//--- the DISPLAY kind of a row (PNL_K_*). PNL_K_LEGACY defers to PnlSetDef.
-int PnlRowKind(const int item,const int dispRow)
-{
-   int rk; string l,u,o; int mn,mx; double st;
-   if(item < 0 || item >= PNL_COUNT) return PNL_K_SEC;
-   PnlEnsureSpec(item);
-   if(g_PnlSpecCount[item] == 0)                    // no spec -> the setting's kind
-   {
-      PnlSetDef(item,dispRow,rk,l,mn,mx,st,u,o);
-      return rk;
-   }
-   int si = PnlSpecIdx(item,dispRow);
-   if(si < 0) return PNL_K_SEC;
-   int k = g_PnlSpec[si].kind;
-   if(k != PNL_K_LEGACY) return k;
-   PnlSetDef(item,g_PnlSpec[si].s0,rk,l,mn,mx,st,u,o);
-   return rk;
-}
-
-//--- the k-th MEMBER's own setting kind (a .cset cell is a colour row, ...)
-int PnlMemberKind(const int item,const int dispRow,const int k)
-{
-   int r = PnlMemberRow(item,dispRow,k);
-   if(r < 0) return -1;
-   int rk; string l,u,o; int mn,mx; double st;
-   PnlSetDef(item,r,rk,l,mn,mx,st,u,o);
-   return rk;
-}
-
-//--- .cset cell caption: "BULL COLOR" -> "BULL" (preview cell key)
-string PnlCsetKey(const string lbl)
-{
-   int p = StringFind(lbl," COLOR");
-   if(p > 0) return StringSubstr(lbl,0,p);
-   return lbl;
-}
-
-//+------------------------------------------------------------------+
-//| PnlRowDef — the DISPLAY-row descriptor every renderer / hit-test  |
-//| uses. `row` is a display row (0 .. PnlRowsCount(item)-1).        |
-//| A section band yields kind=PNL_K_SEC with the band title in        |
-//| `label`; every other row yields the member settings' own kind /   |
-//| label / range, so all existing callers keep working unchanged.    |
-//+------------------------------------------------------------------+
-void PnlRowDef(const int item,const int row,int &kind,string &label,
-               int &minV,int &maxV,double &step,string &unit,string &opts)
-{
-   kind=PNL_K_SEC; label=""; minV=0; maxV=100; step=1; unit=""; opts="";
-   if(item < 0 || item >= PNL_COUNT) return;
-   PnlEnsureSpec(item);
-   if(g_PnlSpecCount[item] == 0)            // no spec card (13) -> the legacy def
-   {
-      PnlSetDef(item,row,kind,label,minV,maxV,step,unit,opts);
-      return;
-   }
-   int si = PnlSpecIdx(item,row);
-   if(si < 0) return;                       // out of range -> a band that renders nothing
-   if(g_PnlSpec[si].s0 < 0)                 // section band
-   {
-      label = g_PnlSpec[si].sec;
-      return;
-   }
-   PnlSetDef(item,g_PnlSpec[si].s0,kind,label,minV,maxV,step,unit,opts);
-   if(g_PnlSpec[si].kind != PNL_K_LEGACY) kind = g_PnlSpec[si].kind;
-}
-
-string PnlTitleText(const int item)
-{
-   if(item==1)  return "Zones & Levels";
-   if(item==0)  return "Trigger Zones";
-   if(item==2)  return "ATR Labels";
-   if(item==3)  return "TH Labels";
-   if(item==4)  return "Hover Chip";   // P-UI-126 (was the retired View Lock)
-   if(item==5)  return "TH3 Tool";   // TH3TOOL-ON (2026-09-19)
-   if(item==6)  return "HTF Candles";
-   if(item==7)  return "Lines";
-   if(item==8)  return "Custom Price";
-   if(item==9)  return "Step Mode";
-   if(item==11) return "Structure Levels";
-   if(item==12) return "Base Box";
-   if(item==13) return "Base Box";
-   if(item==14) return "General Settings";   // P-UI-131
-   return "Factor";
-}
-
-//--- Cycle options (P-UI-92): 0=Structure (16x — two fractal steps up, the
-//--- shipped "Auto"), 1=Pattern (4x — one step up), 2..8 = fixed TFs.
-//--- The two DYNAMIC entries are the Factor card's BASIS names, and W1/MN1
-//--- close the ladder the overlay is most often asked for (a D1/H4 candle on
-//--- an intraday chart). The MODE is the engine's state (HTFCandles.mqh) —
-//--- these two functions only translate between an option INDEX and it, so a
-//--- reordering here can never rename a rung.
-int HTFOptionFromPeriod(const int p)
-{
-   if(g_HTFTfMode == HTF_TF_STRUCTURE) return 0;
-   if(g_HTFTfMode == HTF_TF_PATTERN)   return 1;
-   int vals[7]={240,60,30,15,1440,10080,43200};
-   for(int i=0;i<7;i++) if(vals[i]==p) return i+2;
-   // Manual TF outside the cycle list → snap display to the closest option
-   int best=2; double bestD=1e18;
-   for(int i=0;i<7;i++)
-   {
-      double d=MathAbs(MathLog((double)p/(double)vals[i]));
-      if(d<bestD) { bestD=d; best=i+2; }
-   }
-   return best;
-}
-int HTFPeriodFromOption(const int idx)
-{
-   int vals[7]={240,60,30,15,1440,10080,43200};
-   int i=idx-2;
-   if(i<0) i=0; if(i>6) i=6;
-   return vals[i];
-}
-
-//--- mini strip (item 13) target: the held committed box its LOCK/✕ buttons
-//--- act on. Set by BkHoldFire, validated on every use.
-#endif // BIOTAK_PANELS_PALB_MQH
+#endif
 // BiotakPanels_PalDiag.mqh - the palette popup's own census (P-UI-137, 2026-10-02).
 // Its own file because a witness is an OWNER, and PalB was one line over the
 // contract's 1500 ceiling with it inlined (P-SIZE-1500).
@@ -4051,8 +4176,7 @@ void PalDiagCensus(const int px,const int py,const int w,const int h)
 }
 #endif
 
-#endif // BIOTAK_PANELS_PALDIAG_MQH
-// BiotakPanels_Apply.mqh - BiotakPanels split 2026-09-29: exact lines 3819-4850 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_PALDIAG_MQH// BiotakPanels_Apply.mqh - BiotakPanels split 2026-09-29: exact lines 3819-4850 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_APPLY_MQH
 #define BIOTAK_PANELS_APPLY_MQH
 
@@ -4215,6 +4339,7 @@ double PnlDefValSet(const int item,const int row)
               // colour itself, so the reset path goes through PnlSetColor).
               if(row>=14 && row<=18) return 3;
               if(row==19) return (FactoryDefault(FF_USE_LEG_ATR)>0.5)?1.0:0.0;   // P-LEGATR (0 = OFF)
+              if(row==20) return 1.0;   // P-ANCHOR-LAST (shipped ON)
               return (FactoryDefault(FF_USE_LEG_ATR)>0.5)?1.0:0.0;   // trailing answers the TOP address (row 19)
       case 3: if(row==0) return (FactoryDefault(FF_SHOW_TH_LABELS)>0.5)?1.0:0.0;
               if(row==1) return (FactoryDefault(FF_TH_FRACTAL)>0.5)?1.0:0.0;
@@ -4306,11 +4431,41 @@ double PnlDefValSet(const int item,const int row)
                if(row==9)  return PnlDefValSet(2, 13);   // CARD MARGIN
                if(row==10) return PnlDefValSet(3, 4);    // TH MARGIN
                if(row==11) return PnlDefValSet(2, 10);   // TRADE ROW GAP
-               if(row==12) return PnlDefValSet(2, 11);   // TRADE SIZE
-               if(row==13) return PnlDefValSet(2, 12);   // STAMP GAP
-               return 0;                        // row 14 = NAV (a door resets nothing)
-  }
-  return 0;
+                if(row==12) return PnlDefValSet(2, 11);   // TRADE SIZE
+                if(row==13) return PnlDefValSet(2, 12);   // STAMP GAP
+                return 0;                        // row 14 = NAV (a door resets nothing)
+      // P-SESS: the overview's factory look and the editor's per-slot factory
+      // preset. No FF_ addresses: these globals seed in Runtime_A, so the reset
+      // returns the same numbers those seeds carry (one owner each — literal
+      // here, and the literal is asserted against the seed by the P-SESS gate).
+      case 15: if(row==0) return 0.0;                 // master OFF, as shipped
+               if(row==1) return 5;                   // g_sessHistDays seed
+               if(row==2) return 1;                   // g_sessFutDays seed
+               if(row==3) return 1.0;                 // H/L LINES on
+               if(row==4) return 1.0;                 // LINE LABELS on
+               if(row==5) return 1.0;                 // RANGE TEXT on
+               if(row==6) return 0.0;                 // PRIOR DAY off
+               if(row==7) return 1.0;                 // OVERLAP on
+               if(row==8) return 1.0;                 // COUNTDOWN on
+               if(row==9) return 0.0;                 // ALERTS off
+               return 0;                              // row 10 = NAV
+      case 16: {                                      // the selected slot's factory preset
+               SessSlot fdef; SessSlotFactory(g_sessSlotsEdit, fdef);
+               if(row==0) return (double)g_sessSlotsEdit;      // the pick itself
+               if(row==1) return (double)g_sessSlotsEdit;      // preset name mirrors it
+               if(row==2) return (double)fdef.zone;
+               if(row==3) return (double)(fdef.customMin / 60);
+               if(row==4) return (double)(fdef.startMin / 60);
+               if(row==5) return (double)(fdef.startMin % 60);
+               if(row==6) return (double)(fdef.endMin / 60);
+               if(row==7) return (double)(fdef.endMin % 60);
+               if(row==8) return (double)fdef.days;
+               if(row==9) return (double)fdef.col;
+               if(row==10) return (double)fdef.style;
+               if(row==11) return fdef.enabled ? 1.0 : 0.0;
+               return 0; }                            // row 12 = NAV
+   }
+   return 0;
 }
 
 //+------------------------------------------------------------------+
@@ -4364,6 +4519,11 @@ bool PnlSettingIsMuteGated(const int item,const int row)
    if(item==3)  return (row==0);              // TH LABELS (the family's master)
    if(item==7)  return (row==1);              // SHOW LINES (same switch, other card)
    if(item==11) return (row>=1 && row<=6);    // SHOW STRUCTURE + L1..L5
+   // P-SESS: the Sessions master is its family's top and its painter spells
+   // `g_sessMaster && !IsIndicatorHidden()` (SessionsTick) — the switch gates,
+   // every family row below it (lines/labels/range/prior/overlap/countdown) is
+   // a PIECE of that one picture and stays ungated.
+   if(item==15) return (row==0);
    return false;
 }
 
@@ -4429,6 +4589,7 @@ double PnlCurrentSet(const int item,const int row)
               if(row==13) return g_tradeMarginBottom;
               if(row>=14 && row<=18) return 0;   // palette-only (P-UI-70d)
               if(row==19) return g_useLegATR?1.0:0.0;   // P-LEGATR (not a visibility family: no mute term)
+              if(row==20) return g_calcAnchorOn?1.0:0.0;   // P-ANCHOR-LAST
               return g_useLegATR?1.0:0.0;   // trailing answers the TOP address (row 19)
       case 3: // P-UI-93: SetTHLabelsVisibility spells its mask
               // `(mode != 0) && !IsIndicatorHidden()`, so the TH family's master
@@ -4515,11 +4676,41 @@ double PnlCurrentSet(const int item,const int row)
                if(row==9)  return PnlCurrentSet(2, 13);   // CARD MARGIN
                if(row==10) return PnlCurrentSet(3, 4);    // TH MARGIN
                if(row==11) return PnlCurrentSet(2, 10);   // TRADE ROW GAP
-               if(row==12) return PnlCurrentSet(2, 11);   // TRADE SIZE
-               if(row==13) return PnlCurrentSet(2, 12);   // STAMP GAP
-               return 0;                        // row 14 = NAV
-  }
-  return 0;
+                if(row==12) return PnlCurrentSet(2, 11);   // TRADE SIZE
+                if(row==13) return PnlCurrentSet(2, 12);   // STAMP GAP
+                return 0;                        // row 14 = NAV
+       // P-SESS: the overview reads the g_sess* mirrors the renderer itself
+       // reads (one owner — the switch and the picture cannot disagree), and
+       // the editor reads the SELECTED slot's decode. The slot pick is view
+       // state (g_sessSlotsEdit), never persisted.
+       case 15: if(row==0) return PnlMuteGatedValue(g_sessMaster);
+                if(row==1) return g_sessHistDays;
+                if(row==2) return g_sessFutDays;
+                if(row==3) return g_sessHlLines ? 1.0 : 0.0;
+                if(row==4) return g_sessHlLabels ? 1.0 : 0.0;
+                if(row==5) return g_sessRangeText ? 1.0 : 0.0;
+                if(row==6) return g_sessPrior ? 1.0 : 0.0;
+                if(row==7) return g_sessOverlap ? 1.0 : 0.0;
+                if(row==8) return g_sessCountdown ? 1.0 : 0.0;
+                if(row==9) return g_sessAlerts ? 1.0 : 0.0;
+                return 0;                        // row 10 = NAV
+       case 16: {                                // decode the selected slot once
+                SessSlot cs; SessSlotGet(g_sessSlotsEdit, cs);
+                if(row==0) return (double)g_sessSlotsEdit;
+                if(row==1) return (double)g_sessSlotsEdit;   // preset name mirrors the pick
+                if(row==2) return (double)cs.zone;
+                if(row==3) return (double)(cs.customMin / 60);
+                if(row==4) return (double)(cs.startMin / 60);
+                if(row==5) return (double)(cs.startMin % 60);
+                if(row==6) return (double)(cs.endMin / 60);
+                if(row==7) return (double)(cs.endMin % 60);
+                if(row==8) return (double)cs.days;
+                if(row==9) return (double)cs.col;
+                if(row==10) return (double)cs.style;
+                if(row==11) return cs.enabled ? 1.0 : 0.0;
+                return 0; }                      // row 12 = NAV
+   }
+   return 0;
 }
 
 // (THModeFromFlags / SyncTHFlagsFromMode live in GlobalVariables.mqh — the
@@ -4700,9 +4891,11 @@ int PnlApplySet(const int item,const int row,const double v)
          // P-LEGATR (trailing answers the TOP address, row 19): the plan's ATR
          // source. ON = pre-CP leg composite, OFF = the live read (shipped
          // numbers). The relayout re-resolves every plan leg at once.
-         else             { g_useLegATR=(v>0.5);
+         else if(row==19) { g_useLegATR=(v>0.5);
                             RuntimeSettingsSaveOverridesThrottled();   // OV_ALG
                             g_labelsRelayoutNeeded=true; flags=REFRESH_ALL; }
+         else             { CalcAnchorSetOn(v>0.5);   // P-ANCHOR-LAST
+                            flags=REFRESH_ALL; }
          break;
       case 3:   // TH LABELS — single source of truth is g_thLabelsMode;
                 // flags are derived back from it via SyncTHFlagsFromMode()
@@ -5000,8 +5193,51 @@ int PnlApplySet(const int item,const int row,const double v)
          else if(row==11) { return PnlApplySet(2, 10, v); }   // TRADE ROW GAP
          else if(row==12) { return PnlApplySet(2, 11, v); }   // TRADE SIZE
          else if(row==13) { return PnlApplySet(2, 12, v); }   // STAMP GAP
-         break;   // row 14 = NAV (PnlApplySet returns before the switch for kind 5)
-   }
+          break;   // row 14 = NAV (PnlApplySet returns before the switch for kind 5)
+       case 15:  // P-SESS — SESSIONS. Every row here is a g_sess* mirror the
+                 // renderer's own pump reads; the picture is NOT the chart
+                 // render's (SessionsTick owns it, wipes and repaints from the
+                 // mirrors), so the flags stay REFRESH_NONE and the write is
+                 // answered by one tick + the OV_ block. The master (row 0) is
+                 // mute-gated: while F is held the generic path above already
+                 // released the mute and this line stores the family ON.
+          if(row==0)       { g_sessMaster = (v>0.5); }
+          else if(row==1)  { g_sessHistDays = ClampSettingInt((int)MathRound(v),0,SESS_HIST_MAX); }
+          else if(row==2)  { g_sessFutDays  = ClampSettingInt((int)MathRound(v),0,SESS_FUT_MAX); }
+          else if(row==3)  { g_sessHlLines  = (v>0.5); }
+          else if(row==4)  { g_sessHlLabels = (v>0.5); }
+          else if(row==5)  { g_sessRangeText= (v>0.5); }
+          else if(row==6)  { g_sessPrior    = (v>0.5); }
+          else if(row==7)  { g_sessOverlap  = (v>0.5); }
+          else if(row==8)  { g_sessCountdown= (v>0.5); }
+          else if(row==9)  { g_sessAlerts   = (v>0.5); }
+          RuntimeSettingsSaveOverridesThrottled();   // OV_SSON/SSHD/.../SSAL
+          SessionsTick();                            // paint now, not next tick
+          break;
+       case 16: { // P-SESS — SESSION EDITOR. One slot at a time: decode, change
+                  // the ONE field the row owns, encode. Row 0 is not a slot field
+                  // at all — it is the editor's pick (view state), and the pick
+                  // is answered by the caller's rebuild, not by this store.
+          SessSlot cs; SessSlotGet(g_sessSlotsEdit, cs);
+          if(row==0)       { g_sessSlotsEdit = ClampInt((int)MathRound(v),0,SESS_SLOTS-1); }
+          else if(row==1)  { SessSlotFactory(ClampInt((int)MathRound(v),0,SESS_SLOTS-1), cs); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==2)  { cs.zone = ClampInt((int)MathRound(v),0,SZ_CUSTOM); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==3)  { cs.customMin = ClampSettingInt((int)MathRound(v)*60,SESS_CUSTOM_OFF_LO,SESS_CUSTOM_OFF_HI); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==4)  { cs.startMin = ClampInt((int)MathRound(v),0,23)*60 + (cs.startMin%60); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==5)  { cs.startMin = (cs.startMin/60)*60 + ClampInt((int)MathRound(v),0,55); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==6)  { cs.endMin   = ClampInt((int)MathRound(v),0,23)*60 + (cs.endMin%60); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==7)  { cs.endMin   = (cs.endMin/60)*60 + ClampInt((int)MathRound(v),0,55); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==8)  { cs.days = ((int)MathRound(v)) & 127; SessSlotSet(g_sessSlotsEdit, cs); }   // 7 bits, weekend included (the codec packs 0x7F)
+          else if(row==9)  { cs.col = ClampInt((int)MathRound(v),0,7); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==10) { cs.style = ClampInt((int)MathRound(v),0,2); SessSlotSet(g_sessSlotsEdit, cs); }
+          else if(row==11) { cs.enabled = (v>0.5); SessSlotSet(g_sessSlotsEdit, cs); }
+          if(row!=0)                                 // the pick changed nothing painted
+          {
+             RuntimeSettingsSaveOverridesThrottled();   // OV_SS<n>
+             SessionsTick();
+          }
+          break; }
+    }
    if(flags!=REFRESH_NONE)
    {
       UpdateCircularItemStates();
@@ -5275,8 +5511,7 @@ void PnlSetBitmap(const string n,const int x,const int y,const int w,const int h
 //| TV-like via outside chart click / Esc. Same mirrors as card 12 —  |
 //| never duplicated. R-BKSTRIP 2026-09-07; TV-parity 2026-09-07.     |
 //+------------------------------------------------------------------+
-#endif // BIOTAK_PANELS_APPLY_MQH
-// BiotakPanels_Rows.mqh - BiotakPanels split 2026-09-29: exact lines 4851-5983 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_APPLY_MQH// BiotakPanels_Rows.mqh - BiotakPanels split 2026-09-29: exact lines 4851-5983 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_ROWS_MQH
 #define BIOTAK_PANELS_ROWS_MQH
 
@@ -5762,14 +5997,19 @@ void PnlComputeMenuBounds(int &bx, int &by, int &bw, int &bh)
 
    if(g_UI.menuVisible)
    {
-      for(int i = 0; i < CIRC_ITEM_COUNT; i++)
+      // P-UI-161: the seat count and the button size are the BUILT ones — the
+      // safe-zone rect must cover the same grid the paint wrote, not the old 44px 9.
+      // P-UI-195: the side is the SEAT's own (the outer circle draws 32px).
+      const int n  = CircPlacedCount();
+      for(int i = 0; i < n; i++)
       {
          int ix, iy;
          CircLayout(i, ix, iy);
-         mx = MathMin(mx, ix - CIRC_BTN_SIZE/2);
-         my = MathMin(my, iy - CIRC_BTN_SIZE/2);
-         Mx = MathMax(Mx, ix + CIRC_BTN_SIZE/2);
-         My = MathMax(My, iy + CIRC_BTN_SIZE/2);
+         const int bs = CircSeatSize(i);
+         mx = MathMin(mx, ix - bs/2);
+         my = MathMin(my, iy - bs/2);
+         Mx = MathMax(Mx, ix + bs/2);
+         My = MathMax(My, iy + bs/2);
       }
    }
    bx = mx; by = my;
@@ -6199,24 +6439,33 @@ int PnlDualCells(const int item,const int row)
    int n = PnlRowMembers(item,row);
    return n + ((PnlRowExt(item,row)=="") ? 0 : 1);
 }
-int PnlDualCellX(const int item,const int row,const int cell)
+//--- P-UI-171 (2026-10-20): the DUAL row's cell caption is MEASURED, never a
+//--- literal. The width owner reserved a fixed 12px for the LAST caption while
+//--- the cell walk spent the measured advance, so the last caption crossed the
+//--- card's content edge (the product and its own mirror disagreed by 64px).
+//--- ONE owner for the caption, so the width, the seat and the paint cannot
+//--- drift apart (P-DRAW-77's law).
+string PnlDualCapAt(const int item,const int row,const int cell)
 {
    int n = PnlRowMembers(item,row);
-   string extra = PnlRowExt(item,row);
-   int cells = n + ((extra=="") ? 0 : 1);
+   int cells = n + ((PnlRowExt(item,row)=="") ? 0 : 1);
+   if(cell < 0 || cell >= cells) return "";
+   if(cell < n)
+   {
+      string cl,cu,co; int ck,cmn,cmx; double cst;
+      PnlSetDef(item,PnlMemberRow(item,row,cell),ck,cl,cmn,cmx,cst,cu,co);
+      return PnlShortCap(cl);
+   }
+   return PnlRowExt(item,row);
+}
+int PnlDualCellX(const int item,const int row,const int cell)
+{
+   int cells = PnlDualCells(item,row);
    int x = 0;
    for(int i=0;i<cells;i++)
    {
-      string txt = "";
-      if(i < n)
-      {
-         string cl,cu,co; int ck,cmn,cmx; double cst;
-         PnlSetDef(item,PnlMemberRow(item,row,i),ck,cl,cmn,cmx,cst,cu,co);
-         txt = PnlShortCap(cl);
-      }
-      else txt = extra;
       if(i == cell) return x;
-      x += PNL_DUAL_SW_W + 6 + PnlTextW(txt,PNL_PT_CAP) + 14;   // P-UI-30: real advance
+      x += PNL_DUAL_SW_W + 6 + PnlTextW(PnlDualCapAt(item,row,i),PNL_PT_CAP) + 14;   // P-UI-30: real advance
    }
    return x;
 }
@@ -6286,7 +6535,10 @@ int PnlDualTotalW(const int item,const int row)
    {
       int a = PnlDualCellX(item,row,i);
       int b = PnlDualCellX(item,row,i+1);
-      w = (i == cells-1) ? a + PNL_DUAL_SW_W + 6 + 12 : b;
+      //--- P-UI-171: the LAST cell carries the caption's own advance (+2 for the
+      //--- caption's seat past the switch, -2 from the trailing gap). The old
+      //--- literal 12 left the last caption 52px past the card's content edge.
+      w = (i == cells-1) ? a + PNL_DUAL_SW_W + 6 + PnlTextW(PnlDualCapAt(item,row,i),PNL_PT_CAP) + 12 : b;
    }
    return w;
 }
@@ -6331,6 +6583,102 @@ bool PnlCsetHit(const int mx,const int my,int &item,int &row,int &setRow)
          if(mx >= cx-3 && mx <= cx+PNL_CSET_W+3 && my >= ry+13 && my <= ry+41)
          {
             item=it; row=r; setRow=PnlMemberRow(it,r,i);
+            return true;
+         }
+      }
+   }
+   return false;
+}
+
+//--- CHIPS (P-SESS, kind 10): the session editor's two grids. `opts` names the
+//--- table the taps write — "days" = the 7-bit weekday mask (one cell per day,
+//--- tap = XOR its bit), "color" = the 8 session inks (tap = pick, one lit).
+//--- The count IS the table's height; the geometry is ONE owner, read by the
+//--- painter, this hit test and the row refresher, so a cell can never move
+//--- under a hand that still points at it.
+int PnlChipsCount(const int item,const int row)
+{
+   int rk=0; string rl="",ru="",ro=""; int rMin=0,rMax=0; double rst=1;
+   PnlRowDef(item,row,rk,rl,rMin,rMax,rst,ru,ro);
+   if(ro == "days")  return 7;
+   if(ro == "color") return 8;
+   return 0;
+}
+//--- x0/cy = the FIRST cell's top-left; x0 right-aligns the strip inside the
+//--- row's own column (the DUAL cells' side), cy is the row's content rung.
+void PnlChipsGeom(const int item,const int row,int &x0,int &cy,int &cw,int &ch,
+                  int &gap,int &n)
+{
+   cw=PNL_SCHIP_W; ch=PNL_SCHIP_H; gap=PNL_SCHIP_GAP; n=PnlChipsCount(item,row);
+   int total=n*cw+(n-1)*gap;
+   x0=PnlRowBaseX(item,row)+PNL_WEL-PNL_PAD_X-total;
+   //--- P-UI-179 (2026-10-20): the chips ride the SWATCH STRIP's line, not the
+   //--- row's top line. The caption sits on the top line (ry+PNL_CAP_Y) and the
+   //--- strip was drawn on the SAME line - so the caption lay on the swatches.
+   cy=g_PnlY[item]+PNL_HEAD_H+PnlRowLine(item,row)*PNL_ROW_H+PNL_QSW_Y;
+}
+//--- the value a tap on `cell` writes. The ONE owner of the two tables' tap
+//--- semantics (the press chain reads this, never its own copy).
+double PnlChipsNextValue(const int item,const int row,const int cell)
+{
+   int n=PnlChipsCount(item,row);
+   double cv=PnlCurrent(item,row);
+   if(cell < 0 || cell >= n) return cv;
+   int rk=0; string rl="",ru="",ro=""; int rMin=0,rMax=0; double rst=1;
+   PnlRowDef(item,row,rk,rl,rMin,rMax,rst,ru,ro);
+   if(ro == "days") return (double)(((int)MathRound(cv)) ^ (1 << cell));
+   return (double)cell;   // "color": the tap IS the pick
+}
+//--- the three-letter day captions the day cells wear (Mon = bit 0, the
+//--- engine's own SessMaskBitOfDow order). Two tables so every reader spells
+//--- a day the same way.
+string PnlDayShort(const int i)
+{
+   switch(i % 7)
+   {
+      case 0: return "Mo";
+      case 1: return "Tu";
+      case 2: return "We";
+      case 3: return "Th";
+      case 4: return "Fr";
+      case 5: return "Sa";
+   }
+   return "Su";
+}
+string PnlDayLong(const int i)
+{
+   switch(i % 7)
+   {
+      case 0: return "Monday";
+      case 1: return "Tuesday";
+      case 2: return "Wednesday";
+      case 3: return "Thursday";
+      case 4: return "Friday";
+      case 5: return "Saturday";
+   }
+   return "Sunday";
+}
+//--- chips cell under the cursor -> (item, display row, cell)
+bool PnlChipsHit(const int mx,const int my,int &item,int &row,int &cell)
+{
+   item=-1; row=-1; cell=-1;
+   if(g_PnlOpen < 0) return false;
+   int it = g_PnlOpen;
+   if(!PnlSpecCard(it)) return false;
+   int n  = PnlRowsCount(it);
+   for(int r=0;r<n;r++)
+   {
+      if(PnlRowKind(it,r) != PNL_K_CHIPS) continue;
+      int cc = PnlChipsCount(it,r);
+      if(cc <= 0) continue;
+      int x0,cy,cw,cH,cg,cn;
+      PnlChipsGeom(it,r,x0,cy,cw,cH,cg,cn);
+      for(int i=0;i<cc;i++)
+      {
+         int cx = x0 + i*(cw+cg);
+         if(mx >= cx-3 && mx <= cx+cw+3 && my >= cy-3 && my <= cy+cH+3)
+         {
+            item=it; row=r; cell=i;
             return true;
          }
       }
@@ -6417,8 +6765,7 @@ bool PnlColorAddHit(const int mx,const int my,int &item,int &row)
    return false;
 }
 
-#endif // BIOTAK_PANELS_ROWS_MQH
-// BiotakPanels_Build.mqh - BiotakPanels split 2026-09-29: exact lines 5984-7363 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_ROWS_MQH// BiotakPanels_Build.mqh - BiotakPanels split 2026-09-29: exact lines 5984-7363 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_BUILD_MQH
 #define BIOTAK_PANELS_BUILD_MQH
 
@@ -6534,6 +6881,59 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
                      cx+PNL_CSET_W/2, ry+6, PnlCsetKey(cl), PNL_CLR_MUTED, PNL_PT_CSET);
          ObjectSetString(0,PnlName(item,row,"CSL"+IntegerToString(i)),OBJPROP_FONT,BioChromeFont());
          ObjectSetInteger(0,PnlName(item,row,"CSL"+IntegerToString(i)),OBJPROP_ANCHOR,ANCHOR_UPPER);
+      }
+      return;
+   }
+
+   // ── CHIPS (P-SESS, kind 10): the session editor's two grids — 7 day cells
+   //    (tap flips that weekday's mask bit) or 8 ink swatches (tap picks the
+   //    slot's colour), drawn right-aligned in the row's own column. The
+   //    caption rides the TOP line (the COL row's pattern) because eight 30px
+   //    cells leave the 280px content column no room for a left label; the
+   //    cell geometry comes from PnlChipsGeom — the same owner the hit test
+   //    and the refresher read, so paint and hand can never disagree.
+   if(kind == PNL_K_CHIPS)
+   {
+      if(opts == "days" || opts == "color")
+      {
+         int x0,cy,cw,cH,cg,cN;
+         PnlChipsGeom(item,row,x0,cy,cw,cH,cg,cN);
+         double cv = PnlCurrent(item,row);
+         int cvI  = (int)MathRound(cv);
+         PnlSetBitmap(PnlName(item,row,"GL"), px+PNL_PAD_X-1, ry+PNL_CAP_Y,
+                      PNL_GLYPH_CANVAS, PNL_GLYPH_CANVAS,
+                      PnlGlyphRes(item,PnlRowIcon(item,row),false), Z_PANEL_GLYPH);
+         PnlSetLabel(PnlName(item,row,"L"), px+PNL_PAD_X+PNL_GLYPH_VIS+7, ry+PNL_CAP_Y,
+                     PnlFit(label,PNL_PT_LBL_SM,PNL_WEL-2*PNL_PAD_X-PNL_GLYPH_VIS-7),
+                     PNL_CLR_LABEL, PNL_PT_LBL_SM);
+         ObjectSetString(0,PnlName(item,row,"L"),OBJPROP_FONT,BioChromeFont());
+         for(int i=0;i<cN;i++)
+         {
+            int cx = x0 + i*(cw+cg);
+            string nm = PnlName(item,row,"SC"+IntegerToString(i));
+            if(opts == "days")
+            {
+               bool on = ((cvI >> i) & 1) != 0;
+               PnlSetRect(nm, cx, cy, cw, cH, on ? PNL_CLR_ACCENT : PNL_CLR_SEG_OFF);
+               ObjectSetInteger(0,nm,OBJPROP_BORDER_COLOR, on ? a1 : PNL_CLR_SEG_BD);
+               ObjectSetString(0,nm,OBJPROP_TOOLTIP,"Toggle "+PnlDayLong(i));
+               PnlSetLabel(PnlName(item,row,"SCL"+IntegerToString(i)),
+                           cx+cw/2, cy+5, PnlDayShort(i),
+                           on ? PNL_CLR_CARD : PNL_CLR_SEG_TX, PNL_PT_CSET);
+               ObjectSetString(0,PnlName(item,row,"SCL"+IntegerToString(i)),OBJPROP_FONT,BioChromeFont());
+               ObjectSetInteger(0,PnlName(item,row,"SCL"+IntegerToString(i)),OBJPROP_ANCHOR,ANCHOR_UPPER);
+            }
+            else
+            {
+               color sc = SessColorOf(i);
+               bool sel = (cvI == i);
+               PnlSetRect(nm, cx, cy, cw, cH, sc);
+               ObjectSetInteger(0,nm,OBJPROP_BORDER_COLOR, sel ? a1 : PnlSwatchBorder(sc,PNL_CLR_CARD));
+               ObjectSetString(0,nm,OBJPROP_TOOLTIP,
+                               SessColorName(i) + (sel ? " (current)" : " — click to use"));
+               ObjectDelete(0,PnlName(item,row,"SCL"+IntegerToString(i)));   // swatches carry no letter
+            }
+         }
       }
       return;
    }
@@ -7440,9 +7840,9 @@ void PnlDestroy(const int item)
 //| Drag-to-move release — lock the spot in for future opens and     |
 //| persist it (defined early so the pointer finalizer can call it). |
 //+------------------------------------------------------------------+
-// P-UI-140q: symbol-free key for panel fraction — same pattern as GVHomeFracName.
-// A panel dragged on EURUSD must appear at the same relative place on GBPUSD.
-string PnlFracKey(const int item) { return "BIOMENU_PNL_" + IntegerToString(item) + "_F"; }
+// P-UI-140q/P-UI-165: the panel's own place — SYMBOL in, CHART ID never (per session).
+// Pre-165 shared spelling is the read-only migration source in `InitializeUISupport`.
+string PnlFracKey(const int item) { return "BIOMENU_" + _Symbol + "_PNL_" + IntegerToString(item) + "_F"; }
 // Pack two 0..1 fractions into one double: both scaled to 0..9999 integers.
 // packed = fx_int * 10000 + fy_int  (fx_int and fy_int each 0..9999)
 // This keeps the encoding invertible for any fx,fy in [0,1].
@@ -7463,8 +7863,8 @@ void PnlFracUnpack(const double packed, double &fx, double &fy)
 void PnlCommitMove(const int item)
 {
    g_PnlManualPos[item] = true;
-   // P-UI-140p/q: store as symbol-free FRACTION so the position survives restarts,
-   // resizes, monitor changes AND symbol switches. Old keyed keys are deleted.
+   // P-UI-140p/q/165: store as a FRACTION (pair-scoped) so the position survives
+   // restarts and resizes; another pair keeps its own place. Old keyed keys are gone.
    int rcw = 0, rch = 0;
    if(HomeChartSizeRaw(rcw, rch))
    {
@@ -7815,9 +8215,13 @@ void ChartPointerFinalizeOnUps()
      if(s_palMoveArmed) PalMoveDisarm();   // spot already parked on the proven move
      //--- mirror the move-path release: the travelled spot becomes home (saved),
      //--- the release click is spent, and the frozen layout may re-derive.
-     if(orbDragged) { GVHomeAnswerNew("ORB"); CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates(); UISuppressNextClick(); }
-     if(orbLive) SubRelayoutIfNeeded();
-     ChartScrollReconcile();
+      if(orbDragged) { GVHomeAnswerNew("ORB"); CircOrbHomeSet(g_UI.menuX, g_UI.menuY); SaveUIStates(); UISuppressNextClick(); }
+      if(orbLive) SubRelayoutIfNeeded();
+      // P-UI-161: the ring's SEAT COUNT was frozen for the whole drag too — the
+      // stationary release is the second place it may change (the moving release
+      // is BiotakMenu_C's), so it re-derives on the same edge the sub-menu does.
+      if(orbLive) CircRelayoutIfNeeded();
+      ChartScrollReconcile();
 }
 
 // Commit a pending TEXT edit (TV "Add text" ≈ Ok-on-close): clicking away
@@ -7860,8 +8264,7 @@ void PnlPublishCover()
    else { g_UIPPalRX = -1; g_UIPPalRY = -1; g_UIPPalRW = 0; g_UIPPalRH = 0; }
 }
 
-#endif // BIOTAK_PANELS_BUILD_MQH
-// BiotakPanels_Hit.mqh - BiotakPanels split 2026-09-29: exact lines 7364-8741 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_BUILD_MQH// BiotakPanels_Hit.mqh - BiotakPanels split 2026-09-29: exact lines 7364-8741 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_HIT_MQH
 #define BIOTAK_PANELS_HIT_MQH
 
@@ -9265,8 +9668,7 @@ bool PnlGestureConsumed()
    return (g_UIPressSeq != 0 && s_PnlActedSeq == g_UIPressSeq);
 }
 
-#endif // BIOTAK_PANELS_HIT_MQH
-// BiotakPanels_Route.mqh - BiotakPanels split 2026-09-29: exact lines 8742-9983 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_HIT_MQH// BiotakPanels_Route.mqh - BiotakPanels split 2026-09-29: exact lines 8742-9983 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_ROUTE_MQH
 #define BIOTAK_PANELS_ROUTE_MQH
 
@@ -9585,6 +9987,19 @@ void PnlHandleMouseMove(const int mx,const int my,const bool leftDown,const bool
          if(flags!=REFRESH_NONE) RefreshDisplay(flags);
          return;
       }
+      // chips cell → the session editor's day / colour grid (P-SESS kind 10).
+      // The value a tap writes comes from PnlChipsNextValue — the ONE owner of
+      // the two tables' tap semantics — never from arithmetic copied here.
+      int chi,chr,chc;
+      if(PnlChipsHit(mx,my,chi,chr,chc))
+      {
+         double nv=PnlChipsNextValue(chi,chr,chc);
+         int flags=PnlApply(chi,chr,nv);
+         PnlUpdateRow(chi,chr);
+         UIPressAct("chip");   // P-UI-74: one gesture, one owner (both channels)
+         if(flags!=REFRESH_NONE) RefreshDisplay(flags);
+         return;
+      }
       // "+" quick-add cell → open the full picker for the row's target
       int qai,qar;
       if(PnlColorAddHit(mx,my,qai,qar))
@@ -9794,6 +10209,34 @@ void PnlUpdateRow(const int item,const int row)
             string res=on ? PnlAccentRes(item,"pnl_dsw_on") : "::Files\\Icons\\pnl_dsw_off.bmp";
             ObjectSetString(0,swn,OBJPROP_BMPFILE,0,res);
             ObjectSetString(0,swn,OBJPROP_BMPFILE,1,res);
+         }
+      }
+      return;
+   }
+   if(kind==PNL_K_CHIPS)   // P-SESS: reswap every cell's face + border (and a day
+   {                       // letter's ink) — the same two-table switch the painter
+      int cc=PnlChipsCount(item,row);   // and the tap read, so no third copy exists
+      int nv=(int)MathRound(val);
+      color a1=PnlAccentA1(PnlCardAccent(item));
+      for(int i=0;i<cc;i++)
+      {
+         string cn=PnlName(item,row,"SC"+IntegerToString(i));
+         if(ObjectFind(0,cn)<0) continue;
+         if(opts=="days")
+         {
+            bool on=((nv>>i)&1)!=0;
+            ObjectSetInteger(0,cn,OBJPROP_BGCOLOR, on ? PNL_CLR_ACCENT : PNL_CLR_SEG_OFF);
+            ObjectSetInteger(0,cn,OBJPROP_BORDER_COLOR, on ? a1 : PNL_CLR_SEG_BD);
+            string ln=PnlName(item,row,"SCL"+IntegerToString(i));
+            if(ObjectFind(0,ln)>=0)
+               ObjectSetInteger(0,ln,OBJPROP_COLOR, on ? PNL_CLR_CARD : PNL_CLR_SEG_TX);
+         }
+         else
+         {
+            color sc=SessColorOf(i);
+            ObjectSetInteger(0,cn,OBJPROP_BGCOLOR, sc);
+            ObjectSetInteger(0,cn,OBJPROP_BORDER_COLOR,
+                             (nv==i) ? a1 : PnlSwatchBorder(sc,PNL_CLR_CARD));
          }
       }
       return;
@@ -10512,8 +10955,7 @@ void UIRebuildForMetrics()
    RepaintForDiscreteAction();   // P-PERF-24's owner: a discrete event paints now
 }
 
-#endif // BIOTAK_PANELS_ROUTE_MQH
-// BiotakPanels_Life.mqh - BiotakPanels split 2026-09-29: exact lines 9984-10399 of BiotakPanels.mqh, byte-identical, zero renames.
+#endif // BIOTAK_PANELS_ROUTE_MQH// BiotakPanels_Life.mqh - BiotakPanels split 2026-09-29: exact lines 9984-10399 of BiotakPanels.mqh, byte-identical, zero renames.
 #ifndef BIOTAK_PANELS_LIFE_MQH
 #define BIOTAK_PANELS_LIFE_MQH
 

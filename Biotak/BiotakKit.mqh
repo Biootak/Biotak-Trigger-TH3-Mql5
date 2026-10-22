@@ -87,14 +87,15 @@ static UIState g_UI;
 
 string GetGVName(string key) { return g_UI.gvPrefix + key; }
 
-//--- settings-panel geometry (drag-to-move persistence; panel slots 0..14,
-//     1 = the main Zones & Levels card; 12 = Base Box card; 14 = General Settings).
+//--- settings-panel geometry (drag-to-move persistence; panel slots 0..16,
+//     1 = the main Zones & Levels card; 12 = Base Box card; 14 = General Settings,
+//     15 = Sessions, 16 = Session Editor).
 //     PNL_COUNT lives here (Kit is included before Panels) so every loop
 //     and slot array in both files stays in sync from one define.
-#define PNL_COUNT 15
-static int  g_PnlX[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-static int  g_PnlY[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
+#define PNL_COUNT 17
+static int  g_PnlX[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+static int  g_PnlY[PNL_COUNT] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+static bool g_PnlManualPos[PNL_COUNT] = {false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false};
 static bool g_PnlPinSpot = false;
 
 //==============================================================================
@@ -342,6 +343,10 @@ void UIDragBudgetEnd()
 //==============================================================================
 // INIT / SAVE / PER-TICK
 //==============================================================================
+// P-UI-165: the pre-165 chart-free fraction — a READ-ONLY migration source. It is
+// never written and never deleted: every other pair still reads it until its own
+// first attach migrates it (a pair that never attached again keeps working).
+string PnlFracKeyShared(const int item) { return "BIOMENU_PNL_" + IntegerToString(item) + "_F"; }
 void InitializeUISupport()
 {
    RuntimeSettingsLoadOverrides();
@@ -349,16 +354,18 @@ void InitializeUISupport()
    RestoreDiscreteToggles();   // P-UI-142: chart key, else the OV_-seeded mirror (restart-durable; the early dialog-fallback block stays for Lite)
    LoadPalRecent();
 
-   // P-UI-140p/q: panel drag positions.
-   // Read priority: (1) symbol-free fraction BIOMENU_PNL_{i}_F  [canonical]
-   //                (2) symbol-prefixed fraction PNLPF{i}        [140p legacy, migrate]
-   //                (3) symbol-prefixed pixel    PNLP{i}         [pre-140p legacy, migrate]
+   // P-UI-140p/q/165: panel drag positions.
+   // Read priority: (1) pair-scoped fraction BIOMENU_{SYM}_PNL_{i}_F [canonical]
+   //                (2) chart-free fraction BIOMENU_PNL_{i}_F        [140q legacy, migrate]
+   //                (3) symbol-prefixed fraction PNLPF{i}           [140p legacy, migrate]
+   //                (4) symbol-prefixed pixel    PNLP{i}            [pre-140p legacy, migrate]
    // A fraction is re-derived against the LIVE window so the panel comes back to the
    // same relative place after a restart, resize, monitor change or symbol switch.
    int kcw = 0, kch = 0; HomeChartSize(kcw, kch);
    for(int i = 0; i < PNL_COUNT; i++)
    {
-      string cfk = PnlFracKey(i);                              // canonical symbol-free
+      string cfk = PnlFracKey(i);                              // canonical, pair-scoped
+      string sfk = PnlFracKeyShared(i);                        // P-UI-165 legacy, read-only
       string ofk = GetGVName("PNLPF" + IntegerToString(i));   // old symbol-prefixed frac
       string opk = GetGVName("PNLP"  + IntegerToString(i));   // old symbol-prefixed pixel
       if(GlobalVariableCheck(cfk))
@@ -369,6 +376,18 @@ void InitializeUISupport()
          g_PnlX[i] = (int)MathRound(fx * kcw);
          g_PnlY[i] = (int)MathRound(fy * kch);
          g_PnlManualPos[i] = true;
+      }
+      else if(GlobalVariableCheck(sfk))
+      {
+         // P-UI-165: the pre-165 chart-free fraction — adopt the place and snapshot it
+         // into the pair's own key. The shared key is NEVER written or deleted: every
+         // other pair still reads it until it migrates (its own first attach).
+         double fx = 0, fy = 0;
+         PnlFracUnpack(GlobalVariableGet(sfk), fx, fy);
+         g_PnlX[i] = (int)MathRound(fx * kcw);
+         g_PnlY[i] = (int)MathRound(fy * kch);
+         g_PnlManualPos[i] = true;
+         GlobalVariableSet(cfk, PnlFracPack(fx, fy));
       }
       else if(GlobalVariableCheck(ofk))
       {
@@ -420,6 +439,7 @@ void RefreshUIPerTick()
    UpdateHTFFormingCandle();
    HTFEnsureDrawn();   // self-healing full HTF draw after TF switch / missing data (O(1) steady state)
    CircTipTick();   // armed hover tooltip (dwell-gated, ungated cheap checks)
+   CircHealRingStep();   // P-UI-163: one seat's existence probe per tick (2 ObjectFind, 0 writes while whole)
 
    static uint s_LastMenuSync = 0;
    uint now = GetTickCount();
@@ -440,6 +460,8 @@ void RefreshUIPerTick()
       // warm chart pays cache hits and compares and rebuilds nothing.
       BaseKnotEngPump();
       BaseKnotSyncBadges();   // pixel badges re-glued after scroll/zoom (cheap, runs only with boxes)
+      BaseKnotNoteWitness();   // P-BK-115a: the note keeper's own pulse — silent on a still chart
+      BaseKnotPipWitness();    // P-BK-116: the line-end column's numbers — silent when they did not move
       BaseKnotHintTick();     // result-hint auto-hide pump
    }
    TradePlanLiveTick();   // right-side trade block: 2s-throttled, change-guarded (P-LBL-03)

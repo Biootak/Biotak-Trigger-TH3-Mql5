@@ -766,26 +766,12 @@ void TH3InfoFamilyReposition(const string base, const int topY)
 // Callers: the reposition pass (rare layout moments) and the attach restore.
 void TH3InfoOrphanPlateSweep()
 {
-    // P-MT5-PERF: THE CHART-WIDE WALK, GATED ON THE ONE NUMBER THAT SAYS
-    // WHETHER THE CHART CHANGED. Its own header calls this a rare-layout
-    // moment, but the reposition pass reaches it on EVERY frame body
-    // (2-5 Hz), so it was walking every object on the chart ~2000 times a
-    // second to delete something that is almost never there.
-    //
-    // The gate is EXACT, not heuristic: a plate can only become an orphan
-    // when one of its rows is deleted, and a deletion changes the chart's
-    // object total. Same total => no row died since the last sweep => there
-    // is nothing new to find. The one call this replaces costs one read.
-    //
-    // Worst case is benign: if a row dies in the same frame that another
-    // object is born, the total is unchanged, the sweep waits, and the very
-    // next frame (with the count stable) removes the plate. One frame of an
-    // empty plate is not a defect; a permanent one would be.
-    static int s_lastSweptTotal = -1;
-    const int totalNow = ObjectsTotal(0, -1, -1);
-    if(totalNow == s_lastSweptTotal) return;
-    s_lastSweptTotal = totalNow;
-    for(int i = totalNow - 1; i >= 0; i--)
+    // MT4 parity: no total-count gate. A row can die in the same frame that
+    // another object is born, leaving the total unchanged; a gate on that
+    // number would then never see the orphan. The walk reads every object but
+    // only `ABCD_Pattern_*_InfoPlate` names are candidates, and it runs on
+    // layout/attach moments rather than every tick.
+    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
     {
         string nm = ObjectName(0, i, -1, -1);
         if(StringFind(nm, "ABCD_Pattern_") != 0) continue;
@@ -903,6 +889,7 @@ void TH3InfoFamilyDropActive()
 void TH3InfoCaptionHeal()
 {
     if(g_activeABCDPattern == "") return;
+    if(IsIndicatorHidden()) return;   // P-UI-93: no caption heal under a hidden indicator
     string base = g_activeABCDPattern;
     // P-TH3-INFO-13 (2026-09-22): the caption is a TIMED VISITOR first. The
     // user's order: «لیبل مود ها و لیبل abcd باید بعد چند ثانیه حذف بشن
@@ -1016,6 +1003,7 @@ int TH3InfoFamilyDraw(const string base, const string text,
 void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, double pB,
                      datetime tC, double pC, datetime tD = 0, double pD = 0)
 {
+    if(IsIndicatorHidden()) return;   // P-UI-93: a hidden indicator paints nothing
     #ifdef ENABLE_DEBUG_LOGS
     Print("==================== DrawABCDPattern called | Name: ", mainObjName);
     Print("   A: ", TimeToString(tA), " @ ", DoubleToString(pA, Digits));
@@ -1948,23 +1936,16 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             string bottomBorder = zoneBoxName + "_B_Bottom";
             string leftBorder = zoneBoxName + "_B_Left";
 
-            // R-RENDER-ENGINE: the EMPTY outline is its three strokes. Zones are
-            // NOT ladder-masked (P-TH3-DISC: every pattern keeps its zones), so
-            // the strokes always stage visible. The object sweeps in both style
-            // branches are create-time logistics the one-time family sweep at
-            // the top already covers - they all sit under `if(!rbr)`.
-#ifdef BIOTAK_RENDER_ENGINE
-            if(rbr)
-            {
-                RBridgePatternSeg(topBorder, (long)startTime, upperZone, (long)endTime, upperZone,
-                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, inpABCDExtendCD);
-                RBridgePatternSeg(bottomBorder, (long)startTime, lowerZone, (long)endTime, lowerZone,
-                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, inpABCDExtendCD);
-                RBridgePatternSeg(leftBorder, (long)startTime, lowerZone, (long)startTime, upperZone,
-                                  zoneColor, (int)inpTH3ZoneBorderStyle, inpTH3ZoneBorderWidth, false);
-            }
-            if(!rbr)
-#endif
+            // P-MT5-PARITY (2026-10-21) - R-RENDER-ENGINE: THE EMPTY OUTLINE'S THREE STROKES ARE OBJECTS IN
+            // EVERY BUILD. MT4 draws them as OBJ_TREND with OBJPROP_BACK=true -
+            // BEHIND the candles - and the `_B_Left` vertical is the outline's
+            // closing edge. The canvas groups the whole pattern family on its
+            // FRONT layer (above the candles) and has no slot for one stroke
+            // behind them, so these three stay objects: three small objects per
+            // pattern, not one per level, and the pattern delete path's prefix
+            // sweep already takes them with the family. The FILLED family below
+            // keeps its rectangle as an object too - MT4's filled band is ONE
+            // rectangle whose fill AND border are both in front of the candles.
             {
             if(s_zoneStyleFamily != (int)inpTH3ZoneStyle) {
                 if(ObjectFind(0, zoneUpperName) >= 0) ObjectDelete(0, zoneUpperName);
@@ -2041,9 +2022,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 if((int)ObjectGetInteger(0, leftBorder, OBJPROP_WIDTH) != inpTH3ZoneBorderWidth)
                     ObjectSetInteger(0, leftBorder, OBJPROP_WIDTH, inpTH3ZoneBorderWidth);
             }
-#ifdef BIOTAK_RENDER_ENGINE
-            }   // if(!rbr): the object family only
-#endif
+            }   // the outline's object family - every build
         }
         else {
             // BOX_FILLED: single filled rectangle zone
@@ -2840,6 +2819,10 @@ void TH3PivotMarkersUpdate()
 // carries the full A/B/C/D model.
 void TH3HitPivotForward()
 {
+    // P-UI-160b: the shadow must not advance under the F mute, or the first
+    // tick after show reads the proof as already carried and the ladder never
+    // comes back on a chart that only moved while hidden.
+    if(IsIndicatorHidden()) return;
     if(g_activeABCDPattern == "") return;
     TH3Pattern pat;
     if(!TH3PatternStoreGet(g_activeABCDPattern, pat)) return;

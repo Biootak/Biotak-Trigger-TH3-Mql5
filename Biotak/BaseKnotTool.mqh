@@ -255,6 +255,7 @@
 // text size). Restoring the old look = BKInfoFontPt() returning PnlPt(BK_PT_INFO).
 #define BK_PT_INFO   8    // the box' [H Pips | R:R] readout (P-BK-27: retired size)
 #define BK_PT_BADGE  8    // the retired badge (one-line restorable)
+#define BK_PT_PIP    7    // P-BK-116: the line-end pip/money column (the smallest readable row)
 #define BK_IDLE    0
 #define BK_ARMED   1   // menu hidden, waiting for the first corner click
 #define BK_PREVIEW 2   // first corner set, rubber-band follows the cursor
@@ -329,6 +330,16 @@
 //--- not compile, so a domain-half module that read it would break Lite (P-BUILD-01).
 #define BK_NOTE_EDGE_MARGIN  4     // px the plate keeps from the window's top and left edges
 #define BK_NOTE_BOTTOM_SAFE 20     // px the plate keeps from the bottom edge (the date-scale bar)
+//--- BKCORNER-ON (2026-10-20): the note has ONE home, and it WRAPS. MT4 truncates every
+//--- object's text at 63 characters, and the note's own face is longer than that on a
+//--- normal node - the type at the end was being cut away. The corner readout is split on
+//--- its own " | " boundaries into whole rows, and the plate behind it grows with them.
+#define BK_INFO_TEXT_MAX 63        // MT4's own cap for one OBJ_LABEL's OBJPROP_TEXT
+#define BK_INFO_MAX_ROWS 6         // the family's fixed ceiling (6 x 63 = 378 chars)
+#define BK_CORNER_PAD_X  8         // px of plate on each side of the corner readout's ink
+#define BK_CORNER_PAD_Y  4         // px of plate above and below the corner readout's ink
+#define BK_CORNER_ROW_GAP 4        // px between two corner rows (a toast, not a paragraph)
+#define BK_CORNER_TOAST_MS 3000    // the toast's own life: 3 s, then the family goes
 //--- BKNODERUNG-OFF (P-BK-75, 2026-09-17): P-BK-47 below IS RETIRED. It named the type
 //--- by a RUNG DISTANCE, which was a DURATION in disguise; the user replaced it with the
 //--- box' own HEIGHT against the movement abilities (that TF's own TH) — see the
@@ -450,6 +461,8 @@ struct BaseKnotBox
    int    baseTFMin; // P-BK-36/38: the class LAST published (0 = legacy/unset) — the TF the
                      //              note names, the TF the node's LENGTH is classed by AND the
                      //              TF the break's story is read on
+   int    ownerTFMin; // P-BK-114: the ruler's owner TF from the box height (240%..360% of
+                     //              that TF's ATR); 0 = not measured yet
    int    nodeSide;  // P-BK-47/46: the SIDE the break's story names (0 = none) — published so
                      //              the live-price follow leaves a named trade alone. (The node's
                      //              TIME is not kept here: P-BK-77 finds it from the box' own
@@ -571,9 +584,11 @@ struct BaseKnotNode
     //--- one at the same price were typed by the SAME number — the user's own call was that
     //--- «به جای th باید از atr استفاده بشه».
     double   height;   // top - bot — «طول گره» is «ارتفاع باکس»
-    double   abTrig;   // the node's own time's ATR - the trigger band (the ONE measured number)
-    double   abPat;    // the pattern time's band - ATR x the ladder's own scale
-    double   abStr;    // the structure time's band - the pattern band scaled again
+    double   abTrig;   // the node's own time's ATR - the trigger band (read at the anchor)
+    double   abPat;    // the pattern time's ATR - read at the same anchor (derived only while cold)
+    double   abStr;    // the structure time's ATR - read at the same anchor (derived only while cold)
+    bool     abPatRead; // true = abPat is the pattern rung's OWN row, not the √-law fallback
+    bool     abStrRead; // true = abStr is the structure rung's OWN row, not the √-law fallback
    //--- P-BK-79: THE BAR ALL OF THE ABOVE WAS READ AT — the box' own story end (`storyT`),
    //--- or 0 for the live sizing preview, which has no base yet and asks for the live row.
    //--- Published for the same reason the abilities are: the tooltip prints the bands off
@@ -597,6 +612,17 @@ int BaseKnotFind(const string id)
    for(int i = 0; i < ArraySize(g_bkBoxes); i++)
       if(g_bkBoxes[i].id == id) return i;
    return -1;
+}
+// P-ANCHOR-LAST: a box' calculation time is its OWN story end (`storyT`, the
+// bar its base note/plan is read at). Only a box whose story is not ready
+// degrades to its right edge, never to "now".
+datetime BaseKnotAnchorAt(const string id)
+{
+   int k = BaseKnotFind(id);
+   if(k >= 0 && g_bkBoxes[k].storyT > 0) return g_bkBoxes[k].storyT;
+   string box = BaseKnotBoxName(BaseKnotPrefix(id));
+   if(ObjectFind(0, box) >= 0) return (datetime)ObjectGetInteger(0, box, OBJPROP_TIME, 1);
+   return 0;
 }
 static int         g_bkState      = BK_IDLE;
 static datetime    g_bkT1         = 0;
@@ -660,6 +686,45 @@ static double s_bkEngHunt[BK_ENG_ROW_MAX];
 static double s_bkEngTP1[BK_ENG_ROW_MAX];
 static double s_bkEngTP2[BK_ENG_ROW_MAX];
 static double s_bkEngTP3[BK_ENG_ROW_MAX];
+//--- P-BK-113: the OWNER-TF ATR the note's last line prints. The owner walk
+//--- lives ABOVE this module (ATR is not a class input), so the pump pushes the
+//--- one selected box' lower rungs here; the note only reads them back.
+#define BK_OWNER_ATR_MAX 12
+static int      s_bkOwnerTF[BK_OWNER_ATR_MAX];
+static datetime s_bkOwnerAnchor[BK_OWNER_ATR_MAX];
+static double   s_bkOwnerATR[BK_OWNER_ATR_MAX];
+static int      s_bkOwnerN    = 0;
+static int      s_bkOwnerNext = 0;
+void BaseKnotOwnerATRPush(const int tfMin, const datetime anchor, const double atr)
+{
+   if(tfMin <= 0) return;
+   datetime an = (anchor > 0 ? anchor : 0);
+   int slot = -1;
+   for(int i = 0; i < s_bkOwnerN; i++)
+      if(s_bkOwnerTF[i] == tfMin && s_bkOwnerAnchor[i] == an) { slot = i; break; }
+   if(slot < 0)
+   {
+      slot = s_bkOwnerNext;
+      s_bkOwnerNext = (s_bkOwnerNext + 1) % BK_OWNER_ATR_MAX;
+      if(s_bkOwnerN < BK_OWNER_ATR_MAX) s_bkOwnerN++;
+   }
+   s_bkOwnerTF[slot] = tfMin;
+   s_bkOwnerAnchor[slot] = an;
+   s_bkOwnerATR[slot] = (atr > 0.0 ? atr : 0.0);
+}
+bool BaseKnotOwnerATRGet(const int tfMin, const datetime anchor, double &atr)
+{
+   atr = 0.0;
+   if(tfMin <= 0) return false;
+   datetime an = (anchor > 0 ? anchor : 0);
+   for(int i = 0; i < s_bkOwnerN; i++)
+      if(s_bkOwnerTF[i] == tfMin && s_bkOwnerAnchor[i] == an)
+      {
+         atr = s_bkOwnerATR[i];
+         return (atr > 0.0);
+      }
+   return false;
+}
 static int    s_bkEngN     = 0;
 static uint   s_bkEngEpoch = 0;
 static uint   s_bkEngSeen  = 0;
@@ -1027,7 +1092,7 @@ string BaseKnotBoxTooltip(const string id, const datetime t1, const datetime t2,
    tt += "\n" + TimeToString(t1, TIME_DATE|TIME_MINUTES) + " -> " + TimeToString(t2, TIME_DATE|TIME_MINUTES);
    datetime cs1, cs2;                                    // P-BK-84: the class' span — box ∪ base
    BaseKnotClassSpan(sp, t1, t2, cs1, cs2);
-   tt += BaseKnotBaseLine(sp.still, cs1, cs2, top, bot);   // P-BK-84: the class, off the BASE'S OWN entry..exit (the node's own time, the same on every chart)
+    tt += BaseKnotBaseLine(sp.still, cs1, cs2, top, bot, tfMin, (k >= 0 ? g_bkBoxes[k].baseTFMin : 0));   // P-BK-114: the owner TF; P-BK-112: candle-count fallback
    if(sp.life > 0)   // P-BK-40/41/42: what the note's number is MADE OF, and HOW it is counted
       tt += "\n     " + IntegerToString(sp.life) + " bars = the candles between the ENTRY candle " +
             "and the EXIT candle (entry not counted, exit counted) · " + IntegerToString(sp.still) +
@@ -1693,6 +1758,7 @@ void BaseKnotRegister(const string id, const int dir, const int tfMin)
    g_bkBoxes[n].nodeKind = BK_NODE_NONE;     // P-BK-29/47: no type published yet
    g_bkBoxes[n].nodeSide = 0;                // P-BK-46/47: no break's side published yet
    g_bkBoxes[n].baseTFMin = 0;               // P-BK-36/49: no class published yet
+   g_bkBoxes[n].ownerTFMin = 0;              // P-BK-114: no owner TF measured yet
    g_bkBoxes[n].biasState = BK_STATE_UNKNOWN;   // P-BK-48/49: no life state measured yet
    g_bkBoxes[n].storyT = 0;                  // P-BK-41/49: no story candle published yet
    g_bkBoxes[n].exitT  = 0;                  // P-BK-81: no exit candle published yet
@@ -2228,7 +2294,7 @@ bool BaseKnotOffsetIsHunt(const int kind, const int tfMin, const datetime anchor
    if(kind == BK_NODE_FTR || kind == BK_NODE_NONE) return false;
    return (BaseKnotHuntPips(tfMin, anchor) > 0.0);
 }
-string BaseKnotEntryOffsetTag(const bool isHunt) { return (isHunt ? "HuntSL" : "EngSL"); }
+string BaseKnotEntryOffsetTag(const bool isHunt) { return (isHunt ? "Trigger" : "TRex"); }
 // The penetration itself, in PIPS. 0 = nothing pushed for that (TF, anchor) — an ABSENCE
 // the caller turns into the box' own height, exactly like the risk below.
 double BaseKnotEntryOffsetPips(const int kind, const int tfMin, const datetime anchor = 0)
@@ -2649,7 +2715,10 @@ bool BaseKnotInfoVisible(const string id)
 //| is written on a CHANGE (mode, selection, slot, or the box' own    |
 //| Sync), never once per pump round.                                 |
 //+------------------------------------------------------------------+
-bool BaseKnotNoteInCorner() { return (g_bkShowInfo == BK_NOTE_CHART); }
+//--- BKCORNER-ON (2026-10-20): the box-side home is RETIRED, not removed. The note has
+//--- one home - the family's top-left readout - so this answers true unconditionally;
+//--- restoring the old mode is the one line `return (g_bkShowInfo == BK_NOTE_CHART);`.
+bool BaseKnotNoteInCorner() { return true; }
 // The row's object name. ONE row for the whole chart (it is the family's column, not a box
 // child — see BK_NOTE_CORNER).
 string BaseKnotCornerName()
@@ -2657,20 +2726,198 @@ string BaseKnotCornerName()
    if(StringLen(inpObjectPrefix) == 0) return "";
    return inpObjectPrefix + BK_TAG + BK_NOTE_CORNER;
 }
+//--- BKCORNER-ON (2026-10-20) - THE FAMILY'S NAMES. ------------------------------------
+//--- Row 0 keeps the historical row's name; the wrapped rows carry their ordinal, and the
+//--- plate is row 0 + BK_NOTE_PLATE. The wipes are the only owners that enumerate the whole
+//--- family, so a shorter note can never leave a longer one's ghost behind.
+string BaseKnotCornerRowName(const int row)
+{
+   string nm = BaseKnotCornerName();
+   if(nm == "") return "";   // no prefix: no family, and never a bare "R2" on the chart
+   if(row <= 0) return nm;
+   return nm + "R" + IntegerToString(row + 1);
+}
+string BaseKnotCornerPlateName()
+{
+   string nm = BaseKnotCornerName();
+   if(nm == "") return "";
+   return nm + BK_NOTE_PLATE;
+}
+//--- The family's one sweep. ---------------------------------------------------------
+void BaseKnotCornerFamilyWipe()
+{
+   for(int i = 0; i < BK_INFO_MAX_ROWS; i++)
+   {
+      string nm = BaseKnotCornerRowName(i);
+      if(nm != "") ObjectDelete(0, nm);
+   }
+   string pn = BaseKnotCornerPlateName();
+   if(pn != "") ObjectDelete(0, pn);
+}
 // The pushed slot (-1 = the family has never pushed one, i.e. there is nowhere to draw).
 static int  s_bkCornerSide  = -1;
 static int  s_bkCornerX     = 0;
 static int  s_bkCornerY     = 0;
-static bool s_bkCornerDirty = true;   // a slot write is owed (the row may not exist yet)
-static string s_bkCornerId  = "";     // the box the row currently carries ("" = the sizing box)
-// The row's own wipe (deinit + a mode change): the object goes AND the books are cleared, so the
-// next refresh rebuilds instead of believing the row it just deleted is still there.
+static bool s_bkCornerDirty = true;   // a slot write is owed - the row may not exist yet
+static string s_bkCornerId  = "";     // the box the row currently carries; "" = the sizing box
+//--- BKCORNER-TOAST (2026-10-20) - THE READOUT IS A TOAST, NOT A BADGE. ----------------
+//--- The note lives BK_CORNER_TOAST_MS (3 s) from the last user action, then the family is
+//--- deleted. The key is the box-side note name (`in`), so a tap on the SAME box re-arms
+//--- it, a new box replaces it, and a still frame writes nothing.
+static uint   s_bkToastUntil   = 0;
+static bool   s_bkToastArmed   = false;   // inside the 3 s window
+static bool   s_bkToastVisible = false;   // the family is on the chart
+static string s_bkToastKey     = "";      // the box the window belongs to
+static bool   s_bkToastPaused  = false;   // the cursor is on the toast: its clock is stopped
+static int    s_bkToastRemain  = 0;       // ms left when the pause began
+static int    s_bkToastX = 0, s_bkToastY = 0, s_bkToastW = 0, s_bkToastH = 0;   // last painted rect
+void BaseKnotCornerToastArm()
+{
+   s_bkToastArmed  = true;
+   s_bkToastPaused = false;
+   s_bkToastRemain = BK_CORNER_TOAST_MS;
+   s_bkToastUntil  = GetTickCount() + BK_CORNER_TOAST_MS;
+}
+void BaseKnotCornerToastReset()
+{
+   s_bkToastArmed   = false;
+   s_bkToastVisible = false;
+   s_bkToastPaused  = false;
+   s_bkToastRemain  = 0;
+   s_bkToastKey     = "";
+   s_bkToastUntil   = 0;
+   s_bkToastX = 0; s_bkToastY = 0; s_bkToastW = 0; s_bkToastH = 0;
+}
+void BaseKnotCornerToastRect(const int x, const int y, const int w, const int h)
+{
+   s_bkToastX = x; s_bkToastY = y; s_bkToastW = w; s_bkToastH = h;
+}
+//--- Hover = pause. Called from the shared router on MOUSE_MOVE; four int compares while a
+//--- toast is up, and the clock is read only on the enter/leave transition.
+void BaseKnotCornerToastHover(const int x, const int y)
+{
+   if(!s_bkToastVisible || s_bkToastW <= 0 || s_bkToastH <= 0) return;
+   bool inside = (x >= s_bkToastX && x < s_bkToastX + s_bkToastW &&
+                  y >= s_bkToastY && y < s_bkToastY + s_bkToastH);
+   if(inside == s_bkToastPaused) return;
+   if(inside)
+   {
+      int rem = (int)(s_bkToastUntil - GetTickCount());
+      if(rem <= 0) return;   // already spent: the tick takes it, hover cannot revive it
+      s_bkToastRemain = rem;
+      s_bkToastPaused = true;
+   }
+   else
+   {
+      s_bkToastUntil  = GetTickCount() + (uint)s_bkToastRemain;
+      s_bkToastPaused = false;
+   }
+}
+void BaseKnotCornerToastTick()
+{
+   if(!s_bkToastArmed) return;
+   if(s_bkToastPaused) return;   // the cursor owns the clock
+   if((int)(s_bkToastUntil - GetTickCount()) > 0) return;
+   if(s_bkToastVisible) { BaseKnotCornerFamilyWipe(); s_bkToastVisible = false; BaseKnotCornerToastRect(0, 0, 0, 0); }
+   s_bkToastArmed = false;
+}
+//--- P-BK-115a (2026-10-21): THE TOAST OWNS THE FAMILY'S OWNERSHIP, so its state is asked,
+//--- never inferred. The keeper (`BaseKnotNoteCornerRefresh`) used to read "the row is gone"
+//--- as damage — the same read that is TRUE the moment the window spends and the family is
+//--- deleted — so it Synced and redrew the chart twice a second for ever on a still chart.
+//--- One question, one answer, answered here.
+bool BaseKnotCornerToastIsArmed() { return s_bkToastArmed; }
+// The family's own wipe (deinit + a mode change): every row and the plate go, the books are
+// cleared, so the next refresh rebuilds instead of believing the family is still there.
 void BaseKnotCornerWipe()
 {
-   string nm = BaseKnotCornerName();
-   if(nm != "" && ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);
+   BaseKnotCornerFamilyWipe();
+   BaseKnotCornerToastReset();
    s_bkCornerId    = "";
    s_bkCornerDirty = true;
+}
+//--- BKCORNER-ON (2026-10-20) - THE FACE IS SPLIT, NEVER CUT. --------------------------
+//--- MT4 keeps 63 characters of OBJPROP_TEXT and drops the rest, and the note's last
+//--- field IS the node type (P-BK-29/109). The face therefore becomes as many rows as it
+//--- needs, cut at its own " | " boundaries first (then at a space) so no field is halved.
+int BaseKnotNoteRows(const string text, string &rows[])
+{
+   ArrayResize(rows, 0);
+   string rest = text;
+   int guard = 0;
+   while(StringLen(rest) > 0 && guard < BK_INFO_MAX_ROWS)
+   {
+      guard++;
+      int n = ArraySize(rows);
+      // P-BK-106b: an explicit newline is a row the writer already decided — keep it whole.
+      // The old " | " wrap stays as the fallback for a line that is still too long.
+      int nl = StringFind(rest, "\n");
+      if(nl >= 0 && nl <= BK_INFO_TEXT_MAX)
+      {
+         string rowTxt = StringSubstr(rest, 0, nl);
+         StringTrimRight(rowTxt);
+         if(StringLen(rowTxt) > 0) { ArrayResize(rows, n + 1); rows[n] = rowTxt; }
+         rest = StringSubstr(rest, nl + 1);
+         continue;
+      }
+      if(StringLen(rest) <= BK_INFO_TEXT_MAX || n >= BK_INFO_MAX_ROWS - 1)
+      {
+         ArrayResize(rows, n + 1);
+         rows[n] = rest;
+         break;
+      }
+      // the last " | " that still fits; a cut that leaves too little on the row is skipped
+      int cut = -1, from = 0;
+      while(true)
+      {
+         int p = StringFind(rest, " | ", from);
+         if(p < 0 || p > BK_INFO_TEXT_MAX) break;
+         cut = p;
+         from = p + 1;
+      }
+      if(cut > 0 && cut < BK_INFO_TEXT_MAX / 5) cut = -1;
+      if(cut <= 0)
+      {
+         cut = BK_INFO_TEXT_MAX;
+         for(int i = BK_INFO_TEXT_MAX; i >= 1; i--)
+            if(StringGetCharacter(rest, i - 1) == 32) { cut = i - 1; break; }
+      }
+      if(cut <= 0) cut = BK_INFO_TEXT_MAX;
+      if(cut > StringLen(rest)) cut = StringLen(rest);
+      string rowTxt = StringSubstr(rest, 0, cut);
+      StringTrimRight(rowTxt);
+      ArrayResize(rows, n + 1);
+      rows[n] = rowTxt;
+      rest = StringSubstr(rest, cut);
+      while(StringLen(rest) > 0)
+      {
+         int lead = StringGetCharacter(rest, 0);
+         if(lead != 32 && lead != 124) break;   // skip the separator the break consumed
+         rest = StringSubstr(rest, 1);
+      }
+   }
+   return ArraySize(rows);
+}
+int BaseKnotNoteLineCount(const string text)
+{
+   int n = 1;
+   for(int i = 0; i < StringLen(text); i++)
+      if(StringGetCharacter(text, i) == 10) n++;
+   return n;
+}
+int BaseKnotNoteMaxLineW(const string text, const int fontPt)
+{
+   int best = 0, start = 0, len = StringLen(text);
+   for(int i = 0; i <= len; i++)
+   {
+      if(i == len || StringGetCharacter(text, i) == 10)
+      {
+         int w = PnlRawTextW(StringSubstr(text, start, i - start), fontPt);
+         if(w > best) best = w;
+         start = i + 1;
+      }
+   }
+   return best;
 }
 void BaseKnotCornerSlotPush(const int corner, const int xPos, const int yPos)
 {
@@ -2710,18 +2957,31 @@ bool BaseKnotNoteAtCorner(const string id)
    if(id == "") return true;
    return (id == BaseKnotSelectedId());
 }
-// The row's own keeper — called from the existing 500 ms pump (BaseKnotSyncBadges), so the
-// corner follows a selection change, a mode change, a pushed slot or a box that left this TF
-// without a new event path of its own. NOTHING IS WRITTEN while nothing changed.
+// P-BK-115a (2026-10-21): THE KEEPER LIVES WITH THE STATE IT READS — with the note's own
+// home. It shares the 500 ms pump (`BaseKnotSyncBadges`), so the corner follows a selection
+// change, a mode change, a pushed slot or a box that left this TF without a new event path
+// of its own. NOTHING IS WRITTEN while nothing changed.
+// `s_bkNoteSyncN` / `s_bkNoteSyncMs` are the witness' own numbers (BaseKnotNoteWitness).
+static int  s_bkNoteSyncN  = 0;
+static uint s_bkNoteSyncMs = 0;   // the WORST Sync of the window, not the last
+int BaseKnotNoteSyncTake(uint &msWorst)
+{
+   int n = s_bkNoteSyncN;
+   msWorst = s_bkNoteSyncMs;
+   s_bkNoteSyncN = 0;
+   s_bkNoteSyncMs = 0;
+   return n;
+}
 void BaseKnotNoteCornerRefresh()
 {
    string nm = BaseKnotCornerName();
    if(nm == "") return;
+   BaseKnotCornerToastTick();   // BKCORNER-TOAST: the 3 s life is served by the same pump
    if(!BaseKnotNoteInCorner())
    {
-      if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);   // the box-side home owns the note now
+      BaseKnotCornerFamilyWipe();   // the box-side home owns the note now
       s_bkCornerId    = "";
-      s_bkCornerDirty = false;   // nothing is owed while the rung is not the corner one
+      s_bkCornerDirty = false;      // nothing is owed while the rung is not the corner one
       return;
    }
    if(g_bkState == BK_PREVIEW)
@@ -2733,30 +2993,44 @@ void BaseKnotNoteCornerRefresh()
    if(id != "" && !BaseKnotVisibleNow(id)) id = "";   // a box hidden on this TF claims no row
    if(id == s_bkCornerId && !s_bkCornerDirty)
    {
-      // Steady state: not one chart write. The ONE read left is the heal — something else
-      // (a chart-wide cleanup, the user's own delete) may have taken the row away, and a
-      // readout that silently disappears is the bug this keeper exists for.
-      if(id == "" || ObjectFind(0, nm) >= 0) return;
+      // Steady state: not one chart write. The heal reads the row and its plate — something
+      // else (a chart-wide cleanup, the user's own delete) may have taken the family away,
+      // and a readout that silently disappears is the bug this keeper exists for.
+      // P-BK-115a — BUT ONLY WHILE A NOTE IS SUPPOSED TO BE UP. The toast DELETES the family
+      // when its 3 s window ends, so from that moment "the row is missing" is the note's own
+      // state, not damage — and this test read it as damage on every round: `BaseKnotSync`
+      // (one bar walk + the node read + the whole family's writes) plus `ChartRedraw()`,
+      // twice a second, for ever, with nothing on the chart changing.
+      if(id == "") return;
+      if(!BaseKnotCornerToastIsArmed()) return;   // P-BK-115a: the toast owns the absence
+      if(ObjectFind(0, nm) >= 0 && ObjectFind(0, BaseKnotCornerPlateName()) >= 0) return;
       s_bkCornerDirty = true;   // rebuild it below
    }
    s_bkCornerId = id;
    s_bkCornerDirty = false;
    if(id == "")
    {
-      if(ObjectFind(0, nm) >= 0) ObjectDelete(0, nm);   // nothing answers: a stale note is worse than none
+      BaseKnotCornerFamilyWipe();   // nothing answers: a stale note is worse than none
+      BaseKnotCornerToastReset();   // a later selection of the same box is a NEW toast
       return;
    }
+   uint bkKeeperT0 = GetTickCount();
    BaseKnotSync(id);   // the ONE writer rebuilds the box AND its note — into the row
+   {   // P-BK-115a: the witness' own number — how many Syncs this keeper issued, and the worst
+      uint bkKeeperD = GetTickCount() - bkKeeperT0;
+      s_bkNoteSyncN++;
+      if(bkKeeperD > s_bkNoteSyncMs) s_bkNoteSyncMs = bkKeeperD;
+   }
    ChartRedraw();
 }
 // ONE candle's "is it inside the box" read — the BODY is the criterion (both
 // open and close inside [bot,top], boundary INCLUSIVE, direction-free): wicks may
 // pierce the band, a candle whose BODY is outside is not part of the base.
 // Single definition, so every caller counts the same candle the same way.
-bool BaseKnotBarBodyInside(const int shift, const double top, const double bot)
+bool BaseKnotBarBodyInside(const int shift, const double top, const double bot, const int tf = 0)
 {
-   double o = iOpen(_Symbol, 0, shift);
-   double c = iClose(_Symbol, 0, shift);
+   double o = iOpen(_Symbol, tf, shift);
+   double c = iClose(_Symbol, tf, shift);
    return (o >= bot && o <= top && c >= bot && c <= top);
 }
 //+------------------------------------------------------------------+
@@ -2783,9 +3057,9 @@ bool BaseKnotBarBodyInside(const int shift, const double top, const double bot)
 //| اشتباه بشه همه چیز اشتباه میشه پس باید صد در صد کندل ورود و خروج   |
 //| رو مطمئن باشیم که تعداد درست باشه».                               |
 //+------------------------------------------------------------------+
-bool BaseKnotBarCloseOut(const int shift, const double top, const double bot)
+bool BaseKnotBarCloseOut(const int shift, const double top, const double bot, const int tf = 0)
 {
-   double c = iClose(_Symbol, 0, shift);
+   double c = iClose(_Symbol, tf, shift);
    if(c <= 0) return false;              // series not ready — never a CLAIMED exit
    return (c < bot || c > top);
 }
@@ -2846,17 +3120,17 @@ bool BaseKnotBarCloseOut(const int shift, const double top, const double bot)
 // هستش» — the 13 was the box' own reach, which is no longer part of the base), and the
 // box hover now spells the band, the entry, the exit and the number out, in that order.
 int BaseKnotBarCount(const datetime t1, const datetime t2, const double top, const double bot,
-                     BaseKnotSpan &sp)
+                     BaseKnotSpan &sp, const int readTF = 0)
 {
    BaseKnotSpanClear(sp);
    if(t1 <= 0 || t2 <= 0 || top <= bot) return 0;
-   int sh1 = iBarShift(_Symbol, 0, t1, false);
-   int sh2 = iBarShift(_Symbol, 0, t2, false);
+   int sh1 = iBarShift(_Symbol, readTF, t1, false);
+   int sh2 = iBarShift(_Symbol, readTF, t2, false);
    if(sh1 < 0 || sh2 < 0) return 0;
    // Shift 0 is the LIVE bar, so the box's RIGHT edge (the newer end, where the
    // break is) is the SMALLER shift; walking OLDER increases it.
    int s = (sh1 < sh2 ? sh1 : sh2);
-   int total = Bars;
+   int total = iBars(_Symbol, readTF);
    if(s < 0 || s >= total) return 0;
    // P-BK-34 (2026-09-15) — THE COUNT IS CLOSED-BAR DATA, the same law the node
    // read already obeys (P-BK-29). Shift 0 is the FORMING candle, and iBarShift()
@@ -2911,7 +3185,7 @@ int BaseKnotBarCount(const datetime t1, const datetime t2, const double top, con
    int oldest = 0;   // shift of the OLDEST candle the base lasted (P-BK-37: the start)
    while(s < total && s - edge < BK_BASE_SKIP)
    {
-      if(!BaseKnotBarBodyInside(s, top, bot)) { s++; continue; }   // the break / the dead zone
+      if(!BaseKnotBarBodyInside(s, top, bot, readTF)) { s++; continue; }   // the break / the dead zone
       // P-BK-44 (2026-09-15) — THE BOX' LINES EXTEND FORWARD TOO. «این چرا عقب میارمش
       // فرق میکنه اعداد … 36 تا درست بودش اون نباید 20 باشه … باید امتداده باکس ها به
       // عقب و جلو خطوط شو در نظر بگیر بای کندل ورود و خروج، ملاک که سقف و کف بیس هستش نه
@@ -2928,7 +3202,7 @@ int BaseKnotBarCount(const datetime t1, const datetime t2, const double top, con
          int fup = s - 1, fgap = 0, fprobe = 0, fn = 0;
          while(fup >= 1 && fn + fprobe < BK_BASE_MAX)
          {
-            if(BaseKnotBarBodyInside(fup, top, bot))
+            if(BaseKnotBarBodyInside(fup, top, bot, readTF))
             {
                if(fgap == 0) { fn++; head = fup; }
                else
@@ -2959,7 +3233,7 @@ int BaseKnotBarCount(const datetime t1, const datetime t2, const double top, con
                       // of the box' right edge are inside the number and the class
       while(t < total && n + probe < BK_BASE_MAX)
       {
-         if(BaseKnotBarBodyInside(t, top, bot))
+         if(BaseKnotBarBodyInside(t, top, bot, readTF))
          {
             if(gap == 0)
             {
@@ -3012,7 +3286,7 @@ int BaseKnotBarCount(const datetime t1, const datetime t2, const double top, con
    // only test (P-BK-42/41/81). When nothing closed outside yet, the base simply has NO exit:
    // the end stays the base's OWN right side (`head`, == `tLast`), which is exactly what
    // P-BK-34 asks for — the number stops at the newest closed candle, never one past it.
-   if(!BaseKnotBarCloseOut(end, top, bot)) end = head;
+   if(!BaseKnotBarCloseOut(end, top, bot, readTF)) end = head;
    // P-BK-42 (2026-09-15) — HOW THE TWO ENDS ARE COUNTED: «اول باید سقف و کف بیس یا
    // گره معاملاتی رو مشخص کنیم که ببینم کدوم کندل وارد شده و کدوم کندل خارج شده — کندل
    // ورود جز شمارش حساب نکنیم ولی کندل خروج جز شمارش حساب بکنیم». The band (top/bot) is
@@ -3024,9 +3298,9 @@ int BaseKnotBarCount(const datetime t1, const datetime t2, const double top, con
    // still counts the entry candle, because it is the base's own LENGTH that the size
    // class is read from — P-BK-28/40 — not the note's span.)
    sp.still  = n;                              // P-BK-40: the class's input (entry included)
-   sp.tStart = iTime(_Symbol, 0, oldest);      // the ENTRY candle (not counted)
-   sp.tLast  = iTime(_Symbol, 0, head);        // the base's own right side (both sides)
-   sp.tExit  = iTime(_Symbol, 0, end);         // the EXIT candle (counted)
+   sp.tStart = iTime(_Symbol, readTF, oldest);      // the ENTRY candle (not counted)
+   sp.tLast  = iTime(_Symbol, readTF, head);        // the base's own right side (both sides)
+   sp.tExit  = iTime(_Symbol, readTF, end);         // the EXIT candle (counted)
    sp.life   = oldest - end;                   // P-BK-42: entry out, exit in
    return sp.life;
 }
@@ -3337,16 +3611,28 @@ int BaseKnotLadderAll(int &rungs[])
    return n;
 }
 int BaseKnotBaseTFRead(const int bars, const datetime b1, const datetime b2,
-                       const double top, const double bot)
+                       const double top, const double bot, const int tf = 0)
 {
    if(bars <= 0) return 0;
    if(bars < BK_BASE_MIN_BARS) return -1;
    // P-BK-80: NO CHART TERM, EVER. The chart TF used to add its own candle width here
    // (`+ chartMin`) and to supply the span's two ends; both are gone, so `3 * rung <= spanMin`
    // answers the same on M1 and on MN1.
-   // P-BK-84: and the span is the BASE'S OWN entry..exit, unioned with the box' two anchors
-   // (BaseKnotClassSpan — the box is a FLOOR, never the measurement). No chart term anywhere.
-   int spanMin = (int)((b2 > b1 ? (b2 - b1) / 60 : 0));
+   // P-BK-112 (2026-10-21, user: «این گره زده مال چهار ساعته در صورتی که گره در تایم یک ساعته
+   // دیده میشه») — THE CLASS' SPAN IS THE BASE'S OWN CANDLES IN MARKET TIME, NEVER CALENDAR
+   // MINUTES. MEASURED on the live XAUUSD box 18..21 Sep 2026: its own life is 7 H1 candles,
+   // yet the face read «7 bars · H4 base · FTR». The span was `(b2 - b1) / 60` over the base's
+   // entry..exit unioned with the drawn box, and that run crossed the Fri->Mon close: 7
+   // candles of Friday evening plus Monday morning are ~55 wall-clock hours, so 3 x H4 = 720
+   // minutes "fit" a gap in which only 7 H1 candles exist. A closed market has no candles, so
+   // it may add no minutes. `bars` IS the base's own length (BaseKnotBarCount's `still`,
+   // P-BK-40/84) and `tf` is the box' commit TF that run was counted on, so `bars * tf` is its
+   // market span — chart-free (P-BK-80) and candle-true (the user's 3-candles-per-rung rule).
+   // The drawn box is no longer a term at all: P-BK-84's floor only ever WIDENED the read, and
+   // a box wider than its base is how the H4 label replaced an H1 one.
+   int tfMin = (tf > 0 ? tf : Period());
+   if(tfMin < 1) tfMin = 1;
+   int spanMin = bars * tfMin;
    int rungs[9];
    int n = BaseKnotLadderAll(rungs);
    if(n <= 0) return 1;   // no ladder at all — M1 is the only rung left to name
@@ -3393,6 +3679,7 @@ int BaseKnotBaseTFRead(const int bars, const datetime b1, const datetime b2,
 // new closed bar. P-BK-80: the chart TF is NO LONGER part of the key, because it is no
 // longer part of the question — that is the whole promise, and a key that carried it could
 // only ever hand the same box two different answers on two charts.
+static int      s_bkRungTF     = 0;   // the series the span was read on (the box' commit TF)
 static int      s_bkRungBars   = -1;
 static datetime s_bkRungB1     = 0;   // P-BK-80: the BOX' left anchor
 static datetime s_bkRungB2     = 0;   // ... and its right anchor (never the story's ends)
@@ -3400,50 +3687,59 @@ static double   s_bkRungTop    = 0.0;
 static double   s_bkRungBot    = 0.0;
 static datetime s_bkRungBar    = 0;
 static int      s_bkRungAnswer = 0;
-// P-BK-80: the question is the BOX' OWN geometry alone — its two anchors, its band, and the
+// P-BK-80: the question is the BOX' OWN geometry alone - its two anchors, its band, and the
 // base count it was computed from. No box TF, no chart TF, no chart candle width.
 int BaseKnotBaseTFMin(const int bars, const datetime b1, const datetime b2,
-                      const double top, const double bot)
+                      const double top, const double bot, const int tf = 0)
 {
-   datetime lastClosed = iTime(_Symbol, 0, 1);
-   if(bars == s_bkRungBars && b1 == s_bkRungB1 && b2 == s_bkRungB2 &&
+   datetime lastClosed = iTime(_Symbol, tf, 1);
+   if(tf == s_bkRungTF && bars == s_bkRungBars && b1 == s_bkRungB1 && b2 == s_bkRungB2 &&
       top == s_bkRungTop && bot == s_bkRungBot &&
       lastClosed == s_bkRungBar)
       return s_bkRungAnswer;
-   int answer = BaseKnotBaseTFRead(bars, b1, b2, top, bot);
-   s_bkRungBars = bars; s_bkRungB1 = b1; s_bkRungB2 = b2;
+   int answer = BaseKnotBaseTFRead(bars, b1, b2, top, bot, tf);
+   s_bkRungTF = tf; s_bkRungBars = bars; s_bkRungB1 = b1; s_bkRungB2 = b2;
    s_bkRungTop = top; s_bkRungBot = bot;
    s_bkRungBar = lastClosed; s_bkRungAnswer = answer;
    return answer;
 }
 // Compact note suffix: " · M15 base" / " · H1 base" / " · struct" / "".
-// P-BK-80: `b1..b2` = the BOX' OWN two anchors — the only input the class has.
+// P-BK-112: `bars` (the base's own still count) and `readTF` (the box' commit TF) own the
+// class; `b1..b2` are the display span the hover reports its stand-still count on.
 string BaseKnotBaseTag(const int bars, const datetime b1, const datetime b2,
-                       const double top, const double bot)
+                       const double top, const double bot, const int readTF = 0, const int baseTF = 0)
 {
-   int tf = BaseKnotBaseTFMin(bars, b1, b2, top, bot);
+   if(bars <= 0) return "";
+   if(bars < BK_BASE_MIN_BARS) return " · struct";
+   int tf = (baseTF > 0 ? baseTF : BaseKnotBaseTFMin(bars, b1, b2, top, bot, readTF));
    if(tf == 0) return "";   // unmeasurable — the bars part is omitted too
    if(tf <  0) return " · struct";
    return " · " + BaseKnotTFName(tf) + " base";
 }
 // The same read spelled out for the hover line (the note's full sentence).
 string BaseKnotBaseLine(const int bars, const datetime b1, const datetime b2,
-                        const double top, const double bot)
+                        const double top, const double bot, const int readTF = 0, const int baseTF = 0)
 {
-   int tf = BaseKnotBaseTFMin(bars, b1, b2, top, bot);
+   if(bars <= 0) return "\nBase: size not measurable yet";
+   if(bars < BK_BASE_MIN_BARS) return "\nBase: " + IntegerToString(bars) +
+                      " bars -> structure (a base needs " + IntegerToString(BK_BASE_MIN_BARS) + " candles inside)";
+   int tf = (baseTF > 0 ? baseTF : BaseKnotBaseTFMin(bars, b1, b2, top, bot, readTF));
    if(tf == 0) return "\nBase: size not measurable yet";
    if(tf <  0) return "\nBase: " + IntegerToString(bars) +
                       " bars -> structure (a base needs " + IntegerToString(BK_BASE_MIN_BARS) + " candles inside)";
    // P-BK-84: THE LENGTH IS THE CRITERION, and the stand-still count is REPORTED beside it —
-   // it no longer decides anything (BKHOLD-OFF). The sentence states the rule it was named by.
-   int spanMin = (int)((b2 > b1 ? (b2 - b1) / 60 : 0));
-   if(3 * tf > spanMin)   // the span's own rung: no rung's three candles fit it
+   // it no longer decides anything (BKHOLD-OFF). P-BK-112: and the length is the base's own
+   // candles in MARKET time (`bars × commitTF`), so a weekend gap cannot buy a rung.
+   int tfMin = (baseTF > 0 ? baseTF : (readTF > 0 ? readTF : Period()));
+   if(tfMin < 1) tfMin = 1;
+   int spanMin = bars * tfMin;
+   if(3 * tf > spanMin)   // a count under a base's length (unreachable for bars >= 3)
       return "\nBase: " + IntegerToString(bars) + " bars -> " + BaseKnotTFName(tf) +
-             " base (no rung's " + IntegerToString(BK_BASE_RUNG_MIN) + " candles fit the span — the span's own rung)";
+             " base (no rung's " + IntegerToString(BK_BASE_RUNG_MIN) + " candles fit the base's own candles — the span's own rung)";
    int held = BaseKnotRungHoldCount(tf, b1, b2, top, bot);   // P-BK-84: REPORTED, never a decider
    return "\nBase: " + IntegerToString(bars) + " bars -> " + BaseKnotTFName(tf) +
           " base (" + IntegerToString(BK_BASE_RUNG_MIN) + " candles of " + BaseKnotTFName(tf) +
-          " fit the span" +
+          " fit the base's own candles" +
           (held > 0 ? "; " + IntegerToString(held) + " of them stood still in the band" : "") + ")";
 }
 //+------------------------------------------------------------------+
@@ -3652,28 +3948,45 @@ bool BaseKnotStepRow(const int tfMin, const datetime anchor, double &step)
    }
    return false;
 }
-// P-BK-106 — THE THREE BANDS, OFF ONE ROW. `tfMin` is the NODE'S TIME (P-BK-77's own
-// answer) and the three numbers are the ATR of THAT rung (read), the pattern time's and the
-// structure time's (DERIVED — BaseKnotRungScale multiplies the same ATR by the ladder's own
-// √-law), so a knot is typed without a second row, a second TF or a live number.
-// P-BK-79: `anchor` is the bar the row is read at — the box' own story end — so one box has
-// ONE type for ever once its base is closed. false = the node's time is unknown, the ladder
-// has no rung above it (a MN1 node has no pattern time), or the ATR was never pushed warm —
-// an absence the caller turns into BK_NODE_NONE, never a band out of thin air.
+// P-BK-106 — THE THREE BANDS, OFF THE TABLE. `tfMin` is the NODE'S TIME (P-BK-77's own
+// answer) and the three numbers are the ATR of THAT rung and of the two rungs above it,
+// EACH READ at the box' own anchor (the pump asks all three pairs, P-BK-106b). The old
+// √-law (`pattern = trigger x scale`) is only the cold fallback: it assumed every ladder
+// step scales by the same square root, which is false for H4 -> D1 (x2.449) and D1 -> W1
+// (x2.236), and the user's own report («178.3 x 2 = 356.6 … لزوما این نیست که همیشه ضرب
+// دو باشه») is that assumption showing on the chart. A real upper row always wins.
+// P-BK-79: `anchor` is the bar the rows are read at — the box' own story end — so one box
+// has ONE type for ever once its base is closed. false = the node's time is unknown, the
+// ladder has no rung above it (a MN1 node has no pattern time), or the trigger ATR was
+// never pushed warm — an absence the caller turns into BK_NODE_NONE, never a band.
 bool BaseKnotAbilityGet(const int tfMin, const datetime anchor,
                         double &trig, double &pat, double &str)
 {
    trig = 0.0; pat = 0.0; str = 0.0;
    if(tfMin <= 0) return false;
-   if(!BaseKnotAbilityRow(tfMin, anchor, trig)) return false;   // the ONE read (P-BK-106)
+   if(!BaseKnotAbilityRow(tfMin, anchor, trig)) return false;   // the ONE required read
    int up1 = BaseKnotNextTFMin(tfMin);                          // the pattern time
    int up2 = (up1 > 0 ? BaseKnotNextTFMin(up1) : 0);            // the structure time
    double s1 = BaseKnotRungScale(tfMin, up1);
    double s2 = (up1 > 0 ? BaseKnotRungScale(up1, up2) : 0.0);
    if(s1 <= 0.0 || s2 <= 0.0) return false;   // no rung above — nothing to compare against
-   pat = trig * s1;                          // the pattern time's own ATR, by the √-law
-   str = pat * s2;                           // ... and the structure time's
-   return true;
+   if(!BaseKnotAbilityRow(up1, anchor, pat))  // the pattern rung's own ATR at the same bar
+      pat = trig * s1;                        // cold: the old √-law, only until its row is warm
+   if(!BaseKnotAbilityRow(up2, anchor, str))  // the structure rung's own ATR at the same bar
+      str = pat * s2;                         // cold: the old √-law, only until its row is warm
+   return (trig > 0.0 && pat > 0.0 && str > 0.0);
+}
+// P-BK-106b: the SAME read, plus the two flags the face uses to print only a REAL upper row.
+// The fallback values stay in nd.abPat/abStr when a row is cold; the flags say which is which.
+void BaseKnotAbilityRead(const int tfMin, const datetime anchor, BaseKnotNode &nd)
+{
+   BaseKnotAbilityGet(tfMin, anchor, nd.abTrig, nd.abPat, nd.abStr);
+   nd.abPatRead = false; nd.abStrRead = false;
+   int up1 = BaseKnotNextTFMin(tfMin);
+   int up2 = (up1 > 0 ? BaseKnotNextTFMin(up1) : 0);
+   double tmp = 0.0;
+   if(up1 > 0 && BaseKnotAbilityRow(up1, anchor, tmp)) { nd.abPat = tmp; nd.abPatRead = true; }
+   if(up2 > 0 && BaseKnotAbilityRow(up2, anchor, tmp)) { nd.abStr = tmp; nd.abStrRead = true; }
 }
 // P-BK-75/76/106 — THE ONLY PLACE THE FOUR NAMES ARE SPELLED. `h` is the box' height (the
 // length the user's rule compares); `nodeTFMin` is the NODE'S TIME (P-BK-77: the rung whose
@@ -3813,13 +4126,14 @@ void BaseKnotNodeRead(const datetime t2, const double top, const double bot,
    nd.side = 0; nd.barsAgo = 0; nd.rebreaks = 0; nd.returned = false; nd.crossed = false;
    nd.baseStep = 0.0; nd.breakStep = 0.0; nd.retStep = 0.0; nd.stepTH = 0.0; nd.storyTF = 0;
    nd.height = 0.0; nd.abTrig = 0.0; nd.abPat = 0.0; nd.abStr = 0.0;   // P-BK-75
+   nd.abPatRead = false; nd.abStrRead = false;   // P-BK-106b: false = the √-law fallback, not a real row
     //--- (a) THE TYPE — the node's LENGTH against the bands of the node's own TIME
     //--- (P-BK-75/106). Read FIRST, because it needs nothing this module has to fetch: the TF
     //--- is P-BK-77's answer and the row (the rung's own ATR at the box' own anchor) was pushed
     //--- in by the pump. The rung count that used to name it is retired (BKNODERUNG-OFF).
    nd.height = top - bot;   // «طول گره» — the box' own height, in price units
    nd.kind = BaseKnotNodeKindOfLength(nodeTimeMin, nd.height, nd.anchor);
-   BaseKnotAbilityGet(nodeTimeMin, nd.anchor, nd.abTrig, nd.abPat, nd.abStr);   // published so the tooltip can spell the compare
+   BaseKnotAbilityRead(nodeTimeMin, nd.anchor, nd);   // P-BK-106b: the three ATRs + which upper rows are real
     //--- (a2) THE STEP — P-BK-105: THE SAME ROW THE TYPE WAS DECIDED AGAINST, AT THE SAME
     //--- ANCHOR. The three numbers below are measured in movement steps, and a step read
     //--- live divides a CLOSED knot's base by TODAY'S price («atr برای لایو حساب شده، بدرد
@@ -4057,15 +4371,14 @@ string BaseKnotNodeLine(BaseKnotNode &nd, const double top, const double bot)
    {
       int up1 = BaseKnotNextTFMin(nd.nodeTF);                      // the pattern time
        int up2 = (up1 > 0 ? BaseKnotNextTFMin(up1) : 0);            // the structure time
-       // P-BK-106: the three bands are ONE ATR and two multiplications by the ladder's own
-       // √-law, so the space they name is spelled for what it is: the ATR that was READ (the
-       // node's own time, at the box' own anchor) and the two rungs it is SCALED to. Only one
-       // number was ever measured — a reader who is shown three cannot check two of them.
-       t += " vs " + BaseKnotTFName(nd.nodeTF) + " ATR (trigger " + DoubleToString(BaseKnotToPips(nd.abTrig), 1) + ")" +
-            " · " + BaseKnotTFName(up1) + " band (pattern " + DoubleToString(BaseKnotToPips(nd.abPat), 1) +
-            " = trigger x " + DoubleToString(BaseKnotRungScale(nd.nodeTF, up1), 3) + ")" +
-            " · " + BaseKnotTFName(up2) + " band (structure " + DoubleToString(BaseKnotToPips(nd.abStr), 1) +
-            " = pattern x " + DoubleToString(BaseKnotRungScale(up1, up2), 3) + "), in pips";
+        // P-BK-106b: the three bands are THREE REAL ATR READS at the same bar — the node's
+        // own time and the two rungs above it. The √-law is named only when a row is still
+        // cold and the fallback is what the type actually used.
+        t += " vs " + BaseKnotTFName(nd.nodeTF) + " ATR (trigger " + DoubleToString(BaseKnotToPips(nd.abTrig), 1) + ", read)" +
+             " · " + BaseKnotTFName(up1) + " ATR (pattern " + DoubleToString(BaseKnotToPips(nd.abPat), 1) +
+             (nd.abPatRead ? ", read at the same bar" : ", √-law fallback — the row is still cold") + ")" +
+             " · " + BaseKnotTFName(up2) + " ATR (structure " + DoubleToString(BaseKnotToPips(nd.abStr), 1) +
+             (nd.abStrRead ? ", read at the same bar" : ", √-law fallback — the row is still cold") + "), in pips";
        // P-BK-76: the bands the height fell in, spelled as the MIDPOINTS they are — so a box
        // a hair either side of an ability can be seen to still answer that ability.
        t += "\n      bands: FTR < " + DoubleToString(BaseKnotToPips(BaseKnotNodeBandFtrEtr(nd.nodeTF, nd.anchor)), 1) +
@@ -4157,24 +4470,28 @@ int BaseKnotEngNeeds(int &mins[], datetime &anchors[])
    if(chartTF <= 0) chartTF = 1;
    int n = 0;
    mins[n] = chartTF; anchors[n] = 0; n++;     // the live sizing preview's own risk (P-BK-79: the LIVE row)
+   // P-BK-106b: the live row's own two upper ATRs, asked at the same live anchor, so the
+   // sizing preview can show/type against real rows as soon as the pump has them.
+   int liveUp1 = BaseKnotNextTFMin(chartTF);
+   int liveUp2 = (liveUp1 > 0 ? BaseKnotNextTFMin(liveUp1) : 0);
+   if(liveUp1 > 0) { mins[n] = liveUp1; anchors[n] = 0; n++; }
+   if(liveUp2 > 0) { mins[n] = liveUp2; anchors[n] = 0; n++; }
    for(int i = 0; i < ArraySize(g_bkBoxes); i++)
    {
       int tf = g_bkBoxes[i].baseTFMin;
       if(tf <= 0) tf = chartTF;                // no class published yet — the chart's own
       datetime an = (g_bkBoxes[i].storyT > 0 ? g_bkBoxes[i].storyT : 0);   // P-BK-79: the bar the story ended on
-       // P-BK-78 (superseded by P-BK-106): the type used to compare the box' height against
-       // the TH of the node's own time AND of the two rungs above, so those two rungs were
-       // asked for here as well. The type derives its two upper bands from the node's own ATR
-       // now (BaseKnotAbilityGet), so a rung above is never read and never asked for — one
-       // row per box instead of three, one ATR computation per round instead of three.
-       // P-BK-51/83: the knot's OWN TF is the class (P-BK-46) and it is the ENTRY's own time,
-       // while the STOP is read on the TYPE'S own time — the rung its LENGTH matched, at most
-       // THREE rungs above the class (OTR) — so ONE box still asks for TWO TFs, and every one
-       // of them is a rung of the same ladder.
-       int asked[2];
+       // P-BK-106b: THE TYPE'S THREE ROWS ARE ALL REAL NOW. The node's own ATR and the two
+       // rungs above it are each read at the box' own anchor; the √-law is only the cold
+       // fallback inside BaseKnotAbilityGet, never the answer once a real row exists. The
+       // ask list therefore carries the class, the stop's own TF (P-BK-51/83), and both
+       // upper rungs the type compares against.
+       int asked[4];
        asked[0] = tf;
        asked[1] = BaseKnotMeasureTFMin(g_bkBoxes[i].nodeKind, tf);
-       for(int a = 0; a < 2; a++)
+       asked[2] = BaseKnotNextTFMin(tf);
+       asked[3] = (asked[2] > 0 ? BaseKnotNextTFMin(asked[2]) : 0);
+       for(int a = 0; a < 4; a++)
       {
          if(asked[a] <= 0) continue;
          // P-BK-79: the dedup is on the PAIR. The chart's own live row is (chartTF, 0) and
@@ -4305,6 +4622,200 @@ double BaseKnotTPLevel(const double entry, const int dir, const int tfMin, const
    if(p <= 0.0 || entry <= 0.0) return 0.0;
    return (dir >= 0 ? entry + p * BaseKnotPipSize() : entry - p * BaseKnotPipSize());
 }
+//+------------------------------------------------------------------+
+//| P-BK-116 (2026-10-21) — THE END OF EVERY LINE SAYS WHAT IT IS    |
+//| WORTH: pips, then money.                                         |
+//|                                                                  |
+//| User order, on a knot whose Entry/SL/TP lines carry a tooltip    |
+//| only: «مقدار پیپ و دلاری هر کدوم در آخر هر خط بنویس ولی جوری باشه    |
+//| که چارت رو شلوغ نکنه». So the ink is a COLUMN at the right edge   |
+//| (the very edge the TP ticks hug, P-BK-50), one 7 pt row per line, |
+//| in the LINE'S OWN ink — and it exists for ONE box: the selected   |
+//| one (or the newest while nothing is selected), the same answer    |
+//| the corner note already uses (BaseKnotSelectedId). A box that     |
+//| does not answer deletes its own rows, so a selection change       |
+//| leaves no ghost column behind.                                    |
+//|                                                                  |
+//| WHERE THE MONEY COMES FROM (one basis, stated once): the STOP's    |
+//| pips ARE the risk (hPips), so the position is sized from           |
+//| `inpBKRiskPct` of the balance — lot = risk / (stop pips x pip      |
+//| value) — and every other line is its own pips at that lot. No      |
+//| second size, no second risk: one lot, one account currency, and    |
+//| the terminal's own tick value does the conversion (never a         |
+//| hard-coded $10). 0% = the ink is off and NOTHING is guessed.       |
+//|                                                                  |
+//| COST: writes only on a real change (name/text/x/y/ink compared     |
+//| first), one ChartTimePriceToXY per row, at most five rows, and     |
+//| only while a box is selected — a still frame writes nothing.       |
+//+------------------------------------------------------------------+
+static string s_bkPipOwner = "";   // the box whose column is on the chart ("" = none)
+//--- The column's own numbers, for the flushed witness (`BaseKnotPipWitness`, EventHandlers).
+//--- This file sits inside BaseKnotTool and may not call `DrawStripDiagEmit`; the pair below is
+//--- WRITE-then-read, and the reader says a line only when the string MOVED — so a still chart
+//--- is silent and every real recompute is one line with its own arithmetic.
+static string s_bkPipWitLive = "";
+static string s_bkPipWitSeen = "";
+string BaseKnotPipWitTake()
+{
+   if(s_bkPipWitLive == s_bkPipWitSeen) return "";
+   s_bkPipWitSeen = s_bkPipWitLive;
+   return (s_bkPipWitSeen == "" ? "none" : s_bkPipWitSeen);
+}
+string BaseKnotPipInkName(const string pfx, const int kind, const int k = 0)
+{
+   if(pfx == "") return "";
+   if(kind == 0) return pfx + "PIPENTRY";
+   if(kind == 1) return pfx + "PIPSL";
+   return pfx + "PIPTP" + IntegerToString(k);
+}
+void BaseKnotPipInkWipe(const string pfx)
+{
+   if(pfx == "") return;
+   ObjectDelete(0, BaseKnotPipInkName(pfx, 0));
+   ObjectDelete(0, BaseKnotPipInkName(pfx, 1));
+   for(int k = 1; k <= BK_TP_PLAN_MAX; k++) ObjectDelete(0, BaseKnotPipInkName(pfx, 2, k));
+}
+// Account currency per ONE pip at 1.00 lot — the terminal's own tick value, scaled to the
+// chart's own pip (the same BaseKnotPipSize every other number on the knot is measured in).
+double BaseKnotMoneyPerPip()
+{
+   double pip = BaseKnotPipSize();
+   if(pip <= 0.0) return 0.0;
+   double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tv > 0.0 && ts > 0.0) return tv * (pip / ts);
+   double cs = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   return (cs > 0.0 ? cs * pip : 0.0);
+}
+// The lot the risk % buys for THIS stop, on the symbol's own step/min/max.
+double BaseKnotRiskLot(const double slPips)
+{
+   if(slPips <= 0.0 || inpBKRiskPct <= 0.0) return 0.0;
+   double per = BaseKnotMoneyPerPip();
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(per <= 0.0 || bal <= 0.0) return 0.0;
+   double risk = bal * inpBKRiskPct / 100.0;
+   if(risk <= 0.0) return 0.0;
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0) step = 0.01;
+   double lot = MathFloor(risk / (slPips * per) / step) * step;
+   double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   if(mx > 0.0 && lot > mx) lot = mx;
+   if(mn > 0.0 && lot < mn) lot = mn;
+   return (lot > 0.0 ? NormalizeDouble(lot, 2) : 0.0);
+}
+string BaseKnotMoneyText(const double money)
+{
+   if(money <= 0.0) return "";
+   string cur = AccountInfoString(ACCOUNT_CURRENCY);
+   string sym = (cur == "USD" ? "$" : (cur == "" ? "$" : cur + " "));
+   return sym + DoubleToString(money, money < 100.0 ? 1 : 0);
+}
+// Does a row at `y` land on one already placed? `lineH` is the font's own leading, so two
+// rows closer than that would print through each other.
+bool BaseKnotPipClash(const int y, const int &used[], const int n, const int lineH)
+{
+   for(int u = 0; u < n; u++) if(MathAbs(y - used[u]) < lineH - 2) return true;
+   return false;
+}
+// One row: pips + money, written only when it moved.
+bool BaseKnotPipInkRow(const string nm, const int x, const int y, const string txt, const color clr)
+{
+   if(nm == "" || txt == "") return false;
+   bool have = (ObjectFind(0, nm) >= 0);
+   if(have && (int)ObjectGetInteger(0, nm, OBJPROP_TYPE) != OBJ_LABEL) { ObjectDelete(0, nm); have = false; }
+   if(have &&
+      (int)ObjectGetInteger(0, nm, OBJPROP_XDISTANCE) == x &&
+      (int)ObjectGetInteger(0, nm, OBJPROP_YDISTANCE) == y &&
+      (int)ObjectGetInteger(0, nm, OBJPROP_COLOR) == (int)clr &&
+      ObjectGetString(0, nm, OBJPROP_TEXT) == txt) return true;
+   if(!have && !ObjectCreate(0, nm, OBJ_LABEL, 0, 0, 0)) return false;
+   ObjectSetString(0, nm, OBJPROP_TEXT, txt);
+   ObjectSetString(0, nm, OBJPROP_FONT, inpFontName);
+   ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, PnlPt(BK_PT_PIP));
+   ObjectSetInteger(0, nm, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);   // the projection's own pixel, never a right-edge distance
+   ObjectSetInteger(0, nm, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, nm, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);   // the ink sits ON the line, inside the plot
+   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, nm, OBJPROP_ZORDER, Z_CHART_LABEL);
+   return true;
+}
+// The column. `dir` + `baseTF` + `anchor` are the SAME owners the drawn legs were read from,
+// so the ink can never name a level the lines did not draw (the tick loop asks
+// BaseKnotTPLevel exactly as the Sync did).
+void BaseKnotPipInk(const string id, const double entry, const double sl, const double offPips,
+                   const double hPips, const int dir, const int baseTF, const datetime anchor)
+{
+   string pfx = BaseKnotPrefix(id);
+   if(pfx == "") return;
+   bool sel = (id == BaseKnotSelectedId());
+   if(!sel)
+   {
+      if(s_bkPipOwner == id) { BaseKnotPipInkWipe(pfx); s_bkPipOwner = ""; }
+      s_bkPipWitLive = "";
+      return;   // one box wears the column, and a selection change takes the old one with it
+   }
+   if(s_bkPipOwner != "" && s_bkPipOwner != id) BaseKnotPipInkWipe(BaseKnotPrefix(s_bkPipOwner));
+   s_bkPipOwner = id;
+   double per = BaseKnotMoneyPerPip();
+   double lot = BaseKnotRiskLot(hPips);
+   datetime edge = BaseKnotTPEdgeTime();
+   int ex = 0, ey = 0;
+   if(entry <= 0.0 || sl <= 0.0 || per <= 0.0 || lot <= 0.0 || edge <= 0 ||
+      !ChartTimePriceToXY(0, 0, edge, entry, ex, ey))
+   {
+      BaseKnotPipInkWipe(pfx);   // no size, no money, no ink — never a guessed number
+      s_bkPipWitLive = "";
+      return;
+   }
+   s_bkPipWitLive = "id=" + id + " lot=" + DoubleToString(lot, 2) +
+                    " perPip=" + DoubleToString(per, 2) +
+                    " balance=" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 0) +
+                    " riskPct=" + DoubleToString(inpBKRiskPct, 2) +
+                    " stop=" + DoubleToString(hPips, 1) + "p " + BaseKnotMoneyText(hPips * per * lot) +
+                    " off=" + DoubleToString(offPips, 1) + "p";
+   // the anchor x: the right edge of the plot, a hair inside it (the price axis owns the rest)
+   int x = ex - 4;
+   int ax = ex;
+   int lineH = PnlRawLineH(PnlPt(BK_PT_PIP));
+   if(lineH < 1) lineH = 1;
+   int used[6]; ArrayInitialize(used, -9999); int nu = 0;   // the column never stacks two rows on one pixel row
+   //--- PRIORITY IS THE ORDER THE TRADE IS READ IN: the STOP first (it IS the risk), then the
+   //--- ENTRY's own leg, then the plan's targets. A row that would land on a row already taken
+   //--- is dropped, never nudged: the tooltip still carries that number, and a tight knot then
+   //--- reads three clean rows instead of five smudged ones.
+   int yy = 0;
+   if(hPips > 0.0 && ChartTimePriceToXY(0, 0, edge, sl, ax, yy))
+   {
+      BaseKnotPipInkRow(BaseKnotPipInkName(pfx, 1), x, yy, "-" + DoubleToString(hPips, 1) + "p " + BaseKnotMoneyText(hPips * per * lot), g_bkStopColor);
+      used[nu] = yy; nu++;
+   }
+   else ObjectDelete(0, BaseKnotPipInkName(pfx, 1));
+   if(offPips > 0.0 && ChartTimePriceToXY(0, 0, edge, entry, ax, yy) && !BaseKnotPipClash(yy, used, nu, lineH))
+   {
+      BaseKnotPipInkRow(BaseKnotPipInkName(pfx, 0), x, yy, DoubleToString(offPips, 1) + "p " + BaseKnotMoneyText(offPips * per * lot), g_bkEntryColor);
+      used[nu] = yy; nu++;
+   }
+   else ObjectDelete(0, BaseKnotPipInkName(pfx, 0));
+   for(int tk = 1; tk <= BK_TP_PLAN_MAX; tk++)
+   {
+      string nm = BaseKnotPipInkName(pfx, 2, tk);
+      double lv = (tk <= BaseKnotTPCount() ? BaseKnotTPLevel(entry, dir, baseTF, tk, anchor) : 0.0);
+      if(lv > 0.0 && ChartTimePriceToXY(0, 0, edge, lv, ax, yy) && !BaseKnotPipClash(yy, used, nu, lineH))
+      {
+         double pp = BaseKnotToPips(MathAbs(lv - entry));
+         BaseKnotPipInkRow(nm, x, yy, "+" + DoubleToString(pp, 1) + "p " + BaseKnotMoneyText(pp * per * lot), g_bkTargetColor);
+         s_bkPipWitLive += " tp" + IntegerToString(tk) + "=" + DoubleToString(pp, 1) + "p " + BaseKnotMoneyText(pp * per * lot);
+         used[nu] = yy; nu++;
+      }
+      else ObjectDelete(0, nm);
+   }
+}
 // BKTAGTP-OFF (P-BK-54): THE NOTE'S TARGET FIELD IS RETIRED IN PLACE. The user: «تی پی رو
 // … در اطلاعات نشون نده» — the note is read at a glance, the targets are drawn as ticks
 // (P-BK-50) and spelled leg by leg in the hover (BaseKnotTPPlanTip, still live), so the
@@ -4392,8 +4903,8 @@ string BaseKnotRiskTag(const int measureTF, const int baseTF, const double top, 
       // size without its source is a number nobody can check — so the reading TF rides
       // beside the name whenever it is not the class the note already prints.
       if(measureTF > 0 && baseTF > 0 && measureTF != baseTF)
-         return "EngSL " + BaseKnotTFName(measureTF);
-      return "EngSL";
+         return "TRex " + BaseKnotTFName(measureTF);
+      return "TRex";
    }
    return BaseKnotBoxHeightTag();
 }
@@ -4544,6 +5055,62 @@ string BaseKnotEntryTag(const bool offIsHunt, const double offPips,
    return " | " + BaseKnotEntryOffsetTag(offIsHunt) + " " + DoubleToString(offPips, 1);
 }
 //+------------------------------------------------------------------+
+//| P-TP4 (2026-10-19) — THE CARD'S FOUR LEGS AT THE KNOT'S OWN ROW. |
+//| The old face carried two (`EngSL`, `HuntSL`); the master's card  |
+//| carries four (`TRex`, `Trigger`, `Pricicle`, `Classic`). This is  |
+//| the one row the note prints, read from the plan row the pump     |
+//| already pushed for the same (TF, anchor) — never a second read.  |
+//+------------------------------------------------------------------+
+static int      s_bkLegN = 0;
+static int      s_bkLegTF[BK_ENG_ROW_MAX];
+static datetime s_bkLegAnchor[BK_ENG_ROW_MAX];
+static double   s_bkLegPric[BK_ENG_ROW_MAX];
+static double   s_bkLegClas[BK_ENG_ROW_MAX];
+void BaseKnotPlanLegsPush(const int &mins[], const datetime &anchors[],
+                          const double &pric[], const double &clas[], const int n)
+{
+   int m = 0;
+   for(int i = 0; i < n && m < BK_ENG_ROW_MAX; i++)
+   {
+      if(mins[i] <= 0) continue;
+      s_bkLegTF[m] = mins[i];
+      s_bkLegAnchor[m] = (anchors[i] > 0 ? anchors[i] : 0);
+      s_bkLegPric[m] = (pric[i] > 0.0 ? pric[i] : 0.0);
+      s_bkLegClas[m] = (clas[i] > 0.0 ? clas[i] : 0.0);
+      m++;
+   }
+   s_bkLegN = m;
+}
+double BaseKnotPlanPriciclePips(const int tfMin, const datetime anchor = 0)
+{
+   int tf = (tfMin > 0 ? tfMin : Period());
+   for(int i = 0; i < s_bkLegN; i++)
+      if(s_bkLegTF[i] == tf && s_bkLegAnchor[i] == anchor) return s_bkLegPric[i];
+   return 0.0;
+}
+double BaseKnotPlanClassicPips(const int tfMin, const datetime anchor = 0)
+{
+   int tf = (tfMin > 0 ? tfMin : Period());
+   for(int i = 0; i < s_bkLegN; i++)
+      if(s_bkLegTF[i] == tf && s_bkLegAnchor[i] == anchor) return s_bkLegClas[i];
+   return 0.0;
+}
+string BaseKnotLegPipsText(const double v)
+{
+   if(v <= 0.0) return "--";
+   if(MathAbs(v - MathRound(v)) < 0.05) return IntegerToString((int)MathRound(v));
+   return DoubleToString(v, 1);
+}
+string BaseKnotLegsTag(const int engTF, const double engPips,
+                       const datetime anchor = 0)
+{
+   if(engPips <= 0.0) return "";
+   return "TRex " + BaseKnotLegPipsText(engPips) +
+          " | Trigger " + BaseKnotLegPipsText(BaseKnotHuntPips(engTF, anchor)) +
+          " | Pricicle " + BaseKnotLegPipsText(BaseKnotPlanPriciclePips(engTF, anchor)) +
+          " | Classic " + BaseKnotLegPipsText(BaseKnotPlanClassicPips(engTF, anchor));
+}
+//+------------------------------------------------------------------+
 //| P-BK-109 (2026-10-09, user: «اینجا که نیومده هنوز») — THE TYPE'S  |
 //| OWN ATR AND THE BAR IT CAME FROM, ON THE FACE.                   |
 //|                                                                  |
@@ -4568,8 +5135,110 @@ string BaseKnotEntryTag(const bool offIsHunt, const double offPips,
 string BaseKnotATRTag(BaseKnotNode &nd)
 {
    if(nd.abTrig <= 0.0) return "";   // absence: the hover names it, the face does not guess
-   string bar = (nd.anchor > 0 ? TimeToString(nd.anchor, TIME_DATE | TIME_MINUTES) : "live");
-   return " · ATR " + DoubleToString(BaseKnotToPips(nd.abTrig), 1) + " (" + bar + ")";
+   // P-BK-106b: the leg ruler's compact shape — ONE `ATR` label, three `TF:value` cells,
+   // ascending ladder order (node, pattern, structure). No bar on the face: the hover
+   // carries the moment (P-BK-108). Only REAL rows are printed; a cold row stays in hover.
+   string s = " · ATR " + BaseKnotTFName(nd.nodeTF) + ":" + DoubleToString(BaseKnotToPips(nd.abTrig), 1);
+   int up1 = BaseKnotNextTFMin(nd.nodeTF);
+   int up2 = (up1 > 0 ? BaseKnotNextTFMin(up1) : 0);
+   if(up1 > 0 && nd.abPatRead && nd.abPat > 0.0)
+      s += " | " + BaseKnotTFName(up1) + ":" + DoubleToString(BaseKnotToPips(nd.abPat), 1);
+   if(up2 > 0 && nd.abStrRead && nd.abStr > 0.0)
+      s += " | " + BaseKnotTFName(up2) + ":" + DoubleToString(BaseKnotToPips(nd.abStr), 1);
+   return s;
+}
+string BaseKnotATRPctCell(const int tf, const double atr, const double boxPips)
+{
+   double a = BaseKnotToPips(atr);
+   if(a <= 0.0 || boxPips <= 0.0) return "";
+   return BaseKnotTFName(tf) + ":" + IntegerToString((int)MathRound(boxPips / a * 100.0)) + "%";
+}
+string BaseKnotATRPctTag(BaseKnotNode &nd, const double boxPips)
+{
+   string s = BaseKnotATRPctCell(nd.nodeTF, nd.abTrig, boxPips);
+   if(s == "") return "";
+   s = " · " + s;
+   int up1 = BaseKnotNextTFMin(nd.nodeTF);
+   int up2 = (up1 > 0 ? BaseKnotNextTFMin(up1) : 0);
+   string c = (up1 > 0 && nd.abPatRead ? BaseKnotATRPctCell(up1, nd.abPat, boxPips) : "");
+   if(c != "") s += " | " + c;
+   c = (up2 > 0 && nd.abStrRead ? BaseKnotATRPctCell(up2, nd.abStr, boxPips) : "");
+   if(c != "") s += " | " + c;
+   return s;
+}
+//--- P-BK-113/114: the leg ruler's owner-TF line, on the note. The owner is the
+//--- ladder rung whose own ATR makes the box 240%..360%; for the 248-pip box
+//--- that is M15 (301%), and P-BK-114 makes that same TF the knot's time. The
+//--- lower rungs are pushed by the pump (ATR is above this module); this builder
+//--- only reads the published cache.
+int BaseKnotPrevTFMin(const int tfMin)
+{
+   if(tfMin <= 1) return 0;
+   int rungs[]; int n = BaseKnotLadderAll(rungs);
+   int prev = 0;
+   for(int i = 0; i < n; i++)
+   {
+      if(rungs[i] >= tfMin) break;
+      prev = rungs[i];
+   }
+   return prev;
+}
+#define BK_OWNER_LO 2.40
+#define BK_OWNER_HI 3.60
+string BaseKnotOwnerTag(BaseKnotNode &nd, const double boxPips)
+{
+   if(nd.nodeTF <= 0 || boxPips <= 0.0 || nd.abTrig <= 0.0) return "";
+   int tfs[6]; double atrs[6]; int n = 0;
+   int d1 = BaseKnotPrevTFMin(nd.nodeTF);
+   int d2 = (d1 > 0 ? BaseKnotPrevTFMin(d1) : 0);
+   int d3 = (d2 > 0 ? BaseKnotPrevTFMin(d2) : 0);
+   int down[3]; down[0] = d3; down[1] = d2; down[2] = d1;
+   for(int i = 0; i < 3; i++)
+   {
+      double a = 0.0;
+      if(down[i] > 0 && BaseKnotOwnerATRGet(down[i], nd.anchor, a) && a > 0.0)
+      {
+         tfs[n] = down[i]; atrs[n] = a; n++;
+      }
+   }
+   tfs[n] = nd.nodeTF; atrs[n] = nd.abTrig; n++;
+   int up1 = BaseKnotNextTFMin(nd.nodeTF);
+   int up2 = (up1 > 0 ? BaseKnotNextTFMin(up1) : 0);
+   if(up1 > 0 && nd.abPatRead && nd.abPat > 0.0)
+   {
+      tfs[n] = up1; atrs[n] = nd.abPat; n++;
+   }
+   if(up2 > 0 && nd.abStrRead && nd.abStr > 0.0)
+   {
+      tfs[n] = up2; atrs[n] = nd.abStr; n++;
+   }
+   int start = -1;
+   for(int i = 0; i < n; i++) if(tfs[i] == nd.nodeTF) { start = i; break; }
+   if(start < 0) return "";
+   int owner = -1;
+   int idx = start;
+   for(int step = 0; step < 6; step++)
+   {
+      double ap = BaseKnotToPips(atrs[idx]);
+      if(ap <= 0.0) break;
+      double r = boxPips / ap;
+      if(r >= BK_OWNER_LO && r <= BK_OWNER_HI) { owner = idx; break; }
+      int nxt = (r > BK_OWNER_HI ? idx + 1 : idx - 1);
+      if(nxt < 0 || nxt >= n || nxt == idx) break;
+      idx = nxt;
+   }
+   if(owner < 0) return "";
+   // A TF already printed by BaseKnotATRTag (its ATR) and BaseKnotATRPctTag
+   // (its %) would repeat both fields on the owner row: the node's own rung,
+   // plus the pattern/structure rungs when those reads exist. Only a LOWER
+   // owner rung is new information (it is pumped, not on the face).
+   if(tfs[owner] == nd.nodeTF ||
+      (up1 > 0 && nd.abPatRead && nd.abPat > 0.0 && tfs[owner] == up1) ||
+      (up2 > 0 && nd.abStrRead && nd.abStr > 0.0 && tfs[owner] == up2)) return "";
+   double ap = BaseKnotToPips(atrs[owner]);
+   if(ap <= 0.0) return "";
+   return "TF " + BaseKnotTFName(tfs[owner]) + " | ATR " + DoubleToString(ap, 1) +
+          " | Leg " + IntegerToString((int)MathRound(boxPips / ap * 100.0)) + "%";
 }
 
 #endif // BASE_KNOT_NOTE_MQH
@@ -4607,13 +5276,13 @@ int BKInfoFontPt()
 //--- The plate's height and the pair's two rectangles come from ONE owner, so the writer
 //--- and the follower can never place them differently: a plate that drifts off its own
 //--- ink is worse than no plate at all.
-int BaseKnotNotePlateH() { return PnlRawLineH(BKInfoFontPt()) + 2 * BK_NOTE_PAD_Y; }
+int BaseKnotNotePlateH(const string txt) { return BaseKnotNoteLineCount(txt) * PnlRawLineH(BKInfoFontPt()) + 2 * BK_NOTE_PAD_Y; }
 //--- the plate's WIDTH, off the very string the note prints — its own ONE owner, so the
 //--- writer (which draws the plate) and the follower (which keeps its size in step with the
 //--- ink, P-BK-87) can never measure two different things.
 int BaseKnotNotePlateW(const string txt)
 {
-   int pw = PnlRawTextW(txt, BKInfoFontPt()) + 2 * BK_NOTE_PAD_X;
+   int pw = BaseKnotNoteMaxLineW(txt, BKInfoFontPt()) + 2 * BK_NOTE_PAD_X;
    if(pw < 2 * BK_NOTE_PAD_X + 8) pw = 2 * BK_NOTE_PAD_X + 8;   // a not-yet-written note still gets a plate
    return pw;
 }
@@ -4652,7 +5321,7 @@ void BaseKnotNotePlateTop(const int sx, const int sy, const int pw, const int ph
 void BaseKnotNotePlatePx(const int sx, const int sy, const string txt,
                          int &px, int &py, int &pw, int &ph, int &tx, int &ty)
 {
-   ph = BaseKnotNotePlateH();
+   ph = BaseKnotNotePlateH(txt);
    pw = BaseKnotNotePlateW(txt);
    BaseKnotNotePlateTop(sx, sy, pw, ph, px, py, tx, ty);
 }
@@ -4709,7 +5378,7 @@ void BaseKnotNotePlateFollow(const string pfx, const datetime t1, const double t
    if(!ChartTimePriceToXY(0, 0, t1, top, sx, sy)) return;   // the window cannot answer yet: keep the last pixels
    string pn = BaseKnotInfoPlateName(in);
    bool hasPlate = (ObjectFind(0, pn) >= 0);
-   int ph = BaseKnotNotePlateH();
+   int ph = BaseKnotNotePlateH(ObjectGetString(0, in, OBJPROP_TEXT));
    int pw = BaseKnotNotePlateW(ObjectGetString(0, in, OBJPROP_TEXT));
    int px, py, tx, ty;
    BaseKnotNotePlateTop(sx, sy, pw, ph, px, py, tx, ty);
@@ -4813,14 +5482,80 @@ void BaseKnotNoteInkToFront(const string o)
 // THE GATE: tools/base-count-audit.py [note fields]/[note height] reads the note's own TEXT
 // expression AND the field's builder — a target field, the word "Pips", or a height field
 // that grew a name (or a second copy beside the fallback risk) fails the build.
+//--- BKCORNER-ON (2026-10-20) - THE CORNER READOUT'S OWN PLATE AND ROWS. -----------------
+//--- The plate is the dark TH3 readout bar (BIO_CLR_DEEP, BIO_CLR_FIELD_BD frame) and the
+//--- rows are its ink. Creation order is the paint order (P-LOG-10 / P-TH3-INFO-08), so the
+//--- writer creates the plate FIRST; a row created after it is drawn above it, and the
+//--- writer's X/Y/size guards keep a still frame at zero writes.
+void BaseKnotCornerPlateDraw(const string pn, const int px, const int py, const int pw,
+                             const int ph)
+{
+   bool fresh = (ObjectFind(0, pn) < 0);
+   if(!fresh && (int)ObjectGetInteger(0, pn, OBJPROP_TYPE) != OBJ_RECTANGLE_LABEL)
+   {
+      ObjectDelete(0, pn);
+      fresh = true;
+   }
+   if(!fresh &&
+      (int)ObjectGetInteger(0, pn, OBJPROP_XDISTANCE) == px &&
+      (int)ObjectGetInteger(0, pn, OBJPROP_YDISTANCE) == py &&
+      (int)ObjectGetInteger(0, pn, OBJPROP_XSIZE) == pw &&
+      (int)ObjectGetInteger(0, pn, OBJPROP_YSIZE) == ph &&
+      ObjectGetString(0, pn, OBJPROP_TOOLTIP) == "") return;
+   if(fresh && !ObjectCreate(0, pn, OBJ_RECTANGLE_LABEL, 0, 0, 0)) return;
+   ObjectSetInteger(0, pn, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, pn, OBJPROP_XDISTANCE, px);
+   ObjectSetInteger(0, pn, OBJPROP_YDISTANCE, py);
+   ObjectSetInteger(0, pn, OBJPROP_XSIZE, pw);
+   ObjectSetInteger(0, pn, OBJPROP_YSIZE, ph);
+   ObjectSetInteger(0, pn, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, pn, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, pn, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, pn, OBJPROP_COLOR, BIO_CLR_FIELD_BD);
+   ObjectSetInteger(0, pn, OBJPROP_BGCOLOR, BIO_CLR_DEEP);
+   ObjectSetInteger(0, pn, OBJPROP_BACK, false);
+   ObjectSetInteger(0, pn, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, pn, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, pn, OBJPROP_ZORDER, Z_BOX_INFO);
+   ObjectSetString(0, pn, OBJPROP_TOOLTIP, "");   // no white tooltip over the readout
+}
+void BaseKnotCornerRowAt(const string rn, const string txt, const int x, const int y,
+                         const long tfMask, const string tip, const int fontPt)
+{
+   if(ObjectFind(0, rn) >= 0 && (int)ObjectGetInteger(0, rn, OBJPROP_TYPE) != OBJ_LABEL)
+      ObjectDelete(0, rn);
+   bool fresh = (ObjectFind(0, rn) < 0);
+   if(!fresh &&
+      (int)ObjectGetInteger(0, rn, OBJPROP_XDISTANCE) == x &&
+      (int)ObjectGetInteger(0, rn, OBJPROP_YDISTANCE) == y &&
+      (int)ObjectGetInteger(0, rn, OBJPROP_FONTSIZE) == fontPt &&
+      (long)ObjectGetInteger(0, rn, OBJPROP_TIMEFRAMES) == tfMask &&
+      ObjectGetString(0, rn, OBJPROP_TEXT) == txt &&
+      ObjectGetString(0, rn, OBJPROP_TOOLTIP) == tip) return;
+   if(fresh && !ObjectCreate(0, rn, OBJ_LABEL, 0, 0, 0)) return;
+   ObjectSetString(0, rn, OBJPROP_TEXT, txt);
+   ObjectSetString(0, rn, OBJPROP_FONT, inpFontName);
+   ObjectSetInteger(0, rn, OBJPROP_FONTSIZE, fontPt);
+   ObjectSetInteger(0, rn, OBJPROP_COLOR, BIO_CLR_INK);
+   ObjectSetInteger(0, rn, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, rn, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, rn, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, rn, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+   ObjectSetInteger(0, rn, OBJPROP_BACK, false);
+   ObjectSetInteger(0, rn, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, rn, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, rn, OBJPROP_ZORDER, Z_CHART_LABEL);
+   ObjectSetInteger(0, rn, OBJPROP_TIMEFRAMES, tfMask);
+   ObjectSetString(0, rn, OBJPROP_TOOLTIP, tip);
+}
 void BaseKnotWriteInfo(const string in, const datetime t1, const datetime t2,
                        const double top, const double bot,
                        const double hPips, const string tpTip,
                        const string side, BaseKnotSpan &sp,
                        BaseKnotNode &nd, const long tfMask, const string riskTag,
                        const string tradeTip,   // P-BK-51: the stop's sentence + the entry's own
-                       const string entryTag,    // P-BK-104: the ENTRY's own leg, named and sized
-                       const bool atCorner = false)   // P-BK-58: the family's row instead of the box
+                        const string entryTag,    // P-BK-104: the ENTRY's own leg, named and sized
+                        const bool atCorner = false, const int readTF = 0, const string legsTag = "")   // P-TP4: TRex/Trigger/Pricicle/Classic
 {
    // P-BK-58: ONE object at a time. The placement is a PARAMETER (decided by
    // BaseKnotNoteAtCorner), and the other home is emptied as this one is written, so a mode
@@ -4828,20 +5563,119 @@ void BaseKnotWriteInfo(const string in, const datetime t1, const datetime t2,
    // an OBJ_TEXT pinned to the box' top-left corner (time/price); the corner row is an
    // OBJ_LABEL pinned to the slot the label module pushed in — the same text, the same font,
    // size, colour and rung (P-BK-27/56), only its anchor differs.
+   // BKCORNER-ON (2026-10-20): the note has ONE home now - the family's top-left readout.
+   // The text and the hover are built ONCE, before the home branch, so the retired box-side
+   // path (one line away) can never print a different sentence.
+   int bars = sp.life, still = sp.still;   // P-BK-41: one span, read once
+   string barsPart = (bars > 0 ? " | " + IntegerToString(bars) + " bars" : "");
+   datetime ws1, ws2;                       // P-BK-112: the REPORTED span — box ∪ base (the class itself reads `still` × the commit TF)
+   BaseKnotClassSpan(sp, t1, t2, ws1, ws2);
+   // P-BK-28: the BASE'S SIZE CLASS rides the note itself - ". | 12 bars ? H1 base".
+   // P-BK-29: so does the node type - ". ? FTR" - when there is one to claim.
+   // BKTAGTP-OFF (P-BK-54): the retired plan-target field sat here - restore it by
+   // putting `+ tpTag` back after the risk (and taking BaseKnotTPPlanTag from BKTAGTP-OFF
+   // in BaseKnotSync / BaseKnotSyncLive, which still build `tpTip` for the hover).
+   // P-BK-28/29/54: the class and node type ride the face; the retired plan-target field is BKTAGTP-OFF (see BaseKnotSync).
+    string head = "[" + side + " · " + (legsTag != "" ? legsTag : riskTag + " " + DoubleToString(hPips, 1) + entryTag) + BaseKnotHeightTag(top, bot, riskTag) + "]";
+   double boxPips = BaseKnotToPips(top - bot); string body = (bars > 0 ? IntegerToString(bars) + " bars" : "") + BaseKnotBaseTag(still, ws1, ws2, top, bot, readTF, nd.nodeTF) + BaseKnotNodeTag(nd) + BaseKnotATRPctTag(nd, boxPips);
+   string atr = BaseKnotATRTag(nd); string atrLine = (StringLen(atr) > 3 && StringSubstr(atr, 0, 3) == " · " ? StringSubstr(atr, 3) : atr); string own = BaseKnotOwnerTag(nd, boxPips);
+   string txt = (atCorner ? head + "\n" + body + (atrLine != "" ? "\n" + atrLine : "") + (own != "" ? "\n" + own : "") : head + barsPart + BaseKnotBaseTag(still, ws1, ws2, top, bot, readTF, nd.nodeTF) + BaseKnotNodeTag(nd) + atr);   // P-BK-109: the type's own ATR and the bar it was read at   // P-BK-112: the class reads the base's own candle count on the box' commit TF
+   // P-BK-51: the trade's numbers arrive READY-BUILT (`tradeTip` - the stop's size and its
+   // placement behind the entry, then how deep the entry waits and what sized it), so this
+   // writer never spells a geometry of its own.
+   string tip = "BK " + side + ": " + tradeTip +
+                (bars > 0 ? ", " + IntegerToString(bars) + " bars" : "") +
+                tpTip +   // P-BK-50: the plan's own targets, leg by leg (level + pips + R)
+                BaseKnotHeightTip(top, bot, riskTag) +   // P-BK-57: the note's bare second number
+                 BaseKnotBaseLine(still, ws1, ws2, top, bot, readTF, nd.nodeTF) +   // P-BK-114: the owner TF; P-BK-112: candle-count fallback
+                (bars > 0 ? "\n     " + IntegerToString(bars) + " bars: between the ENTRY candle " +
+                            "and the EXIT candle (entry not counted, exit counted) · " +
+                            IntegerToString(still) + " stood still in the band" : "") +   // P-BK-40/42
+                (bars > 0 ? "\n     band -> entry candle " + TimeToString(sp.tStart, TIME_DATE|TIME_MINUTES) +
+                            (sp.tExit > sp.tLast
+                             ? " -> exit candle " + TimeToString(sp.tExit, TIME_DATE|TIME_MINUTES)
+                             : " -> no exit yet: the base is still holding the band") : "") +
+                BaseKnotNodeLine(nd, top, bot) +   // P-BK-29
+                (atCorner ? "\n     the top-left row is this box' note (BKCORNER-ON): " +
+                            "the selected box, or the newest while nothing is selected" : "");
    string cn = BaseKnotCornerName();
    if(atCorner)
    {
+      // the box-side copy and its plate go with the old home; a stale pair would paint twice
+      if(ObjectFind(0, in) >= 0) ObjectDelete(0, in);
+      string ip = BaseKnotInfoPlateName(in);
+      if(ip != "" && ObjectFind(0, ip) >= 0) ObjectDelete(0, ip);
       if(cn == "" || s_bkCornerSide < 0) return;   // no slot pushed: nothing to draw into
-      if(ObjectFind(0, in) >= 0) ObjectDelete(0, in);   // the box-side copy goes with the mode that wanted it
-      ObjectDelete(0, BaseKnotInfoPlateName(in));   // P-BK-86: and its plate goes with it — an empty bar is not a readout
+      // BKCORNER-TOAST: the note is a toast. A new box (its `in` differs) opens a 3 s
+      // window; the same box only redraws inside its window; an expired one wipes the
+      // family. A tap on the same box re-arms through BaseKnotCornerToastArm().
+      uint now = GetTickCount();
+      if(in != s_bkToastKey || in == BaseKnotLiveTag() + "INFO")   // a live readout stays lit while the cursor moves
+      {
+         s_bkToastKey = in;
+         BaseKnotCornerToastArm();
+      }
+      if(!s_bkToastArmed || (!s_bkToastPaused && (int)(s_bkToastUntil - now) <= 0))
+      {
+         if(s_bkToastVisible) { BaseKnotCornerFamilyWipe(); s_bkToastVisible = false; BaseKnotCornerToastRect(0, 0, 0, 0); }
+         s_bkToastArmed = false;
+         return;
+      }
+      string rows[];
+      int n = BaseKnotNoteRows(txt, rows);
+      if(n <= 0) { BaseKnotCornerFamilyWipe(); s_bkToastVisible = false; BaseKnotCornerToastRect(0, 0, 0, 0); return; }
+      int fontPt = BKInfoFontPt();
+      int lineH = PnlRawLineH(fontPt);
+      if(lineH < 1) lineH = 1;
+      int pitch = lineH + BK_CORNER_ROW_GAP;
+      int maxW = 0;
+      for(int r = 0; r < n; r++)
+      {
+         int w = PnlRawTextW(rows[r], fontPt);
+         if(w > maxW) maxW = w;
+      }
+      int pw = maxW + 2 * BK_CORNER_PAD_X;
+      int ph = n * lineH + (n - 1) * BK_CORNER_ROW_GAP + 2 * BK_CORNER_PAD_Y;
+      int sx = MathMax(8, s_bkCornerX);
+      int sy = MathMax(8, s_bkCornerY);
+      int px = sx - BK_CORNER_PAD_X;
+      int py = sy - BK_CORNER_PAD_Y;
+      int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+      if(cw > 0)
+      {
+         int right = cw - 8;   // the label family's own right boundary
+         if(px + pw > right) px = right - pw;
+         if(px < BK_NOTE_EDGE_MARGIN) px = BK_NOTE_EDGE_MARGIN;
+      }
+      int ch = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+      if(ch > 0)
+      {
+         int bottom = ch - BK_NOTE_BOTTOM_SAFE;
+         if(py + ph > bottom) py = bottom - ph;
+         if(py < BK_NOTE_EDGE_MARGIN) py = BK_NOTE_EDGE_MARGIN;
+      }
+      int tx = px + BK_CORNER_PAD_X;
+      int ty = py + BK_CORNER_PAD_Y;
+      string pn = BaseKnotCornerPlateName();
+      bool plateNew = (ObjectFind(0, pn) < 0 ||
+                       (int)ObjectGetInteger(0, pn, OBJPROP_TYPE) != OBJ_RECTANGLE_LABEL);
+      if(plateNew)
+         for(int d = 0; d < BK_INFO_MAX_ROWS; d++) ObjectDelete(0, BaseKnotCornerRowName(d));
+      BaseKnotCornerPlateDraw(pn, px, py, pw, ph); BaseKnotCornerToastRect(px, py, pw, ph);   // plate FIRST: creation order is paint order
+      for(int r = 0; r < BK_INFO_MAX_ROWS; r++)
+      {
+         string rn = BaseKnotCornerRowName(r);
+         if(r >= n) { if(ObjectFind(0, rn) >= 0) ObjectDelete(0, rn); continue; }
+         BaseKnotCornerRowAt(rn, rows[r], tx, ty + r * pitch, tfMask, "", fontPt);
+         color rowInk = (r == 0 ? BIO_CLR_ACCENT : (r == 1 ? BIO_CLR_INK : BIO_CLR_LABEL)); if((int)ObjectGetInteger(0, rn, OBJPROP_COLOR) != (int)rowInk) ObjectSetInteger(0, rn, OBJPROP_COLOR, rowInk);
+      }
+      s_bkToastVisible = true;
+      return;
    }
-   else if(!BaseKnotNoteInCorner() && cn != "" && ObjectFind(0, cn) >= 0)
-      ObjectDelete(0, cn);   // a MODE change took the note back to the box (P-BK-58); while the mode
-                             // IS corner the row belongs to BaseKnotNoteCornerRefresh, so a box that
-                             // is not the one it answers never wipes it
+   if(cn != "" && ObjectFind(0, cn) >= 0) ObjectDelete(0, cn);
    // ONE name: everything below is the SAME write in either home — the text, the font, the
    // size, the colour, the rung and the hover are shared, and only the last lines differ.
-   string o = (atCorner ? cn : in);
+   string o = in;
    // P-BK-86: BOTH homes are SCREEN objects now — the box-side note moved off the chart layer
    // (it was an OBJ_TEXT, and MT4 painted the candles and the level lines over its glyphs).
    // ObjectCreate never re-types an object it finds, so a pre-plate build's note is purged
@@ -4849,17 +5683,7 @@ void BaseKnotWriteInfo(const string in, const datetime t1, const datetime t2,
    if(ObjectFind(0, o) >= 0 && (int)ObjectGetInteger(0, o, OBJPROP_TYPE) != OBJ_LABEL)
       ObjectDelete(0, o);
    if(ObjectFind(0, o) < 0) ObjectCreate(0, o, OBJ_LABEL, 0, 0, 0);
-   int bars = sp.life, still = sp.still;   // P-BK-41: one span, read once
-   string barsPart = (bars > 0 ? " | " + IntegerToString(bars) + " bars" : "");
-   datetime ws1, ws2;                       // P-BK-84: the class' span — box ∪ base (the box is a floor)
-   BaseKnotClassSpan(sp, t1, t2, ws1, ws2);
-   // P-BK-28: the BASE'S SIZE CLASS rides the note itself — "… | 12 bars · H1 base".
-   // P-BK-29: so does the node type — "… · FTR" — when there is one to claim.
-   // BKTAGTP-OFF (P-BK-54): the retired plan-target field sat here — restore it by
-   // putting `+ tpTag` back after the risk (and taking BaseKnotTPPlanTag from BKTAGTP-OFF
-   // in BaseKnotSync / BaseKnotSyncLive, which still build `tpTip` for the hover).
-    ObjectSetString(0, o, OBJPROP_TEXT,
-                    "[" + side + " · " + riskTag + " " + DoubleToString(hPips, 1) + entryTag + BaseKnotHeightTag(top, bot, riskTag) + barsPart + BaseKnotBaseTag(still, ws1, ws2, top, bot)                    + BaseKnotNodeTag(nd) + BaseKnotATRTag(nd) + "]");   // P-BK-109: the type's own ATR and the bar it was read at   // P-BK-46/40/41: the risk and its source, then the ENTRY's own leg (P-BK-104 — the second leg the levels are drawn with), then the box' own height (P-BK-57), then the class — P-BK-84: off the BASE'S OWN span (∪ the box'), so neither a narrow box nor the chart TF can move it. P-BK-81: the four pattern names are gone — `side` (BUY/SELL) IS the direction now
+   ObjectSetString(0, o, OBJPROP_TEXT, txt);   // built ONCE above, for either home
    ObjectSetString(0, o, OBJPROP_FONT, inpFontName);   // P-BK-56: the label family's own font
    ObjectSetInteger(0, o, OBJPROP_FONTSIZE, BKInfoFontPt());   // P-BK-27/56
    ObjectSetInteger(0, o, OBJPROP_COLOR, BaseKnotFgForBg());
@@ -4881,21 +5705,7 @@ void BaseKnotWriteInfo(const string in, const datetime t1, const datetime t2,
    // P-BK-51: the trade's numbers arrive READY-BUILT (`tradeTip` — the stop's size and its
    // placement behind the entry, then how deep the entry waits and what sized it), so this
    // writer never spells a geometry of its own.
-   ObjectSetString(0, o, OBJPROP_TOOLTIP, "BK " + side + ": " + tradeTip +
-                   (bars > 0 ? ", " + IntegerToString(bars) + " bars" : "") +
-                   tpTip +   // P-BK-50: the plan's own targets, leg by leg (level + pips + R) — P-BK-54: the note's ONLY home for them
-                   BaseKnotHeightTip(top, bot, riskTag) +   // P-BK-57: the note's bare second number, NAMED here, with its arithmetic
-                   BaseKnotBaseLine(still, ws1, ws2, top, bot) +   // P-BK-84: the class, off the BASE'S OWN span
-                   (bars > 0 ? "\n     " + IntegerToString(bars) + " bars: between the ENTRY candle " +
-                               "and the EXIT candle (entry not counted, exit counted) · " +
-                               IntegerToString(still) + " stood still in the band" : "") +   // P-BK-40/42
-                   (bars > 0 ? "\n     band -> entry candle " + TimeToString(sp.tStart, TIME_DATE|TIME_MINUTES) +
-                               (sp.tExit > sp.tLast
-                                ? " -> exit candle " + TimeToString(sp.tExit, TIME_DATE|TIME_MINUTES)
-                                : " -> no exit yet: the base is still holding the band") : "") +
-                   BaseKnotNodeLine(nd, top, bot) +   // P-BK-29
-                   (atCorner ? "\n     the row above the trade card is this box' note (P-BK-58): " +
-                               "the selected box, or the newest while nothing is selected" : ""));
+   ObjectSetString(0, o, OBJPROP_TOOLTIP, tip);   // built ONCE above, for either home
    // P-BK-58: the ONE difference between the two homes — the slot the label module pushed in,
    // or the box' own corner. P-BK-86: BOTH are screen objects now, so the difference is only
    // WHERE the pixels come from (a pushed slot vs a projection of `t2, top`).
@@ -5043,7 +5853,7 @@ void BaseKnotSyncLive(const datetime t2raw, const double p2raw)
    int liveClass = BaseKnotBaseTFMin(spLive.still, ls1, ls2, top, bot);   // P-BK-84: the node's time, off the BASE'S OWN span (∪ the box')
    ndLive.height = top - bot;   // P-BK-75: «طول گره» is the box' own height
    ndLive.kind   = BaseKnotNodeKindOfLength(liveClass, ndLive.height, ndLive.anchor);   // P-BK-78/79: the SAME node's time and the SAME anchor the committed read uses
-   BaseKnotAbilityGet(liveClass, ndLive.anchor, ndLive.abTrig, ndLive.abPat, ndLive.abStr);
+   BaseKnotAbilityRead(liveClass, ndLive.anchor, ndLive);
    ndLive.nodeTF = liveClass;   // P-BK-78: the TF the type was read against, published for the hover
    ndLive.baseTF = liveClass;
    bool liveCorner = BaseKnotNoteAtCorner("");   // P-BK-58: while the user SIZES, the row is the answer
@@ -5621,8 +6431,8 @@ void BaseKnotSync(const string id)
    // the note's own badge all read THIS record, so no two of them can disagree about
    // where the base started, where it ended, or which TF it belongs to.
    BaseKnotSpan sp;
-   int bars = BaseKnotBarCount(t1, t2, top, bot, sp);
-   int still = sp.still;
+   int baseReadTF = (g_bkBoxes[k].ownerTFMin > 0 ? g_bkBoxes[k].ownerTFMin : tfMin); int bars = BaseKnotBarCount(t1, t2, top, bot, sp, baseReadTF);   // P-BK-114: the owner TF is the knot's time
+   if(bars <= 0 && baseReadTF != tfMin) { baseReadTF = tfMin; bars = BaseKnotBarCount(t1, t2, top, bot, sp, tfMin); } int still = sp.still;
    // P-BK-36/38: the CLASS comes first now, because it is also what the node's
    // story is read on — one box, one TF, one story, whichever chart opens it. Both
    // numbers are published on the registry, so the pump's change check reads the
@@ -5638,9 +6448,9 @@ void BaseKnotSync(const string id)
    // the reading either. `t1..t2` below are the box' own; the union is what the class reads.
    datetime bs1, bs2;
    BaseKnotClassSpan(sp, t1, t2, bs1, bs2);
-   int baseTF = BaseKnotBaseTFMin(still, bs1, bs2, top, bot);   // P-BK-84: the node's time, from the base's own span
+   int baseTF = (g_bkBoxes[k].ownerTFMin > 0 && baseReadTF == g_bkBoxes[k].ownerTFMin && bars > 0 ? baseReadTF : BaseKnotBaseTFMin(still, bs1, bs2, top, bot, tfMin));   // P-BK-114: owner first; P-BK-112: candle-count fallback
    g_bkBoxes[k].baseTFMin = baseTF;
-   g_bkBoxes[k].storyT = sp.tLast;   // P-BK-41: the same story the pump re-reads
+   g_bkBoxes[k].storyT = sp.tLast; if(sp.tLast > 0 && g_calcAnchorOwner == id) CalcAnchorFollow(id, sp.tLast);   // P-BK-41: the same story the pump re-reads; P-ANCHOR-LAST: the active owner follows the story it just published
    g_bkBoxes[k].exitT  = sp.tExit;   // P-BK-81: the base's OWN exit candle — the ONE candle the
                                      //          direction is read from, published so the pump's
                                      //          own read cannot land on a different one
@@ -5771,9 +6581,8 @@ void BaseKnotSync(const string id)
                                      DoubleToString(tpP / hPips, 1) + "R" : "") +
                       " — the plan's own TP" + IntegerToString(tk) + " of " + BaseKnotTFName(baseTF) + ")", tfMask, false);
    }
-    ObjectDelete(0, BaseKnotTPName(pfx));   // BKTPR-OFF: purge a pre-P-BK-50 build's single tick
-   ObjectDelete(0, BaseKnotDelName(pfx));   // NOBKDEL 2026-09-06: X badge retired — purge pre-retire badges
-   ObjectDelete(0, BaseKnotBuyName(pfx));   // NOBUYSELL: purge pre-2026-09-06 direction badges
+   BaseKnotPipInk(id, entry, sl, offPips, hPips, dir, baseTF, nd.anchor);   // P-BK-116: every line's own pips + money at its end
+   ObjectDelete(0, BaseKnotTPName(pfx)); ObjectDelete(0, BaseKnotDelName(pfx)); ObjectDelete(0, BaseKnotBuyName(pfx));   // BKTPR-OFF / NOBKDEL / NOBUYSELL: purge older builds' retired badges
    // P-BK-58: WHERE this box' note is drawn is ONE question, asked once (BaseKnotNoteAtCorner):
    // the family's row for the selected/newest box in the corner mode, the box' own corner
    // otherwise. A box the row does not answer keeps NO box-side note in that mode — the note
@@ -5781,8 +6590,9 @@ void BaseKnotSync(const string id)
    bool atCorner = BaseKnotNoteAtCorner(id);
    if(atCorner || BaseKnotInfoVisible(id))
    {
-       BaseKnotWriteInfo(BaseKnotInfoName(pfx), t1, t2, top, bot, hPips, tpTip, side,
-                         sp, nd, tfMask, riskTag, tradeTip, entryTag, atCorner);
+        BaseKnotWriteInfo(BaseKnotInfoName(pfx), t1, t2, top, bot, hPips, tpTip, side,
+                          sp, nd, tfMask, riskTag, tradeTip, entryTag, atCorner, tfMin,
+                          BaseKnotLegsTag(mTF, hPips, nd.anchor));
       if(!atCorner) BaseKnotPlaceBadges(pfx, t1, t2, top, tfMin, tfMask);
    }
    else
@@ -6064,6 +6874,10 @@ void BaseKnotFollowDrag(const string id, const datetime curT, const double curP)
    // BKCURSOR-OFF: the live path is the ONLY path — no anchor move and no
    // terminal drag means there is nothing to follow and nothing to paint.
    else return;   // nothing moved — skip the repaint too
+   // P-ANCHOR-LAST: the owner's read follows the hand, not only the release.
+   // Cost is one compare per moved event; the anchor itself changes only when
+   // the box crosses a bar, and the ATR layer then hits its (TF,bar) cache.
+   CalcAnchorFollow(id, (t2 > t1 ? t2 : t1));
    uint pkT = GetTickCount();   // P-PERF-43: the repaint is the other half of the lag
    BaseKnotDragPaint();
    uint pkD = GetTickCount() - pkT;
@@ -6365,8 +7179,10 @@ bool BaseKnotBodySizeHeal(const string id)
 void BaseKnotDelete(const string id)
 {
    string pfx = BaseKnotPrefix(id);
-   if(pfx != "") ObjectsDeleteAll(0, pfx);   // one call wipes box + all children
+   if(pfx != "") ObjectsDeleteAll(0, pfx);   // one call wipes box + all children (P-BK-116: the line-end ink lives under that prefix)
+   if(s_bkPipOwner == id) s_bkPipOwner = "";   // P-BK-116: the column's owner is gone with it
    BaseKnotUnregister(id);
+   CalcAnchorForget(id);                     // P-ANCHOR-LAST: a deleted owner returns the chart to live
    ChartRedraw();
 }
 // Re-assert the border look on every committed box (Base Box card edits
@@ -6709,6 +7525,7 @@ void BaseKnotCommit(const datetime t2, const double p2raw)
    // native resize (P-BK-72) is measured against. Last write of the commit,
    // after every property this function owns, so nothing here can undo it.
    BaseKnotSelectBox(id);
+   CalcAnchorRemember(BaseKnotAnchorAt(id), id);   // P-ANCHOR-LAST: newest committed box owns the read
    ChartRedraw();
 }
 
@@ -6915,6 +7732,7 @@ bool BaseKnotOnChartEvent(const int id, const long &lparam, const double &dparam
           int kr = BaseKnotFind(bid);
           if(kr >= 0)
           {
+             BaseKnotCornerToastArm();   // BKCORNER-TOAST: a tap on the same box is a new 3 s window
              BaseKnotInfoRearm(bid);   // P-BK-110: "look again" IS the ask — it outranks a
                                     // click-away, and the window restarts with it
              g_bkBoxes[kr].commitMs = GetTickCount();   // the same clock, written by the one owner
@@ -7227,6 +8045,7 @@ if(shit != "" && BaseKnotFind(shit) >= 0 && !BaseKnotLocked(shit))
                   // ended the last one's window (the same ask the click-to-recall path makes).
                   BaseKnotInfoRearm(s_bkDragId);
                  BaseKnotSync(s_bkDragId);
+                 CalcAnchorFollow(s_bkDragId, BaseKnotAnchorAt(s_bkDragId));   // P-ANCHOR-LAST: an active box follows its edge
                 painted = true;
              }
             if(painted) ChartRedraw();

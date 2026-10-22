@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
 //   MT4 source : Biotak/Biotak/LabelFunctions.mqh
 //
@@ -663,8 +663,10 @@ string TradePlanTPRowText(const STradePlan &plan)
 {
    // TWO spaces between the tokens (2026-09-14 user: "the bottom row reads
    // stuck together"). The tokens themselves are the professor's format.
-   return StringFormat("#SL:-%d  #TP1+%d  #TP2+%d  #TP3+%d",
-                       plan.sl, plan.tp1, plan.tp2, plan.tp3);
+   // P-TP4 (2026-10-19): FOUR targets, and `#SL` left this row. The four legs are
+   // the Eng multiples - `Pricicle` is 5 x Eng, NOT the stop (the witness has it).
+   return StringFormat("#TP1:+%d  #TP2:+%d  #TP3:+%d  #TP4:+%d",
+                       plan.tp1, plan.tp2, plan.tp3, plan.tp4);
 }
 
 // ONE leg formatter for the two 0.1-pip legs (P-TRADEPLAN-DEC, user 2026-09-16):
@@ -681,9 +683,22 @@ string TradePlanLegText(const double v)
    return DoubleToString(v, 1);
 }
 
-string TradePlanHunterText(const STradePlan &plan)
+// P-TP4 (2026-10-19): the card's upper row is FOUR legs now, in the master's
+// own order and with his own names:
+//   `TRex: 4  Trigger: 10  Pricicle: 19  Classic: 46`
+// What each one is:
+//   TRex     = plan.eng      (was `Eng.SL:`)   — the knot's risk, 0.1 pip
+//   Trigger  = plan.hunter   (was `Hunter SL:`) — the ETR/CTR/OTR entry, 0.1 pip
+//   Pricicle = plan.pricicle (was `#SL:-n` in the target row) — whole pips
+//   Classic  = plan.classic (new)                            — whole pips
+// The two 0.1-pip legs keep TradePlanLegText (P-TRADEPLAN-DEC, user 2026-09-16);
+// the two new legs are whole pips like SL/TP/SB.
+string TradePlanLegsText(const STradePlan &plan)
 {
-   return "Hunter SL: " + TradePlanLegText(plan.hunter) + " Eng.SL: " + TradePlanLegText(plan.eng);
+   return "TRex: " + TradePlanLegText(plan.eng)
+        + "  Trigger: " + TradePlanLegText(plan.hunter)
+        + "  Pricicle: " + IntegerToString(plan.pricicle)
+        + "  Classic: " + IntegerToString(plan.classic);
 }
 
 //+------------------------------------------------------------------+
@@ -763,9 +778,25 @@ void TRexTradeCardLayout(const STradePlan &plan, STrexCardLayout &L)
    int wTR     = PnlRawTextW("TR", brandSize);
    int wEx     = PnlRawTextW("ex", brandSize);
    int wBrand  = wTR + wEx;
-   int wHunter = PnlRawTextW(TradePlanHunterText(plan), fs);
+   int wHunter = PnlRawTextW(TradePlanLegsText(plan), fs);
    int wTP     = PnlRawTextW(TradePlanTPRowText(plan), fs);
    int cardW = MathMax(wBrand, MathMax(L.showTP ? wTP : 0, L.showSL ? wHunter : 0));
+   //--- P-UI-187 (2026-10-20): the card had a HEIGHT budget and no WIDTH budget.
+   //--- The card grows LEFT from the chart's right edge and the leg row grew
+   //--- (P-TP4: 47 characters - ~230px at 8pt/96dpi), so on a narrow chart it ran
+   //--- off the chart's left side. The chart's own box is the budget now, and a row
+   //--- that does not fit is DROPPED - never clipped: half a number is a wrong one.
+   int rightEdge = MathMax(8, inpLabelsMarginLeft);
+   int chartW = GetCachedChartWidth();
+   int availW = (chartW > 0) ? MathMax(60, chartW - rightEdge - 8) : 0;
+   if(availW > 0)
+   {
+      if(L.showSL && wHunter > availW) L.showSL = false;
+      if(L.showTP && wTP > availW) L.showTP = false;
+      wHunter = L.showSL ? wHunter : 0;
+      wTP = L.showTP ? wTP : 0;
+      cardW = MathMax(wBrand, MathMax(wTP, wHunter));
+   }
    if(cardW < 1) cardW = 1;
 
    int rows = inpTrexStampGapRows;
@@ -810,7 +841,6 @@ void TRexTradeCardLayout(const STradePlan &plan, STrexCardLayout &L)
    L.rows      = rows;
    L.cardW     = cardW;
 
-   int rightEdge = MathMax(8, inpLabelsMarginLeft);
    L.xTrade  = rightEdge + (cardW - wTP) / 2;
    L.xHunter = rightEdge + (cardW - wHunter) / 2;
    L.xBrand  = rightEdge + (cardW - wBrand) / 2;
@@ -830,7 +860,9 @@ void TRexTradeCardLayout(const STradePlan &plan, STrexCardLayout &L)
    // note, then the brand, then the two trade rows) whatever the switches do.
    // P-UI-148: off the CARD's top (`cardTop`), not the wordmark's — a note parked one brand-em
    // above the brand would land on the numbers.
-   LabelPushBaseNoteSlot(L.yBrand + cardTop, 0);
+   // BKCORNER-ON (2026-10-20): the base note no longer rides this column - its slot is the
+   // family's top-left, pushed by LabelPushBaseNoteSlotTop. The old bottom-right push is
+   // retired here (the function is kept as the one-line restore).
 }
 
 bool CreateATRTradeLabel(const string objectPrefix, const STradePlan &plan,
@@ -895,7 +927,7 @@ bool DisplayTradePlanTopRows(const string labelPrefix, const STradePlan &plan,
       ObjectDelete(0, labelPrefix + "TREX_StrBond");
       return true;
    }
-   if(!CreateTRexPiece(labelPrefix + "TREX_Hunter", TradePlanHunterText(plan),
+   if(!CreateTRexPiece(labelPrefix + "TREX_Hunter", TradePlanLegsText(plan),
                        inpATRTradeHunterColor, L.fontSize, L.xHunter, L.yHunter)) return false;
    return true;
 }
@@ -948,7 +980,8 @@ static int s_trxFS = -1, s_trxBS = -1;
 static int s_trxXSp = 0, s_trxYSp = 0, s_trxXTR = 0, s_trxXEx = 0, s_trxYBrand = 0;
 static int s_trxXATR = 0, s_trxYATR = 0, s_trxATRSize = -1;
 static bool s_trxInit = false;
-bool DisplayTRexTitleBlock(const string labelPrefix, const STrexCardLayout &L) {
+bool DisplayTRexTitleBlock(const string labelPrefix, const STrexCardLayout &L,
+                           const int structureMinutes) {
     string spName  = labelPrefix + "TREX_Spread";
     string capName = labelPrefix + "TREX_Caption";   // RETIRED (P-LBL-06) - purge only
     string trName  = labelPrefix + "TREX_TR";
@@ -990,22 +1023,35 @@ bool DisplayTRexTitleBlock(const string labelPrefix, const STrexCardLayout &L) {
         return true;
     }
 
-    // Superscript = live spread of the pair in pips, 1 decimal ("3.2" style).
+    // Superscript = the STRUCTURE candle's live TRUE RANGE in pips + % of the
+    // current-TF ATR ("260.0 (85.3%)"). STRUCTURE = TWO fractal rungs up the
+    // trade-plan ladder (user 2026-10-20: «الان که 15 هستیم مال چهار ساعته رو
+    // باید نشون بده») — M15->H4, M5->H1, H1->D1 — and the read is that TF's LIVE
+    // (forming) bar, shift 0. TrueRange, not the bare high-low: the previous
+    // close's gap is part of the number (ATR_A CalculateTrueRange's own law).
+    // The card's plan structure (`structureMinutes`, P-TP4-RUNG, one rung up) is
+    // NOT this read: it is the plan's Eng/SL basis and is deliberately left alone.
+    // P-TREX-STRUCT-2 (2026-10-21): ported from the MT4 reference; R-TF-UNIT legal
+    // because Period() here is already minutes and TradePlanLadderMinutes() answers
+    // minutes, so CompatTF() is the one sanctioned crossing.
     string spText = "--";
     double pip = GetCachedPipSize();
+    double atrVal = GetATRForTimeframe(Period());
     if(!IsZero(pip, EPSILON_PRICE)) {
-        double ask = MarketInfo(Symbol(), MODE_ASK);
-        double bid = MarketInfo(Symbol(), MODE_BID);
-        if(ask > 0 && bid > 0 && ask >= bid)
-            spText = DoubleToString((ask - bid) / pip, 1);
+        int str2Idx = TradePlanLadderIndex(Period()) + 2;
+        if(str2Idx >= TRADEPLAN_LADDER_SIZE) str2Idx = TRADEPLAN_LADDER_SIZE - 1;
+        ENUM_TIMEFRAMES stf = CompatTF(TradePlanLadderMinutes(str2Idx));
+        double hi = iHigh(NULL, stf, 0), lo = iLow(NULL, stf, 0), pc = iClose(NULL, stf, 1);
+        double rng = hi - lo;
+        if(pc > 0.0) rng = MathMax(rng, MathMax(MathAbs(hi - pc), MathAbs(lo - pc)));
+        if(hi > 0 && lo > 0 && hi >= lo)
+            spText = DoubleToString(rng / pip, 1) + (atrVal > 0.0 && atrVal != EMPTY_VALUE ? " (" + DoubleToString(rng / atrVal * 100.0, 1) + "%)" : "");
     }
     // ATR superscript above `TR`: current-TF weighted ATR in pips, 1 decimal.
     string atrText = "--";
-    double atrPip = GetCachedPipSize();
-    if(!IsZero(atrPip, EPSILON_PRICE)) {
-        double atrVal = GetATRForTimeframe(Period());
+    if(!IsZero(pip, EPSILON_PRICE)) {
         if(atrVal > 0 && atrVal != EMPTY_VALUE)
-            atrText = DoubleToString(NormalizeDouble(atrVal / atrPip, 1), 1);
+            atrText = DoubleToString(NormalizeDouble(atrVal / pip, 1), 1);
     }
     // Every position below comes from the ONE card owner (computed once per pass
     // by the caller): it knows the row pitch, the centring axis and the MEASURED
@@ -1165,7 +1211,8 @@ void DisplayATRTradeLabels(const string objectPrefix) {
     // P-BK-58: the base note's row lives in THIS column, so its slot is pushed here first —
     // the family's floor is all that is stacked when the card is off or its plan is cold, and
     // the card's own layout (below) moves the row above its brand when it IS drawn.
-    LabelPushBaseNoteSlot(LabelFloorMargin(), 0);
+    // BKCORNER-ON (2026-10-20): the base note's slot is the family's top-left, pushed by
+    // LabelPushBaseNoteSlotTop - this column no longer owns it.
     if(!inpShowATRTradeLabels) {
         // Defensive wipe: the relayout callers clear LBL_ first, but a bare
         // toggle path may reach here without a prior clear.
@@ -1199,7 +1246,7 @@ void DisplayATRTradeLabels(const string objectPrefix) {
     STrexCardLayout L;
     TRexTradeCardLayout(plan, L);
     CreateATRTradeLabel(labelPrefix, plan, L);
-    DisplayTRexTitleBlock(labelPrefix, L);
+    DisplayTRexTitleBlock(labelPrefix, L, plan.strMin);
     DisplayTradePlanTopRows(labelPrefix, plan, L);
 }
 
@@ -1271,6 +1318,61 @@ void TradePlanExportEnd()
         FileClose(s_tpxHandle);
         s_tpxHandle = INVALID_HANDLE;
     }
+}
+
+//+------------------------------------------------------------------+
+//| P-TP4-WITNESS — the card's exact numbers, once per chart BAR.    |
+//|                                                                  |
+//| The card is measured in pixels; a wrong leg cannot be read back   |
+//| from it. This sink writes the SAME integers the card drew, plus   |
+//| the unrounded values they came from, so a report can be checked   |
+//| against a build instead of against an eye.                        |
+//|                                                                  |
+//| Cost: one FileOpen + a few lines + FileClose per chart BAR, not  |
+//| per tick, not per 2 s pass. No Print - P-LOG-01 keeps the label  |
+//| pump silent, and this path stays silent too; the file is the     |
+//| only sink. FILE_WRITE truncates by design (P-LOG-02: the file    |
+//| always holds the LATEST dump of that symbol).                    |
+//|                                                                  |
+//| P-TP4-WITNESS-FILE: its OWN file, not tradeplan-auto-<SYM>.log.  |
+//| That one is the on-demand X dump and it truncates on open, so    |
+//| sharing a name meant the next bar silently ate a dump the user   |
+//| had just asked for. Two sinks, two files, neither clobbers the   |
+//| other.                                                           |
+//+------------------------------------------------------------------+
+datetime s_tpWitnessBar = 0;
+
+string TradePlanWitnessFileName()
+{
+    return("tradeplan-witness-" + Symbol() + ".log");
+}
+
+void TradePlanWitness(const STradePlan &plan)
+{
+    if(!plan.valid) return;
+    datetime bar0 = iTime(Symbol(), Period(), 0);
+    if(bar0 == 0 || bar0 == s_tpWitnessBar) return;   // one line set per bar
+    s_tpWitnessBar = bar0;
+
+    int h = FileOpen(TradePlanWitnessFileName(), FILE_WRITE | FILE_TXT | FILE_ANSI);
+    if(h == INVALID_HANDLE) return;
+
+    FileWriteString(h, "P-TP4-WITNESS  build " + TH3_SRC_SHORT +
+                       "  compiled " +
+                       TimeToString(__DATETIME__, TIME_DATE | TIME_MINUTES) + "\r\n");
+    FileWriteString(h, StringFormat("symbol=%s tf=%s bar0=%s  chartMin=%d strMin=%d\r\n",
+                                    Symbol(), GetCurrentTimeframe(),
+                                    TimeToString(bar0, TIME_DATE | TIME_MINUTES),
+                                    plan.chartMin, plan.strMin));
+    FileWriteString(h, StringFormat("ATR own=%.4f str=%.4f  (pips; Eng = own/%.6f)\r\n",
+                                    plan.ownPips, plan.basePips, TRADEPLAN_ENG_DIVISOR));
+    FileWriteString(h, StringFormat("engTrue=%.6f eng=%.1f hunter=%.1f pricicle=%d classic=%d\r\n",
+                                    plan.engTrue, plan.eng, plan.hunter,
+                                    plan.pricicle, plan.classic));
+    FileWriteString(h, StringFormat("slTrue=%.6f sl=%d tp1=%d tp2=%d tp3=%d tp4=%d sb1=%d sb2=%d\r\n",
+                                    plan.slTrue, plan.sl, plan.tp1, plan.tp2,
+                                    plan.tp3, plan.tp4, plan.sb1, plan.sb2));
+    FileClose(h);
 }
 
 void TradePlanLogLegs()
@@ -1471,12 +1573,15 @@ void TradePlanPrintRow(STradePlan &plan)
     string ts = TimeToString(TimeCurrent(), TIME_DATE | TIME_MINUTES | TIME_SECONDS);
     TpxLine("[TRADEPLAN] " + Symbol() + " " + GetCurrentTimeframe() + " " + ts);
     TpxLine("[TRADEPLAN]   TR(own)=" + DoubleToString(plan.ownPips, 1)
-          + "  Eng.SL=" + DoubleToString(plan.eng, 1)
-          + "  Hunter=" + DoubleToString(plan.hunter, 1));
+          + "  TRex=" + DoubleToString(plan.eng, 1)
+          + "  Trigger=" + DoubleToString(plan.hunter, 1)
+          + "  Pricicle=" + IntegerToString(plan.pricicle)
+          + "  Classic=" + IntegerToString(plan.classic));
     TpxLine("[TRADEPLAN]   SL=" + IntegerToString(plan.sl)
           + "  TP1=" + IntegerToString(plan.tp1)
           + "  TP2=" + IntegerToString(plan.tp2)
-          + "  TP3=" + IntegerToString(plan.tp3));
+          + "  TP3=" + IntegerToString(plan.tp3)
+          + "  TP4=" + IntegerToString(plan.tp4));
     TpxLine("[TRADEPLAN]   StrBond=" + IntegerToString(plan.sb1)
           + " - " + IntegerToString(plan.sb2));
     TpxLine("[TRADEPLAN]   slTrue=" + DoubleToString(plan.slTrue, 4)
@@ -1496,6 +1601,16 @@ void TradePlanDumpNow()
     if(!TradePlanComputeLive(Period(), plan)) return;
     TradePlanExportBegin();
     TpxLine("[DUMP] ===== " + Symbol() + " " + GetCurrentTimeframe() + " =====");
+    // P-TP4-STAMP: which binary wrote this file. Without it a dump can be read
+    // against the wrong build and every conclusion drawn from it is worthless -
+    // that is exactly what happened on NZDUSD (a correct 22:12 card was judged
+    // against source edited afterwards). TH3_SRC_SHORT is generated by
+    // tools/gen-build-hash.js over every .mq4/.mqh, so a mismatch here means the
+    // terminal is still running an older .ex4 and needs a chart re-attach.
+    TpxLine("[DUMP] build " + TH3_SRC_SHORT + "  files=" + IntegerToString(TH3_SRC_FILES)
+            + "  " + TimeToString(TimeCurrent(), TIME_DATE | TIME_MINUTES)
+            + "  broker-time");
+
     // Rounding-integrity guard (TradePlanSelfCheck) — the engine computes and
     // displays on the SAME doubles, so this only fires on a real formula/wiring
     // regression. Skipped under the alt formulas: their Hunter leg is TR/1.66666
@@ -1546,6 +1661,8 @@ void TradePlanLiveTick()
     string labelPrefix = GetLevelObjectPrefix() + "LBL_";
     STradePlan plan;
     if(!TradePlanComputeLive(Period(), plan)) return;
+    // P-TP4-WITNESS: exact numbers to the per-symbol file, once per chart bar.
+    TradePlanWitness(plan);
     // ONE card layout for BOTH branches below (P-LBL-09): the drawn-row set and
     // the measured centring axis do not depend on which branch runs, so the
     // steady state costs exactly the same 4 text measurements as the full pass
@@ -1557,9 +1674,12 @@ void TradePlanLiveTick()
     // vs cheap in-place label path; pixels identical either way.
     // %.1f on the two 0.1-pip legs: a change that only moves a decimal (0.3 -> 0.4)
     // MUST re-key the signature, or the card would keep the previous number.
-    string sig = StringFormat("%d|%d|%d|%d|%.1f|%.1f|%d|%d",
-                              plan.sl, plan.tp1, plan.tp2, plan.tp3,
-                              plan.hunter, plan.eng, plan.sb1, plan.sb2);
+    // P-TP4: TP4 / Pricicle / Classic ride it too - a leg the signature does not
+    // carry is a leg the card never repaints.
+    string sig = StringFormat("%d|%d|%d|%d|%d|%.1f|%.1f|%d|%d|%d|%d",
+                              plan.sl, plan.tp1, plan.tp2, plan.tp3, plan.tp4,
+                              plan.hunter, plan.eng, plan.sb1, plan.sb2,
+                              plan.pricicle, plan.classic);
     static string s_sig = "";
     if(sig != s_sig)
     {
@@ -1605,7 +1725,7 @@ void TradePlanLiveTick()
     } // end log-level gate (P-LOG-01)
 
     CreateATRTradeLabel(labelPrefix, plan, L);
-    DisplayTRexTitleBlock(labelPrefix, L);
+    DisplayTRexTitleBlock(labelPrefix, L, plan.strMin);
     DisplayTradePlanTopRows(labelPrefix, plan, L);
     } // numeric change: full block above
     else
@@ -1616,7 +1736,7 @@ void TradePlanLiveTick()
        // too because it owns its row's EXISTENCE - a switch flipped while the
        // numbers were frozen must still remove the row (P-LBL-09).
        CreateATRTradeLabel(labelPrefix, plan, L);
-       DisplayTRexTitleBlock(labelPrefix, L);
+       DisplayTRexTitleBlock(labelPrefix, L, plan.strMin);
        DisplayTradePlanTopRows(labelPrefix, plan, L);
     }
     ThrottledChartRedraw();
@@ -1656,7 +1776,7 @@ void TradePlanLegAtrDump()
       if(i == 0) role = "chart";
       else if(i == 1) role = "struct";
       ENUM_TIMEFRAMES tf = CompatTF(tfMins[i]);
-      double live = CalculateWeightedATR(tf);
+      double live = CalculateWeightedATRLive(tf);   // the witness names the live side, even while anchored
       datetime raw = TradePlanLegAnchorRaw(tfMins[i]);
       int run = TradePlanLegRunBars(tfMins[i]);
       double leg = live;
@@ -2302,6 +2422,30 @@ void LabelPushBaseNoteSlot(const int stackY, const int stackEm)
    int y = stackY + (stackEm > 0 ? stackEm + gap : 0);
    if(y < 8) y = 8;
    BaseKnotCornerSlotPush(CORNER_RIGHT_LOWER, MathMax(8, inpLabelsMarginLeft), y);
+}
+//+------------------------------------------------------------------+
+//| BKCORNER-ON (2026-10-20) — THE NOTE'S SLOT IS TOP-LEFT.           |
+//|                                                                  |
+//| It clears the same two things GetABCDInfoSafeYDistance clears   |
+//| for the TH3 caption: the ATR stack's top margin, then the mode  |
+//| rows' hardcoded +45 (ApplyModeLabelStyle), plus the lock row.   |
+//| The formula is mirrored here, not called: the TH3 owner is       |
+//| Full-only, and this module is compiled by Lite too.             |
+//+------------------------------------------------------------------+
+void LabelPushBaseNoteSlotTop()
+{
+   int y = MathMax(8, inpLabelsMarginTop);
+   if(inpLabelCornerPosition == LABEL_CORNER_LEFT_TOP)
+      y = MathMax(y, inpLabelsMarginTop + g_modeLabelYOffset + inpSectionGap);
+   if(inpModeLabelCorner == CORNER_LEFT_UPPER)
+   {
+      int modeBlock = GetModeLabelBlockHeight();
+      int modeBottom = inpModeLabelYDistance + g_modeLabelYOffset + 45 +
+                       (modeBlock > 0 ? modeBlock : inpModeLabelFontSize + 6) + 4;
+      if(g_timeframeLocked) modeBottom += inpModeLabelFontSize + 6;
+      if(y < modeBottom) y = modeBottom;
+   }
+   BaseKnotCornerSlotPush(CORNER_LEFT_UPPER, MathMax(8, inpLabelsMarginLeft), y);
 }
 
 //+------------------------------------------------------------------+

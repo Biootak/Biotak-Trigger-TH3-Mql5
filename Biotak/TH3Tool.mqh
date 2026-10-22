@@ -157,9 +157,17 @@ void BuildPatternNamesFromRegistry(string &patternNames[], int &patternCount)
     for(int i = 0; i < g_th3PatternRegistryCount; i++) {
         string baseName = g_th3PatternRegistry[i];
         if(baseName == "") continue;
-        string lineAB = baseName + TH3_SUFFIX_LINE_AB;
-        string lineBC = baseName + TH3_SUFFIX_LINE_BC;
-        if(ObjectFind(lineAB) < 0 || ObjectFind(lineBC) < 0) {
+        // P-MT5-TH3DRAG (2026-10-21): THE "IS THIS FAMILY WHOLE?" TEST IS THE
+        // CANVAS-AWARE ONE. In the render engine's build the pattern's LEGS are
+        // canvas strokes, not OBJ_TREND objects, so this leg-only probe found
+        // nothing and UNREGISTERED EVERY PATTERN - the list this function
+        // builds came back empty, and every owner that walks it (the
+        // auto-frequency search, the update-all pass, the panel's pattern rows)
+        // saw no pattern at all. TH3ReadPatternAnchors asks the same question
+        // the drag asks: the legs first (MT4's shape), then the point arrows.
+        datetime tA = 0, tB = 0, tC = 0, tD = 0;
+        double pA = 0, pB = 0, pC = 0, pD = 0;
+        if(!TH3ReadPatternAnchors(baseName, tA, pA, tB, pB, tC, pC, tD, pD)) {
             UnregisterTH3Pattern(baseName);
             i--;
             continue;
@@ -216,6 +224,13 @@ int GetABCDInfoSafeYDistance()
 //+------------------------------------------------------------------+
 void RepositionABCDInfoLabels()
 {
+    // P-UI-160b (2026-10-16): while the F mute is on, the verify below would
+    // read the mute's own state (rows masked, plate dropped) as damage and
+    // re-light the active caption — this pass is reachable while hidden
+    // (RedrawLabelsOnly from the L/G/... key branches), so it must refuse.
+    // The show path needs no call from here: the frame path runs this very
+    // function with the mute off, and Verify's own heal lights the family.
+    if(IsIndicatorHidden()) return;
     // P-TH3-INFO-09: the VERIFY and the ORPHAN SWEEP are not the tool card's
     // privilege. A caption the tool drew (or a build mix left behind) must heal
     // even with the card switched off — with the early return below the passes
@@ -1392,21 +1407,22 @@ int FindOptimalFrequencyForABCD(datetime tX, double pX, datetime tA, double pA,
 //+------------------------------------------------------------------+
 bool AutoSelectBestFrequency(string patternName)
 {
-    //          A  B  C     
-    string lineAB = patternName + "_Line_AB";
-    string lineBC = patternName + "_Line_BC";
-    
-    if(ObjectFind(0, lineAB) < 0 || ObjectFind(0, lineBC) < 0) {
+    // P-MT5-TH3DRAG (2026-10-21): THE READ IS THE CANVAS-AWARE ONE. In the
+    // render engine's build the pattern's LEGS are canvas strokes, not
+    // OBJ_TREND objects, so this leg-only probe found nothing and the owner
+    // answered "Pattern not found" for EVERY pattern - the auto-frequency
+    // search never ran, and with it the live picture the drag re-derives
+    // («درگ میکنم هیچی اتفاقی نمیافته»).
+    // TH3ReadPatternAnchors is the ONE read the drag, the restore, the
+    // alive-probe and the caption keep-check already use: the legs first
+    // (MT4's shape, unchanged on MT4-equivalent inputs), then the point
+    // arrows. On the object path the legs are there, so the answer is MT4's.
+    datetime tA = 0, tB = 0, tC = 0, tD = 0;
+    double pA = 0, pB = 0, pC = 0, pD = 0;
+    if(!TH3ReadPatternAnchors(patternName, tA, pA, tB, pB, tC, pC, tD, pD)) {
         Print("==================== Pattern not found: ", patternName);
         return false;
     }
-    
-    datetime tA = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 0);
-    double pA = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 0);
-    datetime tB = (datetime)ObjectGetInteger(0, lineAB, OBJPROP_TIME, 1);
-    double pB = ObjectGetDouble(0, lineAB, OBJPROP_PRICE, 1);
-    datetime tC = (datetime)ObjectGetInteger(0, lineBC, OBJPROP_TIME, 1);
-    double pC = ObjectGetDouble(0, lineBC, OBJPROP_PRICE, 1);
     
     // CRITICAL FIX: Validate all retrieved values
     if(tA <= 0 || tB <= 0 || tC <= 0 || pA <= 0 || pB <= 0 || pC <= 0) {
@@ -2177,6 +2193,20 @@ void LegMeasureHandles(const string base, const datetime t1, const double p1,
                      : (sel ? LEG_HANDLE_DN_SEL_RES     : LEG_HANDLE_DN_RES);
     string bmpM = up ? (sel ? LEG_HANDLE_UP_MID_SEL_RES : LEG_HANDLE_UP_MID_RES)
                      : (sel ? LEG_HANDLE_DN_MID_SEL_RES : LEG_HANDLE_DN_MID_RES);
+    // P-UI-160b (2026-10-16): the F mute parks the family's three icons. They
+    // are screen-pixel BITMAP_LABELs — no TF mask reaches them (the P-UI-98d
+    // fact the handset handles already answer) — so a hidden chart must PARK
+    // them off-window, exactly like the CP marker and the S1 pair. This is the
+    // family's ONE placement seat: the ride, the follower, the ink and the hide
+    // pass all come through here, so no channel can leave a ring visible while
+    // the mute is on.
+    if(IsIndicatorHidden())
+    {
+        LegHandleAtXY(base + "_H1", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_HALF, bmpH);
+        LegHandleAtXY(base + "_H2", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_HALF, bmpH);
+        LegHandleAtXY(base + "_Mid", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_MID_HALF, bmpM);
+        return;
+    }
     LegHandleAt(base + "_H1", t1, p1, LEG_HANDLE_HALF, bmpH);
     LegHandleAt(base + "_H2", t2, p2, LEG_HANDLE_HALF, bmpH);
     int sx, sy, tx, ty;
@@ -2207,6 +2237,22 @@ void LegMeasureInk(const string base, const datetime t1, const double p1,
                    const datetime t2, const double p2, const color ink, const bool create)
 {
     string ln = base + "_Line";
+    // P-UI-160b (2026-10-16): while the F mute is on, this family's line wears
+    // the TIMEFRAMES mask (chart-space — the zones' own mechanism) and its icons
+    // park. The create branch below is unreachable under the mute (the toggle and
+    // the hit test refuse), but this answers every OTHER caller — a ride, a
+    // selection repaint, a drag that was live when F landed — so no channel can
+    // re-show a line the mute took.
+    if(IsIndicatorHidden())
+    {
+        if(ObjectFind(0, ln) >= 0)
+        {
+            if((int)ObjectGetInteger(0, ln, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+                ObjectSetInteger(0, ln, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+            LegMeasureHandles(base, t1, p1, t2, p2, ink);   // its own hidden branch parks
+        }
+        return;
+    }
     if(create && ObjectFind(0, ln) < 0)
     {
         if(ObjectCreate(0, ln, OBJ_TREND, 0, t1, p1, t2, p2))
@@ -2702,6 +2748,11 @@ void LegMeasureSelShadowForget(const string base)
 bool LegMeasureHitTest(const int mx, const int my, string &base, int &mode)
 {
     base = ""; mode = 0;
+    // P-UI-160b (2026-10-16): a press on a hidden chart never grabs a drawing.
+    // ObjectFind still finds a masked line, so without this the family would
+    // answer a drag from under the F mute. The press path (LegMeasureEditMouse)
+    // routes through this ONE seat, so the gate covers it whole.
+    if(IsIndicatorHidden()) return false;
     int best = 0x7fff;
     for(int i = 0; i < g_legCount; i++)
     {
@@ -2821,6 +2872,7 @@ void LegMeasureDragApply(const datetime curT, const double curP)
             LegMeasureBoxFromAnchors(base, nt1, np1, nt2, np2, false);
         }
     }
+    CalcAnchorFollow(base, LegReadAnchor(nt1, nt2));   // P-ANCHOR-LAST: the read follows the moving tip
 }
 
 // Right-click (or the line vanishing) mid-drag: put the leg back EXACTLY where
@@ -2887,8 +2939,10 @@ void LegMeasureDragEnd()
     double   p2 = ObjectGetDouble(0, ln, OBJPROP_PRICE, 1);
     string txt[]; color acc; int otf; bool trusted;
     LegMeasureReadout(t1, p1, t2, p2, txt, acc, otf, trusted);
+    LegReadWitness("drag", t1, t2, txt, otf, trusted);   // P-LM-25: the committed anchors
     if(trusted) LegMeasureTrack(base, txt, acc);
     LegMeasurePlateShow(base);         // the visit re-arms on the FINAL numbers
+    CalcAnchorFollow(base, LegReadAnchor(t1, t2));   // P-ANCHOR-LAST: an active leg follows its tip
 }
 
 #endif // TH3_TOOL_B_MQH
@@ -3195,12 +3249,20 @@ void LegMeasureToggle()
         LegPreviewClear();        // P-LM-10: the dashes and the preview head together
         ChartViewLockRelease();   // P-UI-90: release the shared scroll/ctx lock
 } else {
+         // P-UI-160b (2026-10-16): the F mute owns the chart — no NEW draw under
+         // it. (An ACTIVE session never reaches here: the hide pass cancels it
+         // in the same event that sets the state.)
+         if(IsIndicatorHidden()) return;
          GestureTakeRelease();   // P-UI-144: a NEW leg is never gated by the last one
          g_legSess.active = true;
         g_legSess.step   = 0;
         s_legLastLeft    = false;
         // P-TH3-PB-UI: one gesture at a time — the leg takes the clicks.
         if(s_th3BaseMarkArmed) TH3BaseMarkCancel("leg meter");
+        // P-MT5-PARITY (2026-10-21) - PARITY (MT4 TH3Tool_C.mqh:274-295): the
+        // leg meter does NOT tear a live ray/path/box session down. MT5's own
+        // "cancel every other tool" sweep did; MT4 never did, and a press that
+        // silently killed an unfinished drawing is its own defect.
         ChartViewLockAcquire();   // P-UI-90: take the shared scroll/ctx lock
     }
 }
@@ -3229,6 +3291,7 @@ void LegMeasureDelete(const string base)
     }
     LegMeasureSelShadowForget(base);  // P-LM-20: its painted state goes with it
     if(s_legDragBase == base) { s_legDragBase = ""; s_legDragMode = 0; }   // no ghost drag
+    CalcAnchorForget(base);           // P-ANCHOR-LAST: deleting the owner returns the chart to live
     Print("TH3: leg measure deleted (P-LM-08): ", base);
     ThrottledChartRedraw();
 }
@@ -3268,19 +3331,34 @@ bool LegMeasureOnObjectDelete(const string objName)
 // Two rulers in one tool is how a leg reads 268% of "ATR" in the box while the
 // label on the same chart reports a different ATR for the same TF.
 //
-// COST — the LEAST the question allows. `CalculateWeightedATR` already owns its
-// own multi-TF TTL cache (bar-count break + trigger-duration TTL, ATRCalculations),
-// and the trade-plan labels ALREADY pay for H1/H4/D1 reads on their own change-gated
-// schedule. A leg now reads the SAME cached numbers, so on a chart whose labels are
-// current the readout is a struct fetch per TF and not one Wilder pass. The
-// per-leg memo table this function used to keep is gone: it was a second cache in
-// front of the first, and the first is already keyed by "did this TF's bar move".
-// A TF whose history is not loaded yet answers 0, which `LegMeasureReadout` treats
-// as "not a reading" (`trusted`), and the next pass tries again.
-double LegAtr14(const int tf)
+// ── P-LM-25 (2026-10-16) — THE LEG'S OWN TIME, NOT THE CHART'S NOW ────
+// The user: «این لگ ها که اندازه میزنم باید محاسبات atr همون زمان باشه یعنی لایو
+// گذشته» — the box for a HISTORICAL leg printed TODAY's ATR (MEASURED: H1 143 /
+// H4 327 / D1 999 equalled the live strip row while the leg sat at 12:00–12:53,
+// and the reference box at 00:51 printed 137/309/962). Every read below now names
+// the bar it is read at: the anchor is the LATER of the leg's two times (the bar
+// its story ended on — BaseKnot's own storyT rule, P-BK-79), so a finished leg
+// freezes the numbers it was measured with and a live drag reads the bar its tip
+// is on. `LegReadAnchor` is the ONE owner of that rule — the readout and its
+// witness both ask it, so box and witness can never disagree about the anchor.
+//
+// COST — the LEAST the question allows. The read goes through the AS-OF sibling
+// `CalculateWeightedATRAt` (P-BK-79, ATR_A.mqh): one full composite per (TF, bar)
+// ever asked, and every repeat is an `iBarShift` plus a 48-row cache scan — the
+// live path is untouched (its 10-row TTL cache is deliberately NOT fed anchors).
+// A drag pays a composite only when the hand crosses a bar — one per TF the
+// readout asks (the three reference TFs plus each owner-walk step); a still frame
+// pays the scan alone. A TF whose history does not reach the anchor answers 0,
+// which `LegMeasureReadout` treats as "not a reading" (`trusted`), and the next
+// pass tries again.
+datetime LegReadAnchor(const datetime t1, const datetime t2)
 {
-    double a = CalculateWeightedATR(CompatTF(tf));
-    if(a <= 0.0 || a == EMPTY_VALUE) return 0.0;   // no history for this TF: not a reading
+    return (t1 > t2) ? t1 : t2;    // the bar the leg's story ended on
+}
+double LegAtr14(const int tf, const datetime anchor)
+{
+    double a = CalculateWeightedATRAt(CompatTF(tf), anchor);
+    if(a <= 0.0 || a == EMPTY_VALUE) return 0.0;   // no history at this TF/bar: not a reading
     return a;
 }
 
@@ -3295,7 +3373,7 @@ double LegAtr14(const int tf)
 #define TH3_LEG_TF_LO   2.40
 #define TH3_LEG_TF_HI   3.60
 #define TH3_LEG_TF_MID  3.00
-int TH3LegOwnerTF(const double legSize, bool &trusted)
+int TH3LegOwnerTF(const double legSize, const datetime anchor, bool &trusted)
 {
     int start = Period();
     if(start <= 0) start = 60;
@@ -3306,7 +3384,7 @@ int TH3LegOwnerTF(const double legSize, bool &trusted)
     int bestTF = start; double bestErr = -1.0;
     for(int w = 0; w < 8; w++)
     {
-        double a = LegAtr14(tf);          // P-LM-19: the labels' own composite
+        double a = LegAtr14(tf, anchor);  // P-LM-25: the labels' composite, at the leg's bar
         if(a <= 0) { trusted = false; break; }
         double r = legSize / a;
         double err = MathAbs(r - TH3_LEG_TF_MID);
@@ -3351,6 +3429,8 @@ void LegMeasureReadout(const datetime t1, const double p1,
     if(pip <= 0) pip = Point;
     double legSize = MathAbs(p2 - p1);
     trusted = true;
+    // P-LM-25: the bar the leg's story ended on — every ATR below is read THERE.
+    datetime anchor = LegReadAnchor(t1, t2);
 
     // the three reference TFs (H1=60, H4=240, D1=1440) whatever the CHART's TF
     // is: these three columns ARE the box's layout
@@ -3359,7 +3439,7 @@ void LegMeasureReadout(const datetime t1, const double p1,
     double pctRef[3];  pctRef[0]=0;  pctRef[1]=0;   pctRef[2]=0;
     double pipRef[3];  pipRef[0]=0;  pipRef[1]=0;   pipRef[2]=0;
     for(int i = 0; i < 3; i++) {
-        double a = LegAtr14(refTFs[i]);       // P-LM-07: memoised per TF per its own bar
+        double a = LegAtr14(refTFs[i], anchor);  // P-LM-25: as-of (anchor cache)
         if(a > 0) atrRef[i] = a;
         else      trusted  = false;          // no history for this TF: not a reading
         pctRef[i] = legSize / atrRef[i] * 100.0;
@@ -3370,8 +3450,8 @@ void LegMeasureReadout(const datetime t1, const double p1,
     // rule (TH3ClosedOwnerTF's bar count — the closed step's grid gate,
     // P-TH3-STEP-08/10) could badge a slow small leg D1 while line 1 read it
     // at 140% of H4; the box contradicted itself in its own three lines.
-    ownerTF = TH3LegOwnerTF(legSize, trusted);
-    double atrOwner = LegAtr14(ownerTF);      // P-LM-07
+    ownerTF = TH3LegOwnerTF(legSize, anchor, trusted);
+    double atrOwner = LegAtr14(ownerTF, anchor);   // P-LM-25: same bar as line 1
     if(atrOwner <= 0) { atrOwner = 1; trusted = false; }
 
     // P-LM-17: the ink is the leg's OWN DIRECTION, automatically — the price at
@@ -3397,6 +3477,25 @@ void LegMeasureReadout(const datetime t1, const double p1,
                           (int)MathRound(legSize / atrOwner * 100.0));
 }
 
+// ── P-LM-25 — THE WITNESS OF THE AS-OF READ (commit paths only) ─────────
+// The number a user reports as wrong must be readable from the FLUSHED diag file
+// beside the bar it was read at: the box can show the numbers, only this line
+// shows the ANCHOR they came from. Called on the two COMMIT paths (a fresh draw,
+// a drag's release) and nowhere else — the drag's per-move pass calls the readout
+// on every held move, and a flushed line per move would put a file write in the
+// mouse stream (contract §5). The channel is `DrawStripDiagEmit` (DrawStrip_Base,
+// flushed + share-read, P-LOG-3); every unit that carries TH3Tool also carries
+// DrawStrip later in the same file, which MQL4 resolves by name (P-WARN-46).
+void LegReadWitness(const string src, const datetime t1, const datetime t2,
+                    string &txt[], const int ownerTF, const bool trusted)
+{
+    DrawStripDiagEmit(StringFormat("[P-LM-25] %s anchor=%s owner=%s trusted=%d | %s | %s | %s",
+                                   src,
+                                   TimeToString(LegReadAnchor(t1, t2), TIME_DATE | TIME_MINUTES),
+                                   TH3TfName(ownerTF), (trusted ? 1 : 0),
+                                   txt[0], txt[1], txt[2]));
+}
+
 // Draw the finished trendline + info box for one leg measurement.
 // ts   = unique timestamp string for object names
 // Returns the object base name ("LM_<ts>")
@@ -3417,6 +3516,7 @@ string LegMeasureDraw(datetime t1, double p1, datetime t2, double p2)
     int    ownerTF = 0;
     bool   trusted = true;      // a live chart has the history: the box is printed as read
     LegMeasureReadout(t1, p1, t2, p2, legTxt, lnCol, ownerTF, trusted);
+    LegReadWitness("draw", t1, t2, legTxt, ownerTF, trusted);   // P-LM-25: the anchor, flushed
 
     // ── the leg's ink: line + start dot + the head that points ALONG it (P-LM-05) ──
     LegMeasureInk(base, t1, p1, t2, p2, lnCol, true);
@@ -3429,6 +3529,7 @@ string LegMeasureDraw(datetime t1, double p1, datetime t2, double p2)
     // P-TH3-PB-OFF (2026-09-21): the finished leg is a measurement only — the
     // old coupling that stored it on the active pattern as pivotBaseTop/Bottom
     // and re-drew the ladder is retired with the drawn base.
+    CalcAnchorRemember(LegReadAnchor(t1, t2), base);   // P-ANCHOR-LAST: newest committed leg owns the read
     return base;
 }
 
@@ -3663,7 +3764,11 @@ void TH3BaseMarkViewRelease()
 void TH3BaseMarkToggle()
 {
     if(s_th3BaseMarkArmed) { TH3BaseMarkCancel("toggle"); return; }
+    if(IsIndicatorHidden()) return;   // P-UI-160b: the F mute owns the chart — no base mark under it
     if(TH3SessionActive() || LegMeasureSessionActive()) return;   // clicks are owned; B waits its turn
+    // P-MT5-PARITY (2026-10-21) - PARITY (MT4 TH3Tool_C.mqh:789-800): the base
+    // mark REFUSES to arm under a live TH3/leg session (the rule above) and
+    // never tears a live ray/path/box session down to make room for itself.
     s_th3BaseMarkArmed = true;
     s_th3BaseMarkHas1  = false;
     s_bmDragDown = false; s_bmDragMoved = false;
@@ -4099,6 +4204,63 @@ void TH3LiveDragHeartbeat()
 }
 
 //+------------------------------------------------------------------+
+//| P-MT5-TH3DEL (2026-10-21) — THE FAMILY'S ONE DELETE DOOR.         |
+//|                                                                  |
+//| THE USER'S RULE: «وقتی پاک میکنم ابجکتهای که بهش مربوطه      |
+//| است هم باید همون لحظه پاک بشه» - whatever door the delete came  |
+//| through (the terminal's Delete key, the object list, the strip's |
+//| bin, another tool's X), the WHOLE family leaves the chart NOW.   |
+//|                                                                  |
+//| WHY IT NEEDED ITS OWN DOOR: in MT4 our own `ObjectDelete` calls |
+//| fire CHARTEVENT_OBJECT_DELETE, so the delete handler had to    |
+//| tell "our own maintenance drop" from "the user's hand" - and   |
+//| MT4's two guards (P-TH3-DEL3, the caption is display and never |
+//| a delete trigger; P-TH3-DEL2, the 5 s heal window) were written |
+//| for exactly that.                                               |
+//|                                                                  |
+//| MT5 NEVER NEEDED THOSE GUARDS: MQL5Compat re-defines          |
+//| `ObjectDelete`/`ObjectCreate`/`ObjectsDeleteAll` as the compat |
+//| ones, which RECORD the name, and the entry's CompatConsumeObjEvent |
+//| swallows that event BEFORE any handler runs (MT5Compat.mqh:1580).|
+//| So on MT5 this handler only ever sees the USER'S delete - and   |
+//| the two guards could only ever UNDO the user: the family came   |
+//| back («بقیه ها باقی میمونه»). MT4's guards are MT4's business   |
+//| (MT4's tree keeps its own copy); here the rule is the user's.  |
+//|                                                                  |
+//| THE ORDER IS THE CONTRACT: the model goes first (nothing may   |
+//| resurrect the family), then the caption, then the canvas rows   |
+//| (the render engine's own family - a bitmap layer has no object |
+//| to sweep), then the objects, then the active pointer.           |
+//+------------------------------------------------------------------+
+void TH3FamilyDeleteAll(const string base)
+{
+   if(base == "") return;
+   // 1) the MODEL - the family is gone from the store, so no heal net
+   //    and no restore can bring it back.
+   TH3PatternStoreRemove(base);
+   // 2) the CAPTION + the plate (P-TH3-INFO-01: the caption leaves
+   //    through its family owner).
+   TH3InfoFamilyDelete(base);
+   // 3) the CANVAS ROWS - the render engine's twin of the objects.
+#ifdef BIOTAK_RENDER_ENGINE
+   RBridgePatternDropBase(base);
+#endif
+   // 4) the OBJECTS - every member wearing the base, whatever the
+   //    deleted member was, plus the MP overlay (its own prefix).
+   string delMP = "TH3_MP_" + base + "_";
+   for(int k = ObjectsTotal(0, -1, -1) - 1; k >= 0; k--)
+   {
+      string onm = ObjectName(0, k, -1, -1);
+      if(onm == base || StringFind(onm, base + "_") == 0
+         || StringFind(onm, delMP) == 0)
+         ObjectDelete(0, onm);
+   }
+   // 5) the ACTIVE pointer - the ladder follows the caption, so a
+   //    family that is gone must not keep the ring lit.
+   if(g_activeABCDPattern == base) SetActiveABCDPattern("");
+}
+
+//+------------------------------------------------------------------+
 void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
     // P-TH3-PERF-05 (2026-09-19) — IDLE MOVES COST NOTHING. The event router
     // hands this dispatcher EVERY chart mouse-move (it shares the channel with
@@ -4340,83 +4502,27 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
         // member reduces to the same base (TH3FamilyBaseOf: prefix + digits),
         // and ONE backward sweep kills every object wearing it — caption rows
         // and plate, targets, zones and borders, proof, temps, legacy PB names
-        // and the overlay — whatever the deleted member was. Rare event, so one
-        // sweep is the whole extra load; stray echoes (our own deletes queuing
-        // behind us) exit on the guard: unregistered base with no anchors left.
-        // P-TH3-DEL2 (2026-09-22) -- OUR OWN DROPS MUST NOT WIPE US.
-        // The DEL1 sweep made EVERY member's delete cascade -- including the
-        // drops our own draws queue behind them: a base commit re-steps every
-        // pattern (UpdateAllTH3Objects), a redraw with no mother match drops
-        // the TH3_MP_* overlay, and the queued OBJECT_DELETE used to wipe the
-        // whole ABCD («وقتی بیس رو انتخاب میکنم abcd حذف میشه»). Now the
-        // ANCHORS decide: points and leg lines intact + this second still
-        // fresh from a draw = own maintenance, healed back off the store's
-        // own anchors; anything else = a broken family, wiped whole.
+        // and the overlay — whatever the deleted member was.
+        //
+        // P-MT5-TH3DEL (2026-10-21): ONE DOOR, AND IT TAKES THE WHOLE FAMILY.
+        //
+        // MT4's two guards lived here: P-TH3-DEL3 (the caption is display,
+        // never a delete trigger) and P-TH3-DEL2 (the 5 s heal window) -
+        // both written for MT4's event stream, where OUR OWN ObjectDelete
+        // calls arrive as CHARTEVENT_OBJECT_DELETE and had to be told apart
+        // from the user's hand. On MT5 our own drops NEVER arrive: the compat
+        // layer records every name and the entry swallows that event before
+        // any handler runs (MQL5Compat.mqh:1580), so THIS handler only ever
+        // sees the USER's delete. The two guards could therefore only ever
+        // undo the user - the family came back the moment it was deleted
+        // («وقتی پاک میکنم بقیه ها باقی میمونه»).
+        //
+        // The user's rule: whatever door the delete came through, the whole
+        // family leaves the chart NOW.
         string baseName = TH3FamilyBaseOf(sparam);
         if(baseName == "") return;
-        // Residue of a never-registered base is the restore path's own job.
-        if(TH3PatternStoreFind(baseName) < 0) return;
-        // P-TH3-DEL3 (2026-09-22) — THE CAPTION IS DISPLAY, NEVER A DELETE
-        // TRIGGER. P-TH3-INFO-10 made the plate's VISIBILITY its existence, so
-        // SetActiveABCDPattern/Verify/Draw drop plates as ROUTINE maintenance;
-        // each drop queued an OBJECT_DELETE whose base reduced to the family,
-        // the anchors were (correctly) alive, and the window below — closed the
-        // moment the last draw ended — sent the sweep to WIPE a healthy ABCD.
-        // Repro: clicking the base band deselects -> SetActive("") -> every
-        // plate on the chart goes («وقتی بیس رو انتخاب میکنم abcd حذف میشه»).
-        // Rows and plate are rebuilt by their own owners (the heal net,
-        // P-TH3-INFO-11), so a HEALTHY family returns here on any caption drop.
-        // The anchors test is not decoration: a family that is ALREADY broken
-        // (P-TH3-RESTORE's orphan sweep drops exactly those captions) must still
-        // die whole, and the caption rows are the objects that carry its delete
-        // events — without this term broken leftovers would linger forever.
-        if(TH3IsInfoLabelName(sparam) && TH3FamilyAnchorsAlive(baseName)) return;
-        // P-TH3-DEL3: WALL clock. TimeCurrent only moves on ticks, so a drop
-        // queued behind a multi-second redraw read the tick-time window as
-        // closed on a live chart and wiped the family behind its own draw.
-        // P-TH3-PB-DRAG-LOCK (2026-09-22): the window is 5 s, not 1 s. A
-        // band-anchor resize can drag for several seconds (and the user's
-        // hand keeps the OBJECT_DRAG stream busy while it does), and a single
-        // MP_* drop queued mid-drag reads the 1 s window as already closed
-        // on a slow chart and wipes a healthy ABCD — the report that survived
-        // the DEL3 fix. 5 s is still well below a user-driven manual delete.
-        if(TH3FamilyAnchorsAlive(baseName)
-           && GetTickCount() - g_th3OwnDeleteMs <= 5000)
-        {
-            TH3Pattern patH;
-            if(TH3PatternStoreGet(baseName, patH))
-                DrawABCDPattern(baseName,
-                                patH.A.time, patH.A.price,
-                                patH.B.time, patH.B.price,
-                                patH.C.time, patH.C.price,
-                                patH.D.time, patH.D.price);
-            return;
-        }
-        // A hand-broken family (or a deliberately deleted member): one
-        // prefix sweep kills every object wearing the base, whatever the
-        // deleted member was.
-        {
-            string delMP = "TH3_MP_" + baseName + "_";
-            for(int k = ObjectsTotal(0, -1, -1) - 1; k >= 0; k--) {
-                string onm = ObjectName(0, k, -1, -1);
-                if(onm == baseName || StringFind(onm, baseName + "_") == 0
-                   || StringFind(onm, delMP) == 0)
-                    ObjectDelete(0, onm);
-            }
-            // P-TH3-INFO-01: the caption leaves through its family owner — the
-            // sweep above already took the rows, this keeps the owner contract
-            // (and the 8p mutant) honest on the delete path.
-            TH3InfoFamilyDelete(baseName);
-#ifdef BIOTAK_RENDER_ENGINE
-            // R-RENDER-ENGINE: the family's canvas rows leave the same way —
-            // objects were the prefix walk above, this is the rec twin. Full
-            // entry only (this file), so nothing here runs in Lite.
-            RBridgePatternDropBase(baseName);
-#endif
-            if(g_activeABCDPattern == baseName) SetActiveABCDPattern("");
-            TH3PatternStoreRemove(baseName);
-            ThrottledChartRedraw();
-        }
+        TH3FamilyDeleteAll(baseName);
+        ThrottledChartRedraw();
         return;
     }
 }
@@ -4528,6 +4634,113 @@ int FindOptimalFrequencyForABCD_WithLearningData(
 }
 
 #endif // TH3_TOOL_D_MQH
+
+// ── P-UI-160b (2026-10-16) — THE PATTERN FAMILY ANSWERS THE F MUTE ───
+// The report: «دکمه f که فقط زون ها رو خاموش و روشن میکنه پیس همه رو باید خاموش
+// بکنه». Same law as the leg meter's LegMeasureHideAll: the mute is a STATE
+// (P-PERF-02), applied once per transition. This family hides through its OWN
+// owners, NEVER through a delete — the store is the source of truth and the
+// delete cascade would read a swept family as a lost pattern (the store-wipe
+// branch of OnABCDMouseEvent). The ladder and the caption are mask owners
+// (TH3LadderSetVisible / TH3InfoFamilySetVisible — the plate drops by
+// EXISTENCE, P-TH3-INFO-10, and that drop is routine maintenance); everything
+// else the namespace carries (points, legs, labels, rays, zone lines and
+// boxes, borders, the MP overlay, temps) is chart-space and takes
+// OBJ_NO_PERIODS directly, skipping the two owner families so the owners'
+// own states are never fought. Show re-asserts the owners' own states — one
+// ladder lit (P-TH3-P6f), the rest dark — and the caption heals through the
+// frame's own RepositionABCDInfoLabels (the visit clock stays the only clock).
+int TH3PatternsHideAll()
+{
+    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+    {
+        string nm = ObjectName(0, i, -1, -1);
+        bool ours = (StringFind(nm, TH3_PATTERN_PREFIX) == 0 ||
+                     StringFind(nm, TH3_TEMP_PREFIX) == 0 ||
+                     StringFind(nm, "TH3_MP_") == 0);   // the MP overlay's own namespace
+        if(!ours) continue;
+        if(TH3IsLadderName(nm) || TH3IsInfoLabelName(nm)) continue;   // owners below
+        if((int)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+            ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+    }
+    int n = TH3PatternStoreCount();
+    for(int i = 0; i < n; i++)
+    {
+        string base = g_th3Patterns.items[i].name;
+        TH3LadderSetVisible(base, false);
+        TH3InfoFamilySetVisible(base, false);   // rows mask, plate drops (existence)
+    }
+    return n;
+}
+
+int TH3PatternsShowAll()
+{
+    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+    {
+        string nm = ObjectName(0, i, -1, -1);
+        bool ours = (StringFind(nm, TH3_PATTERN_PREFIX) == 0 ||
+                     StringFind(nm, TH3_TEMP_PREFIX) == 0 ||
+                     StringFind(nm, "TH3_MP_") == 0);
+        if(!ours) continue;
+        if(TH3IsLadderName(nm) || TH3IsInfoLabelName(nm)) continue;   // owners below
+        if((int)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS)
+            ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+    }
+    int n = TH3PatternStoreCount();
+    for(int i = 0; i < n; i++)
+    {
+        string base = g_th3Patterns.items[i].name;
+        TH3LadderSetVisible(base, (base == g_activeABCDPattern));   // P-TH3-P6f: one ladder lit
+    }
+    return n;
+}
+
+// ── P-UI-160b (2026-10-16) — THE FAMILY ANSWERS THE F MUTE ───────────
+// The report: «دکمه f که فقط زون ها رو خاموش و روشن میکنه پیس همه رو باید خاموش
+// بکنه» — F darkened the level families and left every DRAWING standing (this
+// one, the ABCD family, the rays and the paths). The mute is a STATE (P-PERF-02),
+// so hide masks what a mask can reach and parks what it cannot, once per
+// transition; show undoes exactly that, and the riders (LegMeasureHandles /
+// LegMeasureInk) carry the same hidden term so no channel can re-show a line
+// the mute took. The plate is a timed readout — its visit does not survive the
+// mute (the same rule the expiry already enforces).
+int LegMeasureHideAll()
+{
+    int n = 0;
+    for(int i = 0; i < g_legCount; i++)
+    {
+        string ln = g_legBase[i] + "_Line";
+        if(ObjectFind(0, ln) < 0) continue;
+        if((int)ObjectGetInteger(0, ln, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
+            ObjectSetInteger(0, ln, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
+        LegMeasureHandles(g_legBase[i],
+                          (datetime)ObjectGetInteger(0, ln, OBJPROP_TIME, 0),
+                          ObjectGetDouble(0, ln, OBJPROP_PRICE, 0),
+                          (datetime)ObjectGetInteger(0, ln, OBJPROP_TIME, 1),
+                          ObjectGetDouble(0, ln, OBJPROP_PRICE, 1),
+                          g_legAccent[i]);              // parks through its hidden branch
+        LegMeasurePlateHide(i);
+        n++;
+    }
+    return n;
+}
+
+int LegMeasureShowAll()
+{
+    int n = 0;
+    for(int i = 0; i < g_legCount; i++)
+    {
+        string ln = g_legBase[i] + "_Line";
+        if(ObjectFind(0, ln) < 0) continue;
+        if((int)ObjectGetInteger(0, ln, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS)
+            ObjectSetInteger(0, ln, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+        n++;
+    }
+    // the icons ride back through the ONE rider (the same pass the timer runs)
+    LegMeasureRideChart();
+    return n;
+}
+
 // TH3Recorder.mqh - split from TH3Tool_C.mqh 2026-10-05 (P-SIZE-1500):
 // the interactive audit recorder, by owner.
 #ifndef TH3_RECORDER_MQH
