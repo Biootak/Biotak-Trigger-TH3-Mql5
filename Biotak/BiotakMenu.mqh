@@ -3224,20 +3224,16 @@ void CircCreateBadge(const int i)
    ObjectSetInteger(0, txt, OBJPROP_ZORDER, Z_MENU_BADGE_TX);
 }
 
-void CircCreateItem(const int i)
+//--- P-UI-202 - the bg's create-if-missing (P-UI-163's mirror): MEASURED, 11 of 13 seats drew a BARE GLYPH until a click rebuilt the ring.
+void CircEnsureBg(const int i, const int x, const int y, const bool on)
 {
-   int x, y;
-   CircLayout(i, x, y);
-   int s  = CircSeatSize(i);   // P-UI-161: the seat's own side — P-UI-195: inner 44 / outer 32
-   int bx = x - s / 2;
-   int by = y - s / 2;
-   int feat = RingFeature(i);
-   bool on = CircFeatureLit(feat);
-
+   int s = CircSeatSize(i), bx = x - s / 2, by = y - s / 2;
    string bg = CircBg(i);
    if(ObjectFind(0, bg) < 0)
    {
-      if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+      if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0))
+      { DrawStripDiagEmit(StringFormat("[P-UI-202] bg create FAILED seat=%d", i)); return; }
+      DrawStripDiagEmit(StringFormat("[P-UI-202] bg heal seat=%d s=%d", i, s));
    }
    string bgRes = CircBgRes(s, on);   // P-UI-162: the canvas is the seat's own box size (s + 2*margin)
    ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
@@ -3253,6 +3249,16 @@ void CircCreateItem(const int i)
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_ZORDER, Z_MENU_ITEM);
+}
+
+void CircCreateItem(const int i)
+{
+   int x, y;
+   CircLayout(i, x, y);
+   int feat = RingFeature(i);
+   bool on = CircFeatureLit(feat);
+
+   CircEnsureBg(i, x, y, on);   // P-UI-202
 
    // P-UI-163: create-if-missing, NEVER delete+recreate in one tick — MEASURED 2026-10-17 (the 12:05:39 frame): a same-tick re-create that failed kept the bg and no glyph, and NO writer healed a MISSING icon (every path gates on ObjectFind>=0). Output-identical: the configure below rewrites all, and a BMPFILE re-set re-decodes (the P-UI-161 sync's own law).
    string icon = CircIcon(i);
@@ -3269,21 +3275,17 @@ void CircCreateItem(const int i)
    }
 }
 
-void ToolsCreateItem(const int toolIdx)
+//--- P-UI-202, the Tools twin: same heal (the skin follows the MODE, see SubBgSize).
+void ToolsEnsureBg(const int t, const int x, const int y, const bool on)
 {
-   int x, y;
-   ToolsLayout(toolIdx, x, y);
-   int feat = ToolFeature(toolIdx);
-   bool on = CircFeatureLit(feat);
-
-   // Skin follows the MODE: circular glass disc in the fan/rail/ring, rounded
-   // tile in the grid panel. Size and margin move together with it (see SubBgSize).
-   int bgSize = SubBgSize();
-   int bx = x - bgSize / 2;
-   int by = y - bgSize / 2;
-
-   string bg = ToolsBg(toolIdx);
-   if(ObjectFind(0, bg) < 0) if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+   int bgSize = SubBgSize(), bx = x - bgSize / 2, by = y - bgSize / 2;
+   string bg = ToolsBg(t);
+   if(ObjectFind(0, bg) < 0)
+   {
+      if(!ObjectCreate(0, bg, OBJ_BITMAP_LABEL, 0, 0, 0))
+      { DrawStripDiagEmit(StringFormat("[P-UI-202] tools bg create FAILED cell=%d", t)); return; }
+      DrawStripDiagEmit(StringFormat("[P-UI-202] tools bg heal cell=%d size=%d", t, bgSize));
+   }
    string bgRes = SubBgRes(on);
    ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, bx);
@@ -3298,6 +3300,16 @@ void ToolsCreateItem(const int toolIdx)
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
    ObjectSetInteger(0, bg, OBJPROP_BACK, false);
    ObjectSetInteger(0, bg, OBJPROP_ZORDER, Z_MENU_ITEM);
+}
+
+void ToolsCreateItem(const int toolIdx)
+{
+   int x, y;
+   ToolsLayout(toolIdx, x, y);
+   int feat = ToolFeature(toolIdx);
+   bool on = CircFeatureLit(feat);
+
+   ToolsEnsureBg(toolIdx, x, y, on);   // P-UI-202
 
    // P-UI-163: the same create-if-missing law as CircCreateItem's icon (one class, two live writers — see the measured note there).
    string icon = ToolsIcon(toolIdx);
@@ -3400,6 +3412,22 @@ void CircCreateOrb()
    ObjectDelete(0, CircOrbIcon());
 }
 
+//--- P-UI-203 - ONE FAMILY, NEVER A TAIL. Removing a star re-lays every seat at the new
+//--- pitch and leaves the old tail painted at its old place; sweep = DeleteRing's width.
+void CircRebuildRing()
+{
+   CircNoteBuilt(); int n = CircPlacedCountLive();   // note BEFORE the create: CircLayout reads this n
+   for(int i = n; i < RING_MAX_SEATS; i++)
+   {
+      ObjectDelete(0, CircIcon(i)); ObjectDelete(0, CircBg(i));
+      ObjectDelete(0, CircBadgeBg(i)); ObjectDelete(0, CircBadgeTxt(i));
+   }
+   for(int i = 0; i < n; i++) CircCreateItem(i);
+   #ifdef DSTRIP_DIAG
+   CircRingCensus(n);   // P-UI-200
+   #endif
+}
+
 void CreateMenu()
 {
    // P-UI-65: this is the one UI entry point every attach (and every TF switch)
@@ -3413,15 +3441,7 @@ void CreateMenu()
    if(!g_UI.menuVisible) return;
    // The ring stays hidden while the Tools submenu is open (CreateToolsMenu
    // deleted it, CircItemAt refuses it) — rebuilding it here painted both.
-   if(!g_ToolsOpen)
-   {
-      CircNoteBuilt();                             // BEFORE the create: CircLayout's n is this live set (the orb press keeps the freeze on)
-      for(int i = 0; i < CircPlacedCountLive(); i++)
-         CircCreateItem(i);
-      #ifdef DSTRIP_DIAG
-      CircRingCensus(CircPlacedCountLive());       // P-UI-200: after the create - the seats exist now
-      #endif
-   }
+   if(!g_ToolsOpen) CircRebuildRing();             // P-UI-203: tail sweep + the live set, one owner
    if(g_ToolsOpen)
       for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
 }
@@ -3479,13 +3499,7 @@ void DeleteToolsMenu(const bool restoreRing = true)
    SubInvalidateLayout();
    // P-UI-163c: the twin edge, a cell tip cannot describe a deleted cell.
    CircTipDisarm();
-   if(restoreRing && g_UI.menuVisible)          // bring the ring back
-   {
-      // P-UI-161: the ring is rebuilt from the mask the stars just wrote — a star
-      // toggled while the Tools menu was open lands HERE, in the same click.
-      CircNoteBuilt();
-      for(int i = 0; i < CircPlacedCountLive(); i++) CircCreateItem(i);
-   }
+   if(restoreRing && g_UI.menuVisible) CircRebuildRing();   // P-UI-203: the shrunken mask's tail leaves with it
    DrawStripDiagEmit(StringFormat("[P-UI-168] fan open=0 restore=%d placed=%d built=%d", (restoreRing ? 1 : 0), CircPlacedCountLive(), s_circBuiltSeats));
    ChartRedraw();
 }
@@ -4204,14 +4218,7 @@ void CircUpdateItemState(const int i)
       DrawStripDiagEmit(StringFormat("[P-UI-163] icon heal seat=%d feat=%d", i, feat));
    }
    CircConfigureIcon(icon, feat, on, ix, iy);
-   string bg = CircBg(i);
-   if(ObjectFind(0, bg) >= 0)
-   {
-      string res = CircBgRes(CircSeatSize(i), on);   // P-UI-162: per-side canvas — box == canvas on this path too
-      ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, res);
-      ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, res);
-      ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119   // bg ring keeps a live tooltip too
-   }
+   CircEnsureBg(i, ix, iy, on);   // P-UI-202: the sheddable half now heals through the create's own owner
 
    if(CircHasBadge(feat)) CircShowBadge(i, on);
 }
@@ -4222,21 +4229,16 @@ void ToolsUpdateItemState(const int t)
 
    int feat = ToolFeature(t);
    bool on = CircFeatureLit(feat);
+   int tx, ty;
+   ToolsLayout(t, tx, ty);
    string icon = ToolsIcon(t);
-   if(ObjectFind(0, icon) >= 0)
+   if(ObjectFind(0, icon) < 0)   // P-UI-202: the ring's heal law, applied to the cells too
    {
-      int tx, ty;
-      ToolsLayout(t, tx, ty);
-      CircConfigureIcon(icon, feat, on, tx, ty);
+      if(!ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
+      DrawStripDiagEmit(StringFormat("[P-UI-202] tools icon heal cell=%d feat=%d", t, feat));
    }
-   string bg = ToolsBg(t);
-   if(ObjectFind(0, bg) >= 0)
-   {
-      string res = SubBgRes(on);
-      ObjectSetString(0, bg, OBJPROP_BMPFILE, 0, res);
-      ObjectSetString(0, bg, OBJPROP_BMPFILE, 1, res);
-      ObjectSetString(0, bg, OBJPROP_TOOLTIP, "");   // P-UI-119   // bg ring keeps a live tooltip too
-   }
+   CircConfigureIcon(icon, feat, on, tx, ty);
+   ToolsEnsureBg(t, tx, ty, on);
    // Refresh badge text + visibility (e.g. Step/Factor override → Auto)
    if(CircHasBadge(feat) && ObjectFind(0, ToolsBadgeBg(t)) >= 0)
    {
@@ -5171,11 +5173,8 @@ void ToggleMenuVisibility()
       // Same rule as CreateMenu: no ring behind an open Tools submenu.
       // P-UI-161: the ring's seats are the PLACED ones (the star mask decides),
       // the Tools menu's are the whole catalog.
-      if(!g_ToolsOpen)
-      {
-         CircNoteBuilt();   // the create's n is the LIVE set - the opening press keeps the freeze on
-         for(int i = 0; i < CircPlacedCountLive(); i++) CircCreateItem(i);
-      }
+      // P-UI-203: the rebuild owns the tail sweep AND the live-mask note.
+      if(!g_ToolsOpen) CircRebuildRing();
       if(g_ToolsOpen)
          for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
    }
