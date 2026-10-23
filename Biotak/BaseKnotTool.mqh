@@ -6410,9 +6410,26 @@ void BaseKnotSync(const string id)
    int tfMin = g_bkBoxes[k].tfMin;
    if(tfMin <= 0) tfMin = BaseKnotIdTF(id);   // legacy registry rows
    long tfMask = BaseKnotTFMask(tfMin);
-   ObjectSetInteger(0, box, OBJPROP_TIMEFRAMES, tfMask);
+   //--- P-MT5-SELKEEP (2026-10-23) — THE BOX KEEPS ITS SELECTION ACROSS OUR OWN WRITES.
+   //--- reported: «بیس نات چرا سلکت بودنش خودکار بسته میشه هی» — MT4 keeps a
+   //--- rectangle selected while a program writes its properties, MT5 drops the
+   //--- highlight on the write, so this pump (500 ms, plus every drag step and TF
+   //--- switch) handed the user a box that let go of itself every half second and
+   //--- lost its five markers with it (those markers ARE the resize handles).
+   //--- TWO halves, both the project's own law: never write a property you would
+   //--- not change (the heal below now reads first), and — because the style block
+   //--- writes on every pass in BOTH trees — the selection is read once here and
+   //--- put back only if OUR OWN write was what dropped it (a click that walked
+   //--- away deselects before this function runs, so it is never re-selected).
+   bool wasSel = (bool)ObjectGetInteger(0, box, OBJPROP_SELECTED);
+   if((long)ObjectGetInteger(0, box, OBJPROP_TIMEFRAMES) != tfMask)
+      ObjectSetInteger(0, box, OBJPROP_TIMEFRAMES, tfMask);
    BaseKnotStyleBox(box);   // fill layer + drag handle — the VISIBLE border is the 4 edges below
-   ObjectSetInteger(0, box, OBJPROP_SELECTABLE, !g_bkBoxes[k].locked);   // lock heal: handle follows the registry
+   bool wantSel = !g_bkBoxes[k].locked;   // lock heal: handle follows the registry
+   if((bool)ObjectGetInteger(0, box, OBJPROP_SELECTABLE) != wantSel)
+      ObjectSetInteger(0, box, OBJPROP_SELECTABLE, wantSel);
+   if(wasSel && wantSel && !(bool)ObjectGetInteger(0, box, OBJPROP_SELECTED))
+      ObjectSetInteger(0, box, OBJPROP_SELECTED, true);
    // P-BK-46/50: the trade's own numbers are computed BELOW, right after the node read
    // — the knot's TYPE decides which edge the entry sits on and its CLASS (its own
    // TF) decides what R is measured in (and which TF's plan the targets come from),

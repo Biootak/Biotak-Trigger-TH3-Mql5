@@ -1746,6 +1746,74 @@ void CompatWarmUiSkins()
 }
 
 //+------------------------------------------------------------------+
+//| P-MT5-ONECLICK (2026-10-23) - ONE PHYSICAL RELEASE, ONE CLICK.    |
+//|                                                                  |
+//| MT4 sends ONE click-family event per button-up. MT5 sends that    |
+//| release on TWO channels: the OBJECT click (which names the        |
+//| object under the cursor) and the CHART click (which names no       |
+//| object at all), and in the measured cases the OBJECT click could  |
+//| even arrive twice.                                                 |
+//|                                                                  |
+//| The shared source is written against the MT4 meaning - ONE event  |
+//| per gesture - so the second delivery reads as a SECOND GESTURE:   |
+//| the strip toggles closed what it had just opened and its close     |
+//| path writes OBJPROP_SELECTED=false («خودش خودکار انسلکت می‌شه»),       |
+//| a card switch flips twice and looks dead («چرا تاگل کار نمی‌کند»),  |
+//| a tool that plants a point on click plants two.                   |
+//|                                                                  |
+//| The rule here is deliberately narrow, because this filter sits in  |
+//| front of EVERY handler:                                          |
+//|   * the same OBJECT click, same name, within the window -> drop    |
+//|     (one release cannot name one object twice);                    |
+//|   * a CHART click within the window of an OBJECT click -> drop     |
+//|     (the chart half of the same release).                          |
+//|   * anything else passes, so two genuinely separate clicks - a     |
+//|     user's real double-click 300+ ms apart, a click on another     |
+//|     object, a click on empty chart - are never touched.            |
+//|                                                                  |
+//| Window: 300 ms. MEASURED twins on the live terminal were 62-171 ms |
+//| apart; the user's own repeat clicks in the same log were 1.4-2.1 s.|
+//+------------------------------------------------------------------+
+#define COMPAT_CLICK_TWIN_MS 300
+
+static uint   g_ccObjMs = 0;      // when the last OBJECT click was dispatched
+static string g_ccObjName = "";   // ...and what it named
+static uint   g_ccChartMs = 0;    // when the last CHART click was dispatched
+
+// Returns true when this event is the SECOND channel of a release that has
+// already been dispatched - the caller drops it, exactly as if MT4 had sent
+// only one. Call it for CHARTEVENT_CLICK and CHARTEVENT_OBJECT_CLICK only.
+bool CompatOneClickDedupe(const int id, const string sparam)
+{
+   // The entry calls this for EVERY event (one line, so the parity checker can
+   // see the shim call on it), so the non-click traffic - the mouse-move stream
+   // above all - must cost one comparison and no clock read.
+   if(id != CHARTEVENT_CLICK && id != CHARTEVENT_OBJECT_CLICK) return false;
+   const uint now = GetTickCount();
+   if(id == CHARTEVENT_OBJECT_CLICK)
+   {
+      // ONLY a repeat of the SAME name is dropped. An object click that follows a
+      // chart click is never dropped, whatever the order: if the terminal ever
+      // sends the pair the other way round, dropping this one would remove the
+      // only event that carries the object's NAME (the strip would never open,
+      // the card would never answer). One direction of caution costs nothing.
+      const bool same = (g_ccObjMs != 0 && now - g_ccObjMs <= COMPAT_CLICK_TWIN_MS
+                         && sparam == g_ccObjName);
+      if(same) { g_ccObjMs = 0; g_ccChartMs = 0; return true; }
+      g_ccObjMs = now; g_ccObjName = sparam; g_ccChartMs = 0;
+      return false;
+   }
+   if(id == CHARTEVENT_CLICK)
+   {
+      if(g_ccObjMs != 0 && now - g_ccObjMs <= COMPAT_CLICK_TWIN_MS)
+      { g_ccObjMs = 0; g_ccChartMs = 0; return true; }
+      g_ccChartMs = now; g_ccObjMs = 0; g_ccObjName = "";
+      return false;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
 //| R-TF-UNIT, the MT5 half: make Period() mean what it means on MT4. |
 //|                                                                  |
 //| MQL5's Period() returns an ENUM_TIMEFRAMES (H1 == 16385). MQL4's  |

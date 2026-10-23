@@ -386,7 +386,12 @@ static bool g_LongPressFired  = false;  // true after panel opened (prevents tog
 // so the hand's move and the painted move could drift a whole redraw apart — the
 // drag read as stepping. 15 ms doubles the attempt rate; the real rate is still
 // bounded by the redraw itself, and only a live grab ever reaches this gate.
-#define CIRC_DRAG_REDRAW_INTERVAL 15
+//--- P-MT5-PARITY (2026-10-23): 30, exactly MT4's value (BiotakMenu_A:352). This
+//--- tree had halved it to 15, which doubled the ring/orb redraws per drag second
+//--- — a cadence difference nobody could see in a line diff (the line matched
+//--- except for the number, and the checker drops no preprocessor line quietly
+//--- enough for that to matter: tools/parity/property-audit.py --defines owns it).
+#define CIRC_DRAG_REDRAW_INTERVAL 30
 
 //--- chart lock while dragging or while a settings panel is open
 //

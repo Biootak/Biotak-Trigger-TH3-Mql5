@@ -82,6 +82,39 @@ Copy-Item (Join-Path $iconSrc '*.bmp') $iconDst -Force
 $have = @(Get-ChildItem $iconDst -Filter *.bmp -ErrorAction SilentlyContinue).Count
 $pre += "icons: $have/$want"
 
+# --- the COMPILER's own data folder ---------------------------------------
+# `#resource "\\Files\\Icons\\x.bmp"` is resolved by MetaEditor against the data
+# folder of the terminal IT belongs to - not against the one this script builds
+# into, and not against the source tree. The compiler here is another install
+# (see $Compiler), so a raster copied only to the runtime terminal is "resource
+# file not found" at compile time even though the .bmp sits in Files/Icons and
+# on the chart's own terminal. MEASURED 2026-10-23: the compiler's folder held
+# 370 icons and lacked bk_anchor_on/off.bmp, which is exactly the pair MT5's
+# DrawStrip had no #resource line for - the port dropped the directives because
+# the compile failed, and the LAST OBJECT cell painted no art ever since.
+# Map the compiler back to its terminal through origin.txt (each terminal data
+# folder records the install path it belongs to), then feed it the same set.
+$compilerIcons = $null
+$compilerDir = Split-Path -Parent $meta
+try {
+    foreach ($d in Get-ChildItem (Join-Path $env:APPDATA 'MetaQuotes\Terminal') -Directory -ErrorAction SilentlyContinue) {
+        $origin = Join-Path $d.FullName 'origin.txt'
+        if (-not (Test-Path $origin)) { continue }
+        $raw = (Get-Content $origin -Raw -Encoding Unicode) -replace "`0", ''
+        if ($raw.Trim().TrimEnd('\') -ieq $compilerDir.TrimEnd('\')) {
+            $cand = Join-Path $d.FullName 'MQL5\Files\Icons'
+            if (Test-Path $cand) { $compilerIcons = $cand; break }
+        }
+    }
+} catch { $compilerIcons = $null }
+if ($compilerIcons -and ($compilerIcons -ne $iconDst)) {
+    Copy-Item (Join-Path $iconSrc '*.bmp') $compilerIcons -Force
+    $cHave = @(Get-ChildItem $compilerIcons -Filter *.bmp -ErrorAction SilentlyContinue).Count
+    $pre += "compiler icons: $cHave/$want"
+} elseif (-not $compilerIcons) {
+    $pre += "compiler icons: terminal of $compilerDir not found (a new #resource will fail to compile)"
+}
+
 # --- build identity -------------------------------------------------------
 # MT4's tools/gen-build-hash.js owns Biotak/BuildHash.mqh and drops the same
 # hash at <terminal>\MQL4\Files\th3-src.txt on every build, so a chart can

@@ -463,6 +463,16 @@ void OnChartEvent(const int id,
   // MT5Compat\MQL5Compat.mqh, "THE PROGRAMMATIC OBJECT EVENT STORM".
   if((id == CHARTEVENT_OBJECT_CREATE || id == CHARTEVENT_OBJECT_DELETE) &&
      CompatConsumeObjEvent(id, sparam)) return;
+  // MT5-ONLY P-MT5-ONECLICK (2026-10-23): ONE RELEASE, ONE CLICK — the same
+  // shape as the filter above, one layer down. MT5 can report a single
+  // button-up twice (the OBJECT click and then the CHART click, and in the
+  // measured cases the OBJECT click itself twice), while every handler in the
+  // shared source is written for MT4's single delivery. The second copy then
+  // reads as a SECOND GESTURE: the strip toggles shut what it just opened and
+  // its close path writes OBJPROP_SELECTED=false, a card switch flips twice
+  // and looks dead, a click-to-plant tool plants two points. Dropped here,
+  // before ANY handler runs. Full note: MT5Compat\MQL5Compat.mqh.
+  if(CompatOneClickDedupe(id, sparam)) return;
   // BUG-15 (2026-10-13, resolved 2026-10-16) — NO LEAVE EVENT EXISTS ON EITHER
   // PLATFORM, SO THERE IS NOTHING TO FILTER HERE.
   //
@@ -510,7 +520,8 @@ void OnChartEvent(const int id,
   // request empty and pays nothing. MT5's `UISyncDrain` at the tail of this handler is
   // not a substitute: it settles the ring light and the open card's switch bitmaps and
   // never runs that pass, so without this line LAST OBJECT flipped and nothing moved.
-  if(DrawStripRefreshTake()) RefreshDisplay(REFRESH_ALL);
+  int dsAsk = DrawStripRefreshTake();
+  if(dsAsk > 0) RefreshDisplay(REFRESH_ALL);
   // P-PAL-20 (2026-10-02) — THE LEDGER, REWRITTEN WHOLE, EVERY EVENT, AND WRITTEN
   // LAST. This is the same bridge's second direction and it exists for one reason: a
   // colour pick is a release on TWO channels, `HandleUIChartEvent` serves the palette

@@ -102,8 +102,38 @@ foreach ($t in $targets) {
     foreach ($l in $raw) { $report += "    $l" }
 }
 
+# ---------------------------------------------------------------------------
+# STAGE 2 - PARITY. A green compile proves the code BUILDS; it says nothing
+# about whether the MT5 tree still MIRRORS MT4. audit-all.ps1 is that proof, and
+# it belongs here: a shared-source edit is not finished until both questions are
+# answered, and a human who has to remember a second command forgets it on
+# exactly the edit that matters (2026-10-23: three real defects, all after a
+# green compile).
+# ---------------------------------------------------------------------------
 $report += ''
-$report += "GATE $Tag : $(if ($fail -eq 0) { "ALL GREEN ($($targets.Count) entries)" } else { "$fail of $($targets.Count) FAILED" })"
+$report += 'PARITY  (tools/parity/audit-all.ps1 - six checks)'
+$praw = @()
+try {
+    # *>&1, not 2>&1: audit-all reports through Write-Host (the information
+    # stream), which a plain 2>&1 leaves on the host and out of the capture -
+    # that read as "six checks, zero captured, so FAILED" the first time.
+    $praw = @(& (Join-Path $PSScriptRoot 'parity\audit-all.ps1') -Quiet *>&1)
+} catch {
+    $praw = @("PARITY THREW: $($_.Exception.Message)")
+}
+$pcheck = @($praw | Where-Object { $_ -match '^\s*(PASS|FAIL)\s' })
+# The six checks are long single lines; fold each to its verdict + first fields.
+foreach ($l in $pcheck) {
+    $short = if ($l.Length -gt 118) { $l.Substring(0, 118) + '...' } else { $l }
+    $report += ('  ' + $short)
+}
+$pbad = @($pcheck | Where-Object { $_ -match '^\s*FAIL\s' }).Count
+if ($pcheck.Count -eq 0) { $pbad++ }
+$fail += $pbad
+$report += ("PARITY: {0}" -f $(if ($pbad -eq 0) { 'ALL GREEN' } else { "$pbad check(s) FAILED" }))
+
+$report += ''
+$report += "GATE $Tag : $(if ($fail -eq 0) { "ALL GREEN ($($targets.Count) entries + parity)" } else { "$fail problem(s) across $($targets.Count) entries + parity" })"
 $report += "PASS = freshly compiled; CACHED = source unchanged, MetaEditor replayed the previous result (still truthful, but proves nothing about an edit you just made)."
 $report | Set-Content -Path $outPath -Encoding UTF8
 $report | ForEach-Object { $_ }

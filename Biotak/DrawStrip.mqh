@@ -235,6 +235,13 @@
 #resource "\\Files\\Icons\\gl_check_gold.bmp"
 #resource "\\Files\\Icons\\gl_nav_m.bmp"
 #resource "\\Files\\Icons\\gl_droplet_m.bmp"
+//--- P-ANCHOR-LAST-MOVE: the LAST OBJECT seat's two inks. MT4 embeds them in
+//--- DrawStrip_Head (its lines 79-80); this tree kept only the runtime path, and
+//--- a "::Files\\Icons\\x.bmp" path resolves ONLY for a raster the compiling unit
+//--- `#resource`d — so the cell painted no art while every check read green (the
+//--- parity checker drops preprocessor lines by design).
+#resource "\\Files\\Icons\\bk_anchor_off.bmp"
+#resource "\\Files\\Icons\\bk_anchor_on.bmp"
 
 // ══════════════════════════════════════════════════════════════════════════
 // P-DRAW-08 — ONE STRIP, EVERY DRAWING TOOL, ITS OWN CONTROLS. A hold on any
@@ -10202,7 +10209,16 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
        // drawing, of the plate, or of the chart), never the "clicked away"
        // gesture the TV-style dismissal below is for. Measured HERE because this
        // is also the event that ends the press cycle.
-       relWasDrag = (s_dsPressTracked && s_dsTravel > DSTRIP_CLICK_SLOP);
+       //--- MT5-ONLY P-MT5-DRAGREL (2026-10-23) — ONE RELEASE, TWO CHANNELS, ONE
+       //--- HAND. MT5 reports this button-up TWICE: the OBJECT click first (it opens
+       //--- the strip and spends the press memo below), then the CHART click. The
+       //--- second one therefore read `s_dsPressTracked == false` and threw away its
+       //--- own MEASURED travel - 64 px in the terminal log, `[drawstrip] dismiss
+       //--- click ... travel=64` - so a drag-release dismissed the strip the same
+       //--- gesture had just opened («این استریپ خودکار بسته می‌شه»). Travel is the
+       //--- hand's own fact and it survives the memo, so it answers alone here; a
+       //--- motionless click still measures 0 and dismisses exactly as before.
+       relWasDrag = (s_dsTravel > DSTRIP_CLICK_SLOP);
        relPressObj = s_dsPressObj;   // P-UI-113i: keep the press owner for the tail
        // P-UI-113j: ELSE THE LATCH'S OWN OWNER. A still press left no move edge, and
        // the terminal's LIVE selection is not a fact this release may ask: MT4
@@ -10249,7 +10265,21 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
        // CLICK-TOGGLE: a named click on a drawing opens/closes/switches the strip.
        if(id == CHARTEVENT_OBJECT_CLICK)
        {
-          if(DrawStripClickToggle(sparam, relWasDrag)) return true;
+          if(DrawStripClickToggle(sparam, relWasDrag))
+          {
+             //--- MT5-ONLY P-MT5-TWIN (2026-10-23) — AN OPEN OWES ITS TWIN, ON
+             //--- EVERY PATH. MT5 reports one button-up twice: the OBJECT click
+             //--- (this branch) and then the CHART click. The interior path below
+             //--- already arms the twin flag; this one did not, so the chart click
+             //--- of the SAME release reached the dismissal two lines later, found
+             //--- travel 0, and closed the strip the object click had just opened
+             //--- - and its close path writes OBJPROP_SELECTED=false, which is the
+             //--- user's «خودش خودکار انسلکت می‌شه». Measured in the terminal log
+             //--- as `click opened ... selected=false` / `click closed ...` 170 ms
+             //--- apart, repeating. A CLOSE never arms (it owes nothing).
+             if(s_dsOpen) DrawStripTwinArm();
+             return true;
+          }
        }
        DrawStripHoldSelectionDisarm();  // P-UI-113g: a later click owns selection now
        s_dsLeftPrev = false;   // (every release emits one: the boxes' own law, BkHoldOnBoxUp)
@@ -10618,6 +10648,16 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
        if(DrawStripReleaseOnDrawing(relPressObj, rcx, rcy)) return false;
       // P-DRAW-13: pin survives outside clicks (only ✕ paths, Del and Esc dismiss).
       if(s_dsPinned) return false;
+      //--- MT5-ONLY P-MT5-TWIN (2026-10-23): THE SECOND CHANNEL OF THE OPEN.
+      //--- MT5 delivers one button-up as an OBJECT click and then a CHART click;
+      //--- the first is spent above, so by the time this one arrives the press
+      //--- memo is empty and the release pixel is not the plate -> the strip
+      //--- closed itself in the same gesture that opened it (measured: open at
+      //--- :43:13.155, close at :43:13.326, travel 0, twelve times in a minute).
+      //--- The twin flag is armed by whichever open path ran; spending it here
+      //--- costs the second channel and nothing else - a later, genuine click
+      //--- still dismisses (the flag is one-shot and 800 ms bounded).
+      if(DrawStripTwinSpent()) return false;
       // P-UI-113d: A DRAG-RELEASE IS NOT A DISMISSAL (the box mini-strip's own
       // `dragRel` / BK_CLICK_SLOP rule, measured in the click head above). Reading
       // it as one is the second way a strip vanished on the user's own hand: hold

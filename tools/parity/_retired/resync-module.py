@@ -343,6 +343,48 @@ MODULE_PATCHES = {
          '      bool isOurObject = DrawIsIndicatorObject(sparam);\n'
          '      bool userDel = !isOurObject && !g_suppressDeleteEvents && !TickDeadlinePending(g_suppressDeleteEventsUntilMs);\n',
          "indicator-owned deletes are never user gestures on MT5"),
+        # P-MT5-DRAGREL (2026-10-23) - ONE RELEASE, TWO CHANNELS. MT5 reports a
+        # button-up on a drawing twice (the OBJECT click first, the CHART click
+        # after); the first spends the press memo, so the second read
+        # `s_dsPressTracked == false` and dropped its own MEASURED travel (64 px in
+        # the terminal log: `[drawstrip] dismiss click ... travel=64`). The user's
+        # report was exactly that: «این استریپ خودکار بسته میشه». P-UI-113d's own
+        # sentence is the spec - a drag-release is never a dismissal - and travel
+        # is the hand's fact, so it answers without the memo. A motionless click
+        # still measures 0 and dismisses as before.
+        (re.compile(
+            r'       relWasDrag = \(s_dsPressTracked && s_dsTravel > DSTRIP_CLICK_SLOP\);\n'),
+         '       //--- MT5-ONLY P-MT5-DRAGREL (2026-10-23) - ONE RELEASE, TWO CHANNELS, ONE\n'
+         '       //--- HAND. Travel is the hand\'s own fact and it survives the spent press\n'
+         '       //--- memo, so it answers alone here.\n'
+         '       relWasDrag = (s_dsTravel > DSTRIP_CLICK_SLOP);\n',
+         "MT5 reports one button-up on two channels; honour the measured travel"),
+        # P-MT5-TWIN (2026-10-23) - the object-click open arms the twin flag, so the
+        # chart click of the SAME release is spent instead of closing what it just
+        # opened. Measured: `click opened ...` / `click closed ...` 170 ms apart,
+        # twelve times in a minute, and the close wrote OBJPROP_SELECTED=false.
+        (re.compile(
+            r'          if\(DrawStripClickToggle\(sparam, relWasDrag\)\) return true;\n'),
+         '          if(DrawStripClickToggle(sparam, relWasDrag))\n'
+         '          {\n'
+         '             //--- MT5-ONLY P-MT5-TWIN (2026-10-23): an OPEN owes its twin on\n'
+         '             //--- every path; the interior path below already arms it.\n'
+         '             if(s_dsOpen) DrawStripTwinArm();\n'
+         '             return true;\n'
+         '          }\n',
+         "the object-click open arms the twin, as the interior open does"),
+        # P-MT5-TWIN, second half: the twin must be spent at the DISMISSAL too, not
+        # only inside the toggle - the second channel arrives as a chart click.
+        (re.compile(
+            r'       if\(DrawStripReleaseOnDrawing\(relPressObj, rcx, rcy\)\) return false;\n'
+            r'      // P-DRAW-13: pin survives outside clicks[^\n]*\n'
+            r'      if\(s_dsPinned\) return false;\n'),
+         '      if(DrawStripReleaseOnDrawing(relPressObj, rcx, rcy)) return false;\n'
+         '      // P-DRAW-13: pin survives outside clicks (only ✕ paths, Del and Esc dismiss).\n'
+         '      if(s_dsPinned) return false;\n'
+         '      //--- MT5-ONLY P-MT5-TWIN (2026-10-23): the second channel of the open.\n'
+         '      if(DrawStripTwinSpent()) return false;\n',
+         "the dismissal spends the twin of the click that opened the strip"),
     ],
     "ExtendedDrawingFunctions.mqh": [
         # P-PERF-CSO1 (2026-10-12) - MT5-only bulk-window arming (see the
@@ -1680,6 +1722,36 @@ int SweepForeignLadderObjects(const SModeConfig &config,
          '   bool okShot = WindowScreenShot(shotPath, shotW, shotH, 0);\n'
          '#endif\n',
          "MQL5 screenshot API is ChartScreenShot, not WindowScreenShot"),
+    ],
+    "BaseKnotTool.mqh": [
+        # P-MT5-SELKEEP (2026-10-23) - THE BOX KEEPS ITS SELECTION ACROSS OUR OWN
+        # WRITES. Reported: «بیس نات چرا سلکت بودنش خودکار بسته میشه هی». MT4
+        # keeps a rectangle highlighted while a program writes its properties;
+        # MT5 drops OBJPROP_SELECTED on the write, so the 500 ms pump (plus every
+        # drag step and TF switch) handed the user a box that let go of itself
+        # twice a second - and its four corner markers (they ARE the resize
+        # handles) went with it. Two halves, both this project's own law: the two
+        # property writes read first (never write what would not change), and the
+        # selection is read before them and put back only if OUR OWN write was
+        # what dropped it - a click that walked away deselects before this
+        # function runs, so it is never re-selected. The MT4 text this replaces
+        # is its unconditional pair of ObjectSetInteger calls.
+        (re.compile(
+            r'   long tfMask = BaseKnotTFMask\(tfMin\);\n'
+            r'   ObjectSetInteger\(0, box, OBJPROP_TIMEFRAMES, tfMask\);\n'
+            r'   BaseKnotStyleBox\(box\);   // fill layer \+ drag handle[^\n]*\n'
+            r'   ObjectSetInteger\(0, box, OBJPROP_SELECTABLE, !g_bkBoxes\[k\]\.locked\);   // lock heal[^\n]*\n'),
+         '   //--- P-MT5-SELKEEP (2026-10-23) — THE BOX KEEPS ITS SELECTION ACROSS OUR OWN WRITES.\n'
+         '   bool wasSel = (bool)ObjectGetInteger(0, box, OBJPROP_SELECTED);\n'
+         '   if((long)ObjectGetInteger(0, box, OBJPROP_TIMEFRAMES) != tfMask)\n'
+         '      ObjectSetInteger(0, box, OBJPROP_TIMEFRAMES, tfMask);\n'
+         '   BaseKnotStyleBox(box);   // fill layer + drag handle — the VISIBLE border is the 4 edges below\n'
+         '   bool wantSel = !g_bkBoxes[k].locked;   // lock heal: handle follows the registry\n'
+         '   if((bool)ObjectGetInteger(0, box, OBJPROP_SELECTABLE) != wantSel)\n'
+         '      ObjectSetInteger(0, box, OBJPROP_SELECTABLE, wantSel);\n'
+         '   if(wasSel && wantSel && !(bool)ObjectGetInteger(0, box, OBJPROP_SELECTED))\n'
+         '      ObjectSetInteger(0, box, OBJPROP_SELECTED, true);\n',
+         "MT5 drops OBJPROP_SELECTED on any property write; keep the box's selection"),
     ],
 }
 

@@ -289,6 +289,10 @@ void OnChartEvent(const int id,
   // MT5Compat\MQL5Compat.mqh, "THE PROGRAMMATIC OBJECT EVENT STORM".
   if((id == CHARTEVENT_OBJECT_CREATE || id == CHARTEVENT_OBJECT_DELETE) &&
      CompatConsumeObjEvent(id, sparam)) return;
+  // MT5-ONLY P-MT5-ONECLICK (2026-10-23): ONE RELEASE, ONE CLICK — see the full
+  // note in "Biotak Trigger TH3.mq5". MT5 can deliver a single button-up twice;
+  // the second copy reads as a second gesture in every shared handler.
+  if(CompatOneClickDedupe(id, sparam)) return;
   // P-PERF-34: scope the frame deferral to this window (see EventHandlers).
   g_inChartEvent = true;
   // P-PERF-04: interaction budget (Lite has no menu/panel half to time).
