@@ -107,8 +107,9 @@
 #resource "\\Files\\Icons\\circ_off_30.bmp"
 #resource "\\Files\\Icons\\circ_on_30.bmp"
 // R-SUBLADDER (2026-09-11): Tools grid panel + its cells. cell_*.bmp is the
-// rounded-square tile (46px canvas == the 46px pitch); sub_panel_r<N>[p].bmp is
-// the panel backdrop, one per visible row count 1..4 ('p' = with pager strip).
+// cell DISC (46px canvas == the 46px pitch; P-UI-221 turned it from a rounded
+// square into the ring's own disc); sub_panel_r<N>[p].bmp is the panel
+// backdrop, one per visible row count 1..4 ('p' = with pager strip).
 // One BMP per height because stretching a single rounded panel would turn its
 // 13px corners into ellipses and blur its 1px border (P-ICONS-* — never scale).
 #resource "\\Files\\Icons\\cell_off.bmp"
@@ -265,9 +266,9 @@
 // purpose: adjacent canvases abut with ZERO overlap, so an ON cell's glow can
 // never wash onto its neighbour (a larger canvas made the winner depend on
 // object Z-order, i.e. it flickered).
-#define SUB_CELL_VIS     40     // visible rounded square (the .tcell)
+#define SUB_CELL_VIS     40     // visible DISC (the .tcell) — P-UI-221: was a rounded square
 #define SUB_CELL_GAP     6      // gap between two cells (.cells gap)
-#define SUB_CELL_MARG    3      // baked glow/shadow margin inside cell_*.bmp
+#define SUB_CELL_MARG    3      // baked glow margin inside cell_*.bmp
 #define SUB_CELL_CANVAS  (SUB_CELL_VIS + 2 * SUB_CELL_MARG)   // 46 — the BMP side
 #define SUB_GRID_COLS    4      // fixed: 4 columns, exactly like the preview
 #define SUB_GRID_PAD     10     // panel padding around the cell block
@@ -2660,12 +2661,17 @@ string ToolsIcon(const int i) { return g_UI.btnPrefix + "ToolsIcon" + IntegerToS
 string ToolsBadgeBg(const int i) { return g_UI.btnPrefix + "ToolsBadge" + IntegerToString(i); }
 string ToolsBadgeTxt(const int i) { return g_UI.btnPrefix + "ToolsBadgeTxt" + IntegerToString(i); }
 
-//--- sub-item SKIN. The sub-menu speaks two visual languages: the fan/rail/ring
-//    reuse the ring's circular glass disc (circ_*.bmp, 52px canvas = 44px disc +
-//    4px glow), while the grid panel uses the rounded-square tile (cell_*.bmp,
-//    46px canvas = 40px tile + 3px glow). A grid of discs reads as scattered
-//    debris; a grid of tiles reads as one control block. Size AND margin must
-//    follow the skin, or the icon drifts off-centre and the hit tile mis-sizes.
+//--- sub-item SKIN. ONE visual language: the fan/rail/ring use the ring's
+//    circular glass disc (circ_*.bmp, 52px canvas = 44px disc + 4px glow) and
+//    the grid panel uses the SAME disc at its own size (cell_*.bmp, 46px canvas
+//    = 40px disc + 3px glow). P-UI-221 (2026-10-23): the cell used to be a
+//    rounded square - a second language that read as a square next to a disc -
+//    and BOTH families carried a BOX-blur glow that filled the canvas corners,
+//    so the silhouette behind every seat was the bitmap RECTANGLE (the «دایره
+//    نیست» report). tools/icons/make-disc-skins.py rebuilds the margin as a
+//    radial glow that dies inside the canvas; the face is not resampled.
+//    Size AND margin must follow the skin, or the icon drifts off-centre and
+//    the hit tile mis-sizes.
 int SubBgSize()
 {
    return SubIsPanelMode() ? SUB_CELL_CANVAS : CIRC_BG_SIZE;
