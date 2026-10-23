@@ -6292,18 +6292,17 @@ bool IsDdRow(const int item,const int row)
    return (cnt>=4);
 }
 // Closed select-button rect (shared by draw + press hit-test + update).
+// P-UI-210 (2026-10-22, ported from MT4): the drawn pill, the press rect and the
+// popup anchor are ONE rect. The old width (maxLen*7+54, clamped 104..190) was a
+// second guess at the very text the create path fits (50+textW, floor 72), so the
+// hit rect drifted off the skin whenever the two disagreed.
 void PnlDdRect(const int item,const int row,int &x,int &y,int &w,int &h)
 {
-   int kind; string label,unit,opts; int minV,maxV; double step;
-   PnlRowDef(item,row,kind,label,minV,maxV,step,unit,opts);
-   string arr[]; int cnt=PnlSplit(opts,arr,12);
-   int maxLen=0;
-   for(int i=0;i<cnt;i++) maxLen=MathMax(maxLen,StringLen(arr[i]));
-   w=MathMax(104,MathMin(190,maxLen*7+54));
+   w=MathMax(PNL_BTN_W,50+PnlTextW(PnlDdOptText(item,row),PNL_PT_CTL));
    int px=PnlRowBaseX(item,row), py=g_PnlY[item];
    x=px+PNL_WEL-PNL_PAD_X-w;
-   y=PnlRowY(item,row,py)+PNL_CTL_Y;
-   h=PNL_CTL_H;
+   y=PnlRowY(item,row,py)+PNL_CTL_Y-1;
+   h=26;
 }
 string PnlDdOptText(const int item,const int row)
 {
@@ -7220,11 +7219,9 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
          // a value longer than one character drew its arrow on top of its own
          // text (BASIS "Control" read "Contro⌄"). The preview's .dd is
          // content-fitted (padding 10/9, gap 8, 7px chevron ≈ 50 + textW).
-         int dw = 50 + PnlTextW(PnlDdOptText(item,row),PNL_PT_CTL);   // P-UI-30
-         if(dw < 72) dw = 72;
-         int dx = px + PNL_WEL - PNL_PAD_X - dw;
-         int dy = ry + PNL_CTL_Y - 1;
-          PnlSetButton(PnlName(item,row,"DD"), dx, dy, dw, 26, "",
+         int dx,dy,dw,dh;
+         PnlDdRect(item,row,dx,dy,dw,dh);   // P-UI-210: the ONE closed-dropdown rect
+          PnlSetButton(PnlName(item,row,"DD"), dx, dy, dw, dh, "",
                        PNL_CLR_FIELD, PNL_CLR_FIELD_BD, true);
          PnlSetBitmap(PnlName(item,row,"DDI"), dx+7, dy+7, PNL_GLYPH_CANVAS, PNL_GLYPH_CANVAS,
                       PnlGlyphRes(item,PnlRowIcon(item,row),true), Z_PANEL_INK);
@@ -9128,9 +9125,14 @@ bool PnlSwitchHit(const int mx,const int my,int &item,int &row)
       PnlRowDef(g_PnlOpen,r,kind,label,minV,maxV,step,unit,opts);
        if(kind!=1) continue;
        int swX=PnlRowBaseX(g_PnlOpen,r)+PNL_SW_X-PNL_SW_PAD;
-       int swY=PnlRowY(g_PnlOpen,r,py)+PNL_SW_Y-PNL_SW_PAD;
+       int ry=PnlRowY(g_PnlOpen,r,py);
+       int swY=ry+PNL_SW_Y-PNL_SW_PAD;
+       // P-UI-211 (2026-10-22, ported from MT4): a switch's 5px halo stops at its
+       // OWN row. Without the clamp a press in the pad between two rows could
+       // flip the row above (the loop returns the first expanded rect it meets).
+       int y0=MathMax(swY-5,ry), y1=MathMin(swY+PNL_SW_H+2*PNL_SW_PAD+5,ry+PNL_ROW_H-1);
       if(mx >= swX-5 && mx <= swX+PNL_SW_W+2*PNL_SW_PAD+5 &&
-         my >= swY-5 && my <= swY+PNL_SW_H+2*PNL_SW_PAD+5)
+         my >= y0 && my <= y1)
       {
          item=g_PnlOpen; row=r;
          return true;
@@ -10430,25 +10432,35 @@ void PnlUpdateRow(const int item,const int row)
          // P-UI-26: the box is content-fitted at create (dw=50+6/char); a
          // longer/shorter option must resize it live, or text runs under
          // the chevron while the hit-rect (PnlDdRect, always fresh) moves on.
-         int dw = 50 + PnlTextW(PnlDdOptText(item,row),PNL_PT_CTL);   // P-UI-30
-         if(dw < 72) dw = 72;
-         int dx = px + PNL_WEL - PNL_PAD_X - dw;
+         int dx,dy,dw,dh;
+         PnlDdRect(item,row,dx,dy,dw,dh);   // P-UI-210: the ONE closed-dropdown rect
          string dd=PnlName(item,row,"DD");
          if(ObjectFind(0,dd)>=0)
          {
             ObjectSetInteger(0,dd,OBJPROP_XDISTANCE,dx);
+            ObjectSetInteger(0,dd,OBJPROP_YDISTANCE,dy);
             ObjectSetInteger(0,dd,OBJPROP_XSIZE,dw);
+            ObjectSetInteger(0,dd,OBJPROP_YSIZE,dh);
          }
          string ddi=PnlName(item,row,"DDI");
-         if(ObjectFind(0,ddi)>=0) ObjectSetInteger(0,ddi,OBJPROP_XDISTANCE,dx+7);
+         if(ObjectFind(0,ddi)>=0)
+         {
+            ObjectSetInteger(0,ddi,OBJPROP_XDISTANCE,dx+7);
+            ObjectSetInteger(0,ddi,OBJPROP_YDISTANCE,dy+7);
+         }
          string dt=PnlName(item,row,"DDT");
          if(ObjectFind(0,dt)>=0)
          {
             ObjectSetInteger(0,dt,OBJPROP_XDISTANCE,dx+24);
+            ObjectSetInteger(0,dt,OBJPROP_YDISTANCE,dy+8);
             ObjectSetString(0,dt,OBJPROP_TEXT,PnlDdOptText(item,row));
          }
          string ddc=PnlName(item,row,"DDC");
-         if(ObjectFind(0,ddc)>=0) ObjectSetInteger(0,ddc,OBJPROP_XDISTANCE,dx+dw-13);
+         if(ObjectFind(0,ddc)>=0)
+         {
+            ObjectSetInteger(0,ddc,OBJPROP_XDISTANCE,dx+dw-13);
+            ObjectSetInteger(0,ddc,OBJPROP_YDISTANCE,dy+11);
+         }
       }
       else   // segmented pills: restyle every segment
       {

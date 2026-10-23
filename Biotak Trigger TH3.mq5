@@ -193,6 +193,8 @@ int OnInit()
     // BaseKnotTool's span, ATRCalculations' effective bars), so refreshing here
     // is what makes the first paint match MT4 exactly.
     CompatRefreshChartData();
+    // MT5-ONLY (P-UI-223): decode the UI skins before any label exists.
+    CompatWarmUiSkins();
     // MT5-ONLY (P-PERF-117b): BEFORE this instance creates one object, name what
     // the chart already carries — an orphan from the previous instance names
     // itself here, and so does the fix's target family.

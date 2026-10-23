@@ -1713,6 +1713,39 @@ int ObjectsDeleteAllCompat(const long chart_id, const string prefix,
 }
 
 //+------------------------------------------------------------------+
+//| P-UI-223 - DECODE THE UI SKINS BEFORE THE FIRST LABEL EXISTS.     |
+//|                                                                  |
+//| A bitmap label whose resource has never been DECODED can present  |
+//| as an EMPTY box for its first frame(s). The object, its box, its  |
+//| path and its pixels are all correct - the ring census at           |
+//| 10:57:50 proved it, and ResourceReadImage reads 52x52 - yet the   |
+//| 9 inner 44px seats drew a bare glyph while the 3 outer 32px seats |
+//| drew their disc, until a click rebuilt the ring. The 52px ring    |
+//| skin is the biggest and the last to decode, so a label created    |
+//| against a cold cache paints blank.                                |
+//|                                                                  |
+//| One decode per attach (a few KB) puts the family in the cache     |
+//| before any label is created; after that the terminal serves the   |
+//| cached image and every show/rebuild paints on its first frame.    |
+//+------------------------------------------------------------------+
+void CompatWarmUiSkins()
+{
+   string skins =
+      "circ_off;circ_on;circ_off_30;circ_on_30;circ_off_32;circ_on_32;"
+      "circ_off_35;circ_on_35;circ_off_39;circ_on_39;circ_off_43;"
+      "circ_on_43;cell_off;cell_on;orb_bg";
+   string parts[];
+   int n = StringSplit(skins, ';', parts);
+   uint px[];
+   uint w = 0, h = 0;
+   int warmed = 0;
+   for(int i = 0; i < n; i++)
+      if(ResourceReadImage("::Files\\Icons\\" + parts[i] + ".bmp", px, w, h))
+         warmed++;
+   Print("[P-UI-223] ui skins warmed=", warmed, "/", n);
+}
+
+//+------------------------------------------------------------------+
 //| R-TF-UNIT, the MT5 half: make Period() mean what it means on MT4. |
 //|                                                                  |
 //| MQL5's Period() returns an ENUM_TIMEFRAMES (H1 == 16385). MQL4's  |

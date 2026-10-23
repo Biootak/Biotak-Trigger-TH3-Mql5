@@ -52,7 +52,10 @@ the file, diff it, rebuild both MT5 entries, and say so in the commit message.
 - `_retired/mql5-biotak-aug21/` — the stale divergent copy this repository used
   to carry (frozen 2026-08-21). Kept for reference; never included.
 - `tools/mt5-build.ps1` — MetaEditor compile helper (targets ONE terminal;
-  see the preflight). `tools/mt5-verify.ps1` — the closed loop: build, prune
+  see the preflight). `tools/mt5-reload.ps1` — **the standard command**: builds
+  both entries and restarts the terminal, so the new `.ex5` is the resident
+  code. `tools/mt5-restart.ps1` — the graceful close/relaunch it calls.
+  `tools/mt5-verify.ps1` — the instrumented closed loop: build, prune
   old logs, restart that terminal, watch its fresh log, report a verdict.
   `tools/parity/module-report.py` — read-only drift detector against MT4.
   `tools/parity/_retired/resync-module.py` — the retired generator; its
@@ -62,9 +65,29 @@ the file, diff it, rebuild both MT5 entries, and say so in the commit message.
 
 ## Build
 
+**The standard command is one line; it builds both entries and restarts the
+terminal, so the new `.ex5` is the code the charts actually run:**
+
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 -Source "Biotak Trigger TH3.mq5"
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 -Source "Biotak Trigger TH3 Lite.mq5"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-reload.ps1
+```
+
+**Never ask the user to flip the timeframe to load a build, and never tell them
+"the fix is ready, switch TF".** A compile is not a reload: MetaEditor only
+writes bytes; the resident indicator keeps executing the old `.ex5` until the
+terminal restarts. MT4's own MetaEditor notifies its terminal; our external CLI
+compiler does not, which is exactly the "I must change the timeframe for it to
+apply" report. `tools/mt5-build.ps1` therefore restarts the terminal itself after
+every green `.mq5` build (graceful close, `OnDeinit` saves, profile restores);
+`tools/mt5-reload.ps1` passes `-NoRestart` while it builds both entries and then
+restarts once. This is a standing rule for every session, not a per-request
+instruction.
+
+`tools/mt5-build.ps1` still works for one entry / diagnostics (`-NoRestart`
+keeps the terminal untouched). The MT4 sanity compile never restarts the MT5
+terminal and is only for porting an MT4 change over:
+
+```powershell
 # MT4 sanity check (optional — this repo can no longer affect MT4, but run it
 # after porting an MT4 change over, to prove the two trees still agree)
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-build.ps1 `

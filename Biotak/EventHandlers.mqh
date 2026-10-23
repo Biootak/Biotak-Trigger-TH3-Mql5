@@ -3308,6 +3308,17 @@ void RedrawAllObjects(bool force_redraw=false)
             g_initialized = true;
             g_calculatedOnce = false;
             g_redrawTHLevelsNeeded = true;
+#ifdef BIOTAK_RENDER_ENGINE
+            // MT5-ONLY (async history): an attach can spend its staged wipe on the
+            // synthetic ±1% band while MetaTrader is still loading bars. Restart
+            // the rebuild the moment real history lands, so lines AND zones are
+            // re-decided from it; without this restart the BLOCK rung can consume
+            // the redraw flag (it draws only labels) and the chart keeps the
+            // synthetic picture - empty zone layer included - until a timeframe
+            // switch rebuilds it. Normal (history-ready) attaches are unaffected:
+            // their stage is already BUILD_STAGE_LINES here.
+            if(g_buildStage != 0) g_buildStage = BUILD_STAGE_LINES;
+#endif
         }
     } else if (priceBrokeHistoricalRange) {
         // Just trigger a redraw, values are already updated!

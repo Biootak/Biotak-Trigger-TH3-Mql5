@@ -223,10 +223,29 @@ int SetMidZonesVisible(const bool on)
 #ifdef BIOTAK_RENDER_ENGINE
    if(RBridgeActive())
    {
-      // MT5-ONLY (R-RENDER-ENGINE): ONE layer mask; the recs rebuild only when
-      // the time spent hidden made them stale.
+      // MT5-ONLY (R-RENDER-ENGINE): ONE layer mask, then the family's own
+      // frame. The press NEVER runs RenderZones, so the presented zone bitmap
+      // must not be trusted after it: a resize (or any layer recreation) empties
+      // the resource and the OFF render that would raise `stale` may never run.
+      // `stale` used to gate the ON frame, which is why zones appeared only
+      // after a timeframe change rebuilt them. MT4's press always re-asserted
+      // the family (REFRESH_BUFFERS); the canvas equivalent is one owed frame
+      // per discrete press, never a stream.
+      const bool wasStale = RBridgeZonesStale();
       RBridgeZoneFamilyMask(on);
-      if(on && RBridgeZonesStale()) ScheduleHeavyFrame("zone-build");
+      RBridgeZonesMarkStale();
+      if(on)
+      {
+         // MT4's REFRESH_BUFFERS: the frame re-asserts the family even when
+         // frameSig already carries the new switch (a staged frame can seal
+         // the signature without ever rendering the zone family).
+         g_redrawTHLevelsNeeded = true;
+         g_renderAllNeeded      = true;
+         ScheduleHeavyFrame("zone-build");
+      }
+      _LOG_GATE_W Print("[P-UI-224] MID ZONES press on=", (on?1:0),
+            " stale_before=", (wasStale?1:0), " zoneShow=", (g_rbrZoneShow?1:0),
+            " stage=", g_buildStage, " init=", (g_initialized?1:0));
       RepaintForDiscreteAction();      // P-PERF-24: the press paints NOW
       return REFRESH_NONE;
    }

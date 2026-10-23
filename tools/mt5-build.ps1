@@ -19,6 +19,13 @@ param(
     [switch]$ErrorsOnly,
     [string]$Tag = "",
     [string]$Compiler = "C:\Program Files\Vittaverse  MT5 Terminal\MetaEditor64.exe",
+    # A compile is NOT a reload: MetaEditor only writes the .ex5; the attached
+    # chart keeps executing the old bytes. MT4's own editor notifies its
+    # terminal; an external CLI compile (this script) does not. The standing
+    # rule is therefore: a successful MT5 build restarts the terminal itself,
+    # so the user never has to flip the timeframe by hand. -NoRestart is for
+    # the wrapper (tools/mt5-reload.ps1), which restarts once after both entries.
+    [switch]$NoRestart,
     # THE terminal this repository builds for. One hash, one target: the old
     # F5617C4B... instance is retired and its junction has been removed, so a
     # build that quietly lands in the wrong data folder is the failure mode this
@@ -156,3 +163,12 @@ if ($ErrorsOnly) {
 "errors : $($errs.Count)"
 "warns  : $($warns.Count)"
 "result : $result"
+
+# MAKE THE BUILD LIVE. The terminal keeps the old .ex5 until it restarts, so a
+# green compile without this step is a chart still running yesterday's code -
+# exactly the "I must change the timeframe for it to apply" report. Only an
+# MT5 source and only a green build; the MT4 sanity compile must never touch
+# the MT5 terminal.
+if (-not $NoRestart -and [System.IO.Path]::GetExtension($src).ToLower() -eq '.mq5' -and $errs.Count -eq 0) {
+    & (Join-Path $PSScriptRoot 'mt5-restart.ps1') -TerminalHash $TerminalHash
+}

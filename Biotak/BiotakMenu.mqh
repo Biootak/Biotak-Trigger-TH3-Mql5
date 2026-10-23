@@ -3714,13 +3714,13 @@ void CircMoveItem(const int i)
       ObjectSetInteger(0, CircIcon(i), OBJPROP_XDISTANCE, x - CIRC_ICON_SIZE / 2);
       ObjectSetInteger(0, CircIcon(i), OBJPROP_YDISTANCE, y - CIRC_ICON_SIZE / 2);
    }
-   if(ObjectFind(0, CircBg(i)) >= 0)
-   {
-      ObjectSetInteger(0, CircBg(i), OBJPROP_XDISTANCE, bx - CIRC_BG_MARGIN);
-      ObjectSetInteger(0, CircBg(i), OBJPROP_YDISTANCE, by - CIRC_BG_MARGIN);
-      ObjectSetInteger(0, CircBg(i), OBJPROP_XSIZE, s + 2 * CIRC_BG_MARGIN);
-      ObjectSetInteger(0, CircBg(i), OBJPROP_YSIZE, s + 2 * CIRC_BG_MARGIN);
-   }
+   // P-UI-202 (MT4 64e3bd7): a move is a HEAL, not a translate. A missing bg —
+   // or one still carrying the previous mode's canvas (rail 43 -> ring 52) —
+   // was moved as-is and stayed a bare glyph until a click rebuilt the ring.
+   if(ObjectFind(0, CircBg(i)) < 0 || (int)ObjectGetInteger(0, CircBg(i), OBJPROP_XSIZE) != s + 2 * CIRC_BG_MARGIN)
+      CircEnsureBg(i, x, y, CircFeatureLit(RingFeature(i)));
+   else { ObjectSetInteger(0, CircBg(i), OBJPROP_XDISTANCE, bx - CIRC_BG_MARGIN);
+          ObjectSetInteger(0, CircBg(i), OBJPROP_YDISTANCE, by - CIRC_BG_MARGIN); }
    int feat = RingFeature(i);
    if(CircHasBadge(feat)) CircMoveBadge(i);
 }

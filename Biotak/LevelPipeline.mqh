@@ -884,6 +884,15 @@ void RenderZones(
     // helpers CreateZone multiplies, so the two paths cannot bake two pictures.
     if(RBridgeActive())
     {
+        static string s_znWit = "";
+        string znWit = IntegerToString(config.zonesEnabled ? 1 : 0) + ":" +
+                       IntegerToString(zoneCount) + ":" +
+                       IntegerToString(RBridgeZonesStale() ? 1 : 0);
+        if(znWit != s_znWit) {
+            s_znWit = znWit;
+            _LOG_GATE_W Print("[P-ZN] RenderZones en=", (config.zonesEnabled ? 1 : 0),
+                  " zones=", zoneCount, " stale=", (RBridgeZonesStale() ? 1 : 0));
+        }
         RBridgeZoneFamilyMask(true);
         RBridgeZonesBegin();
 
