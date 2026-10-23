@@ -69,7 +69,11 @@ void RPlatLayerDelete(const string objName)
    if(ObjectFind(0,objName)>=0) ObjectDelete(0,objName);
 }
 void RPlatEnableMouse(bool on){ ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,on); }
-void RPlatRedraw(){ ChartRedraw(0); }
+// R-POINTER-FRAME (2026-10-23): the coalescer by NAME — the `ChartRedraw()`
+// macro does not match the one-argument call shape, and this is the only such
+// call in the tree. Inside a chart event this records the ask (one frame, after
+// every writer); outside one it is the terminal's own call, unchanged.
+void RPlatRedraw(){ CompatChartRedraw(); }
 bool RPlatTimerStart(int ms){ return EventSetMillisecondTimer(ms); }
 void RPlatTimerStop(){ EventKillTimer(); }
 

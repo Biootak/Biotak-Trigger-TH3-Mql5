@@ -13,6 +13,14 @@
 //| Included AFTER BiotakMenu_A (CircBg) and BiotakMenu_Ring (the      |
 //| seat's side, the outer radius), BEFORE BiotakMenu_B (CircNoteBuilt |
 //| is the one-per-build caller).                                      |
+//|                                                                   |
+//| P-PERF-56 (2026-10-23) - RING_CENSUS, NOT DSTRIP_DIAG. The walk    |
+//| below is O(chart) (ObjectsTotal + five reads per UI object) and    |
+//| every one of its ~13 lines is a Print + FileWrite + FileFlush. It  |
+//| ran on every ring rebuild - MEASURED 6183 lines in a day, 43% of   |
+//| the journal, 475 rebuilds, 8 of them inside 18 s of ordinary work. |
+//| The question it answered (2026-10-22) is closed, so it is a hunt   |
+//| switch of its own instead of riding the always-on strip diag.      |
 //+------------------------------------------------------------------+
 #ifndef BIOTAK_MENU_RINGCENSUS_MQH
 #define BIOTAK_MENU_RINGCENSUS_MQH

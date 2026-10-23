@@ -55,6 +55,22 @@
 // measured at 4668 lines, 23% of the live terminal log, on the very path
 // the user moves the mouse along. Uncomment to bring it back for a hunt.
 //#define GESTURE_CENSUS
+//
+// P-PERF-56 (2026-10-23): the RING CENSUS - the same decision as
+// GESTURE_CENSUS above, for the other diagnostic that outlived its hunt.
+// `CircRingCensus` (P-UI-200, 2026-10-22) answered «مربع شده»: it re-reads
+// EVERY seat's BMPFILE and then WALKS THE WHOLE CHART (ObjectsTotal +
+// five reads per bitmap/rectangle/button) to name what overlaps the ring,
+// emitting ~13 lines - each one a Print plus a FileWrite AND a FileFlush.
+// It ran on EVERY ring rebuild, and a rebuild is what every menu open, card
+// apply and metric change does: MEASURED 2026-10-23, 6183 [P-UI-200]
+// lines = 43% of a day's journal, from 475 rebuilds, and 8 of those
+// rebuilds inside 18 s of ordinary panel work. That is an O(chart) walk
+// and ~100 synchronous disk flushes landing in the same thread the user is
+// dragging with. The defect it was built for is long closed; the code
+// stays (it is the only witness that names an overlapping object), behind
+// this switch. Uncomment for a hunt, never for a release.
+//#define RING_CENSUS
 
 //                                                                   
 

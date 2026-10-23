@@ -295,10 +295,17 @@ void OnChartEvent(const int id,
   if(CompatOneClickDedupe(id, sparam)) return;
   // P-PERF-34: scope the frame deferral to this window (see EventHandlers).
   g_inChartEvent = true;
+  CompatFrameBegin();   // MT5-ONLY R-POINTER-FRAME: one frame per event, see MQL5Compat
   // P-PERF-04: interaction budget (Lite has no menu/panel half to time).
+  // P-PERF-59 (2026-10-23): `p4a` USED TO BE MEASURED BEFORE THE CALL — the two
+  // GetTickCounts sat above the handler, so the field was always 0 and the line
+  // did not even print it. A half that reads zero is worse than an unmeasured
+  // one: the Full entry's own log is read as "the UI is the heavy half", and on
+  // Lite (no UI at all) the same reading would have said the indicator was free.
+  // The clock now brackets the call it names, and the field is printed.
   uint p4t = GetTickCount();
-  uint p4a = GetTickCount() - p4t;
   OnChartEventHandler(id,lparam,dparam,sparam);
+  uint p4a = GetTickCount() - p4t;
   g_inChartEvent = false;
   // P-PERF-40: a user action settles the frame it owes, in the SAME event — see
   // the full note in "Biotak Trigger TH3.mq4". An event that only SCHEDULED its
@@ -308,7 +315,6 @@ void OnChartEvent(const int id,
   // an unbounded in-event stall.
   p4t = GetTickCount();
   CoopPump();
-  uint p4c = GetTickCount() - p4t;
 #ifdef BIOTAK_RENDER_ENGINE
   // MT5-ONLY (R-RENDER-ENGINE): the repaint/mask channel — scroll, zoom and
   // resize re-map the canvas; KEYDOWN/OBJECT_CLICK carry the F/L hide and the
@@ -317,6 +323,11 @@ void OnChartEvent(const int id,
   if(id == CHARTEVENT_CHART_CHANGE || id == CHARTEVENT_KEYDOWN || id == CHARTEVENT_OBJECT_CLICK)
      RBridgePump(IsIndicatorHidden(), g_linesVisible, inpShowMidZones);
 #endif
+  // MT5-ONLY R-POINTER-FRAME: the one frame this event owes, painted after every
+  // writer (see the full note in "Biotak Trigger TH3.mq5" and MQL5Compat). Its
+  // cost is inside `settle=` — the field brackets the pump AND the frame.
+  int p4fr = CompatFrameEnd();
+  uint p4c = GetTickCount() - p4t;
   // P-PERF-26: name + id (see EventHandlers: id=1 is OBJECT_CLICK, not the cursor).
   // `settle=` is in the budget check on purpose — a drain must not hide its cost.
    // P-PERF-50: same gate as the Full entry — the ledger message is string
@@ -325,7 +336,8 @@ void OnChartEvent(const int id,
    uint p4tot = p4a + p4c;
    if(p4tot >= P_P4_EVENT_WARN_MS)
       P4ReportSlow("chart event " + P4EventName(id) + "(id=" + IntegerToString(id) + ")" +
-                   " [settle=" + P4MsTag(p4c) + "]",
+                   " [indicator=" + P4MsTag(p4a) + " settle=" + P4MsTag(p4c) +
+                   " frame=" + IntegerToString(p4fr) + "]",
                    p4tot, P_P4_EVENT_WARN_MS);
 }
 

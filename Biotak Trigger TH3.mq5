@@ -494,6 +494,7 @@ void OnChartEvent(const int id,
   // the flag here (not in the handlers) is what makes the guarantee hold for
   // every path they call, including ones added later.
   g_inChartEvent = true;
+  CompatFrameBegin();   // MT5-ONLY R-POINTER-FRAME: one frame per event, see MQL5Compat
   uint p4t = GetTickCount();
   OnChartEventHandler(id,lparam,dparam,sparam);
   uint p4a = GetTickCount() - p4t;
@@ -503,7 +504,20 @@ void OnChartEvent(const int id,
   HandleUIChartEvent(id,lparam,dparam,sparam);
   // P-DRAW-08: the drawing strip's own buttons and its dismiss clicks. Its own
   // owner, its own objects — it shares no state with the panels.
+  //
+  // MT5-ONLY P-PERF-58 (2026-10-23) — `strip=` IS ITS OWN FIELD, and the reason
+  // is a measurement this ledger could not answer. A live drag's lag report is
+  // answered by `ui=`, but `ui=` is THREE owners glued together (the ring/cards,
+  // the strip, and the palette bridges below), so a 47 ms `ui=` names no one —
+  // and the day's log carries MOUSE_MOVE events at 438..906 ms with `ui=` 875
+  // while ring+panel+hold measured under 40 ms (P-PERF-15's own breakdown), i.e.
+  // the heavy half was the strip or the bridges and the ledger could not say
+  // which. One GetTickCount pair per event: the split names the owner on the
+  // NEXT report instead of another round of guessing. `ui=` keeps its meaning
+  // (the whole half) — this field is carved OUT of it, never added to it.
+  uint p4sT = GetTickCount();
   DrawStripOnEvent(id,lparam,dparam,sparam);
+  uint p4s = GetTickCount() - p4sT;
   // P-PAL-19 (2026-10-02) — THE ONE BRIDGE. DrawStrip is include 99 and the panels
   // are 124, and MQL4 needs a definition before its use, so the strip cannot call
   // `PalOpenDraw` itself: it leaves a REQUEST (DrawStripPalAsk) and this line — the
@@ -597,6 +611,15 @@ void OnChartEvent(const int id,
   // that hides its cost would be the defect this cycle is fixing, one level up.
   p4t = GetTickCount();
   UISyncDrain();
+  // MT5-ONLY R-POINTER-FRAME (2026-10-23) — THE ONE FRAME THIS EVENT OWES.
+  // It is painted HERE, after the LAST writer of the event (both halves, the
+  // pump, the render bridge and the UI drain), so what lands on screen is the
+  // complete picture and every `ChartRedraw()` the handlers made was a flag in
+  // `p4fr`, not a synchronous full-chart paint of a half-written frame. Its
+  // cost lands in `panels=` (the same budget the drain is charged to — a frame
+  // that hides its own cost would be the defect this ledger exists to catch).
+  // Full law and the measurement behind it: MT5Compat\MQL5Compat.mqh.
+  int p4fr = CompatFrameEnd();
   uint p4e = GetTickCount() - p4t;
   // P-PERF-26: the NAME next to the id - a ledger nobody can read without
   // recalling which number means what is how id=1 (OBJECT_CLICK) got filed as a
@@ -613,8 +636,8 @@ void OnChartEvent(const int id,
    uint p4tot = p4a + p4b + p4c + p4e;
    if(p4tot >= P_P4_EVENT_WARN_MS)
       P4ReportSlow("chart event " + P4EventName(id) + "(id=" + IntegerToString(id) + ") [indicator=" +
-               P4MsTag(p4a) + " ui=" + P4MsTag(p4b) + " settle=" + P4MsTag(p4c) +
-               " panels=" + P4MsTag(p4e) + "]",
+               P4MsTag(p4a) + " ui=" + P4MsTag(p4b) + " strip=" + P4MsTag(p4s) + " settle=" + P4MsTag(p4c) +
+               " panels=" + P4MsTag(p4e) + " frame=" + IntegerToString(p4fr) + "]",
                p4tot, P_P4_EVENT_WARN_MS);
 }
 

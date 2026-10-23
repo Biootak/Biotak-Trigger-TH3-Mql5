@@ -3474,8 +3474,8 @@ void CircRebuildRing()
       ObjectDelete(0, CircBadgeBg(i)); ObjectDelete(0, CircBadgeTxt(i));
    }
    for(int i = 0; i < n; i++) CircCreateItem(i);
-   #ifdef DSTRIP_DIAG
-   CircRingCensus(n);   // P-UI-200
+   #ifdef RING_CENSUS
+   CircRingCensus(n);   // P-UI-200 - P-PERF-56: opt-in, see BuildConfig.mqh
    #endif
 }
 

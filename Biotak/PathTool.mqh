@@ -1103,10 +1103,20 @@ if(pressed && pfx != "")
          //--- hit test must never keep: the log used to read «select … select …» and a user
          //--- pressing a visible dot learned nothing from it. It names the selection, the
          //--- dots it owns and the lock, on the press edge only.
-         PathWitness("press found neither dot nor body: sel=" + s_pathSel
-                     + " dots=" + IntegerToString(PathSegCount(s_pathSel))
-                     + " at " + IntegerToString((int)lparam) + "," + IntegerToString((int)dparam)
-                     + " why=" + GestureTakeWhy());
+         //--- P-PERF-57 (2026-10-23) - AND IT IS ONLY A PATH'S QUESTION. This handler runs
+         //--- on EVERY press anywhere on the chart (it is first in the chain), so on a chart
+         //--- with no path at all the line can only report the one thing that is already
+         //--- known: there was nothing to hit. MEASURED 2026-10-23: 1121 of these in a day,
+         //--- nearly all of them from presses that were meant for a box or the chart - and
+         //--- each one is a Print + FileWrite + FileFlush ON THE PRESS EDGE, i.e. at the
+         //--- start of every drag. With no path in the registry the witness is silent, and
+         //--- the first path ever drawn brings it back - the same income, none of the cost
+         //--- (`sel=`/`dots=0` is what a chart with no path would have printed anyway).
+         if(ArraySize(s_pathIds) > 0)
+            PathWitness("press found neither dot nor body: sel=" + s_pathSel
+                        + " dots=" + IntegerToString(PathSegCount(s_pathSel))
+                        + " at " + IntegerToString((int)lparam) + "," + IntegerToString((int)dparam)
+                        + " why=" + GestureTakeWhy());
       }
       return false;
    }

@@ -1814,6 +1814,91 @@ bool CompatOneClickDedupe(const int id, const string sparam)
 }
 
 //+------------------------------------------------------------------+
+//| R-POINTER-FRAME (2026-10-23) — ONE FRAME PER CHART EVENT.          |
+//|                                                                  |
+//| MEASURED, 2026-10-23: the terminal's own ledger carried 169       |
+//| MOUSE_MOVE events over the 40 ms budget in one day (worst 906 ms,   |
+//| with `ui=` 875) while the BOX drag the user was making measured     |
+//| `move=0ms paint=0ms` — the drag's arithmetic is already free, and   |
+//| what is not free is THE PAINT. `ChartRedraw` is 2.14 us on an idle  |
+//| chart and is priced PER OBJECT on a full one (the project's own     |
+//| measurement, EventHandlers P-PERF-49), and this chart carries 226-  |
+//| 637 objects.                                                     |
+//|                                                                  |
+//| A chart event is a UNIT of work: its handlers write their objects   |
+//| and the frame is owed once, at the end. What the shared source does  |
+//| instead is call `ChartRedraw()` wherever a write lands, so one event  |
+//| can ask for two or three SYNCHRONOUS full-chart paints — the first  |
+//| of them painting a picture the next handler is about to change.      |
+//| That is two costs for one frame: the extra paint, and the torn frame |
+//| the notes throughout DrawStrip complained about («یک فریم عقب»).     |
+//|                                                                  |
+//| THE LAW (this shim, MT5-only by construction — the shared modules    |
+//| keep their single `ChartRedraw()` line, byte-identical to MT4):     |
+//|   * inside a chart event, a repaint request is a FLAG, never a paint;|
+//|   * the entry opens the scope before its first handler and closes it  |
+//|     after its last one, where the ONE owed frame is painted — after  |
+//|     every writer, so the frame is complete;                         |
+//|   * outside a chart event (OnCalculate / OnTimer / OnInit / OnDeinit)|
+//|     nothing changes: the paint is immediate, exactly as before.      |
+//| The ask count is kept so the ledger can print `frame=N`: N is how    |
+//| many paints this event used to pay for, i.e. the saving is measured, |
+//| not claimed. N==1 means the event was already minimal.               |
+//|                                                                  |
+//| The macro takes no parameters, so `ChartRedraw(0)` does NOT match it |
+//| (measured: a one-parameter form makes every zero-argument call warn  |
+//| 89 -- 99 of them in the Full build). The ONE explicit id call in the  |
+//| tree, `RPlatRedraw` in Engine\RenderPlatform.mqh, is pointed at the   |
+//| coalescer by name instead, so both call shapes reach it and the build |
+//| stays at zero warnings.                                              |
+//+------------------------------------------------------------------+
+static bool s_cfInEvent = false;   // a chart event owns the frame
+static bool s_cfOwed    = false;   // ...and someone asked for it
+static int  s_cfAsked   = 0;       // how many owners asked (the ledger's N)
+static int  s_cfWorst   = 0;       // worst N since the last read
+
+// Opens the scope. Called ONCE per OnChartEvent, before the first handler, on
+// the same line region as `g_inChartEvent = true` (P-PERF-34's scope).
+void CompatFrameBegin()
+{
+   s_cfInEvent = true;
+   s_cfOwed    = false;
+   s_cfAsked   = 0;
+}
+
+// The repaint request every module already writes. Inside an event it records
+// the ask and returns; outside it is the terminal's own call, unchanged.
+void CompatChartRedraw()
+{
+   if(s_cfInEvent) { s_cfOwed = true; s_cfAsked++; return; }
+   ChartRedraw();
+}
+
+// Closes the scope and paints the ONE frame it owes, AFTER every writer of the
+// event. Returns the number of requests this event merged (1 = it was minimal).
+int CompatFrameEnd()
+{
+   s_cfInEvent = false;
+   const int asked = s_cfAsked;
+   s_cfAsked = 0;
+   if(asked > s_cfWorst) s_cfWorst = asked;
+   if(s_cfOwed) { s_cfOwed = false; ChartRedraw(); }
+   return asked;
+}
+
+// The worst merged count since the previous call — read by the ledger only.
+int CompatFrameWorst()
+{
+   const int w = s_cfWorst;
+   s_cfWorst = 0;
+   return w;
+}
+
+// Everything BELOW this line — every shared module, the entries — asks the
+// coalescer. (See the note above for the one call shape that does not match.)
+#define ChartRedraw() CompatChartRedraw()
+
+//+------------------------------------------------------------------+
 //| R-TF-UNIT, the MT5 half: make Period() mean what it means on MT4. |
 //|                                                                  |
 //| MQL5's Period() returns an ENUM_TIMEFRAMES (H1 == 16385). MQL4's  |

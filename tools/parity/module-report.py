@@ -1000,6 +1000,10 @@ DECLARED_MT5_LINES = {
     "Biotak Trigger TH3.mq5": [
         (r'^\s*(if\(reason == REASON_REMOVE\) )?P4LeftoverCensus\("(oninit|remove)"\);\s*$',
          "MT5-ONLY: the P4 leftover ledger at attach/remove (see EventHandlers)"),
+        (r'^\s*uint p4sT = GetTickCount\(\);\s*$|^\s*uint p4s = GetTickCount\(\) - p4sT;\s*$',
+         "MT5-ONLY (P-PERF-58): the strip's own clock inside the event ledger — the "
+         "field that carves `strip=` out of `ui=`, so a slow pointer event names the "
+         "strip instead of the three glued owners. MT4's entry has no strip field."),
         (r'^\s*uint p4q = GetTickCount\(\);\s*$|^\s*g_pInitMs[A-Za-z0-9]* = GetTickCount\(\) - p4q(; p4q = GetTickCount\(\))?;\s*$',
          "MT5-ONLY: the attach tail's per-phase stopwatch"),
         (r'^\s*const bool p116keep = \(reason == REASON_CHARTCHANGE\);\s*$|^\s*if\(!p116keep\)\s*$|^\s*else\s*$',
@@ -1058,6 +1062,13 @@ DECLARED_MT5_LINES = {
          "HRayTool)"),
         (r'^\s*for\(int i = 0; i < ArraySize\(s_pathIds\); i\+\+\)\s*$',
          "MT5-ONLY: the id registry walk the handle wipe and reg-add share"),
+        (r'^\s*if\(ArraySize\(s_pathIds\) > 0\)\s*$',
+         "MT5-ONLY (P-PERF-57): the press witness is a PATH's question. This handler "
+         "runs first on every press anywhere on the chart, and on a chart with no path "
+         "the 'found neither dot nor body' line can only report what is already known — "
+         "MEASURED 1121 of them in a day, each a Print + FileWrite + FileFlush ON THE "
+         "PRESS EDGE. With no path in the registry the witness is silent; the first "
+         "path drawn brings it back."),
     ],
 }
 
