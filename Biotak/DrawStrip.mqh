@@ -274,9 +274,10 @@
 // strip; nothing here runs in the mouse stream.
 #define DSTRIP_PICK_NONE (-99)  // no popover open
 #define DSTRIP_MORE      (-60)  // the more-popover (sections, not a slot)
-#define DSTRIP_SLOT_MORE   (-6) // quick: the "..." popover
-#define DSTRIP_SLOT_GEAR   (-7) // quick: the full-settings panel
-#define DSTRIP_SLOT_PIN    (-8) // quick: pin toggle (stays while editing)
+//--- P-UI-214: MORE/GEAR/PIN were three seat names nothing ever read — the quick row
+//--- reaches those three through DRAW_SLOT_MORE and the gear/pin seats themselves, so
+//--- the constants were pure spelling. MT4 deleted them; carrying them here kept a
+//--- "MT5-only symbol" alive that meant nothing. LEVELS stays: it IS read (9 sites).
 #define DSTRIP_SLOT_LEVELS (-9) // quick: the fibo level-membership editor
 #define DSTRIP_PICK_DEL_W 26   // P-DRAW-134: the template row's own ✕ seat — delete is a BUTTON, not a modifier
 //--- P-DRAW-13: the V6 shell metrics. ONE 30px row, icon-only, 2px gaps — the
@@ -493,13 +494,42 @@
 //--- already in the origin). One owner of the caption's own seat.
 #define DSTRIP_GEAR_CAP_X  (DSTRIP_GEAR_PAD + DSTRIP_GEAR_CAP_DX)
 //--- P-DRAW-77: THE CARDS' OWN ROW SEATS, SPELLED ONCE HERE. Every number is the
-//--- card's own constant (BiotakPanels 568/586/6155/6158), restated because
-//--- `PNL_*` does not exist in this file (BiotakPanels is included AFTER it).
-//--- 10 = (42-22)/2 chip+switch top · 14 = PNL_LBL_Y · 8 = the label's own gap
-//--- after the chip · 40 = PNL_SW_W. One table, so the panel cannot drift from
-//--- the card it stands beside a unit at a time.
+//--- card's own constant (BiotakPanels' PNL_*), restated because `PNL_*` does not
+//--- exist in this file (BiotakPanels is included AFTER it). One table, so the
+//--- panel cannot drift from the card it stands beside a unit at a time.
 #define DSTRIP_CARD_CHIP_Y 10
 #define DSTRIP_CARD_LBL_Y  14
+//--- P-UI-214 (2026-10-22, ported from MT4) — THE ROW GLYPH AND THE LABEL'S X, NAMED
+//--- ONCE. `PNL_CHIP_VIS` (22) and `PNL_SW_W` (40) live in BiotakPanels (include 180),
+//--- BELOW DrawStrip (include 148) — the same include-order reason `DSTRIP_GEAR_XW`
+//--- keeps its own name. The strip wrote the chip's 22 six times (two faces in the
+//--- gear card, four in the paint) and the label's x three ways (`PAD + 22 + 8`,
+//--- `PAD + (res=="" ? 0 : 22+8)` and a bare `PAD`), so retuning the card's chip moved
+//--- the cards and left the panel on the old number. One name per seat: the paint, the
+//--- fit and the hit tests read these.
+#define DSTRIP_CARD_CHIP_VIS 22   // = PNL_CHIP_VIS, the cards' own row glyph
+#define DSTRIP_CARD_LBL_DX   (DSTRIP_CARD_CHIP_VIS + 8)   // PnlLabelX: the chip plus its 8 of air
+#define DSTRIP_GEAR_SW_W     40   // = PNL_SW_W, the cards' own .sw pill width
+#define DSTRIP_GEAR_SW_H     22   // = PNL_SW_H, the cards' own .sw pill height
+//--- P-UI-216 (2026-10-22, ported from MT4) — THE HEAD'S MARK SEAT, DERIVED ONCE.
+//--- P-DRAW-80 moved this panel's head onto the cards' own seats BY HAND and left six
+//--- literals behind: `+9,+6` (the canvas' corner), `44,44` (the canvas), `+23,+20`
+//--- (the glyph) and `56` (the text column). Every one of them was the card's number
+//--- minus/plus its glow pad, so the next retune of the mark would move the cards and
+//--- leave this head 7px off again — the exact defect P-DRAW-80 fixed.
+#define DSTRIP_CARD_MARK_VIS 30   // = PNL_MARK_VIS, the cards' .mark disc
+#define DSTRIP_CARD_MARK_Y   13   // = PNL_MARK_Y, centred in the 56px header
+#define DSTRIP_CARD_MARK_PAD  7   // = PNL_MARK_PAD, the disc's glow
+#define DSTRIP_MARK_CANVAS   (DSTRIP_CARD_MARK_VIS + 2*DSTRIP_CARD_MARK_PAD)   // 44, the baked art
+#define DSTRIP_MARK_GLYPH    15   // = PNL_GLYPH_CANVAS, the mark/close glyph
+#define DSTRIP_MARK_MK_X     (DSTRIP_GEAR_PAD - DSTRIP_CARD_MARK_PAD)          //  9
+#define DSTRIP_MARK_MK_Y     (DSTRIP_CARD_MARK_Y - DSTRIP_CARD_MARK_PAD)       //  6
+#define DSTRIP_MARK_GL_X     (DSTRIP_GEAR_PAD + DSTRIP_CARD_MARK_PAD)          // 23
+#define DSTRIP_MARK_GL_Y     (DSTRIP_CARD_MARK_Y + DSTRIP_CARD_MARK_PAD)       // 20
+#define DSTRIP_HEAD_TX_X     (DSTRIP_GEAR_PAD + DSTRIP_CARD_MARK_VIS + 10)     // 56, the head's text column
+//--- P-UI-216: a band caption's point size — the cards' `PNL_PT_SEC` 7, which this
+//--- file spelled as a bare `7` in the one place it is read (the section band's `lpt`).
+#define DSTRIP_SEC_PT        7    // = PNL_PT_SEC
 //--- P-DRAW-66: the quick row's THREE GROUPS — identity | values | commands. A
 //--- separator is a 1x20 hairline centred in the row with 8 air on each side, so
 //--- the chrome never reads as one more value; the head's air is the tight step.
@@ -509,7 +539,7 @@
 #define DSTRIP_SEP_AIR    8
 //--- P-DRAW-66: the command group's ids and count, moved UP from the layout block
 //--- so the state block can size its own seat array by the count (one owner).
-#define DSTRIP_QUICK_CAP 8
+#define DSTRIP_QUICK_CAP 9
 #define DSTRIP_ACT_MORE 0
 #define DSTRIP_ACT_GEAR 1
 #define DSTRIP_ACT_PIN 2
@@ -1625,8 +1655,7 @@ string DrawStripPRecLabelName() { return "PnlDrawS_PRecT"; }
 //--- P-PAL-14: the well an EMPTY recent slot wears. A seat of its own, because the
 //--- slot is a state the trader can see, not an absence.
 string DrawStripPRecEmptyName(const int i) { return DrawStripPRecName(i) + "E"; }
-string DrawStripPHexLbName() { return "PnlDrawS_PHexLb"; }
-string DrawStripPHexEdName() { return "PnlDrawS_PHexEd"; }
+string DrawStripPHexLbName() { return "PnlDrawS_PHexLb"; }   // (Ed was only read by the retired painter)
 //--- P-DRAW-48: the OPACITY band's own five objects (Lb = its label, T = the bed,
 //--- F = the filled part, K = the knob, V = the `NN%` readout).
 string DrawStripPOpLbName()    { return "PnlDrawS_POpLb"; }
@@ -1916,9 +1945,9 @@ bool DrawStripGearHit(const int mx, const int my)
       if(s_dsGRKind[r] == 4)
       {
          int sx = rx + DSTRIP_GEAR_PAD, sy = ry + DSTRIP_CARD_CHIP_Y;
-         if(mx >= sx && mx < sx + 22 && my >= sy && my < sy + 22)
+         if(mx >= sx && mx < sx + DSTRIP_CARD_CHIP_VIS && my >= sy && my < sy + DSTRIP_CARD_CHIP_VIS)
          { DrawStripGearLevelColorTap(r); return true; }
-         int lx = rx + DSTRIP_GEAR_PAD + 22 + 8;
+         int lx = rx + DSTRIP_GEAR_PAD + DSTRIP_CARD_LBL_DX;
          int wx = rx + rowW - 40;
          if(mx >= lx && mx < wx)
          { DrawStripGearLevelDescTap(r); return true; }
@@ -1995,8 +2024,35 @@ bool DrawStripVis(const EDrawKind k, const int slot)
 //--- no terminal call; the two reads are the channel's own seat, on a repaint.
 //--- (The box's own 50 % is NOT in this test: it moves the drawing's own anchor, so
 //--- it works on every channel type.)
+//--- P-ANCHOR-LAST-MOVE (2026-10-22, ported from MT4) — IS THE HELD DRAWING ONE OF
+//--- THE TWO THAT OWN AN ATR ANCHOR? A BaseKnot box (the note's class/EngSL rows read
+//--- the ATR at the box' right edge) and a leg ruler (`LM_…_Line`, the measure's own
+//--- bar). Nothing else on this chart carries an anchor, so nothing else gets the seat.
+bool DrawStripAnchorOwner(const string nm)
+{
+   if(nm == "") return false;
+   if(StringFind(nm, TH3_LEG_PREFIX) == 0)
+   {
+      int len = StringLen(nm);
+      if(len > 5 && StringSubstr(nm, len - 5) == "_Line") return true;
+   }
+   int n = BaseKnotCount();
+   for(int i = 0; i < n; i++)
+   {
+      string pfx = BaseKnotPrefix(g_bkBoxes[i].id);
+      if(pfx != "" && BaseKnotBoxName(pfx) == nm) return true;
+   }
+   return false;
+}
 bool DrawStripSeatAvail(const EDrawKind k, const int slot)
 {
+   //--- P-ANCHOR-LAST-MOVE: the anchor seat is the HELD OBJECT'S, not the kind's —
+   //--- asked BEFORE the caps gate, like the path's 50 % seat (owner test above).
+   if(slot == DRAW_SLOT_ANCHOR)
+   {
+      if(s_dsObj == "" || ObjectFind(0, s_dsObj) < 0) return false;
+      return DrawStripAnchorOwner(s_dsObj);
+   }
    //--- P-UI-139: THE 50 % CELL IS THE PATH'S TOO — a polyline's own answer to it is
    //--- a small circle at each leg's middle. It CANNOT be a KIND rule: a kind rule
    //--- would hand the cell to every plain trendline, and a control nothing answers
@@ -2198,6 +2254,11 @@ string DrawStripIconRes(const int slot, const string nm)
                                                        : "::Files\\Icons\\bk_back_off.bmp");
    if(slot == DRAW_SLOT_FONT) return "::Files\\Icons\\gl_textsize_m.bmp";
    if(slot == DRAW_SLOT_GLYPH) return "::Files\\Icons\\bk_glyph.bmp";
+   //--- P-ANCHOR-LAST-MOVE: one shape in two inks. ON = the ATR is read at the
+   //--- owner's bar (box right edge / leg end bar); OFF = the live read.
+   if(slot == DRAW_SLOT_ANCHOR)
+      return (g_calcAnchorOn ? "::Files\\Icons\\bk_anchor_on.bmp"
+                             : "::Files\\Icons\\bk_anchor_off.bmp");
    if(slot == DSTRIP_SLOT_LEVELS) return "::Files\\Icons\\bk_levels.bmp";
    return "";
 }
@@ -2901,6 +2962,15 @@ string DrawStripSlotTip(const EDrawKind k, const int slot, const string nm)
       case DRAW_SLOT_BODYSTYLE:
          return "Handle style: " + DrawStripSlotText(k, DRAW_SLOT_BODYSTYLE, nm) +
                 " — click to choose" + scope;
+      //--- P-ANCHOR-LAST-MOVE: the switch speaks in the two states it has, and names
+      //--- the bar it reads, because «last object» alone says nothing about WHAT moves.
+      case DRAW_SLOT_ANCHOR:
+         if(g_calcAnchorOn)
+            return "Last object: ON — the ATR is read at " +
+                   (g_calcAnchorTime > 0 ? TimeToString(g_calcAnchorTime, TIME_DATE | TIME_MINUTES)
+                                         : (string)"the owner's bar") +
+                   ", so the labels show the numbers this drawing was measured with" + scope;
+         return "Last object: OFF — the ATR is read LIVE; click to read it at this drawing's bar" + scope;
       default: break;
    }
    if(slot == DSTRIP_SLOT_LEVELS)
@@ -3974,9 +4044,9 @@ bool DrawStripGearLevelSwatch(const int r, const int rx, const int py, bool &dd)
    color lc = (li >= 0 ? (color)(int)ObjectGetInteger(0, s_dsObj, OBJPROP_LEVELCOLOR, li)
                        : (color)(int)DrawSlotRead(s_dsObj, DRAW_SLOT_COLOR));
    string ltip = tip + " · swatch sets this level's color";
-   dd |= DrawStripFace(DrawStripRowChipName(r), rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22,
+   dd |= DrawStripFace(DrawStripRowChipName(r), rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, DSTRIP_CARD_CHIP_VIS, DSTRIP_CARD_CHIP_VIS,
                        cur ? "::Files\\Icons\\pnl_chip_gold.bmp" : "::Files\\Icons\\pnl_chip.bmp", ltip);
-   dd |= DrawStripBtn(DrawStripRowIconName(r), rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22,
+   dd |= DrawStripBtn(DrawStripRowIconName(r), rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, DSTRIP_CARD_CHIP_VIS, DSTRIP_CARD_CHIP_VIS,
                       lc, DrawStripInkOn(lc), BioSwatchBorder(lc, BIO_CLR_CARD), "", ltip);
    return true;
 }
@@ -5467,51 +5537,10 @@ bool DrawStripEdit(const int e, const int x, const int y, const int w,
    dirty |= DrawStripSetStr(nm, OBJPROP_TOOLTIP, tip);
    return dirty;
 }
-//--- TV parity board: the HEX field. It is NOT a gear edit (`DrawStripEdit` adds
-//--- the settings panel's own origin), so it has its own owner and its own name.
-//--- P-DRAW-48: the seed is the LIVE colour now — the field used to be seeded once
-//--- and a grid pick left the old hex on screen («hex ناقص پیاده سازی شده»);
-//--- `s_dsHexFocus` is the one guard: while the user is typing, nothing writes.
-bool DrawStripPopHex(const int x, const int y, const int w, const string seed)
-{
-   string nm = DrawStripPHexEdName();
-   bool dirty = false;
-   if(ObjectFind(0, nm) < 0)
-   {
-      if(!ObjectCreate(0, nm, OBJ_EDIT, 0, 0, 0)) return false;
-      ObjectSetInteger(0, nm, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, nm, OBJPROP_FONTSIZE, PnlPt(8));
-      ObjectSetString(0, nm, OBJPROP_FONT, BIO_FONT_MONO);
-      ObjectSetInteger(0, nm, OBJPROP_COLOR, DSTRIP_CLR_LABEL);
-      ObjectSetInteger(0, nm, OBJPROP_BGCOLOR, DSTRIP_CLR_FIELD);
-      ObjectSetInteger(0, nm, OBJPROP_BORDER_COLOR, DSTRIP_CLR_FIELD_BD);
-      ObjectSetInteger(0, nm, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, nm, OBJPROP_ALIGN, ALIGN_LEFT);
-      ObjectSetInteger(0, nm, OBJPROP_READONLY, false);
-      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, nm, OBJPROP_ZORDER, Z_STRIP_ICON);
-      ObjectSetString(0, nm, OBJPROP_TEXT,
-                      DrawStripColorHex((color)(int)DrawSlotRead(s_dsObj, DRAW_SLOT_COLOR)));
-      dirty = true;
-   }
-   //--- the live seed: a guarded write, so a repaint that changed nothing writes
-   //--- nothing — and the field follows a colour picked on the grid or typed
-   //--- elsewhere. An empty seed (the field holds the focus) never writes.
-   if(seed != "" && ObjectGetString(0, nm, OBJPROP_TEXT) != seed)
-      dirty |= DrawStripSetStr(nm, OBJPROP_TEXT, seed);
-   //--- P-DRAW-122: the layer, every paint (same heal as the panel's fields and rects:
-   //--- a bare HEX box on the board is this field painting under the plate).
-   dirty |= DrawStripSetInt(nm, OBJPROP_ZORDER, Z_STRIP_ICON);
-   dirty |= DrawStripSetInt(nm, OBJPROP_BACK, false);
-   dirty |= DrawStripSetInt(nm, OBJPROP_XDISTANCE, x);
-   dirty |= DrawStripSetInt(nm, OBJPROP_YDISTANCE, y);
-   dirty |= DrawStripSetInt(nm, OBJPROP_XSIZE, w);
-   dirty |= DrawStripSetInt(nm, OBJPROP_YSIZE, DSTRIP_POP_EDIT_H);
-   dirty |= DrawStripSetStr(nm, OBJPROP_TOOLTIP,
-                            "Type #RRGGBB, Enter applies it" + DrawStripTipScope());
-   return dirty;
-}
+//--- P-PAL-21 / P-BE-07 (2026-10-22): `DrawStripPopHex` and `DrawStripPHexEdName`
+//--- lived here. The board's HEX field went with the board (P-PAL-21), and the
+//--- painter was left behind with ZERO call sites - 50 lines that could never run,
+//--- plus the only reader of `PnlDrawS_PHexEd`. Deleted outright; MT4 never had it.
 //--- P-DRAW-90 (2026-09-30) — THE FOOT'S THREE COMMANDS AND ITS OWN GRID.
 //--- The design draws `Reset | All · Copy`; the code shipped `All · Copy` and
 //--- put the reset ring on `All`. Three owners now, one per question: the LABEL
@@ -5668,11 +5697,13 @@ bool DrawStripGearHeadPaint()
    //--- +23/+20 — so the disc floated off its own glyph and the whole head sat
    //--- 7px off the card it belongs to. LITERALS, not PNL_*: BiotakPanels is
    //--- included AFTER this file.
-   dirty |= DrawStripFace(DrawStripGearHeadName("MK"), gx + 9, hy + 6, 44, 44,
+   dirty |= DrawStripFace(DrawStripGearHeadName("MK"), gx + DSTRIP_MARK_MK_X, hy + DSTRIP_MARK_MK_Y,
+                           DSTRIP_MARK_CANVAS, DSTRIP_MARK_CANVAS,
                            "::Files\\Icons\\pnl_mark_gold.bmp", tip);
-   dirty |= DrawStripFace(DrawStripGearHeadName("MG"), gx + 23, hy + 20, 15, 15,
+   dirty |= DrawStripFace(DrawStripGearHeadName("MG"), gx + DSTRIP_MARK_GL_X, hy + DSTRIP_MARK_GL_Y,
+                           DSTRIP_MARK_GLYPH, DSTRIP_MARK_GLYPH,
                            DrawStripGearMarkRes(), tip);
-   int htx = gx + 56;   // PNL_PAD_X + PNL_MARK_VIS + 10
+   int htx = gx + DSTRIP_HEAD_TX_X;   // PNL_PAD_X + PNL_MARK_VIS + 10
    // P-DRAW-36: the version chip and the close button sit at the PLATE's right
    // inset (s_dsGearW0 - PAD), so they read as flush with the content's own
    // right edge instead of 32px short of it.
@@ -5827,7 +5858,7 @@ bool DrawStripGearSectionsPaint(const int x, const int w)
       //--- The rule below started at `PnlTextW(txt, 7)` while a row label draws at 9,
       //--- so every caption sharing a row had its hair start ~8px early and run
       //--- under the last letters of its own word.
-      int lpt = (rowLbl ? DSTRIP_GEAR_LBL_PT : 7);
+      int lpt = (rowLbl ? DSTRIP_GEAR_LBL_PT : DSTRIP_SEC_PT);
       //--- P-DRAW-80: the label sits on the card's seat — `+16+14` from the CARD,
       //--- `+14` down, muted at pt 7 for a band (BiotakPanels 6007-6008).
       dirty |= DrawStripLblIn(sn + "T", x0 + DSTRIP_GEAR_CAP_X, y, DSTRIP_GEAR_ROW_H, txt,
@@ -6036,10 +6067,10 @@ bool DrawStripGearPaint()
       {
          string dg = PnlFit(DrawStripGearGroupDigest(s_dsGRArg[r]), 8, cw / 2);
          int dw = (dg == "") ? 0 : PnlTextW(dg, 8);
-         dirty |= DrawStripFace(rc, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22,
+         dirty |= DrawStripFace(rc, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, DSTRIP_CARD_CHIP_VIS, DSTRIP_CARD_CHIP_VIS,
                                 cur ? "::Files\\Icons\\pnl_chip_gold.bmp" : "::Files\\Icons\\pnl_chip.bmp", tip);
-         dirty |= DrawStripFace(ri, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22, res, tip);
-         int gx0 = rx + DSTRIP_GEAR_PAD + 22 + 8;
+         dirty |= DrawStripFace(ri, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, DSTRIP_CARD_CHIP_VIS, DSTRIP_CARD_CHIP_VIS, res, tip);
+         int gx0 = rx + DSTRIP_GEAR_PAD + DSTRIP_CARD_LBL_DX;
          dirty |= DrawStripLblIn(rl, gx0, py, DSTRIP_GEAR_ROW_H,
                                  PnlFit(txt, 9, cw - (gx0 - rx) - dw - DSTRIP_GEAR_DG_PAD - DSTRIP_ROW_GAP),
                                  cur ? DSTRIP_CLR_VALUE : DSTRIP_CLR_LABEL, tip, 9, true);
@@ -6075,9 +6106,9 @@ bool DrawStripGearPaint()
          //--- CHIP_VIS + 8 at `ry+PNL_LBL_Y` (BiotakPanels 6155/6158) — this panel
          //--- sat them on a tighter 12/32 grid of its own, which is the whole of
          //--- "the panel reads as a second grid beside the cards".
-         dirty |= DrawStripFace(rc, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22,
+         dirty |= DrawStripFace(rc, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, DSTRIP_CARD_CHIP_VIS, DSTRIP_CARD_CHIP_VIS,
                                 cur ? "::Files\\Icons\\pnl_chip_gold.bmp" : "::Files\\Icons\\pnl_chip.bmp", tip);
-         dirty |= DrawStripFace(ri, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, 22, 22, res, tip);
+         dirty |= DrawStripFace(ri, rx + DSTRIP_GEAR_PAD, py + DSTRIP_CARD_CHIP_Y, DSTRIP_CARD_CHIP_VIS, DSTRIP_CARD_CHIP_VIS, res, tip);
       }
       int labelX = rx + DSTRIP_GEAR_PAD + (res == "" ? 0 : 22 + 8);
       int k = s_dsGRKind[r];
@@ -6446,7 +6477,7 @@ bool DrawStripBodyPaint(const int fam, const int plateTop, const int plateH,
 {
    bool dirty = false;
    int b = 0, y0 = y, yEnd = y + h;
-   int headBot = DSTRIP_SKIN_TOPT - DSTRIP_SKIN_M;
+   //--- P-BE-07 (ported 2026-10-22): `headBot` was built here and read nowhere.
    if(gridTop > y0 && gridTop < yEnd)
    {
       dirty |= DrawStripCellPaint(fam, b++, plateTop, plateH, x, y0, w, gridTop - y0, seamFrom);
@@ -8273,6 +8304,11 @@ void DrawStripLearnCurrent()
       //--- "learn the look" must not touch them, and same-value writes on them would
       //--- cost two description reads for a guaranteed no-op.
       if(s == DRAW_SLOT_BOXHALF || s == DRAW_SLOT_EXTEND) continue;
+      //--- P-ANCHOR-LAST-MOVE: the anchor seat is not a LOOK either — it holds the
+      //--- chart's switch, not a property of this drawing. "Learn this look" must not
+      //--- touch it (a same-value write there would be a no-op at best, and the seat's
+      //--- read is the GV, not the object).
+      if(s == DRAW_SLOT_ANCHOR) continue;
       if(!DrawSlotAvailable(k, s)) continue;
       DrawSlotWrite(s_dsObj, s, DrawSlotRead(s_dsObj, s));
    }
@@ -8613,6 +8649,27 @@ bool DrawStripTap(const int idx, const string tap)
       else s_dsPicker = slot;
       DrawStripLayout();
       DrawStripPaint();
+      return true;
+   }
+   //--- P-ANCHOR-LAST-MOVE (2026-10-22, ported from MT4) — THE ONE SEAT WHOSE STATE IS
+   //--- NOT AN OBJECT PROPERTY. It is the chart's own ATR-anchor switch, so it flips
+   //--- HERE instead of riding `DrawStripWriteValue` — a write to a property the
+   //--- rectangle/trend line does not have is the silent no-op this strip refuses
+   //--- (C-04). It sits before the toggle branch for that reason, and it flushes:
+   //--- a user action gets ONE unconditional redraw, never the paint's own `dirty` gate.
+   if(slot == DRAW_SLOT_ANCHOR)
+   {
+      CalcAnchorSetOn(!g_calcAnchorOn);
+      DrawStripDiagEmit("[drawstrip] ANCHOR on=" + IntegerToString(g_calcAnchorOn ? 1 : 0) +
+                        " obj=\"" + s_dsObj + "\" at=" +
+                        (g_calcAnchorTime > 0 ? TimeToString(g_calcAnchorTime, TIME_DATE | TIME_MINUTES)
+                                              : (string)"live"));
+      DrawStripPaint();
+      //--- the SAME-PASS half: the ATR this switch changes is read by the label/level/
+      //--- plan pass, which a bare `ChartRedraw` does not run — so the press asks the
+      //--- ONE dispatcher the cards use. One press, one full refresh.
+      RequestUISync();
+      ChartRedraw();
       return true;
    }
    if(DrawStripIsToggle(slot))
@@ -9767,7 +9824,8 @@ void DrawStripHoldSelectArm()
 void DrawStripHoldSelectPoll()
 {
    if(s_dsSelectRepairUntil == 0) return;
-   uint now = GetTickCount();
+   //--- P-BE-07 (ported 2026-10-22): a `GetTickCount()` was taken here every poll
+   //--- and read nowhere — the deadlines below are absolute, already armed.
    if(!TickDeadlinePending(s_dsSelectRepairUntil)) { DrawStripHoldSelectionDisarm(); return; }
    if(!TickDeadlinePending(s_dsSelectRepairAt)) return;   // still inside the release callback/tail
    if(!s_dsOpen || s_dsObj == "" || s_dsSelectRepairName != s_dsObj)

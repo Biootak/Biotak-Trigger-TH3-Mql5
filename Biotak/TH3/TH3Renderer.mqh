@@ -1024,7 +1024,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
 #ifdef BIOTAK_RENDER_ENGINE
     rbr = RBridgeActive();
 #endif
-    const bool patActive = (g_activeABCDPattern == mainObjName);
+    bool isActive = (g_activeABCDPattern == mainObjName);
     
     if(tD <= 0 || pD <= 0) {
         if(!CalculateABCDPointD(tA, pA, tB, pB, tC, pC, tD, pD)) {
@@ -1859,17 +1859,17 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         if(rbr)
         {
             RBridgePatternSeg(lineName, (long)startTime, centerPrice, (long)endTime, centerPrice,
-                              targetInk, (int)STYLE_SOLID, 2, inpABCDExtendCD, patActive);
+                              targetInk, (int)STYLE_SOLID, 2, inpABCDExtendCD, isActive);
             if(inpTH3LabelPosition != TH3_LABEL_HIDDEN)
             {
                 double zonePips = (zoneHalfWidth * 2.0) / pipSize;
                 string labelText = StringFormat("%s (%.1f) ========%.1f", targetNames[i], targetPips[i], zonePips);
                 if(inpABCDExtendCD)
                     RBridgePatternText(lineName + "_Text", 0, centerPrice, labelText,
-                                       targetInk, 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+                                       targetInk, 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", isActive);
                 else
                     RBridgePatternText(lineName + "_Text", (long)endTime, centerPrice, labelText,
-                                       targetInk, 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+                                       targetInk, 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", isActive);
             }
         }
         if(!rbr)
@@ -2124,15 +2124,15 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         if(rbr)
         {
             RBridgePatternSeg(midName, (long)startTime, midLevels[mi], (long)endTime, midLevels[mi],
-                              TH3InkForChart(clrGray), (int)STYLE_DOT, 1, inpABCDExtendCD, patActive);
+                              TH3InkForChart(clrGray), (int)STYLE_DOT, 1, inpABCDExtendCD, isActive);
             if(inpTH3LabelPosition != TH3_LABEL_HIDDEN)
             {
                 if(inpABCDExtendCD)
                     RBridgePatternText(midName + "_Text", 0, midLevels[mi], midText,
-                                       TH3InkForChart(clrGray), 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+                                       TH3InkForChart(clrGray), 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", isActive);
                 else
                     RBridgePatternText(midName + "_Text", (long)endTime, midLevels[mi], midText,
-                                       TH3InkForChart(clrGray), 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", patActive);
+                                       TH3InkForChart(clrGray), 8, (int)(TA_RIGHT|TA_VCENTER), 0, "Arial", isActive);
             }
         }
         if(!rbr)
@@ -2620,7 +2620,8 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // family carries a plate (INFO-10), so `patIdx` buys nothing and costs the
     // user a 64 px empty slot above the caption plus a jump whenever the active
     // pattern changes. The caption sits at the base of the safe area.
-    bool isActive = patActive;
+    // P-BE-06 (2026-10-22): `isActive` was a second name for `isActive` — the
+    // alias bought nothing and read as if the two could differ.
     int rowY    = inpABCDInfoYDistance;
     int infoLines = TH3InfoFamilyDraw(mainObjName,
                                        rowIdentity + "\n" + rowLegs + "\n" + rowPrices + "\n" +

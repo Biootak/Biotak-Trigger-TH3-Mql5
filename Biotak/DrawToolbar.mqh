@@ -172,7 +172,15 @@ struct DrawKindProfile
 #define DRAW_SLOT_BODYCOLOR 13
 #define DRAW_SLOT_BODYWIDTH 14
 #define DRAW_SLOT_BODYSTYLE 15
-#define DRAW_SLOT_N          16
+//--- P-ANCHOR-LAST-MOVE (2026-10-22, ported from MT4) — THE ONE SEAT THAT IS NOT THE
+//--- KIND'S. The ATR anchor switch left the ATR labels card (it was never a label
+//--- setting) and lives here, on the strip, for the only two drawings that own an
+//--- anchor: a BaseKnot box and a leg ruler. It is asked of the HELD OBJECT, never of
+//--- the kind — a kind rule would hand it to every rectangle and every trendline — so
+//--- `DrawStripSeatAvail` answers it BEFORE the caps gate, the same door the path's
+//--- 50 % seat uses (P-UI-139). APPENDED, so no existing slot index moved.
+#define DRAW_SLOT_ANCHOR     16
+#define DRAW_SLOT_N          17
 
 //--- THE CAPABILITIES, one bit per slot. A kind's mask IS its toolbar.
 #define DRAW_CAP_COLOR   (1 << DRAW_SLOT_COLOR)
@@ -192,6 +200,11 @@ struct DrawKindProfile
 #define DRAW_CAP_BODYWIDTH (1 << DRAW_SLOT_BODYWIDTH)
 #define DRAW_CAP_BODYSTYLE (1 << DRAW_SLOT_BODYSTYLE)
 #define DRAW_CAP_BODY      (DRAW_CAP_BODYCOLOR | DRAW_CAP_BODYWIDTH | DRAW_CAP_BODYSTYLE)
+//--- P-ANCHOR-LAST-MOVE: NO kind carries this bit. The seat is the held object's, so
+//--- `DrawKindCaps` must never answer it — it is granted in `DrawStripSeatAvail` from
+//--- the object's own identity, and the cap constant exists only so the seat has a
+//--- name in the same currency as every other one.
+#define DRAW_CAP_ANCHOR    (1 << DRAW_SLOT_ANCHOR)
 //--- every drawing tool the user has: the four common controls + the two that
 //--- every MT4 object really carries (LOCK, BACK) + the terminal's own dialog
 //--- hint. Kinds add FILL / RAY / FONT / GLYPH on top (see the table).
@@ -613,6 +626,28 @@ bool DrawAnchorXY(const string name, const int idx, int &x, int &y)
 {
    datetime t = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, idx);
    double   p = ObjectGetDouble(0, name, OBJPROP_PRICE, idx);
+   // P-UI-208 (2026-10-22) — THE AXIS THE OBJECT DOES NOT OWN IS NOT AN ANCHOR.
+   // A horizontal line carries NO time (the helpers create it as
+   // `ObjectCreate(..., 0, 0, price)`) and a vertical line carries NO price.
+   // Requiring both made every such line un-projectable, so a press on it named
+   // nothing and the strip refused to open: MEASURED 2026-10-22 12:56:27
+   // XAUUSD,M15 — `[drawstrip] close: anchor projection failed on "Horizontal
+   // Line 43389"`, and the Biotak-made custom-price lines are born the same way.
+   // Borrow the missing axis from the MIDDLE of the live window: it is on the
+   // chart by definition, whatever the scroll, and the axis the object really
+   // owns is untouched.
+   const int type = (int)ObjectGetInteger(0, name, OBJPROP_TYPE);
+   if((t <= 0 && type == OBJ_HLINE) || (!(p > 0.0) && type == OBJ_VLINE))
+   {
+      int sub = 0; datetime tc = 0; double pc = 0.0;
+      const int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      const int chh = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+      if(cw > 0 && chh > 0 && ChartXYToTimePrice(0, cw / 2, chh / 2, sub, tc, pc))
+      {
+         if(t <= 0 && type == OBJ_HLINE) t = tc;
+         if(!(p > 0.0) && type == OBJ_VLINE) p = pc;
+      }
+   }
    if(t <= 0 || !(p > 0.0)) return false;
    if(!ChartTimePriceToXY(0, 0, t, p, x, y)) return false;
    return true;
@@ -2468,27 +2503,22 @@ void DrawStripDiagEmit(const string line) { Print(line); }
 //--- name-keyed sweep for the delete hub (DrawStrip_Router): the object is gone,
 //--- so no kind check — names this unit never built simply probe absent. The ONE
 //--- sweep; the sync's delete path calls it instead of keeping a second copy.
+//--- P-LOOK-3D-f (2026-10-22) - ONE PREFIX, FOUR FAMILIES, NO GAP. The sweep was
+//--- a walk of `dl = 0..11` that asked `q = 0,1,2...` and STOPPED at the first
+//--- absent name, then probed `_FSC`/`_FSW`/`_FSH` per level. Two holes in that
+//--- shape: a stack whose q=0 was already gone (or whose only child sat on level 3
+//--- while level 0 carried none) broke the walk early, and the strays behind the
+//--- gap survived every delete - the class P-ORPHAN-ALL was written for. Every name
+//--- this unit builds starts with `<master>_FS` (`_FSD` stack rows, `_FSC` caps,
+//--- `_FSW` wash, `_FSH` the retired shadow), so ONE prefix delete answers for all
+//--- four, covers any gap, and costs one object-list pass instead of ~100 probes.
+//--- The child guard stays: a CHILD's delete must never walk its master's sweep
+//--- (measured 1000-7125 ms per event before it, P-DRAW-74b).
 bool FibPenStraysDrop(const string fibo)
 {
    if(fibo == "") return false;
-   bool dd = false;
-   for(int dl = 0; dl < FIBPEN_MAX_LEVELS; dl++)
-   {
-      for(int q = 0; ; q++)
-      {
-         string nm = FibPenName(fibo, dl, q);
-         if(ObjectFind(0, nm) < 0) break;
-         ObjectDelete(0, nm);
-         dd = true;
-      }
-      string cn = FibPenCapName(fibo, dl);
-      if(ObjectFind(0, cn) >= 0) { ObjectDelete(0, cn); dd = true; }
-      string wn = FibPenWashName(fibo, dl);
-      if(ObjectFind(0, wn) >= 0) { ObjectDelete(0, wn); dd = true; }
-      string sn = FibPenShwName(fibo, dl);   // P-LOOK-3D: the fourth family sweeps with the rest
-      if(ObjectFind(0, sn) >= 0) { ObjectDelete(0, sn); dd = true; }
-   }
-   return dd;
+   if(FibPenChildParent(fibo) != "") return false;
+   return (ObjectsDeleteAll(0, fibo + "_FS") > 0);
 }
 
 //--- the ONE sync: demotes the undrawable width, builds / refreshes / drops
@@ -2518,10 +2548,15 @@ bool FibPenSync(const string fibo, const bool dropAll)
    {
       // P-LOOK: every family the unit ever built dies here — a look switch strands
       // the previous look's children, and only this sweep can name them all.
-      if(!dropAll && ObjectFind(0, FibPenName(fibo, 0, 0)) < 0 &&
-         ObjectFind(0, FibPenCapName(fibo, 0)) < 0 &&
-         ObjectFind(0, FibPenWashName(fibo, 0)) < 0 &&
-         ObjectFind(0, FibPenShwName(fibo, 0)) < 0) return false;
+      //--- P-LOOK-3D-f (2026-10-22): the fence that stood here asked LEVEL 0 for
+      //--- four names and returned early when it found none. A stack lives on the
+      //--- level that NEEDED it, so a fibo whose level 3 wore a thick non-solid pen
+      //--- had no level-0 child: the sweep never ran, the strays stayed for good,
+      //--- and the early return also skipped the memo write below — the 2 s net then
+      //--- read "pen=0 vs memo=1" on every pass and re-synced the same dead pen
+      //--- forever (a mismatch it could never settle). The sweep IS the probe now:
+      //--- one prefix call answers for the whole family, and every exit writes the
+      //--- memo, so the net settles on the first pass.
       bool dd = FibPenStraysDrop(fibo);
       if(dd || dirty)
          DrawStripDiagEmit("[drawstrip] FIBPEN fibo=\"" + fibo + "\" dropall=1 look=" + IntegerToString(lk));

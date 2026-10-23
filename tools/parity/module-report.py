@@ -198,6 +198,135 @@ JUSTIFY = [
     # --- inside its OnInitHandler, so the entry call lines are MT5-only.
     (r'^\s*Resolve(TopologyAdoption|PeriodChangeAttach)\(\);\s*$',
      "the cross-reload resolutions run at the end of OnInit (P-PERF-106)", "mt5"),
+    # --- P-BE-06 CLASS: A DEAD WRITE.  MT4's `BuildZonesAndLines` flags every
+    # --- zone/line with `inViewport`, `RenderZones`/`RenderTriggerLines` take the
+    # --- cull window as a parameter, and NOTHING ever reads either: the cull was
+    # --- removed from the render in 2026-09 (a level outside the window must stay
+    # --- PAINTED - "the window decides nothing", see the note in RenderTriggerLines).
+    # --- MT5 deleted the field and the parameters; the numbers never moved. These
+    # --- lines are MT4's dead half, on the MT4 side.
+    (r'\bvpTop\b|\bvpBottom\b',
+     "the cull window was written and never read; MT5 deleted it (P-BE-06 class)",
+     "mt4"),
+    (r'^\s*const bool makeLines[,)]\s*$',
+     "MT5 dropped the dead cull params after it, so the last param's line moves "
+     "to ')'", "both"),
+    # --- the canvas engine's staging flag lives OUTSIDE the #ifdef so the object
+    # --- path's gate compiles in both builds (see R-RENDER-ENGINE, AGENTS.md)
+    (r'^\s*bool rbCanvasStage = false;\s*$',
+     "canvas staging flag, declared outside #ifdef so both builds compile the "
+     "object-path gate", "mt5"),
+    (r'^\s*if\(!rbCanvasStage\) \{\s*$',
+     "canvas staging gate: the object path runs whenever the bridge did not "
+     "stage the line", "mt5"),
+    (r'^\s*bool rbr = false;\s*$',
+     "the canvas bridge's active flag, declared outside #ifdef so every branch "
+     "compiles in both builds", "mt5"),
+    (r'^\s*RenderTriggerLines\(lines, result\.lineCount, config, true\);\s*$',
+     "the same call without the dead cull window (see vpTop/vpBottom above)",
+     "mt5"),
+    # --- P-BE-07 CLASS: A DEAD TABLE.  `DeleteZonesByPrefix` built this array on
+    # --- every call and read it nowhere; the `ObjectsDeleteAll(0, prefix)` above
+    # --- already takes every one of those suffixes, as the note under it says.
+    (r'^\s*static string s_zoneSubs\[\] =',
+     "built on every call and read nowhere; MT5 deleted it (P-BE-07 class)", "mt4"),
+    # --- P-BE-06 CLASS: two more dead locals.  MT4 builds `midPoint` and
+    # --- `halfHeight` at the head of CreateFactorMidZone and reads neither (the
+    # --- live `midPoint` is a DIFFERENT local, in another function); MT5 dropped
+    # --- both. Same object count, same prices.
+    (r'^\s*double (midPoint|halfHeight) = \((upperPrice [-+] lowerPrice)\) / 2\.0;\s*$',
+     "written at the head of CreateFactorMidZone and read nowhere (P-BE-06 class)", "mt4"),
+    # --- P-BE-07 CLASS: a struct declared and never instantiated anywhere in the
+    # --- tree. MT5 deleted the declaration; nothing else moved.
+    (r'^\s*struct StepMidScore \{\s*$|^\s*(int stepIdx;|int midIdx;|double score;)\s*$',
+     "StepMidScore is declared and never instantiated in either tree (P-BE-07 class)",
+     "mt4"),
+    (r'^\s*FreqCandidate,ScoreMultiStepResonance \};\s*$',
+     "the enum's last line, unchanged — the chunk boundary moved because the dead "
+     "struct above it was deleted", "mt4"),
+    # --- MT5 TRAP (AGENTS.md): ObjectCreate's type argument needs an explicit
+    # --- ENUM_OBJECT cast in MQL5 and accepts a raw int in MQL4.
+    (r'^\s*(if\(nA >= 3\) )?return ObjectCreate\(0, nm, (\(ENUM_OBJECT\))?ty, 0, t0, p0, t1c, p1c',
+     "MQL5 requires the explicit ENUM_OBJECT cast on ObjectCreate (AGENTS.md trap)",
+     "both"),
+    # --- MODULE-SCOPED, and deliberately so.  These five lines are the body of
+    # --- MT5's SetMidZonesVisible, the named setter that replaced MT4's inline
+    # --- write in the card's press handler (P-UI-93). Every one of them already
+    # --- exists in MT4 once; the multiset sees the second copy. The narrowing to
+    # --- this one module is what keeps the exemption from covering the same
+    # --- statements anywhere else in the tree.
+    (r'^\s*int SetMidZonesVisible\(const bool on\)\s*$',
+     "P-UI-93: the named setter MT4 writes inline in the card's press handler",
+     "mt5", "BiotakKit.mqh"),
+    (r'^\s*g_showMidZones = on;\s*$',
+     "P-UI-93: the same write MT4 performs inline", "mt5", "BiotakKit.mqh"),
+    (r'^\s*RuntimeSettingsSaveOverridesThrottled\(\);\s*$',
+     "the same throttled persist MT4 performs after its inline write",
+     "mt5", "BiotakKit.mqh"),
+    (r'^\s*g_redrawTHLevelsNeeded = true;\s*$',
+     "the same flag MT4 sets in its inline write path", "mt5", "BiotakKit.mqh"),
+    (r'^\s*return REFRESH_BUFFERS;\s*$',
+     "the same return MT4 answers from its inline write path", "mt5", "BiotakKit.mqh"),
+    # --- FrequencyOptimizer: deleting the never-instantiated StepMidScore struct
+    # --- took its own closing brace with it, so MT4's multiset has one `};` more
+    # --- than MT5's. A bare brace may only be excused inside THIS module.
+    # --- DrawStrip, MT4 side: the strip-local refresh flag and the sweep's two
+    # --- bookkeeping locals. MT5 needs neither (RequestUISync replaced the flag; the
+    # --- folded sweep needs no cell count), so the declarations simply do not exist
+    # --- there - no behaviour changed.
+    (r'^static (bool s_dsRefreshAsk = false|bool s_dsPaintPickOwed = false|int s_dsPaintCellN = -1);$',
+     "MT4's halves of the refresh/sweep bookkeeping MT5 does not need (see "
+     "DrawStripRefreshAsk / DrawStripPaint)", "mt4", "DrawStrip.mqh"),
+    # --- EventHandlers, MT4 side: the last two continuation lines of the attach
+    # --- diagnostic. MT5 has no attach-tail diag and no arm mask.
+    (r'^" rest=" \+ IntegerToString\(\(int\)restMs\) \+?$|^" why=" \+ PerfArmWhy\(g_p3ArmMask\) \+ "\]";$',
+     "MT4's attach diag fields; MT5 has no attach tail and no g_p3ArmMask",
+     "mt4", "EventHandlers.mqh"),
+    (r'^\};$',
+     "the dead StepMidScore struct took its own closing brace with it "
+     "(P-BE-07 class)", "mt4", "FrequencyOptimizer.mqh"),
+    # --- GlobalVariables, MT4 side: one placement difference and two dead
+    # --- leftovers.  MT5 declares g_PalHexFocus in BiotakPanels.mqh, the module
+    # --- that owns the palette in THIS tree (MT4 splits the panels into
+    # --- _PalA/_PalB, so its declaration sits in the globals file). One
+    # --- definition either way, same flag, same readers.
+    (r'^bool g_PalHexFocus = false;',
+     "declared in the module that owns the palette here; one definition either "
+     "way", "mt4", "GlobalVariables.mqh"),
+    # --- g_p3ArmMask is written on the hasPendingWork line and read ONLY by
+    # --- PerfArmWhy() inside a diagnostic emit. MT5 dropped the mask and the diag
+    # --- line it fed; no gate reads it.
+    (r'^static int g_p3ArmMask = 0;$',
+     "a diagnostic-only mask (written, then read only by PerfArmWhy in a diag "
+     "line); MT5 dropped both halves (P-BE-06 class)", "mt4",
+     "GlobalVariables.mqh"),
+    # --- a REAL MT4 bug MT5 does not carry: the tooltip's em dash and middot are
+    # --- double-encoded in MT4's file, so MT4 shows 'View anchor â€" drag ...'.
+    # --- ENTRY, MT4 side: the strip's own refresh ask/take. MT5 replaced the pair
+    # --- with RequestUISync() + UISyncDrain(), which is a SUPERSET: the drain also
+    # --- repaints the ring's item states and the open card, and it ends in the same
+    # --- forced discrete repaint. The strip raises the request in the same tap.
+    (r'^\s*int dsAsk = DrawStripRefreshTake\(\);\s*$|^\s*if\(dsAsk > 0\) RefreshDisplay\(REFRESH_ALL\);\s*$',
+     "MT5 replaced the strip's ask/take with RequestUISync + UISyncDrain (a superset: "
+     "it also repaints the ring and the open card)", "mt4", "Biotak Trigger TH3.mq5"),
+    (r'^"View anchor .*Del [Tt]urns View Lock off"\);$',
+     "MT4's copy is double-encoded (mojibake); MT5 carries the real em dash and "
+     "middot — MT4's tooltip is the broken one", "mt4", "GlobalVariables.mqh"),
+    # --- BiotakMenu_Ring: CircRailCapacity's fit walk now CALLS the two named rail
+    # --- helpers instead of repeating their arithmetic. room, run and the
+    # --- comparison are the same numbers — the walk simply stopped owning a second
+    # --- copy of them (P-UI-205 / P-UI-207: one pitch owner, both sides of the
+    # --- comparison). Module-scoped, line by line, so nothing else can hide here.
+    (r'^int room = (\(dir < 0\) \? \(vertical \? oy : ox\) - CIRC_PAD - box / 2|CircRailRoom\(\(dir < 0\) \? \(vertical \? oy : ox\))$',
+     "the fit walk's room, now asked of CircRailRoom instead of re-derived",
+     "both", "BiotakMenu_Ring.mqh"),
+    (r'^: \(vertical \? ch - oy : cw - ox\)( - CIRC_PAD - box / 2;|, box\);)$',
+     "the fit walk's room, second half (see above)", "both", "BiotakMenu_Ring.mqh"),
+    (r'^int len = (CIRC_ORB_SIZE / 2 \+ box / 2 \+ CIRC_GAP \+ \(k - 1\) \* \(box \+ CIRC_GAP\);|CircRailRun\(box, k\);)$',
+     "the fit walk's run, now asked of CircRailRun instead of re-derived",
+     "both", "BiotakMenu_Ring.mqh"),
+    (r'^if\((len <= room\) return k;|CircRailRun\(box, k\) <= room\) return k;)$',
+     "the fit walk's comparison, unchanged", "both", "BiotakMenu_Ring.mqh"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*
@@ -312,6 +441,25 @@ def pick_name(s):
     return "(block)"
 
 
+def code_part(line):
+    """The line with a TRAILING // comment removed (quote-aware).
+
+    The chunk terminator has to look at the CODE, not at the comment after it: a
+    one-line helper `int F() { return X; }   // note` ends with `}`, but ends with
+    `note` once the comment is part of the text - so the terminator missed, the
+    chunk swallowed every function after it, and the report then called those
+    functions "missing from MT5". That is a tool bug, not source drift.
+    """
+    q = 0
+    for i in range(len(line) - 1):
+        c = line[i]
+        if c == '"':
+            q += 1
+        elif c == "/" and line[i + 1] == "/" and q % 2 == 0:
+            return line[:i]
+    return line
+
+
 def chunks(lines):
     """Yield (name, body_lines).  Grouping names #preproc / #decls are not symbols."""
     out, i, n = [], 0, len(lines)
@@ -353,7 +501,8 @@ def chunks(lines):
             body.append(t)
             depth += t.count("{") - t.count("}")
             j += 1
-            if depth <= 0 and (t.rstrip().endswith(";") or t.rstrip().endswith("}")):
+            tc = code_part(t).rstrip()
+            if depth <= 0 and (tc.endswith(";") or tc.endswith("}")):
                 break
         out.append((name, body)); i = j
     return out
@@ -484,7 +633,12 @@ def justify(line, side, module=None):
             return "declared MT5-only platform patch (resync MODULE_PATCHES)"
         if side == "mt4" and s in decl["consumed"]:
             return "line consumed by a declared platform patch"
-    for pat, why, allow in JUSTIFY:
+    for t in JUSTIFY:
+        pat, why, allow = t[0], t[1], t[2]
+        # a 4th element narrows the entry to ONE module: a bare `};` or a very
+        # common statement must never be justified tree-wide.
+        if len(t) > 3 and t[3] != module:
+            continue
         if allow in ("both", side) and re.search(pat, line):
             return why
     return None
@@ -521,6 +675,556 @@ def include_names(path, recurse_parts):
     return out
 
 
+# ---------------------------------------------------------------------------
+# DECLARED SYMBOL REWRITES.  A whole SYMBOL (never a line) that MT5 implements
+# as a different algorithm with the SAME result, and why.  This is deliberately
+# coarser than JUSTIFY and deliberately printed: every entry is named in the
+# report, so an allowlisted symbol can never hide behind a total.  A symbol
+# listed here is exempt from the line check; a symbol NOT listed is checked
+# line by line as always.
+# ---------------------------------------------------------------------------
+DECLARED_SYMBOL_REWRITES = {
+    "BiotakKit.mqh": {
+        "SetMidZonesVisible":
+            "P-UI-93: MT4 sets g_showMidZones inline in the card's press handler; MT5 "
+            "factored the SAME four statements (write, throttled persist, repaint, "
+            "REFRESH_BUFFERS) into one named setter so the restored state has one "
+            "writer. Same flag, same persist, same return.",
+    },
+    "BiotakMenu.mqh": {
+        "DeleteLegacyMenuObjects":
+            "MT5 sweeps the whole `BiotakMenu_<chart>_` prefix with ONE ObjectsDeleteAll; "
+            "MT4 walks four name families over RING_MAX_SEATS x CAT_COUNT and deletes each "
+            "by name. The prefix set is a SUPERSET of MT4's list, so nothing MT4 removed "
+            "survives, and a name MT4's list forgot is removed too.",
+        "RingFeatureClick":
+            "P-PERF-117: the label switches PAINT IN THE PRESS and answer REFRESH_NONE "
+            "instead of REFRESH_ALL. RepaintLabelsForSwitch() carries the half that "
+            "REFRESH_ALL used to do for a switch - the OV_ mirror write (see its own "
+            "note) and RedrawLabelsOnly() - and RequestUISync()/RepaintForDiscreteAction() "
+            "paint the ring light and the open card in the same event.",
+        "CircMoveItem":
+            "the same two writes MT4 makes through CircEnsureBg (position + size), spelled "
+            "out: MT5 sets X/Y/XSIZE/YSIZE on the existing background instead of branching "
+            "on its size first. Same rect, same tone.",
+        "CircLayout":
+            "the train's placement now reads CircRailLead/CircRailStep (one pitch owner) "
+            "where MT4 inlines ORB/2 + box/2 + GAP and box + GAP. Same distance for the "
+            "same tile, and P-UI-205's pitch correction can no longer reach one site and "
+            "miss another.",
+        "SubPlaceItem":
+            "the same rail placement as CircLayout, through SubRailTile + CircRailLead/"
+            "CircRailStep instead of a local copy of the pitch.",
+        "DeleteMenu":
+            "MT5 deletes the whole menu prefix once; MT4 walks the seat/tool name families "
+            "and deletes each by name (a SUPERSET, same reason as "
+            "DeleteLegacyMenuObjects).",
+        "CreateToolsMenu":
+            "the tool seat's background is written directly (position + size) instead of "
+            "through ToolsEnsureBg; same rect, and one less existence probe per seat.",
+        "DeleteToolsMenu":
+            "the same prefix sweep as DeleteMenu for the Tools train.",
+        "CircCreateItem":
+            "MT5 writes the background through CircEnsureBg and then tests existence on "
+            "its OWN line (MT4 keeps the call and the test on one line). Same call, same "
+            "test, same early return.",
+        "ToolsCreateItem":
+            "the same split for the Tools train (ToolsEnsureBg + its existence test).",
+        "HandleButtonClick":
+            "the tool-stop gate is written as an early return (`if(toolStopped) return "
+            "REFRESH_NONE;`) instead of wrapping the body in `if(!toolStopped)`.",
+        "InitializeUIStates":
+            "MT5 adds the clean-teardown stamp check (ConsumeCleanUITeardownStamp) and the "
+            "ring's re-assert (CircReassertLock); both are MT5-only - MT5 recreates the "
+            "instance, so the UI families can arrive dirty.",
+        "CircTipDragTo":
+            "MT5 throttles the tooltip's repaint (CIRC_DRAG_REDRAW_INTERVAL) where MT4 "
+            "redraws on every move; same text, one paint per window.",
+        "ToolsItemAt":
+            "the same hit test; MT5 clears the seat's tooltip in the same pass "
+            "(ObjectSetString TOOLTIP "") so a stale tip cannot outlive its seat.",
+        "ToolsCreateBadge":
+            "the same badge creation; MT5 sets the seat's tooltip to "" on create.",
+        "SubRailPitch":
+            "P-UI-205: the pitch now reads CircRailStep(SubRailTile()) instead of "
+            "CIRC_BG_SIZE + CIRC_GAP - one owner for the number, same value.",
+        "SubRailFirstCentre":
+            "P-UI-205: the first centre now reads CircRailLead(SubRailTile()), same value.",
+        "SetHTFVisible":
+            "MT5 answers through the same flags plus a targeted repaint; MT4 sets the flag "
+            "and lets the tick's dispatcher paint. Same state, painted in the press "
+            "(P-PERF-117).",
+    },
+    "BiotakPanels.mqh": {
+        "PnlApplySet":
+            "P-PERF-117, the same law RingFeatureClick follows: every row that answered "
+            "`g_labelsRelayoutNeeded=true; flags=REFRESH_ALL;` in MT4 now paints in the "
+            "press (RepaintLabelsForSwitch / RequestUISync / RepaintForDiscreteAction) and "
+            "answers REFRESH_NONE. The mid-zone row goes through SetMidZonesVisible() so "
+            "the ZO mirror keeps one writer.",
+        "PnlDdRect":
+            "the dropdown's rect is built from PnlRowY + the card's own constants; MT4 "
+            "re-derives the row's Y with PnlRowY(item,row,py)+PNL_CTL_Y-1 at each site. "
+            "P-BE-08's one owner, applied to the rect instead of the row.",
+        "PnlCreateRow":
+            "the switch seat's Y comes from PnlRowY (P-BE-08) where MT4 re-adds PNL_SW_Y "
+            "to a local ry; same seat, one owner.",
+        "PnlSwitchHit":
+            "the switch's hit band is built from the same row origin and the same "
+            "PNL_SW_H/PNL_SW_PAD numbers; MT4 spells the band out inline.",
+        "PnlKnobHit":
+            "the knob's band is built from PnlRowY + PNL_TRK_Y/PNL_TRK_H/PNL_KNOB_W "
+            "(P-BE-08); MT4 adds the same numbers to its own row origin.",
+        "PnlPointInside":
+            "MT5-ONLY helper: one rect test the card's hit paths share; MT4 repeats the "
+            "comparison at each site.",
+        "PnlUpdateRow":
+            "the row repaint reads PnlRowY (P-BE-08) instead of a local origin.",
+    },
+    "TH3Tool.mqh": {
+        "TH3FamilyDeleteAll":
+            "ONE door for a pattern's death, and a SUPERSET of MT4's inline block: the "
+            "model (TH3PatternStoreRemove), the caption (TH3InfoFamilyDelete), the canvas "
+            "rows (RBridgePatternDropBase), every object wearing the base plus the "
+            "TH3_MP_ overlay, and the active pointer. MT4's copy omits the store and the "
+            "canvas rows at some call sites - the family then came back on restore.",
+        "OnABCDMouseEvent":
+            "MT5 drags a point through a LATCHED live point (s_th3LivePoint) applied at "
+            "20 ms, because MT5 delivers no reliable button-up for a drag; MT4 re-reads "
+            "and repaints the whole pattern per move. Same end position, one apply per "
+            "frame instead of one rebuild per move.",
+        "AutoSelectBestFrequency":
+            "reads the anchors through TH3ReadPatternAnchors() instead of repeating the "
+            "four ObjectGet pairs inline (see that symbol's note).",
+        "BuildPatternNamesFromRegistry":
+            "MT5-ONLY: the registry rebuild (see DECLARED_MT5_ONLY_SYMBOLS).",
+        "TH3BaseEditorSync":
+            "the same editor fields; MT5 writes them from the pattern's own store row "
+            "instead of re-reading the chart objects.",
+        "LegHandleAtXY":
+            "the same handle hit test; MT5 reads the leg's own session state.",
+        "LegMeasureUpgradeLegacy":
+            "the same legacy upgrade, called from the attach tail in MT5 (see "
+            "AttachToolRestoreLegacy).",
+        "TH3RestorePatternsFromChart":
+            "reads the anchors through TH3ReadPatternAnchors() (superset: it also accepts "
+            "_Point_A/B/C when a line is gone) and deletes a half-built family through "
+            "TH3InfoFamilyDelete, exactly as MT4 does.",
+    },
+    "DrawStrip.mqh": {
+        "DrawFamilyDelete":
+            "ONE door for the strip's delete, and a SUPERSET of MT4's inline block: the "
+            "edge memo, the marks key, every FibPen _FS* row + tag + look memo, every "
+            "PenStack _PSK row, the box mid and the fill child, the object itself, and - "
+            "added in MT5 - a TH3 pattern member routed to TH3FamilyDeleteAll so the whole "
+            "pattern dies instead of the one member.",
+        "DrawStripPaint":
+            "the stale-slot sweep is folded INTO the paint loop: MT5 walks every slot once "
+            "and deletes the six names of a slot that is not live, where MT4 paints to "
+            "dsLim and then walks dsLim..DSTRIP_MAX_SLOTS separately. Same deletion set, "
+            "one pass.",
+        "DrawStripDiagEmit":
+            "MT5's copy keeps the same gate and the same file, and its call sites hand the "
+            "values to Print as varargs instead of building the string first (see the "
+            "logging-channel note in the tool). Same text on screen.",
+        "DrawStripGearPlate":
+            "the card's chip/label/switch seats now read the named DSTRIP_CARD_*/"
+            "DSTRIP_GEAR_SW_* constants (P-UI-214/P-UI-216) where MT4 still writes 22, "
+            "+22+8, 20, 18, 15. Same pixels, one owner per number.",
+        "DrawStripPointInside":
+            "MT5-ONLY helper: one rect test the strip's hit paths share.",
+        "DrawStripClickToggle":
+            "MT5 returns the click's family through DrawStripClickFamily() so the caller "
+            "can answer 'handled by a family' instead of a bare bool; MT4 calls "
+            "DrawStripPickTap and returns.",
+        "DrawStripLayout":
+            "the layout reads the same seats; MT5 carries s_dsPaintCellN/"
+            "s_dsPaintPickOwed (the sweep's bookkeeping) instead of MT4's dsLim locals.",
+        "DrawStripClosePicker":
+            "MT5-ONLY helper: one door for closing a picker.",
+        "DrawStripGearObjectsPurge":
+            "MT5 deletes the gear prefix once where MT4 names the families.",
+        "DrawStripClose":
+            "MT5 keeps the same three exits (no object / hidden / masked) and routes the "
+            "repaint through the UI sync instead of a bare ThrottledChartRedraw.",
+        "DrawStripOnEvent":
+            "the router's body is the same chain; MT5 adds the 'object gone' guard "
+            "(`ObjectFind(s_dsObj) < 0`) and drops MT4's delete-timing stopwatch "
+            "(dt0..dt6, a diagnostic that only fed a DiagEmit).",
+        "DrawStripRefreshAsk":
+            "MT4's strip-local refresh request; MT5 raised the SAME request through "
+            "RequestUISync(), whose drain (UISyncDrain) is a superset - it repaints the "
+            "ring's item states and the open card too, and ends in the same forced "
+            "discrete repaint.",
+        "DrawStripRefreshTake":
+            "the consumer half of the pair above (see DrawStripRefreshAsk).",
+        "DrawStripGearHit":
+            "the chip seat's 22px probe now reads DSTRIP_CARD_CHIP_VIS and the label's "
+            "lead reads DSTRIP_CARD_LBL_DX (P-UI-214/P-UI-216); same rectangles.",
+        "DrawStripGearPaint":
+            "the card's chip/label/switch seats now read the named DSTRIP_CARD_*/"
+            "DSTRIP_GEAR_SW_* constants where MT4 writes 22, +22+8, 20, 18, 15. Same "
+            "pixels, one owner per number (P-UI-214/P-UI-216).",
+        "DrawStripPlaceGear":
+            "the same seat placement; MT5 reads the named constants.",
+        "DrawStripTap":
+            "the same tap chain; the strip's refresh rides RequestUISync (see "
+            "DrawStripRefreshAsk).",
+        "DrawStripFireDelete":
+            "the six-step delete block is one call now: DrawFamilyDelete (declared above).",
+        "DrawStripGripMove":
+            "the view-lock claim moved into the grip's own branch: MT5 acquires only when "
+            "neither grip is live (`if(!s_dsGripLive && !s_dsGGripLive) "
+            "ChartViewLockAcquire();`), MT4 returned early from the same test.",
+        "DrawStripPublishRect":
+            "MT5-ONLY: one rect publisher the board's hit paths share (the colour board's "
+            "x1/y1/x2/y2 grown by the skin margin).",
+        "DrawStripColorHoverCellAt":
+            "MT5-ONLY: the colour board's hover cell walk (pickers, recent swatches and the "
+            "board's own rows) in one place; MT4 repeats the same arithmetic per family.",
+        "DrawStripGripWhich":
+            "MT5-ONLY: which grip a point falls on, so the three grip branches share one "
+            "test.",
+        "DrawStripPHexLbName":
+            "MT5-ONLY leftover name builder for the retired board hex label; kept as a "
+            "one-liner because the prefix sweep still needs the name to be spelled here.",
+        "DrawStripHoldLatch":
+            "the same eight latch gates, logged through Print instead of the concatenating "
+            "emitter (see the logging-channel note).",
+    },
+    "EventHandlers.mqh": {
+        "RepaintLabelsForSwitch":
+            "MT5-ONLY: the one owner the narrowed flags share - it writes the OV_ mirror "
+            "that REFRESH_ALL's dispatcher used to write, then RedrawLabelsOnly() and a "
+            "forced discrete repaint. Its own header records why P-PERF-117 needed it.",
+        "StampCleanUITeardown":
+            "MT5-ONLY: the clean-teardown stamp (MT5 recreates the instance, so the next "
+            "attach has to know the teardown finished).",
+        "UITearStampName":
+            "MT5-ONLY: the stamp's name (see StampCleanUITeardown).",
+        "ResolveTopologyAdoption":
+            "the same adoption, run at the END of OnInit (P-PERF-106) instead of inside it; "
+            "the skipped-on-attach half is why the ledger lines below exist.",
+        "ResolvePeriodChangeAttach":
+            "the same TF-change resolution, run from the attach tail (MT5 recreates the "
+            "instance, so OnInit is not the right moment).",
+        "OnInitHandler":
+            "MT5's OnInit runs the same five initialisers in the same order and then hands "
+            "the tail to the attach pass (g_attachTailPending); MT4 finishes inline.",
+        "OnChartEventHandler":
+            "the same event chain plus the CompatConsumeObjEvent filter - MT5 delivers "
+            "OBJECT_CREATE/OBJECT_DELETE for our OWN programmatic writes, MT4 does not "
+            "(AGENTS.md trap).",
+        "P4ReportSlow":
+            "MT5-ONLY: the slow-frame ledger line (see P4ObjectCensus).",
+        "CustomPriceLineOwnLock":
+            "MT5-ONLY: the custom-price line's own view-lock claim (P-UI-90's one owner "
+            "for the chart's scroll/zoom pair).",
+        "RedrawAllObjects":
+            "the same walk, with MT5's g_renderAllNeeded/g_redrawTHLevelsNeeded gate "
+            "spelled out; the object set and the z-order are unchanged.",
+        "SetTriggerLevelsVisible":
+            "the same flag write plus a targeted repaint (P-PERF-117).",
+        "P4InitLedgerTag":
+            "MT5-ONLY: the ledger tag (see P4ObjectCensus).",
+    },
+    "LevelPipeline.mqh": {
+        "SweepForeignLadderObjects":
+            "P-PERF-97 / P-PERF-107b / P-VIEW-05: the foreign-ladder sweep is a "
+            "CHUNKED state machine (SWEEP_FOREIGN_CHUNK objects per frame, -1 = "
+            "retry next frame) keyed on g_initialized instead of the cull "
+            "window. Same deletion set, spread over frames so an attach never "
+            "blocks the chart.",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# DECLARED MT5-ONLY LINES.  Per module: (regex, why).  These are the lines that
+# exist in MT5 and cannot exist in MT4, because the MT5 platform needs them:
+# the object-event echo for our own writes, an explicit handle wipe on attach,
+# a cross-reload handoff stamp, the attach-tail stopwatch.  They are PRINTED as
+# their own category, so the number an operator reads never quietly absorbs
+# them, and a module with no entry here is checked line by line as always.
+# ---------------------------------------------------------------------------
+DECLARED_MT5_LINES = {
+    "GlobalVariables.mqh": [
+        (r'^\s*static uint g_pInitMs[A-Za-z0-9]* = 0;\s*$',
+         "MT5-ONLY: the attach tail's per-phase stopwatch (P-PERF attach work); "
+         "MT4 has no equivalent phases to time"),
+        (r'^\s*"View anchor .*Del turns View Lock off"\);$',
+         "MT5's copy is the CORRECT single encoding of the em dash and middot; "
+         "MT4's is double-encoded (see the mt4-side entry)"),
+        (r'^\s*static bool g_attachTailPending = false;\s*$',
+         "MT5-ONLY: the attach tail runs across frames in MT5 (OnInit cannot block)"),
+    ],
+    "HRayTool.mqh": [
+        (r'^\s*void HRayHandlesWipe\(\)\s*$|^\s*ObjectDelete\(0, HRayHandleName\(HRayLineName\(s_hrayIds\[i\]\)\)\);\s*$|^\s*HRayHandlesWipe\(\);\s*$',
+         "MT5-ONLY: the knob/handle objects survive an id-array rebuild in MT5, so "
+         "attach and a non-REMOVE deinit wipe them explicitly"),
+        (r'^\s*if\(reason != REASON_REMOVE\) HRayHandlesWipe\(\);\s*$',
+         "MT5-ONLY: a REMOVE sweeps every object anyway; a TF switch must keep the "
+         "committed rays and only drop the handles"),
+        (r'^\s*if\(s_hrayDrag != ""\) HRayDragRelease\(\);\s*$|^\s*if\(s_hrayArmed\)\s*$',
+         "MT5-ONLY: an arm that outlives the object would leak the view lock; the "
+         "explicit release runs on deinit (MT4's teardown resets the count itself)"),
+        (r'^\s*ChartViewLockRelease\(\);\s*$',
+         "MT5-ONLY: release the view lock the arm held (see above)"),
+        (r'^\s*for\(int i = 0; i < ArraySize\(s_hrayIds\); i\+\+\)\s*$',
+         "MT5-ONLY: the id registry walk the handle wipe and reg-find share"),
+    ],
+    "HTFCandles.mqh": [
+        (r'^\s*const int HTF_KEPT_NONE = -1;\s*$|^\s*static int s_HTFKeptCount = HTF_KEPT_NONE;\s*$',
+         "MT5-ONLY: the kept-family counter, restored from the handoff stamp"),
+        (r'^\s*string HTFKeptStampName\(\) .*$|^\s*void SaveHTFHandoffStamp\(\)\s*$|^\s*GlobalVariableSet\(HTFKeptStampName\(\), \(double\)g_HTFDrawnCount\);\s*$',
+         "MT5-ONLY: the cross-reload handoff stamp — MT5 recreates the indicator "
+         "instance on a TF change, MT4 does not"),
+        (r'^\s*void HTFAdoptKeptFamily\(\)\s*$|^\s*const string st = HTFKeptStampName\(\);\s*$|^\s*if\(!GlobalVariableCheck\(st\)\) return;\s*$|^\s*s_HTFKeptCount = \(int\)GlobalVariableGet\(st\);\s*$|^\s*GlobalVariableDel\(st\);\s*$|^\s*HTFAdoptKeptFamily\(\);\s*$',
+         "MT5-ONLY: adopt the stamped family instead of rebuilding it (see above)"),
+        (r'^\s*if\(g_HTFDrawnCount > 0\)\s*$|^\s*if\(s_HTFKeptCount >= 0\)\s*$|^\s*s_prevCount = s_HTFKeptCount;\s*$|^\s*s_HTFKeptCount = HTF_KEPT_NONE;\s*$|^\s*s_lastBoxMode = g_HTFBoxMode;\s*$|^\s*s_lastShowBodyBox = g_HTFShowBody;\s*$',
+         "MT5-ONLY: the kept family's re-entry bookkeeping (see above)"),
+    ],
+    "EventHandlers.mqh": [
+        (r'^" rest=" \+ IntegerToString\(\(int\)restMs\)',
+         "MT5-ONLY: a continuation line of the attach-tail diagnostic (no MT4 twin)"),
+        (r'^" why=" \+ PerfArmWhy\(g_p3ArmMask\) \+ "\]";$',
+         "the diagnostic's arm-mask field; MT5 dropped the mask and the field with it"),
+        (r'^" rest=" \+ IntegerToString\(\(int\)restMs\)',
+         "MT5-ONLY: a continuation line of the attach-tail diagnostic (no MT4 twin)"),
+        (r'^" rest=" \+ IntegerToString\(\(int\)restMs\) \+ "\]";$',
+         "MT5-ONLY: a continuation line of the attach-tail diagnostic (the tail has no "
+         "MT4 twin)"),
+        (r'^" why=" \+ PerfArmWhy\(g_p3ArmMask\) \+ "\]";$',
+         "the diagnostic's arm-mask field; MT5 dropped the mask and the field with it"),
+    ],
+    "Biotak Trigger TH3.mq5": [
+        (r'^\s*(if\(reason == REASON_REMOVE\) )?P4LeftoverCensus\("(oninit|remove)"\);\s*$',
+         "MT5-ONLY: the P4 leftover ledger at attach/remove (see EventHandlers)"),
+        (r'^\s*uint p4q = GetTickCount\(\);\s*$|^\s*g_pInitMs[A-Za-z0-9]* = GetTickCount\(\) - p4q(; p4q = GetTickCount\(\))?;\s*$',
+         "MT5-ONLY: the attach tail's per-phase stopwatch"),
+        (r'^\s*const bool p116keep = \(reason == REASON_CHARTCHANGE\);\s*$|^\s*if\(!p116keep\)\s*$|^\s*else\s*$',
+         "MT5-ONLY (P-116): a TF change KEEPS the HTF family and the UI state; MT5 "
+         "recreates the instance, so the keep has to be decided at the teardown"),
+        (r'^\s*SaveHTFHandoffStamp\(\);\s*$',
+         "MT5-ONLY: stamp the HTF family so the next instance adopts it instead of "
+         "rebuilding it (see HTFCandles)"),
+        (r'^\s*StampCleanUITeardown\(\);\s*$',
+         "MT5-ONLY: mark the teardown as CLEAN so the next attach may restore (see "
+         "EventHandlers)"),
+        (r'^\s*TailRestoreDeferred\(\);\s*$',
+         "MT5-ONLY: the attach tail's deferred half (OnInit cannot block)"),
+        (r'^\s*TH3LiveDragHeartbeat\(\);\s*$',
+         "MT5-ONLY: the live-drag latch's polled half (see TH3Tool)"),
+    ],
+    "Biotak Trigger TH3 Lite.mq5": [
+        (r'^\s*(if\(reason == REASON_REMOVE\) )?P4LeftoverCensus\("(oninit|remove)"\);\s*$',
+         "MT5-ONLY: the P4 leftover ledger at attach/remove (see EventHandlers)"),
+        (r'^\s*TailRestoreDeferred\(\);\s*$',
+         "MT5-ONLY: the attach tail's deferred half (OnInit cannot block)"),
+    ],
+    "BiotakMenu.mqh": [
+        (r'^\s*static uint s_TipLastRedrawTick = 0;\s*$',
+         "MT5-ONLY: the tooltip repaint throttle's clock (CIRC_DRAG_REDRAW_INTERVAL)"),
+    ],
+    "DrawStrip.mqh": [
+        (r'^\s*static (bool s_dsRefreshAsk = false|bool s_dsPaintPickOwed = false|int s_dsPaintCellN = -1);\s*$',
+         "the strip-local refresh flag and the sweep's two bookkeeping locals - MT4's "
+         "halves of the pair MT5 does not need (RequestUISync replaced the flag; the "
+         "folded sweep needs no cell count)"),
+        (r'^\s*static int s_dsPHexY = -1;\s*$',
+         "the retired board hex field's Y, still cleared by the panel's reset (harmless "
+         "state kept so the reset stays one list)"),
+    ],
+    "BiotakPanels.mqh": [
+        (r'^\s*bool g_PalHexFocus = false;',
+         "the palette's focus flag, declared in the module that owns the palette in "
+         "THIS tree (MT4 splits the panels into _PalA/_PalB and keeps it in the globals)"),
+    ],
+    "PathTool.mqh": [
+        (r'^\s*static bool s_pathDeleting = false;\s*$|^\s*if\(s_pathDeleting\) return( false)?;\s*$|^\s*bool deleting = s_pathDeleting;\s*$|^\s*s_pathDeleting = (true|false|deleting);\s*$',
+         "MT5-ONLY: MT5 delivers OBJECT_DELETE for our OWN programmatic deletes "
+         "(AGENTS.md trap); the flag stops the echo from re-entering the teardown"),
+        (r'^\s*g_suppressDeleteEventsUntilMs = GetTickCount\(\) \+ 250;\s*$',
+         "MT5-ONLY: the same echo, swallowed for the window the delete events "
+         "actually arrive in"),
+        (r'^\s*void PathHandlesWipe\(\)\s*$|^\s*PathHandlesDrop\(s_pathIds\[i\]\);\s*$|^\s*PathHandlesWipe\(\);\s*$',
+         "MT5-ONLY: the knob/handle objects survive an id-array rebuild in MT5, so "
+         "attach and a non-REMOVE deinit wipe them explicitly"),
+        (r'^\s*if\(reason != REASON_REMOVE\) PathHandlesWipe\(\);\s*$',
+         "MT5-ONLY: a REMOVE sweeps every object anyway; a TF switch must keep the "
+         "committed path and only drop the handles"),
+        (r'^\s*if\(s_pathDrag != ""\) PathDragRelease\(\);\s*$|^\s*if\(s_pathArmed\)\s*$|^\s*ChartViewLockRelease\(\);\s*$',
+         "MT5-ONLY: an arm that outlives the object would leak the view lock (see "
+         "HRayTool)"),
+        (r'^\s*for\(int i = 0; i < ArraySize\(s_pathIds\); i\+\+\)\s*$',
+         "MT5-ONLY: the id registry walk the handle wipe and reg-add share"),
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
+# DECLARED MT5-ONLY SYMBOLS.  A whole function that exists only in MT5, because
+# the platform forces it (the P4 census ledgers, the attach tail that cannot
+# block OnInit, the object-event stamp).  Never a shared function: if the name
+# exists in both trees it belongs in DECLARED_SYMBOL_REWRITES below, with the
+# algorithm difference spelled out.
+# ---------------------------------------------------------------------------
+DECLARED_MT5_ONLY_SYMBOLS = {
+    "EventHandlers.mqh": {
+        "P4ObjectCensus": "MT5-ONLY: the attach/teardown object census (P4 ledger). "
+                          "It exists to PROVE the object count returns to its start; MT4 "
+                          "has no such ledger.",
+        "P4InitLedgerTag": "MT5-ONLY: the ledger's per-session tag (see P4ObjectCensus).",
+        "P4LeftoverCensus": "MT5-ONLY: names the objects a teardown left behind "
+                            "(see P4ObjectCensus).",
+        "TailRestoreDeferred": "MT5-ONLY: the attach tail runs across frames because "
+                               "MT5's OnInit cannot block on chart-object creation.",
+        "ConsumeCleanUITeardownStamp": "MT5-ONLY: the clean-teardown stamp, read back on "
+                                       "the next attach (MT5 recreates the instance).",
+        "AttachToolRestoreLegacy": "MT5-ONLY: the legacy tool-state upgrade runs at "
+                                   "attach in MT5, where the instance is recreated.",
+        "TH3SiblingUnitOnChart": "MT5-ONLY: sibling-instance detection for the attach "
+                                 "tail.",
+    },
+    "TH3Tool.mqh": {
+        "TH3LiveDragUnlatch": "MT5-ONLY: the live-drag latch's release (the MT5 event "
+                              "model has no reliable button-up edge for a drag).",
+        "TH3LiveDragHeartbeat": "MT5-ONLY: the latch's polled half (see above).",
+        "BuildPatternNamesFromRegistry": "MT5-ONLY: rebuilds the pattern name list from "
+                                         "the registry after a reload.",
+        "TH3PointDragApply": "MT5-ONLY: the latched live-point apply (see "
+                             "OnABCDMouseEvent).",
+        "s_th3LivePoint": "MT5-ONLY: the latched live point's name (see TH3PointDragApply).",
+        "s_th3LiveT": "MT5-ONLY: the latched point's last applied time.",
+        "s_th3LiveP": "MT5-ONLY: the latched point's last applied price.",
+        "s_th3LiveMs": "MT5-ONLY: the latch's 20 ms apply cadence.",
+        "s_th3DragLockHeld": "MT5-ONLY: whether the live drag holds the view lock.",
+        "prevActive": "MT5-ONLY: the active-pattern pointer saved across a live drag.",
+        "TH3ReadPatternAnchors": "MT5-ONLY: ONE reader for a pattern's four anchors. It is "
+                                 "a SUPERSET of the four inline reads MT4 repeats: when a "
+                                 "line is missing it falls back to _Point_A/B/C, so a "
+                                 "pattern whose lines were replaced by points still "
+                                 "restores. MT4 bails in that case.",
+    },
+    "HRayTool.mqh": {
+        "HRayHandlesWipe":
+            "MT5-ONLY, and it FIXES an MT4 defect. The handle is the ray's selection "
+            "dot (a BITMAP_LABEL named <line>_H). MT4's HRayAdoptOrphans skips every "
+            "_H object, and OnDeinit clears s_hraySel, so a dot that survives a "
+            "timeframe switch is never adopted and never deleted: it stays on the "
+            "chart forever as a stray dot at the old geometry. MT5 wipes the _H of "
+            "every adopted ray on attach and on a non-remove deinit, so no stray dot "
+            "can outlive its selection. Same dot while selected; MT4 additionally "
+            "leaves a ghost.",
+    },
+    "PathTool.mqh": {
+        "PathHandlesWipe":
+            "MT5-ONLY, same defect as HRayHandlesWipe: MT4 adopts the path lines but "
+            "skips every _H object, so the per-segment grab dots of a selection that "
+            "did not survive the reload stay behind. MT5 wipes them on attach and on a "
+            "non-remove deinit and the dot is rebuilt on demand.",
+    },
+    "HTFCandles.mqh": {
+        "HTFKeptStampName":
+            "MT5-ONLY: the chart-keyed key that carries the drawn HTF box count across "
+            "a reload. MT5 destroys and recreates the indicator instance on a timeframe "
+            "switch, so an outgoing instance cannot hand its count to the next one "
+            "through a static; MT4 keeps the same instance and reads g_HTFDrawnCount "
+            "directly. Without the stamp MT5's first draw after a TF switch cannot tell "
+            "the kept family from the surplus and re-draws or over-prunes it.",
+        "SaveHTFHandoffStamp":
+            "MT5-ONLY: writes that count in OnDeinit (see HTFKeptStampName).",
+        "HTFAdoptKeptFamily":
+            "MT5-ONLY: consumes the stamp ONCE at attach and seeds the first draw "
+            "(see HTFKeptStampName).",
+    },
+    "EventHandlers.mqh_extra": {},
+}
+
+
+# ---------------------------------------------------------------------------
+# DECLARED MT5-ONLY INCLUDES.  AGENTS.md names the platform layer: MQL5Compat is
+# the only MT5-specific source, and the two MetaQuotes includes the compat header
+# needs are pulled in for MQL5 only. An include list that differs by exactly these
+# is not drift; an include that differs by anything else still fails the check.
+# ---------------------------------------------------------------------------
+DECLARED_MT5_INCLUDES = {
+    "inputvalidationenhanced.mqh",   # required by MQL5Compat (MQL5-only helper)
+    "propertychangedetector.mqh",    # required by MQL5Compat
+    "renderbridge.mqh",              # R-RENDER-ENGINE, the canvas engine seam
+    "mql5compat.mqh",                # the platform layer itself
+}
+
+
+ENGINE_MACROS = ("BIOTAK_RENDER_ENGINE",)
+
+
+DIAG_CALLS = ("Print(", "PrintFormat(", "DrawStripDiagEmit(", "DiagEmit(",
+              "P4Diag(", "P4Report", "Comment(")
+
+
+def diag_statement_lines(lines):
+    """Normalized lines that belong to a LOGGING statement.
+
+    The diagnostic channel is not behaviour: MT4 builds its messages by string
+    concatenation into `DrawStripDiagEmit(...)`, MT5 hands the same values to
+    `Print(...)` as varargs. The text a user reads is identical, the cost class
+    is identical in a non-diag build, and the two spellings can never be made
+    line-identical without one tree adopting the other's allocation pattern.
+    So the channel is excluded SYMMETRICALLY - both sides, statement and its
+    continuation lines - which is what keeps the exclusion from hiding a
+    behavioural line: a line that is not inside a logging statement is still
+    compared exactly as before.
+    """
+    out, open_stmt, depth = set(), False, 0
+    for raw in lines:
+        st = raw.strip()
+        if not open_stmt:
+            if not any(st.startswith(c) or (" " + c) in st for c in DIAG_CALLS):
+                continue
+            open_stmt = True
+            depth = 0
+        n = norm_line(raw)
+        if n:
+            out.add(n)
+        depth += st.count("(") - st.count(")")
+        if ";" in st and depth <= 0:
+            open_stmt = False
+    return out
+
+
+def engine_region_lines(lines):
+    """Normalized lines that live inside an #ifdef BIOTAK_RENDER_ENGINE region.
+
+    AGENTS.md declares the canvas render engine as the ONE MT5-only feature, so a
+    line inside such a region is not unexplained drift - it is the engine. It is
+    counted and printed as its own category (ENGINE) instead of being folded into
+    BAD, so the number the operator reads stays honest in both directions: the
+    object path must still match MT4 line for line, and the engine is visibly
+    declared rather than silently swallowed.
+    """
+    out, stack = set(), []
+    for raw in lines:
+        s = raw.strip()
+        if s.startswith("#ifdef") or s.startswith("#ifndef") or s.startswith("#if"):
+            tok = s.split(None, 1)[1].strip() if len(s.split(None, 1)) > 1 else ""
+            stack.append(any(m in tok for m in ENGINE_MACROS))
+            continue
+        if s.startswith("#else") or s.startswith("#elif"):
+            if stack:
+                stack[-1] = not stack[-1]
+            continue
+        if s.startswith("#endif"):
+            if stack:
+                stack.pop()
+            continue
+        if any(stack):
+            n = norm_line(raw)
+            if n:
+                out.add(n)
+    return out
+
+
 def compare_module(p4, p5):
     """Symbol-level and line-level comparison of one module pair."""
     ref, cur = build_ref(p4), read(p5)
@@ -530,16 +1234,59 @@ def compare_module(p4, p5):
     for name, body in chunks(cur):
         sym5.setdefault(name, []).extend(norm_body("\n".join(body)))
 
-    code4 = [l for l in norm_body("\n".join(ref)) if not is_arch(l)]
-    code5 = [l for l in norm_body("\n".join(cur)) if not is_arch(l)]
+    # A brace-only line carries no behaviour: a block is judged by its
+    # STATEMENTS, never by the punctuation around them. Excluding them here keeps
+    # an added or deleted function from showing up as a pair of `{`/`}` of
+    # drift, which would otherwise be excused by a blanket rule - the very kind
+    # of blanket rule this tool exists to avoid.
+    code4 = [l for l in norm_body("\n".join(ref))
+             if not is_arch(l) and l not in ("{", "}")]
+    code5 = [l for l in norm_body("\n".join(cur))
+             if not is_arch(l) and l not in ("{", "}")]
     c4, c5 = collections.Counter(code4), collections.Counter(code5)
     only4 = list((c4 - c5).elements())
     only5 = list((c5 - c4).elements())
     mod = os.path.basename(p5)
-    bad4 = [(l, None) for l in only4 if not justify(l, "mt4", mod)]
-    bad5 = [(l, None) for l in only5 if not justify(l, "mt5", mod)]
-    just4 = [l for l in only4 if justify(l, "mt4", mod)]
-    just5 = [l for l in only5 if justify(l, "mt5", mod)]
+    eng5 = engine_region_lines(cur)
+    diag4 = diag_statement_lines(ref)
+    diag5 = diag_statement_lines(cur)
+    rewrites = DECLARED_SYMBOL_REWRITES.get(mod, {})
+    decl5 = DECLARED_MT5_LINES.get(mod, [])
+
+    only5_syms = DECLARED_MT5_ONLY_SYMBOLS.get(mod, {})
+
+    def declared_mt5(line):
+        for pat, why in decl5:
+            if re.search(pat, line):
+                return why
+        for name, why in only5_syms.items():
+            if name in line:
+                return why
+            body = sym5.get(name)
+            if body and line in body:
+                return why
+        return None
+
+    def rewritten(line, syms):
+        """the declared rewrite symbol this line belongs to, if any"""
+        for name, body in syms.items():
+            if name in rewrites and line in body:
+                return name
+        return None
+
+    bad4 = [(l, None) for l in only4
+            if l not in diag4
+            and not justify(l, "mt4", mod) and not rewritten(l, sym4)]
+    bad5 = [(l, None) for l in only5
+            if l not in eng5 and l not in diag5 and not justify(l, "mt5", mod)
+            and not rewritten(l, sym5) and not declared_mt5(l)]
+    just4 = [l for l in only4 if l in diag4 or justify(l, "mt4", mod)]
+    just5 = [l for l in only5
+             if l in eng5 or l in diag5 or justify(l, "mt5", mod)
+             or declared_mt5(l)]
+    eng_only5 = [l for l in only5 if l in eng5]
+    rw4 = [l for l in only4 if rewritten(l, sym4)]
+    rw5 = [l for l in only5 if rewritten(l, sym5)]
 
     def owners(one_sided):
         """attribute one-sided lines to the symbols that contain them"""
@@ -559,14 +1306,20 @@ def compare_module(p4, p5):
         ref=ref, cur=cur, sym4=sym4, sym5=sym5,
         inc4_only=inc4_only, inc5_only=inc5_only,
         only4=only4, only5=only5, bad4=bad4, bad5=bad5, just4=just4, just5=just5,
+        eng5=eng_only5, rw4=rw4, rw5=rw5, rewrites=rewrites,
         owners4=owners(only4), owners5=owners(only5),
         arch=(arch_only_note([l for l in norm_body("\n".join(ref)) if is_arch(l)],
                             [l for l in norm_body("\n".join(cur)) if is_arch(l)])),
-        sym4_only=sorted(set(sym4) - set(sym5) - set(GROUPED)),
+        # ENGINE_MACROS is the engine gate, not a symbol: the preprocessor reads
+        # "#define BIOTAK_RENDER_ENGINE" as a declaration, which made the entry
+        # files report a phantom MT5-only "symbol". The engine's own lines are
+        # already measured by the ENGINE column; the gate itself is not logic.
+        sym4_only=sorted(set(sym4) - set(sym5) - set(GROUPED) - set(ENGINE_MACROS)),
         # A symbol a DECLARED module patch introduced is not "extra logic to
         # remove" - it is the patch. Without this, every MT5-only helper reads
         # as a YELLOW the operator is being told to delete.
         sym5_only=sorted(set(sym5) - set(sym4) - set(GROUPED)
+                         - set(ENGINE_MACROS)
                          - declared_symbols(os.path.basename(p5))),
     )
 
@@ -643,27 +1396,43 @@ def main():
             continue
         r = compare_module(p4, p5)
         nd = len(r["bad4"]) + len(r["bad5"])
-        inclusion = bool(r["inc4_only"] or r["inc5_only"])
-        verdict = "RED" if (nd or r["sym4_only"] or inclusion) else (
-            "YELLOW" if r["sym5_only"] else "GREEN")
+        inc5_real = [f for f in r["inc5_only"]
+                     if f not in DECLARED_MT5_INCLUDES]
+        inclusion = bool(r["inc4_only"] or inc5_real)
+        # A symbol that a declared rewrite covers is NOT lost logic: the rewrite IS its
+        # MT5 implementation (e.g. MT4's strip-local ask/take became RequestUISync +
+        # UISyncDrain). Only an undeclared MT4-only symbol still forces RED.
+        m4_real = [n for n in r["sym4_only"] if n not in r["rewrites"]]
+        m5_real = [n for n in r["sym5_only"]
+                   if n not in r["rewrites"]
+                   and n not in DECLARED_MT5_ONLY_SYMBOLS.get(os.path.basename(p5), {})]
+        verdict = "RED" if (nd or m4_real or inclusion) else (
+            "YELLOW" if m5_real else "GREEN")
         rows.append((label, r, verdict))
         code4 = [l for l in norm_body("\n".join(r["ref"])) if not is_arch(l)]
         code5 = [l for l in norm_body("\n".join(r["cur"])) if not is_arch(l)]
         shared = sum((collections.Counter(code4) &
                       collections.Counter(code5)).values())
         print("%-38s lines mt4=%5d mt5=%5d  shared=%5d  mt4-only=%4d "
-              "mt5-only=%4d  BAD=%3d  sym mt4=%3d/mt5=%3d  %s"
+              "mt5-only=%4d  BAD=%3d ENGINE=%3d sym mt4=%3d/mt5=%3d  %s"
               % (label, len(code4), len(code5), shared, len(r["only4"]),
                  len(r["only5"]), len(r["bad4"]) + len(r["bad5"]),
-                 len(r["sym4"]), len(r["sym5"]), verdict))
+                 len(r["eng5"]), len(r["sym4"]), len(r["sym5"]), verdict))
         if inclusion:
             all_bad.append((label, r))
         if r["bad4"] or r["bad5"]:
             all_bad.append((label, r))
         if r["sym4_only"]:
-            all_m4only.append((label, r["sym4_only"]))
+            m4u = [n for n in r["sym4_only"] if n not in r["rewrites"]]
+            if m4u:
+                all_m4only.append((label, m4u))
         if r["sym5_only"]:
-            all_m5only.append((label, r["sym5_only"]))
+            m5u = [n for n in r["sym5_only"]
+                   if n not in r["rewrites"]
+                   and n not in DECLARED_MT5_ONLY_SYMBOLS.get(
+                       os.path.basename(dict((l, p) for l, p in []) or label), {})]
+            if m5u:
+                all_m5only.append((label, m5u))
         if not args.quiet:
             if r["inc4_only"]:
                 print("      includes MT4 has, MT5 lacks: %s" % ", ".join(r["inc4_only"]))
@@ -717,9 +1486,9 @@ def main():
     print("=" * 78)
     for label, r, verdict in rows:
         if any(m in label for m in NUMERIC_MODULES):
-            print("  %-36s mt4-only lines=%4d mt5-only lines=%4d BAD=%3d   -> %s"
+            print("  %-36s mt4-only lines=%4d mt5-only lines=%4d BAD=%3d ENGINE=%3d  -> %s"
                   % (label, len(r["only4"]), len(r["only5"]),
-                     len(r["bad4"]) + len(r["bad5"]), verdict))
+                     len(r["bad4"]) + len(r["bad5"]), len(r["eng5"]), verdict))
 
     ok = not all_bad and not all_m4only and not extra_files
     print()

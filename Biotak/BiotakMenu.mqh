@@ -2242,7 +2242,8 @@ void CircLayout(const int i, int &x, int &y)
       // P-UI-204: the PITCH is the TILE's width (s + 2*margin). MEASURED 10:29: box 43 at
       // pitch 41 - every tile overlapped its neighbour by 2px and the train read as a comb.
       int box = s + 2 * CIRC_BG_MARGIN;
-      int step = box + CIRC_GAP;
+      int step = CircRailStep(box);
+      int lead = CircRailLead(box);
       // P-UI-26: clamp the rail's CROSS axis so buttons never draw half
       // off-chart. One uniform shift for the whole train — never a per-item
       // clamp (that stacks the train, P-UI-13) and never a radius shrink
@@ -2251,12 +2252,12 @@ void CircLayout(const int i, int &x, int &y)
       if(vertical)
       {
          x = MathMax(half, MathMin(cw - half, ox));
-         y = oy + dir * (CIRC_ORB_SIZE / 2 + box / 2 + CIRC_GAP + i * step);
+         y = oy + dir * (lead + i * step);
       }
       else
       {
          y = MathMax(half, MathMin(ch - half, oy));
-         x = ox + dir * (CIRC_ORB_SIZE / 2 + box / 2 + CIRC_GAP + i * step);
+         x = ox + dir * (lead + i * step);
       }
    }
    else if(CircSeatOuter(i))
@@ -2371,8 +2372,9 @@ double SubFanFitRadius(const int ox, const int oy, const int cw, const int ch)
 // (ToolsItemAt) all read these two numbers. A second copy of either is a
 // second grid: P-UI-204 corrected the pitch in the paint only, so the fit walk
 // still promised room for tiles it had measured as seats.
-int SubRailPitch()       { return CIRC_BG_SIZE + CIRC_GAP; }              // tile canvas + gap
-int SubRailFirstCentre() { return CIRC_ORB_SIZE / 2 + CIRC_BG_SIZE / 2 + CIRC_GAP; }
+int SubRailTile()        { return CIRC_BG_SIZE; }   // the TILE this rail PAINTS (52), not the seat
+int SubRailPitch()       { return CircRailStep(SubRailTile()); }          // tile canvas + gap
+int SubRailFirstCentre() { return CircRailLead(SubRailTile()); }          // orb centre -> first tile centre
 
 bool SubRailAxis(const int n, const int ox, const int oy, const int cw, const int ch,
                  int &ux, int &uy, bool &fits)
@@ -2388,12 +2390,12 @@ bool SubRailAxis(const int n, const int ox, const int oy, const int cw, const in
    // law P-UI-204 gave the ring train. SEAT pitch (44+6) drew every 52px disc
    // canvas 2px into its neighbour (a comb) and let the last tile hang past the
    // padded edge, because the fit walk measured a smaller box than the paint.
-   int pitch    = SubRailPitch();
-   int trainLen = SubRailFirstCentre() + (n - 1) * pitch + CIRC_BG_SIZE / 2;   // the last tile's far edge
+   int tile     = SubRailTile();
+   int trainLen = CircRailRun(tile, n);      // the last tile's far edge — one owner
    if(nearLeft || nearRight)
    {
-      int upRoom   = oy - CIRC_PAD - CIRC_BG_SIZE / 2;
-      int downRoom = ch - CIRC_PAD - oy - CIRC_BG_SIZE / 2;
+      int upRoom   = CircRailRoom(oy, tile);
+      int downRoom = CircRailRoom(ch - oy, tile);
       int dir = (upRoom >= downRoom) ? -1 : 1;
       if(dir == -1 && upRoom < trainLen && downRoom >= trainLen) dir = 1;
       else if(dir == 1 && downRoom < trainLen && upRoom >= trainLen) dir = -1;
@@ -2401,8 +2403,8 @@ bool SubRailAxis(const int n, const int ox, const int oy, const int cw, const in
       fits = ((dir == -1) ? upRoom : downRoom) >= trainLen;
       return true;
    }
-   int leftRoom  = ox - CIRC_PAD - CIRC_BG_SIZE / 2;
-   int rightRoom = cw - CIRC_PAD - ox - CIRC_BG_SIZE / 2;
+   int leftRoom  = CircRailRoom(ox, tile);
+   int rightRoom = CircRailRoom(cw - ox, tile);
    int dir = (leftRoom >= rightRoom) ? -1 : 1;
    if(dir == -1 && leftRoom < trainLen && rightRoom >= trainLen) dir = 1;
    else if(dir == 1 && rightRoom < trainLen && leftRoom >= trainLen) dir = -1;
@@ -2582,7 +2584,7 @@ void SubPlaceItem(const int i, int &x, int &y)
       // P-UI-205: the rail's step is the TILE's canvas (52) + gap — the pit the
       // paint (ToolsEnsureBg) writes, so neighbours never share a pixel column.
       // Both numbers come from the one owner above, never from a local copy.
-      int dist = SubRailFirstCentre() + i * SubRailPitch();
+      int dist = CircRailLead(SubRailTile()) + i * CircRailStep(SubRailTile());
       x = ox + ux * dist;
       y = oy + uy * dist;
       return;

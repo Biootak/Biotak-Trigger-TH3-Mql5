@@ -23,7 +23,7 @@
 static string   s_bkOwnKeyId    = "";
 static datetime s_bkOwnKeyT1    = 0;
 static datetime s_bkOwnKeyT2    = 0;
-static datetime s_bkOwnKeyStory = 0;
+static datetime s_bkOwnKeyAnchor = 0;
 static datetime s_bkOwnKeyBar   = 0;
 static double   s_bkOwnKeyTop   = 0.0;
 static double   s_bkOwnKeyBot   = 0.0;
@@ -76,7 +76,12 @@ void BaseKnotOwnerATRPump()
          double p2 = ObjectGetDouble(0, box, OBJPROP_PRICE, 1);
          top = MathMax(p1, p2); bot = MathMin(p1, p2);
       }
-      an = g_bkBoxes[k].storyT;
+      //--- P-BK-115d (2026-10-22, ported from MT4): the anchor is the box' right
+      //--- edge, never storyT. Sync derives storyT FROM the owner this pump
+      //--- publishes, so reading storyT here closes a loop: pump reads story ->
+      //--- publishes ownerTFMin -> Sync rewrites story -> pump re-keys -> the
+      //--- note flickers and the 500 ms memo never holds.
+      an = t2;
    }
    //--- P-BK-115b (2026-10-21) — THE MEASUREMENT IS A QUESTION, SO IT IS ASKED ONCE PER ANSWER.
    //--- MEASURED, by the call graph: this function ran on EVERY 500 ms pump and performed, per
@@ -91,10 +96,10 @@ void BaseKnotOwnerATRPump()
    string   bid    = (k >= 0 ? g_bkBoxes[k].id : "");
    int      own    = (k >= 0 ? g_bkBoxes[k].ownerTFMin : 0);
    if(bid == s_bkOwnKeyId && t1 == s_bkOwnKeyT1 && t2 == s_bkOwnKeyT2 &&
-      top == s_bkOwnKeyTop && bot == s_bkOwnKeyBot && an == s_bkOwnKeyStory &&
+      top == s_bkOwnKeyTop && bot == s_bkOwnKeyBot && an == s_bkOwnKeyAnchor &&
       barNow == s_bkOwnKeyBar && own == s_bkOwnKeyTF) return;
    s_bkOwnKeyId = bid; s_bkOwnKeyT1 = t1; s_bkOwnKeyT2 = t2;
-   s_bkOwnKeyTop = top; s_bkOwnKeyBot = bot; s_bkOwnKeyStory = an;
+   s_bkOwnKeyTop = top; s_bkOwnKeyBot = bot; s_bkOwnKeyAnchor = an;
    s_bkOwnKeyBar = barNow; s_bkOwnKeyTF = own;
    uint bkOwnT0 = GetTickCount();
    double bkOwnPips = BaseKnotToPips(top - bot);
@@ -117,12 +122,14 @@ void BaseKnotOwnerATRPump()
    }
    if(k >= 0 && g_bkBoxes[k].baseTFMin > 0) tf = g_bkBoxes[k].baseTFMin;
    if(k >= 0 && g_bkBoxes[k].ownerTFMin > 0) tf = g_bkBoxes[k].ownerTFMin;   // P-BK-115b: the field this pump owns
-   if(k >= 0) an = g_bkBoxes[k].storyT;
+   //--- P-BK-115d: the ability rows keep the story's anchor (Sync's field), while
+   //--- the owner walk and its witness keep the box edge they were measured at.
+   datetime anStory = (k >= 0 ? g_bkBoxes[k].storyT : 0);
    int down = BaseKnotPrevTFMin(tf);
    for(int i = 0; i < 3 && down > 0; i++)
    {
-      double atr = CalculateWeightedATRAt(CompatTF(down), an);
-      BaseKnotOwnerATRPush(down, an, atr);
+      double atr = CalculateWeightedATRAt(CompatTF(down), anStory);
+      BaseKnotOwnerATRPush(down, anStory, atr);
       down = BaseKnotPrevTFMin(down);
    }
    //--- P-BK-115b: the witness — one line per REAL measurement, zero on a still chart. It names

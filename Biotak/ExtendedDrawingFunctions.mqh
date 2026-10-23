@@ -285,8 +285,6 @@ bool CreateFactorMidZone(const string zoneName,
     config.borderWidth = inpMidZoneBorderWidth;
     
     // Calculate midpoint (for unified system)
-    double midPoint = (upperPrice + lowerPrice) / 2.0;
-    double halfHeight = (upperPrice - lowerPrice) / 2.0;
     
     // Create zone using unified system
     SZoneCreationRequest request = ZoneRequestNew();   // P-UI-131h
@@ -1942,9 +1940,6 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
     // CACHE TRIGGER STATE (optimization)
     //                                                                
     
-    bool triggerEnabled = IsTriggerLevelsEnabled();
-    bool structureEnabled = inpShowStructure;
-    int baseMultiplier = GetValidatedBaseMultiplier(); // Use central validation
     
     //                                                                
     // DRAW LEVELS ABOVE MIDPOINT
@@ -1988,7 +1983,6 @@ void DrawFactorLevelsHarmonic(const string objectPrefix, const double highPrice,
         color levelColor;
         ENUM_LINE_STYLE levelStyle;
         int levelWidth;
-        bool shouldDraw = true;  // Default: draw all levels
         
         int logicalStep = i + 1;  // Step count for Structure levels
         

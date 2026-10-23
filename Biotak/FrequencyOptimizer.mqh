@@ -146,11 +146,9 @@ double ScoreMultiStepResonance(double pA, double pB, double pC, double frequency
     ArrayInitialize(midpointUsed, false);
 
     // First pass: compute all step-midpoint scores
-    struct StepMidScore {
-        int    stepIdx;
-        int    midIdx;
-        double score;
-    };
+    //--- P-BE-07 (ported 2026-10-22): a `StepMidScore` struct stood here and was
+    //--- never instantiated — the pass below fills `stepScores` / `stepBestMid`
+    //--- directly. A dead type is a second shape of the same answer.
 
     // Build score matrix (4 steps   all midpoints)   find top match per step
     double stepScores[4] = {0, 0, 0, 0};

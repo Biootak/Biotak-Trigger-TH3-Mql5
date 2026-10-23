@@ -438,6 +438,20 @@ bool CircRailShape(bool &vertical, int &dir)
    return true;
 }
 
+// P-UI-205 / P-UI-207: THE RAIL'S FOUR NUMBERS — ONE OWNER.
+// The paint (CircLayout), the fit walk (CircRailCapacity), the placement
+// (SubRailAxis) and the hit box all read these; a second copy of any of them is
+// a second grid. MT5 had inlined lead/step/run/room at three sites while MT4
+// named them, so a pitch correction could reach one site and miss two — the
+// exact shape P-UI-204 -> P-UI-205 was. `tile` is the TILE canvas
+// (CIRC_BG_SIZE), never the seat: the seat is what the glyph needs, the tile is
+// what the paint draws and what must fit.
+int CircRailStep(const int tile) { return tile + CIRC_GAP; }                             // one tile centre -> the next
+int CircRailLead(const int tile) { return CIRC_ORB_SIZE / 2 + tile / 2 + CIRC_GAP; }     // orb centre -> first tile centre
+int CircRailRun(const int tile, const int n)                                             // orb centre -> the FAR tile's edge
+{ return CircRailLead(tile) + (n - 1) * CircRailStep(tile) + tile / 2; }
+int CircRailRoom(const int freeRun, const int tile) { return freeRun - CIRC_PAD - tile / 2; }   // the padded run the tiles must end inside
+
 // The train's own fit walk: the longest count whose run at ITS OWN side puts
 // the last TILE's far edge inside the padded bound — the SAME numbers
 // CircLayout paints with (room = dist - CIRC_PAD - box/2, len = ORB/2 + box/2 +
@@ -458,10 +472,9 @@ int CircRailCapacity(const int n, const bool vertical, const int dir)
    {
       int s    = CircBtnSizeForN(k);        // each candidate at ITS OWN side — the paint's own number
       int box  = s + 2 * CIRC_BG_MARGIN;    // P-UI-205: the TILE is what is drawn and what must fit
-      int room = (dir < 0) ? (vertical ? oy : ox) - CIRC_PAD - box / 2
-                           : (vertical ? ch - oy : cw - ox) - CIRC_PAD - box / 2;
-      int len  = CIRC_ORB_SIZE / 2 + box / 2 + CIRC_GAP + (k - 1) * (box + CIRC_GAP);
-      if(len <= room) return k;
+      int room = CircRailRoom((dir < 0) ? (vertical ? oy : ox)
+                                        : (vertical ? ch - oy : cw - ox), box);
+      if(CircRailRun(box, k) <= room) return k;
    }
    return 1;   // the door alone — a degrade to the previous surface, never to nothing (P-UI-13)
 }

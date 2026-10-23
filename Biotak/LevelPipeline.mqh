@@ -858,18 +858,15 @@ void RenderZones(
     // zone object the cache knows, with zero index assumptions and zero
     // ObjectFind probes. The owner lives in VisibilityManager because the F show
     // path writes the same masks and the two must agree (P-PERF-41 there).
-    if(!config.zonesEnabled)
-    {
 #ifdef BIOTAK_RENDER_ENGINE
-        // MT5-ONLY (R-RENDER-ENGINE): the canvas family hides as ONE layer
-        // mask - the object path's per-object walk has nothing to walk here.
-        // P-PERF-117: the staging below is unreachable while the family is
-        // off, so the recs age from this very pass on - the MID ZONES press
-        // must know before it shows them again.
-        if(RBridgeActive()) { RBridgeZoneFamilyMask(false); RBridgeZonesMarkStale(); return; }
+    // MT5-ONLY (R-RENDER-ENGINE): the canvas family hides as ONE layer mask -
+    // the object path's per-object walk has nothing to walk here. P-PERF-117:
+    // the staging below is unreachable while the family is off, so the recs
+    // age from this very pass on - the MID ZONES press must know before it
+    // shows them again.
+    if(!config.zonesEnabled && RBridgeActive()) { RBridgeZoneFamilyMask(false); RBridgeZonesMarkStale(); return; }
 #endif
-        HideAllZoneFamilyObjects(); return;
-    }
+    if(!config.zonesEnabled) { HideAllZoneFamilyObjects(); return; }
 
     bool triggerEnabled = IsTriggerLevelsEnabled();
 

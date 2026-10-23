@@ -644,7 +644,9 @@ int DeleteZonesByPrefix(const string &prefix)
     deletedCount += ObjectsDeleteAll(0, prefix);
     
     // Sub-objects created by CreateZone / CreateOrUpdateZoneBorder
-    static string s_zoneSubs[] = {"_Top", "_Bottom", "_B_Top", "_B_Bottom", "_B_Left", "_B_Right"};
+    //--- P-BE-07 (ported 2026-10-22): a `s_zoneSubs` table stood here, built on
+    //--- every call and read nowhere — the prefix wipe above already took every one
+    //--- of those suffixes, as the note under it has always said.
     // Note: these share the same prefix, so the ObjectsDeleteAll above already captured them.
     // The cache needs to be invalidated for these too.
     if(g_objectCacheSize > 0) {

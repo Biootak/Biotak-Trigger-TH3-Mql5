@@ -2416,7 +2416,6 @@ void OnDeinitHandler(const int reason) {
             ObjectDelete(0, inpObjectPrefix + "TH_Targets_" + tfLabels[i]);
         }
 
-        string symbolName = GetCachedSymbol();
         string chartIdStrLocal = GetCachedChartIdStr();
         // P-UI-56: a parameter change returns the start point to the Input default by
         // clearing the FLAG (the resolver then prefers the Input seed). The PRICE key
@@ -3127,7 +3126,6 @@ void RedrawAllObjects(bool force_redraw=false)
     // handled — one pass per 30-minute block instead of ~240.
     if(boundaryCandidate) s_lastBoundaryBlock = boundaryBlock;
 
-    string s_cachedSymbol = GetCachedSymbol();
     int s_cachedDigits = GetCachedDigits();
     double s_cachedPoint = GetCachedPoint();
     // PERF: Cache Bid/Ask once per redraw frame instead of ~10 SymbolInfoDouble syscalls
@@ -4462,9 +4460,13 @@ void BaseKnotEngPump()
       pips[i] = (plan.eng > 0.0 ? plan.eng : 0.0);
       // P-BK-51: HuntSL rides the same row — the TRex card's Trigger.
       hunts[i] = (plan.hunter > 0.0 ? plan.hunter : 0.0);   // P-TRADEPLAN-DEC: 0.1 pip, same rule
-       tp1[i]  = (plan.tp1 > 0 ? (double)plan.tp1 : 0.0);
-       tp2[i]  = (plan.tp2 > 0 ? (double)plan.tp2 : 0.0);
-       tp3[i]  = (plan.tp3 > 0 ? (double)plan.tp3 : 0.0);
+       // P-BK-120 (2026-10-22, ported from MT4): the legs are the plan's RATIOS on THIS
+       // row's EngSL — the very number `pips[i]` above pushes and the box draws its stop
+       // with — never `plan.tp1..3`, which the plan sizes off the STRUCTURE rung (a
+       // different stop). So a box' ticks, its stop and its R are one ruler.
+       tp1[i]  = (double)TradePlanTPFromEng(plan.eng, 1);
+       tp2[i]  = (double)TradePlanTPFromEng(plan.eng, 2);
+       tp3[i]  = (double)TradePlanTPFromEng(plan.eng, 3);
        pric[i] = (plan.pricicle > 0 ? (double)plan.pricicle : 0.0);
        clas[i] = (plan.classic > 0 ? (double)plan.classic : 0.0);
        // P-BK-106 — THE TYPE'S OWN MEASURE IS BACK ON ATR (P-BK-92's TH reversal retired).
@@ -6826,8 +6828,7 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             g_startPointOverride = -1;   // panel START POINT row: Q restores the dialog seed
             g_customTHStartPrice = inpCustomTHStartPrice;
             string chartIdStr = GetCachedChartIdStr();
-            string symbolName = GetCachedSymbol();
-            GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
+                GlobalVariableDel("Biotak_StepMode_" + chartIdStr);
             // P-UI-67: the reset drops the override through its owner (state + key),
             // so the panel's SS/LS ORDER switch is the answer again.
             SSLSOrderOverrideClear();

@@ -1686,6 +1686,19 @@ void PalClose()
     UIDragBudgetEnd();   // P-UI-33: a mixer gesture cannot outlive its palette (idempotent)
     PalMoveDisarm();     // the title carry ends with its popup (spot stays parked)
     PalHoverRestore();   // P-UI-131h: a close while previewing must not leave the colour picked
+   if(g_PalMixDrag > 0)
+   {
+      // P-UI-81c (ported 2026-10-22): a live mixer owns a chart-lock claim of its
+      // own. Closing the popup under it (Done, Esc, a card switch) used to reset
+      // `g_PalMixDrag` and leave that claim, its drag owner and its coalesced
+      // recents tail behind — the next drag then found the lock held by nobody.
+      // End it through the same release path the pointer's own release uses.
+      g_PalMixDrag = 0;
+      PalRefreshRecents(true);
+      DragReleaseIf(DRAG_PANEL_KNOB);
+      UIDragBudgetEnd();
+      CircUnlockChart();
+   }
    if(!g_PalOpen) return;
    SavePalRecentDurable();   // P-PERF-44: flush the throttled mixer drag tail (own transaction)
    ObjectsDeleteAll(0, g_UI.btnPrefix+"Pal_", 0, -1);
@@ -1934,8 +1947,8 @@ void PalDrawMixer(const int contY)
    int trackX=PalMixTrackX();
    int trackW=PalMixTrackW();
     //--- the four rows, centred in the band the tabs leave above the HEX row
-    const int PITCH=30;
-    int top=PalMixTop();
+    //--- P-BE-07 (ported 2026-10-22): `PITCH`/`top` were built here and read
+    //--- nowhere — `PalMixRowY(i)` already owns `i*30` and `PalMixTop()`.
     for(int i=0;i<3;i++)
     {
        int y=PalMixRowY(i);
@@ -2161,9 +2174,14 @@ void PnlSpecBuild(const int item)
       // read/apply branches all stay (MIDPOINT precedent, P-UI-47).
       // P-LEGATR: the plan's ATR source, APPENDED in its own band (14→16 display
       // rows, still wide). Address 19 renders here and nowhere else.
-      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "PLAN ATR", 2);
+      // P-ANCHOR-LAST-MOVE (2026-10-22, ported from MT4): address 20 (LAST OBJECT) is
+      // OFF THIS CARD. It was never an ATR-label setting: its two consumers are the
+      // BaseKnot note and the leg ruler, and neither reads it (they carry their own
+      // anchors — BaseKnot_Owner.mqh `an = t2`, TH3Tool `LegReadAnchor`). The address,
+      // its read/apply branches and its GV stay (MIDPOINT precedent, P-UI-47); only
+      // the display row is gone, so the band declares ONE row (19) instead of two.
+      PnlSpecAdd(2, PNL_K_SEC, -1, 0, "", "", "PLAN ATR", 1);
       PnlSpecAdd(2, PNL_K_LEGACY, 19, 1, "gauge");
-      PnlSpecAdd(2, PNL_K_LEGACY, 20, 1, "gauge");   // P-ANCHOR-LAST
       // P-UI-70d: the trade card's personalisation band. The four rows below
       // write the SAME settings the group-13 dialog inputs write (ROW GAP ->
       // P-UI-131: the whole TRADE CARD band moved to the GENERAL card (ROW GAP,
@@ -3456,10 +3474,13 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else if(row==16) { kind=4; label="HUNTER COLOR"; }
       else if(row==17) { kind=4; label="TRADE COLOR"; }
       else if(row==18) { kind=4; label="SPREAD COLOR"; }
-       // P-LEGATR: APPENDED (row 19), so rows 0..18 keep their addresses and the
-       // persisted OV_ keys keep their meaning. P-ANCHOR-LAST is row 20.
-      else if(row==19) { kind=1; label="PRE-CP ATR"; }
-      else             { kind=1; label="LAST OBJECT"; }
+      // P-LEGATR: APPENDED (row 19), so rows 0..18 keep their addresses and the
+      // persisted OV_ keys keep their meaning.
+      // P-ANCHOR-LAST-MOVE (2026-10-22): row 20 (LAST OBJECT) left this card, so
+      // PRE-CP ATR is the trailing branch and the card ends at 19 — `row_arms`
+      // counts branches, and the fallthrough's row is "how many branches
+      // preceded it", which is now 19, the same address it already wrote.
+      else             { kind=1; label="PRE-CP ATR"; }
    }
     else if(item==3)   // TH LABELS
     {
@@ -6097,6 +6118,17 @@ int PnlRowLine(const int item,const int row)
    }
    return line;
 }
+//--- P-BE-08 (2026-10-22, ported from MT4) — ONE SEAT, ONE SPELLING.
+//--- `py + PNL_HEAD_H + PnlRowLine(item,row)*PNL_ROW_H` stood eleven times: the row
+//--- paint, the update path and nine hit tests (pure, track, switch, dropdown rect,
+//--- chips, close, colour-add, band, dual). If the head's height or the row pitch
+//--- ever moves, the paint follows and a hit rect written the old way stays on the
+//--- old line — the "hit is not on the skin" class P-UI-209/212 fixed one site at a
+//--- time. This is the only owner; every reader asks it.
+int PnlRowY(const int item,const int row,const int py)
+{
+   return py + PNL_HEAD_H + PnlRowLine(item,row)*PNL_ROW_H;
+}
 int PnlPairRows(const int item)   // total pair-lines (height + skin select)
 {
    if(!PnlIsWide(item)) return PnlRowsCount(item);
@@ -6270,7 +6302,7 @@ void PnlDdRect(const int item,const int row,int &x,int &y,int &w,int &h)
    w=MathMax(104,MathMin(190,maxLen*7+54));
    int px=PnlRowBaseX(item,row), py=g_PnlY[item];
    x=px+PNL_WEL-PNL_PAD_X-w;
-   y=py+PNL_HEAD_H+PnlRowLine(item,row)*PNL_ROW_H+PNL_CTL_Y;
+   y=PnlRowY(item,row,py)+PNL_CTL_Y;
    h=PNL_CTL_H;
 }
 string PnlDdOptText(const int item,const int row)
@@ -6567,7 +6599,7 @@ bool PnlCsetHit(const int mx,const int my,int &item,int &row,int &setRow)
    if(g_PnlOpen < 0) return false;
    int it = g_PnlOpen;
    if(!PnlSpecCard(it)) return false;
-   int px = g_PnlX[it], py = g_PnlY[it];
+   int py = g_PnlY[it];
    int n  = PnlRowsCount(it);
    for(int r=0;r<n;r++)
    {
@@ -6576,7 +6608,7 @@ bool PnlCsetHit(const int mx,const int my,int &item,int &row,int &setRow)
       int m = PnlRowMembers(it,r);
       int total = m*PNL_CSET_W + (m-1)*PNL_CSET_GAP;
       int x0 = bx + (PNL_WEL - total)/2;
-      int ry = py + PNL_HEAD_H + PnlRowLine(it,r)*PNL_ROW_H;
+      int ry = PnlRowY(it,r,py);
       for(int i=0;i<m;i++)
       {
          int cx = x0 + i*(PNL_CSET_W+PNL_CSET_GAP);
@@ -6615,7 +6647,7 @@ void PnlChipsGeom(const int item,const int row,int &x0,int &cy,int &cw,int &ch,
    //--- P-UI-179 (2026-10-20): the chips ride the SWATCH STRIP's line, not the
    //--- row's top line. The caption sits on the top line (ry+PNL_CAP_Y) and the
    //--- strip was drawn on the SAME line - so the caption lay on the swatches.
-   cy=g_PnlY[item]+PNL_HEAD_H+PnlRowLine(item,row)*PNL_ROW_H+PNL_QSW_Y;
+   cy=PnlRowY(item,row,g_PnlY[item])+PNL_QSW_Y;
 }
 //--- the value a tap on `cell` writes. The ONE owner of the two tables' tap
 //--- semantics (the press chain reads this, never its own copy).
@@ -6693,15 +6725,18 @@ bool PnlBandHit(const int mx,const int my,int &item,int &row)
    if(g_PnlOpen < 0) return false;
    int it = g_PnlOpen;
    if(!PnlSpecCard(it)) return false;
-   int px = g_PnlX[it], py = g_PnlY[it];
+   int py = g_PnlY[it];
    int n  = PnlRowsCount(it);
    for(int r=0;r<n;r++)
    {
       if(PnlRowKind(it,r) != PNL_K_SEC) continue;
       int bx = PnlRowBaseX(it,r);
-      int ry = py + PNL_HEAD_H + PnlRowLine(it,r)*PNL_ROW_H;
+      int ry = PnlRowY(it,r,py);
       // WIDE: bands span both columns — hit the whole card width
-      if(mx >= bx+PNL_PAD_X-6 && mx <= bx+PnlCardW(it)-PNL_PAD_X+6 && my >= ry+5 && my <= ry+37)
+      // P-UI-209 (ported 2026-10-22): the band's hit rect IS its skin. It used to be
+      // `bx+PAD_X-6 .. bx+cardW-PAD_X+6` by `ry+5 .. ry+37`, i.e. 6px narrower on each
+      // side and 5px down — a press on the band's own left/right edge fell through.
+      if(mx >= bx && mx <= bx+PnlCardW(it) && my >= ry && my <= ry+PNL_ROW_H-1)
       {
          item=it; row=r;
          return true;
@@ -6718,7 +6753,7 @@ bool PnlDualHit(const int mx,const int my,int &item,int &row,int &cell)
    if(g_PnlOpen < 0) return false;
    int it = g_PnlOpen;
    if(!PnlSpecCard(it)) return false;
-   int px = g_PnlX[it], py = g_PnlY[it];
+   int py = g_PnlY[it];
    int n  = PnlRowsCount(it);
    for(int r=0;r<n;r++)
    {
@@ -6726,7 +6761,7 @@ bool PnlDualHit(const int mx,const int my,int &item,int &row,int &cell)
       int bx = PnlRowBaseX(it,r);
       int cells = PnlDualCells(it,r);
       int x0 = bx + PNL_WEL - PNL_PAD_X - PnlDualTotalW(it,r);
-      int ry = py + PNL_HEAD_H + PnlRowLine(it,r)*PNL_ROW_H;
+      int ry = PnlRowY(it,r,py);
       for(int i=0;i<cells;i++)
       {
          int cx = x0 + PnlDualCellX(it,r,i);
@@ -6747,7 +6782,7 @@ bool PnlColorAddHit(const int mx,const int my,int &item,int &row)
    if(g_PnlOpen < 0) return false;
    int it = g_PnlOpen;
    if(!PnlSpecCard(it)) return false;
-   int px = g_PnlX[it], py = g_PnlY[it];
+   int py = g_PnlY[it];
    int n  = PnlRowsCount(it);
    for(int r=0;r<n;r++)
    {
@@ -6755,7 +6790,7 @@ bool PnlColorAddHit(const int mx,const int my,int &item,int &row)
       int bx = PnlRowBaseX(it,r);
       int ax = bx + PNL_PAD_X + PNL_QSW_PREV + PNL_QSW_GAP
                   + PNL_QSW_N*(PNL_QSW_W+PNL_QSW_GAP);
-      int ry = py + PNL_HEAD_H + PnlRowLine(it,r)*PNL_ROW_H;
+      int ry = PnlRowY(it,r,py);
       if(mx >= ax-4 && mx <= ax+PNL_QSW_ADD+4 && my >= ry+14 && my <= ry+44)
       {
          item=it; row=r;
@@ -6776,7 +6811,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
 {
    int kind; string label,unit,opts; int minV,maxV; double step;
    PnlRowDef(item,row,kind,label,minV,maxV,step,unit,opts);
-   int ry  = py + PNL_HEAD_H + PnlRowLine(item,row)*PNL_ROW_H;
+   int ry  = PnlRowY(item,row,py);
    int acc = PnlCardAccent(item);
    color a1 = PnlAccentA1(acc);
    // WIDE: full-width elements span the whole card; half-column rows only
@@ -8270,6 +8305,7 @@ void PnlPublishCover()
 
 void PnlCloseAll()
 {   BkFlushTextEdit();   // close = apply (TV Ok semantics)
+   PnlReapStaleGestures(false);   // P-UI-81 (ported 2026-10-22): a close must not leave a latch
    g_BkTextFocus = false;
    bool wasOpen = (g_PnlOpen >= 0);
    // P-PERF-47: ONE FAMILY WIPE INSTEAD OF FOURTEEN PER-ITEM TEARDOWNS.
@@ -8511,7 +8547,13 @@ int PnlDdHit(const int mx,const int my)
    if(g_PnlDdItem<0) return -1;
    if(mx<g_PnlDdX || mx>g_PnlDdX+g_PnlDdW || my<g_PnlDdY || my>g_PnlDdY+g_PnlDdH)
    { PnlDdClose(); return -1; }
-   int idx=ClampInt((my-(g_PnlDdY+PNL_DD_PAD))/PNL_DD_ROW_H,0,MathMax(0,g_PnlDdN-1));
+   const int local = my-(g_PnlDdY+PNL_DD_PAD);
+   // P-UI-79b (ported 2026-10-22): the popup's own top pad is NOT a row. Without
+   // this guard `local` went negative, ClampInt folded it to 0, and a press in the
+   // pad (or above the list) silently picked the FIRST option — a click that hit
+   // nothing changed the setting.
+   if(local<0 || local>=g_PnlDdN*PNL_DD_ROW_H) return REFRESH_NONE;
+   int idx=ClampInt(local/PNL_DD_ROW_H,0,MathMax(0,g_PnlDdN-1));
    int item=g_PnlDdItem, row=g_PnlDdRow;
    return PnlApplyOption(item,row,idx);
 }
@@ -9021,7 +9063,7 @@ bool PnlKnobHit(const int mx,const int my,int &item,int &row)
 {
    item=-1; row=-1;
    if(g_PnlOpen < 0) return false;
-   int px=g_PnlX[g_PnlOpen], py=g_PnlY[g_PnlOpen];
+   int py=g_PnlY[g_PnlOpen];
    int rowsCount=PnlRowsCount(g_PnlOpen);
    for(int r=0;r<rowsCount;r++)
    {
@@ -9033,7 +9075,7 @@ bool PnlKnobHit(const int mx,const int my,int &item,int &row)
        // P-UI-131d: derived from the track's own centre, never a 42px-row literal —
        // the old `+21` was PNL_TRK_Y+PNL_TRK_H/2-PNL_KNOB_W/2 frozen for TRK_Y 27, so
        // moving the track moved the knob's GRAB ZONE (or not) by accident.
-       int knobY=py+PNL_HEAD_H+PnlRowLine(g_PnlOpen,r)*PNL_ROW_H
+       int knobY=PnlRowY(g_PnlOpen,r,py)
                  +PNL_TRK_Y+PNL_TRK_H/2-PNL_KNOB_W/2;
       // generous grab zone: knob ±half width sideways, tight vertically — and the
       // floor is the ROW's own (P-UI-131d: knobY moved with the track, so `+2` past
@@ -9053,7 +9095,7 @@ bool PnlTrackHit(const int mx,const int my,int &item,int &row)
 {
    item=-1; row=-1;
    if(g_PnlOpen < 0) return false;
-   int px=g_PnlX[g_PnlOpen], py=g_PnlY[g_PnlOpen];
+   int py=g_PnlY[g_PnlOpen];
    int rowsCount=PnlRowsCount(g_PnlOpen);
    for(int r=0;r<rowsCount;r++)
    {
@@ -9061,7 +9103,7 @@ bool PnlTrackHit(const int mx,const int my,int &item,int &row)
       PnlRowDef(g_PnlOpen,r,kind,label,minV,maxV,step,unit,opts);
        if(kind!=0) continue;
        int trackX=PnlRowBaseX(g_PnlOpen,r)+PNL_TRACK_X;
-       int trackY=py+PNL_HEAD_H+PnlRowLine(g_PnlOpen,r)*PNL_ROW_H+PNL_TRK_Y;
+       int trackY=PnlRowY(g_PnlOpen,r,py)+PNL_TRK_Y;
       if(mx >= trackX && mx <= trackX+PNL_TRACK_W &&
          my >= trackY-8 && my <= trackY+PNL_TRK_H+5)
       {
@@ -9078,7 +9120,7 @@ bool PnlSwitchHit(const int mx,const int my,int &item,int &row)
 {
    item=-1; row=-1;
    if(g_PnlOpen < 0) return false;
-   int px=g_PnlX[g_PnlOpen], py=g_PnlY[g_PnlOpen];
+   int py=g_PnlY[g_PnlOpen];
    int rowsCount=PnlRowsCount(g_PnlOpen);
    for(int r=0;r<rowsCount;r++)
    {
@@ -9086,7 +9128,7 @@ bool PnlSwitchHit(const int mx,const int my,int &item,int &row)
       PnlRowDef(g_PnlOpen,r,kind,label,minV,maxV,step,unit,opts);
        if(kind!=1) continue;
        int swX=PnlRowBaseX(g_PnlOpen,r)+PNL_SW_X-PNL_SW_PAD;
-       int swY=py+PNL_HEAD_H+PnlRowLine(g_PnlOpen,r)*PNL_ROW_H+PNL_SW_Y-PNL_SW_PAD;
+       int swY=PnlRowY(g_PnlOpen,r,py)+PNL_SW_Y-PNL_SW_PAD;
       if(mx >= swX-5 && mx <= swX+PNL_SW_W+2*PNL_SW_PAD+5 &&
          my >= swY-5 && my <= swY+PNL_SW_H+2*PNL_SW_PAD+5)
       {
@@ -9131,9 +9173,14 @@ bool PnlClosePressHit(const int mx,const int my)
       my >= py+15-PNL_XBTN_PAD && my <= py+15+PNL_XBTN_VIS+PNL_XBTN_PAD)
       return true;
    // Done button (footer)
+   // P-UI-130b (ported 2026-10-22): the pill is drawn at `PnlFootBtnW("Done")` and its
+   // glow adds `PNL_BTN_PAD` all round; this hit read a fixed `PNL_BTN_W` with no pad,
+   // so the right part of the visible button was dead and the pad outside it was not.
    int fy = py+PNL_HEAD_H+PnlPairRows(it)*PNL_ROW_H;
-   int dx = px+cw-PNL_PAD_X-PNL_BTN_W;
-   if(mx >= dx && mx <= dx+PNL_BTN_W && my >= fy+10 && my <= fy+10+PNL_BTN_H)
+   int bw = PnlFootBtnW("Done");
+   int dx = px+cw-PNL_PAD_X-bw;
+   if(mx >= dx-PNL_BTN_PAD && mx <= dx+bw+PNL_BTN_PAD &&
+      my >= fy+10-PNL_BTN_PAD && my <= fy+10+PNL_BTN_H+PNL_BTN_PAD)
       return true;
    return false;
 }
@@ -10172,7 +10219,7 @@ void PnlUpdateRow(const int item,const int row)
    if(item == 13) { BkMiniRefresh(); return; }   // TV strip — one whole-toolbar
                                                  // repaint, never row-level
    int px=PnlRowBaseX(item,row);
-   int ry=g_PnlY[item]+PNL_HEAD_H+PnlRowLine(item,row)*PNL_ROW_H;
+   int ry=PnlRowY(item,row,g_PnlY[item]);
    int kind=0; string label="",unit="",opts="";
    int minV=0,maxV=0; double step=1;
    PnlRowDef(item,row,kind,label,minV,maxV,step,unit,opts);
@@ -10292,7 +10339,6 @@ void PnlUpdateRow(const int item,const int row)
     if(kind==1)   // pill switch — reswap the face + chip, grow/prune rail+wash
     {
        bool on=(val>0.5);
-       int acc=PnlCardAccent(item);
        string sw=PnlName(item,row,"SW");
        if(ObjectFind(0,sw)>=0)
        {
@@ -10406,8 +10452,6 @@ void PnlUpdateRow(const int item,const int row)
       }
       else   // segmented pills: restyle every segment
       {
-         int gap=4;
-         int segW=(PNL_WEL-2*PNL_PAD_X-(n-1)*gap)/n;
          for(int i=0;i<n;i++)
          {
             string seg=PnlName(item,row,"C"+IntegerToString(i));
@@ -11403,27 +11447,42 @@ void PnlRestoreSaved()
 //--- tab that was open with its collapse, and the pin. What deliberately does
 //--- NOT: the pickers, the colour board and the palette popup — transient
 //--- popups of the surface, reopened by a tap, not by a layout.
+//--- P-UI-146d (2026-10-22) — A MISS IS NOT A VERDICT. MT5's copy retired itself on
+//--- the FIRST call (`done = true;` before any work), so one early frame - before the
+//--- drawing is enumerable or before the window can hold the strip - left the strip
+//--- shut for the whole life of the chart. MT4 learned this as P-UI-146d: the miss is
+//--- retried a bounded five times, one second apart, and a drawing that is really gone
+//--- (or an open that keeps failing) stops at the same ceiling instead of scanning
+//--- forever. `done` now means "settled", never "tried".
+//--- P-UI-146c — THE PIN IS WRITTEN BEFORE THE OPEN. DrawStripOpenAt keeps the pin it
+//--- finds (`keepPin`) and paints at the END of that same pass, so a pin restored after
+//--- the open leaves the first frame's icon and rim on the OLD state - and the `gid==0`
+//--- seat has no repaint at all, so that wrong frame would be the permanent one.
 void DrawStripStateRestore()
 {
    static bool done = false;
+   static int tries = 0;
+   static uint lastTry = 0;
    if(done) return;
-   done = true;
-   if(s_dsOpen) return;                       // a click already opened one — it wins
+   if(tries >= 5) { done = true; return; }
+   const uint nowMs = GetTickCount();
+   if(lastTry != 0 && (nowMs - lastTry) < 1000) return;
+   if(s_dsOpen) { done = true; return; }      // a click already opened one - it wins
    const string sfx = "DS" + IntegerToString(Period());
    string kO = GetGVName(sfx + "O");
-   if(!GlobalVariableCheck(kO)) return;
-   if(GlobalVariableGet(kO) < 0.5) return;    // it was left shut: nothing to bring back
+   if(!GlobalVariableCheck(kO)) { done = true; return; }
+   if(GlobalVariableGet(kO) < 0.5) { done = true; return; }   // it was left shut: nothing to bring back
    string stamp = "Biotak_LastTFSwitch_" + GetCachedChartIdStr();
    datetime nowT = TimeCurrent();
    if(nowT > 0 && GlobalVariableCheck(stamp))
    {
       datetime lastSw = (datetime)GlobalVariableGet(stamp);
-      if(lastSw > 0 && (nowT - lastSw) <= 20) return;   // a switch just closed it: stay closed
+      if(lastSw > 0 && (nowT - lastSw) <= 20) { done = true; return; }   // a switch just closed it: stay closed
    }
    string kN = GetGVName(sfx + "N");
-   if(!GlobalVariableCheck(kN)) return;
+   if(!GlobalVariableCheck(kN)) { done = true; return; }
    const double want = GlobalVariableGet(kN);
-   if(want < 0.0) return;
+   if(want < 0.0) { done = true; return; }
    string target = "";
    const int total = ObjectsTotal(0, -1, -1);
    for(int i = 0; i < total; i++)
@@ -11436,18 +11495,31 @@ void DrawStripStateRestore()
       target = nm;
       break;
    }
-   if(target == "") return;                    // the drawing is gone or renamed: stay shut
-   if(!DrawStripOpen(target)) return;
+   if(target == "")
+   {
+      tries++;                                // not enumerable YET - ask again in a second
+      lastTry = nowMs;
+      return;
+   }
+   bool pin = false;
+   string kP = GetGVName(sfx + "P");
+   if(GlobalVariableCheck(kP)) pin = (GlobalVariableGet(kP) > 0.5);
+   const bool oldPin = s_dsPinned;
+   s_dsPinned = pin;
+   if(!DrawStripOpen(target))
+   {
+      s_dsPinned = oldPin;                    // the open failed: leave the pin as it was
+      tries++;
+      lastTry = nowMs;
+      return;
+   }
+   done = true;
    int g = 0;
    string kG = GetGVName(sfx + "G");
    if(GlobalVariableCheck(kG)) g = (int)GlobalVariableGet(kG);
    bool col = false;
    string kC = GetGVName(sfx + "C");
    if(GlobalVariableCheck(kC)) col = (GlobalVariableGet(kC) > 0.5);
-   bool pin = false;
-   string kP = GetGVName(sfx + "P");
-   if(GlobalVariableCheck(kP)) pin = (GlobalVariableGet(kP) > 0.5);
-   s_dsPinned = pin;
    if(g > 0)
       DrawStripGearRestoreTab(g, col);   // the strip's OWN door: a repaint is a
                                          // REQUEST the strip spends (P-PAL-19f),
