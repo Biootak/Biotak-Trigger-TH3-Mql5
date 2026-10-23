@@ -1266,6 +1266,17 @@ bool DrawStripPalTargetIsLevel() { return (s_dsPalLevel >= 0); }
 int    DrawStripPalAsked()   { if(s_dsPalAskSlot == DSTRIP_PICK_NONE) return -1;
                                int a = s_dsPalAskSlot; s_dsPalAskSlot = DSTRIP_PICK_NONE; return a; }
 string DrawStripPalTargetObj()  { return s_dsPalObj; }
+//--- P-ANCHOR-LAST-MOVE (2026-10-22, ported from MT4 2026-10-23) — THE STRIP'S SECOND
+//--- ONE-WAY BRIDGE, the same shape as the palette's above. The anchor seat changes an
+//--- ATR the label/level/plan pass reads, and `RefreshDisplay` (BiotakKit, include 128)
+//--- is unreachable from here (this file is include 99) — so the press leaves a REQUEST
+//--- and the entry's OnChartEvent, the first place that sees both sides, performs it.
+//--- MT5's `RequestUISync` is NOT this: its drain settles the ring light and the open
+//--- card's switch bitmaps, and never runs the ATR/label/level/plan pass — which is the
+//--- difference the MT4 build closed on 2026-10-22 (LAST OBJECT flipped, nothing moved).
+static bool s_dsRefreshAsk = false;      // one pending full pass, one press wide
+void DrawStripRefreshAsk()  { s_dsRefreshAsk = true; }
+bool DrawStripRefreshTake() { bool f = s_dsRefreshAsk; s_dsRefreshAsk = false; return f; }
 //--- P-PAL-19: the strip's own rect, for the one caller that places the popup beside
 //--- it (the entry's bridge). Three lines, because a bridge that cannot say WHERE the
 //--- strip is would park the palette in a corner — P-UI-98r's own finding, one surface
@@ -1446,16 +1457,10 @@ void DrawStripPublishRect()
       if(s_dsGEY - DSTRIP_SKIN_M < y1) y1 = s_dsGEY - DSTRIP_SKIN_M;
       if(s_dsGEX + s_dsGearW0 + DSTRIP_SKIN_M > x2) x2 = s_dsGEX + s_dsGearW0 + DSTRIP_SKIN_M;
       if(s_dsGEY + s_dsGearH + DSTRIP_SKIN_M > y2) y2 = s_dsGEY + s_dsGearH + DSTRIP_SKIN_M;
-   }
-   //--- P-DRAW-48: the COLOUR BOARD is occupancy too — a card placed by the
-   //--- neighbours must clear it, and a fresh board must clear them.
-   if(DrawStripIsColorSlot(s_dsPicker) && s_dsBW > 0 && s_dsBH > 0)
-   {
-      if(s_dsBX - DSTRIP_SKIN_M < x1) x1 = s_dsBX - DSTRIP_SKIN_M;
-      if(s_dsBY - DSTRIP_SKIN_M < y1) y1 = s_dsBY - DSTRIP_SKIN_M;
-      if(s_dsBX + s_dsBW + DSTRIP_SKIN_M > x2) x2 = s_dsBX + s_dsBW + DSTRIP_SKIN_M;
-      if(s_dsBY + s_dsBH + DSTRIP_SKIN_M > y2) y2 = s_dsBY + s_dsBH + DSTRIP_SKIN_M;
-   }
+   }//--- P-PAL-21 (2026-10-02, parity with MT4): the colour-board occupancy clause
+//--- is RETIRED, not lost — `s_dsBW/s_dsBH` are 0 at every write in the tree, so
+//--- the clause could never fire. MT4 deleted it; this tree kept a dead branch.
+
    g_UIStripRX = x1;
    g_UIStripRY = y1;
    g_UIStripRW = x2 - x1;
@@ -1771,13 +1776,10 @@ bool DrawStripPointInside(const int mx, const int my)
    //--- (the panel is where the user was just working).
    if(s_dsGear != 0 && s_dsGearW0 > 0 && s_dsGearH > 0 &&
       mx >= s_dsGEX - m && mx <= s_dsGEX + s_dsGearW0 + m &&
-      my >= s_dsGEY - m && my <= s_dsGEY + s_dsGearH + m) return true;
-   //--- P-DRAW-48: the COLOUR BOARD is our surface too — it can float anywhere,
-   //--- including over the chart, and a click on its plate is not a click on the
-   //--- chart (it would dismiss the very strip the board belongs to).
-   if(DrawStripIsColorSlot(s_dsPicker) && s_dsBW > 0 && s_dsBH > 0 &&
-      mx >= s_dsBX - m && mx <= s_dsBX + s_dsBW + m &&
-      my >= s_dsBY - m && my <= s_dsBY + s_dsBH + m) return true;
+      my >= s_dsGEY - m && my <= s_dsGEY + s_dsGearH + m) return true;//--- P-PAL-21 (2026-10-02, parity with MT4): the COLOUR BOARD's own surface
+//--- clause is retired with the board (`s_dsBW/s_dsBH` are 0 at every write, so
+//--- it could never answer true). MT4 deleted it; this tree kept a dead branch.
+
    //--- P-PAL-20: AND WHATEVER ELSE THIS STRIP OWNS — the popups the entry's bridge
    //--- republished this event (the cards' palette, opened by a colour cell). Same
    //--- law as the two clauses above, one registry instead of one branch per popup.
@@ -2736,34 +2738,10 @@ int DrawStripColorHoverCellAt(const int mx, const int my)
           if(mx >= x && mx <= x + s_dsGGW[g] && my >= y && my <= y + s_dsGGH[g]) return g;
 
       }
-   }
-   //--- P-DRAW-48: the colour board's bands are the BOARD's (its own origin), so
-   //--- the hover must read them there — the strip's origin previewed the colour of
-   //--- a phantom cell one row away (reported: the pointer sits on one colour and
-   //--- the drawing takes another).
-   if(DrawStripIsColorSlot(s_dsPicker) && s_dsBW > 0 && s_dsBH > 0)
-   {
-      // TV parity board: the grid's own cells, then the RECENT band's.
-      for(int r = 0; r < s_dsPN; r++)
-      {
-          int x = s_dsBX + DSTRIP_PAD + (r % BIOPICK_COLS) * (DSTRIP_PICK_CELL + DSTRIP_PICK_GAP);
-          int y = s_dsBY + s_dsPY[r] + (DSTRIP_PICK_ROW - DSTRIP_PICK_CELL) / 2;
-          if(mx >= x && mx <= x + DSTRIP_PICK_CELL && my >= y && my <= y + DSTRIP_PICK_CELL)
-
-            return DSTRIP_HOVER_POP_BASE + r;
-      }
-      if(s_dsPRecY >= 0)
-      {
-         int ry = s_dsBY + s_dsPRecY + (DSTRIP_PICK_ROW - DSTRIP_PICK_CELL) / 2;
-         for(int i = 0; i < s_dsRecentN; i++)
-         {
-            int rx = s_dsBX + DSTRIP_PAD + DSTRIP_PREC_LW + i * (DSTRIP_PICK_CELL + DSTRIP_PICK_GAP);
-            if(mx >= rx && mx <= rx + DSTRIP_PICK_CELL && my >= ry && my <= ry + DSTRIP_PICK_CELL)
-               return DSTRIP_HOVER_REC_BASE + i;
-         }
-      }
-   }
-   return -1;
+   }//--- P-PAL-21 (2026-10-02, parity with MT4): the colour board's hover bands are
+//--- retired with the board — `s_dsBW/s_dsBH` are 0 at every write, so this walk
+//--- could never return a cell. MT4 deleted it; this tree kept a dead branch.
+return -1;
 }
 
 color DrawStripColorHoverValue(const int cell)
@@ -8667,8 +8645,11 @@ bool DrawStripTap(const int idx, const string tap)
       DrawStripPaint();
       //--- the SAME-PASS half: the ATR this switch changes is read by the label/level/
       //--- plan pass, which a bare `ChartRedraw` does not run — so the press asks the
-      //--- ONE dispatcher the cards use. One press, one full refresh.
-      RequestUISync();
+      //--- ONE dispatcher the cards use, through the entry's bridge (BiotakKit is
+      //--- include 128 and this file is 99). One press, one full pass in the SAME
+      //--- event; a still frame asks nothing and pays nothing.
+      DrawStripRefreshAsk();
+      RequestUISync();   // ...and the ring light / open card's switch settle in the drain
       ChartRedraw();
       return true;
    }
@@ -9577,17 +9558,10 @@ int DrawStripGripWhich(const int mx, const int my)
    //--- P-DRAW-66: the identity group IS one handle — grip, its air and the name,
    //--- with no dead pixel between them (the old pair left the 4px gap ownerless).
    if(my >= rowY && my <= rowY + DSTRIP_CELL &&
-      mx >= s_dsX + DSTRIP_PAD && mx <= s_dsX + s_dsBadgeX + s_dsBadgeW) return 1;
-    // P-DRAW-48: the BOARD's own header carries the BOARD (its two seats — pin
-    // and close — excluded). It is asked FIRST: the board can sit anywhere,
-    // including over the strip, and a press on ITS header is never the strip's.
-    if(DrawStripIsColorSlot(s_dsPicker) && s_dsBW > 0 && s_dsBH > 0 && s_dsPHeadY >= 0)
-    {
-       int hy0 = s_dsBY + s_dsPHeadY, hy1 = hy0 + DSTRIP_BOARD_HDR;
-       int xx0 = s_dsBX + s_dsBW - DSTRIP_PAD - 2 * DSTRIP_PHEAD_XW - 2 - 2;
-       if(my >= hy0 && my <= hy1 && mx >= s_dsBX && mx <= s_dsBX + s_dsBW && mx < xx0) return 3;
-    }
-    return 0;
+      mx >= s_dsX + DSTRIP_PAD && mx <= s_dsX + s_dsBadgeX + s_dsBadgeW) return 1;//--- P-PAL-21 (2026-10-02, parity with MT4): the BOARD's own header clause is
+//--- retired with the board (`s_dsBW/s_dsBH` are 0 at every write, so the clause
+//--- never fired). MT4 deleted it; this tree kept a dead branch.
+return 0;
 }
 #endif // DRAW_STRIP_TAP_MQH// DrawStrip_Router.mqh - DrawStrip split 2026-09-29: exact lines 7019-7969 of DrawStrip.mqh, byte-identical, zero renames.
 #ifndef DRAW_STRIP_ROUTER_MQH

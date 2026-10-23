@@ -502,6 +502,15 @@ void OnChartEvent(const int id,
   // the palette's existence beyond this handshake.
   int palAsk = DrawStripPalAsked();
   if(palAsk >= 0) PalOpenDraw(DrawStripPlateX(), DrawStripPlateY(), DrawStripPlateW());
+  // P-ANCHOR-LAST-MOVE (2026-10-22) — the strip's SECOND one-way bridge, same shape as
+  // the line above. The anchor seat changes an ATR that the label/level/plan pass reads,
+  // and `RefreshDisplay` (BiotakKit, include 128) is unreachable from the strip (99).
+  // The press leaves a request; this is the first place that sees both sides, so it
+  // performs it. One press -> one full pass in the SAME event; a still frame leaves the
+  // request empty and pays nothing. MT5's `UISyncDrain` at the tail of this handler is
+  // not a substitute: it settles the ring light and the open card's switch bitmaps and
+  // never runs that pass, so without this line LAST OBJECT flipped and nothing moved.
+  if(DrawStripRefreshTake()) RefreshDisplay(REFRESH_ALL);
   // P-PAL-20 (2026-10-02) — THE LEDGER, REWRITTEN WHOLE, EVERY EVENT, AND WRITTEN
   // LAST. This is the same bridge's second direction and it exists for one reason: a
   // colour pick is a release on TWO channels, `HandleUIChartEvent` serves the palette

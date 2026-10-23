@@ -82,6 +82,41 @@ Copy-Item (Join-Path $iconSrc '*.bmp') $iconDst -Force
 $have = @(Get-ChildItem $iconDst -Filter *.bmp -ErrorAction SilentlyContinue).Count
 $pre += "icons: $have/$want"
 
+# --- build identity -------------------------------------------------------
+# MT4's tools/gen-build-hash.js owns Biotak/BuildHash.mqh and drops the same
+# hash at <terminal>\MQL4\Files\th3-src.txt on every build, so a chart can
+# contradict its own banner (TH3SourceStampTail -> srcfile=... match=yes|NO).
+# This tree had neither: the hash was frozen at commit cf10c2d and every MT5
+# build printed it, which is the eight-day confusion P-BUILD-08 ended on MT4.
+# Ported 2026-10-23 - regenerate before the compile, then publish the stamp
+# beside THIS terminal. A missing node is a warning, never a failed build.
+$stampLine = $null
+if ([System.IO.Path]::GetExtension($src).ToLower() -eq '.mq5') {
+    $gen = Join-Path $root 'tools\gen-build-hash.js'
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if ((Test-Path $gen) -and $node) {
+        try {
+            $line = @(& node $gen 2>&1 | ForEach-Object { "$_" }) | Select-Object -Last 1
+            if ($line -match '^hash=[0-9a-f]{16} short=[0-9a-f]{8} files=\d+') {
+                $stampLine = $line.Trim()
+                $pre += "buildhash: $stampLine"
+            } else {
+                $pre += "buildhash: generator produced no hash ($line)"
+            }
+        } catch {
+            $pre += "buildhash: generator failed ($($_.Exception.Message))"
+        }
+    } else {
+        $pre += "buildhash: node or tools/gen-build-hash.js missing - BuildHash.mqh left as-is"
+    }
+    # FileOpen(FILE_TXT|FILE_ANSI) is what BuildConfig reads; plain ASCII, one line.
+    $stampPath = Join-Path $terminalRoot 'MQL5\Files\th3-src.txt'
+    if ($stampLine) {
+        Set-Content -Path $stampPath -Value $stampLine -Encoding ASCII
+        $pre += "stamp: th3-src.txt = $stampLine"
+    }
+}
+
 # Names carry spaces ("Biotak Trigger TH3"); Start-Process splits ArgumentList on
 # whitespace, so the log path must be quote-free. Sanitise it.
 $name = [System.IO.Path]::GetFileNameWithoutExtension($src) -replace '\s+', '-'

@@ -1020,9 +1020,21 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // object-path A/B; this branch turns off with it. Declared before the
     // early-fail path below, which drops the base's canvas rows with its
     // objects.
+    // R-MASK-SCOPE (2026-10-23) — THE PATTERN IS A DRAWING, NOT A LADDER.
+    // The canvas engine's licence in this fork is the MT5-only mask for the
+    // LEVELS ladder and the HTF candles, and nothing else (user rule,
+    // 2026-10-23). The TH3/ABCD pattern is an object the user grabs, drags and
+    // deletes, so it paints REAL OBJECTS here exactly as MT4 does; the bridge
+    // branch below stays compiled for the A/B sweep but is never taken. Define
+    // BIOTAK_RENDER_PATTERNS (beside BIOTAK_RENDER_ENGINE) to put the pattern
+    // back on the canvas.
     bool rbr = false;
 #ifdef BIOTAK_RENDER_ENGINE
+    #ifdef BIOTAK_RENDER_PATTERNS
     rbr = RBridgeActive();
+    #else
+    rbr = false;
+    #endif
 #endif
     bool isActive = (g_activeABCDPattern == mainObjName);
     
