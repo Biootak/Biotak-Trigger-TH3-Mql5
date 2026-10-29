@@ -6,20 +6,15 @@
 //| makes it 240%..360%. That TF is the knot's time now, so the pump  |
 //| measures it first, recounts the base on that TF, and publishes    |
 //| both before the ability rows are asked for.                      |
-//|                                                                  |
-//| P-BK-115b (2026-10-21) — THE MEASUREMENT IS A QUESTION, SO IT IS  |
-//| ASKED ONCE PER ANSWER (see the key below): the pump ran on every  |
-//| 500 ms round and paid a full selected-box walk, nine ATR legs and |
-//| a bar recount for inputs that had not moved.                     |
 //+------------------------------------------------------------------+
 #ifndef BASE_KNOT_OWNER_MQH
 #define BASE_KNOT_OWNER_MQH
 
 //--- P-BK-115b (2026-10-21): the question this pump answers, as its own key — the selected
-//--- box, its two corners, its price band, its story bar, the newest closed bar, and the
-//--- owner TF it last published. Every one of them is an INPUT of `BaseKnotOwnerTFWalk` or of
-//--- the story it is read at, so an unchanged key means an unchanged answer. Compared as
-//--- numbers (no string built per round).
+//--- box, its two corners, its price band, the newest closed bar, and the
+//--- owner TF it last published. Every one of them is an INPUT of `BaseKnotOwnerTFWalk`, so
+//--- an unchanged key means an unchanged answer. Compared as numbers (no string built per
+//--- round).
 static string   s_bkOwnKeyId    = "";
 static datetime s_bkOwnKeyT1    = 0;
 static datetime s_bkOwnKeyT2    = 0;
@@ -76,11 +71,8 @@ void BaseKnotOwnerATRPump()
          double p2 = ObjectGetDouble(0, box, OBJPROP_PRICE, 1);
          top = MathMax(p1, p2); bot = MathMin(p1, p2);
       }
-      //--- P-BK-115d (2026-10-22, ported from MT4): the anchor is the box' right
-      //--- edge, never storyT. Sync derives storyT FROM the owner this pump
-      //--- publishes, so reading storyT here closes a loop: pump reads story ->
-      //--- publishes ownerTFMin -> Sync rewrites story -> pump re-keys -> the
-      //--- note flickers and the 500 ms memo never holds.
+      // P-BK-115d: the anchor is the box' right edge, never storyT (Sync derives
+      // storyT from the owner this pump publishes, so reading it here is a loop).
       an = t2;
    }
    //--- P-BK-115b (2026-10-21) — THE MEASUREMENT IS A QUESTION, SO IT IS ASKED ONCE PER ANSWER.
@@ -109,21 +101,37 @@ void BaseKnotOwnerATRPump()
       bkOwner = BaseKnotOwnerTFWalk(bkOwnPips, an);
       BaseKnotSpan osp;
       //--- P-BK-115b — AND THE STORY HAS ONE PUBLISHER. This block used to write `baseTFMin`,
-      //--- `storyT` and `exitT` too, while `BaseKnotSync` publishes the same three fields from
-      //--- its OWN walk. `storyT` is the anchor key of every ability row and the `CalcAnchor`
-      //--- owner time, so two walks that can disagree (Sync falls back to the box' commit TF
-      //--- when the owner TF answers 0 bars) took turns re-keying the note — the second live
-      //--- writer the touch rule names. The pump measures the OWNER TF, which is the field it
-      //--- owns (P-BK-114); the story stays the Sync's.
+      //--- `storyT` and `exitT` too, while `BaseKnotSync` (BaseKnot_Plan.mqh) publishes the
+      //--- same three fields from its OWN walk. `storyT` is the anchor key of every ability row
+      //--- and the `CalcAnchor` owner time, so two walks that can disagree (Sync falls back to
+      //--- the box' commit TF when the owner TF answers 0 bars) took turns re-keying the note —
+      //--- the second live writer the touch rule names. The pump measures the OWNER TF, which
+      //--- is the field it owns (P-BK-114); the story stays the Sync's.
+      //--- P-BK-123 (2026-10-24) — A MISS IS NOT A NEW ANSWER. This used to zero the published
+      //--- owner, so ONE unmeasurable round (the box caught mid-drag, a rung whose own count came
+      //--- back 0) re-typed the knot through `BaseKnotBaseTFMin`'s fallback rung: another class,
+      //--- another (TF, anchor) row, and a Sync that redrew ENTRY/SL/TP/ink off the box' HEIGHT
+      //--- because the new row was not pushed yet — then back again half a second later.
+      //--- MEASURED in the journal (2026-10-24 11:03:59..11:04:00): `owner=none`, `owner=M1`,
+      //--- `owner=none`, `owner=M15` inside 1.5 s, with `stop=64.8p` (the height) printed between
+      //--- two `stop=14.6p` (the plan) — the flicker the user reported as «الکی حذف و رسم بشه».
+      //--- The published fact stands until a round really answers ANOTHER one; a new box still
+      //--- starts at 0 (BaseKnotRegister) and a box that leaves the band is re-measured as soon
+      //--- as any rung answers it.
       if(bkOwner > 0 && BaseKnotBarCount(t1, t2, top, bot, osp, bkOwner) > 0)
          g_bkBoxes[k].ownerTFMin = bkOwner;
       else
-         g_bkBoxes[k].ownerTFMin = 0;
+         s_bkOwnKeyId = "";   // P-BK-123: a miss keeps the published fact AND retries next round (the key is what would have made it permanent)
    }
-   if(k >= 0 && g_bkBoxes[k].baseTFMin > 0) tf = g_bkBoxes[k].baseTFMin;
+   // P-BK-126b (2026-10-27): the CLASS is the knot's time (the three candles), so the rows the
+   // type and the stop read are the class' own; the ATR owner stays as the fallback for a box
+   // whose class is not published yet (a fresh box, the round before its first Sync). Without the
+   // swap an off-ladder class (31m) scaled its trigger from M5 instead of from the nearest rung
+   // below it (M15) — the √-law reading six rungs of air.
    if(k >= 0 && g_bkBoxes[k].ownerTFMin > 0) tf = g_bkBoxes[k].ownerTFMin;   // P-BK-115b: the field this pump owns
-   //--- P-BK-115d: the ability rows keep the story's anchor (Sync's field), while
-   //--- the owner walk and its witness keep the box edge they were measured at.
+   if(k >= 0 && g_bkBoxes[k].baseTFMin > 0) tf = g_bkBoxes[k].baseTFMin;
+   // P-BK-115d: the ability rows keep the story's anchor (Sync's field), while the
+   // owner walk and its witness keep the box edge they were measured at.
    datetime anStory = (k >= 0 ? g_bkBoxes[k].storyT : 0);
    int down = BaseKnotPrevTFMin(tf);
    for(int i = 0; i < 3 && down > 0; i++)
