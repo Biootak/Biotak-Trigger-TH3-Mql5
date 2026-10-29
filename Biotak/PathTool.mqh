@@ -177,7 +177,9 @@ void PathArm()
    //--- horizontal pan moves this family too (only while armed — the band is the
    //--- only time-anchored pixel this tool owns).
    s_pathCursorOk = false;
-   s_pathBandMode = 0;   // P-PATH-CANVAS-2: a new arm asks the engine again
+   s_pathBandMode = 0;      // P-PATH-CANVAS-2: a new arm asks the engine again
+   s_pathSwallowClick = false;   // P-PATH-BUG-4: a swallow that outlived its click
+                                 // would eat the FIRST vertex of this new path
 #ifdef BIOTAK_RENDER_ENGINE
    REngineExtTimeContent(true);
 #endif
@@ -394,13 +396,36 @@ bool PathIsHandle(const string nm)
       if(StringGetChar(rest, i) == 95) ulast = i;
    return (ulast > 0 && ulast + 1 < StringLen(rest) && StringGetChar(rest, ulast + 1) == 72);   // 'H'
 }
+// P-PATH-BUG-6 (2026-10-29) — A CHILD IS SWEPT BY NAME, NOT BY ITS PARENT'S COUNT.
+// Both child families were dropped by walking 0..PathSegCount(id), which is only
+// correct while the parent is still whole. Every route that matters runs AFTER the
+// segments are gone — the delete watcher (a native delete of the last segment) and
+// PathRegDel itself — and PathSegCount then answers 0, so the sweep deleted `_H0`
+// and left `_H1.._Hn` on the chart. That is the exact «dots with no lines» the
+// P-UI-146 note set out to end, still reachable two years later by a different door.
+// One walk of the object list answers for any state of the parent.
+void PathChildrenDrop(const string id, const string tail)
+{
+   if(id == "") return;
+   const string pre = PathPrefix() + id + tail;
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)   // backwards: a delete shifts the tail
+   {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, pre) == 0) ObjectDelete(0, nm);
+   }
+}
 // The handles go with the path, always as one family (P-LOG-10 law 4). It sits ABOVE
 // PathRegDel on purpose: P-UI-146 makes the registrar the one sweep, and MQL4 has no
 // prototype that is not a warning (warning 46), so the order carries the dependency.
 void PathHandlesDrop(const string id)
 {
    int m = PathSegCount(id);
-   for(int k = 0; k <= m; k++) ObjectDelete(0, PathHandleName(id, k));
+   if(m > 0)   // the parent is whole: the count is exact and this is the cheap pass
+   {
+      for(int k = 0; k <= m; k++) ObjectDelete(0, PathHandleName(id, k));
+      return;
+   }
+   PathChildrenDrop(id, "_H");   // the parent is gone: nothing to count, sweep by name
 }
 void PathRegDel(const string id)
 {
@@ -580,6 +605,9 @@ int PathPointToSegPx(const int mx, const int my, const datetime t1, const double
 }
 bool PathPressHit(const int mx, const int my, string &id)
 {
+   id = "";   // P-PATH-BUG-2: the out-parameter is CLEARED, not inherited. The two
+              // callers happen to pass a fresh local today; the day one passes a
+              // reused variable the old id would answer "hit" with no hit at all.
    if(IsIndicatorHidden()) return false;   // P-UI-160b: no grabbing a hidden path
    int best = 0x7fff;
    for(int i = 0; i < ArraySize(s_pathIds); i++)
@@ -978,8 +1006,13 @@ string PathMidName(const string id, const int k) { return PathPrefix() + id + "_
 void PathMidDrop(const string id)
 {
    int m = PathSegCount(id);
-   for(int k = 0; k < m; k++) ObjectDelete(0, PathMidName(id, k));
-   ObjectDelete(0, PathMidName(id, m));
+   if(m > 0)   // the parent is whole: the count is exact and this is the cheap pass
+   {
+      for(int k = 0; k < m; k++) ObjectDelete(0, PathMidName(id, k));
+      ObjectDelete(0, PathMidName(id, m));
+      return;
+   }
+   PathChildrenDrop(id, "_M");   // P-PATH-BUG-6: the parent is gone — sweep by name
 }
 bool PathMidGet(const string id)
 {
@@ -989,7 +1022,15 @@ bool PathMidGet(const string id)
 // One marker per segment, at that segment's own (t,p) middle. Bounded by the path's
 // segment count and it runs only on a cell press, a drag step and a chart change —
 // never on a tick.
-void PathMidApply(const string id)
+// P-PATH-BUG-8 (2026-10-29) — THE DRAG STEP MAY NOT PAY FOR THE WHOLE ROW, AND MAY
+// NOT WRITE A FILE. Two things rode every frame of a vertex carry when this toggle
+// was on: the loop re-projected EVERY segment's marker (O(n) lookups per frame for
+// the two legs that can actually move), and the witness block below — a Print plus
+// FileWrite plus FileFlush, in Full — ran once per frame as well. A hand at 60 fps
+// was flushing 60 journal lines a second for a diagnostic that is read once.
+//   quiet  : the caller is a frame, not a press. No witness.
+//   onlyK  : re-seat that ONE marker (-1 = the whole row, the press/chart-change pass).
+void PathMidApply(const string id, const bool quiet = false, const int onlyK = -1)
 {
    bool on = PathMidGet(id);
    int made = 0;
@@ -997,6 +1038,7 @@ void PathMidApply(const string id)
    int n = PathSegCount(id);
    for(int k = 0; k < n; k++)
    {
+      if(onlyK >= 0 && k != onlyK) continue;   // a carry owns one leg, not the row
       string nm = PathMidName(id, k);
       string seg = PathSegName(id, k);
       if(!on || ObjectFind(0, seg) < 0) { ObjectDelete(0, nm); continue; }
@@ -1047,7 +1089,9 @@ void PathMidApply(const string id)
    //--- refused" from "it exists and the terminal will not draw it" is to read the
    //--- object back in the same breath: how many markers exist, and the FIRST one's
    //--- seat, ink, size and period mask. Cost: one flushed line per PRESS.
-   if(on)
+   //--- P-PATH-BUG-8: ...per PRESS, and that is now enforced by the caller, not by
+   //--- hope — a drag frame passes quiet and writes nothing.
+   if(on && !quiet)
    {
       string f = PathMidName(id, 0);
       PathWitness("mid PASS id=" + id + " made=" + IntegerToString(made) +
@@ -1162,7 +1206,13 @@ int PathShowAll()
    PathFollowAll();   // re-place the selected path's vertex handles
    return n;
 }
-void PathMakeSegment(const string id, const int idx, const datetime t1, const double p1, const datetime t2, const double p2)
+// P-PATH-BUG-3 (2026-10-29): RETURNS WHETHER THE SEGMENT REALLY EXISTS. The caller
+// used to advance s_pathSegCount unconditionally, so a refused ObjectCreate (a name
+// collision after a hard restart) left the session believing in a leg that is not on
+// the chart: the commit then registers a path whose last index has no object, the
+// tooltip pass writes into nothing, and PathSegCount — which WALKS the objects —
+// disagrees with the session for the rest of its life.
+bool PathMakeSegment(const string id, const int idx, const datetime t1, const double p1, const datetime t2, const double p2)
 {
    string nm = PathSegName(id, idx);
    if(ObjectCreate(0, nm, OBJ_TREND, 0, t1, p1, t2, p2))
@@ -1178,7 +1228,9 @@ void PathMakeSegment(const string id, const int idx, const datetime t1, const do
       ObjectSetInteger(0, nm, OBJPROP_BACK, false);
       ObjectSetInteger(0, nm, OBJPROP_ZORDER, Z_BOX_RAY);
       ObjectSetString(0, nm, OBJPROP_TOOLTIP, PathTooltip(idx + 1));
+      return true;
    }
+   return false;
 }
 void PathCommitVertex(const datetime t, const double p)
 {
@@ -1194,8 +1246,9 @@ void PathCommitVertex(const datetime t, const double p)
    }
    if(s_pathAnchorT > 0 && s_pathAnchorP > 0)
    {
-      PathMakeSegment(s_pathSessionId, s_pathSegCount, s_pathAnchorT, s_pathAnchorP, t, p);
-      s_pathSegCount++;
+      //--- the count is the OBJECT SET's, not the click's (see PathMakeSegment)
+      if(PathMakeSegment(s_pathSessionId, s_pathSegCount, s_pathAnchorT, s_pathAnchorP, t, p))
+         s_pathSegCount++;
    }
    s_pathAnchorT = t;
    s_pathAnchorP = p;
@@ -1208,11 +1261,18 @@ void PathFinish()
    ObjectDelete(0, PathPreviewName());
    s_pathPrevLive = false;   // P-PERF-168: the memo dies with the object
    s_pathPend = false;
-   //--- P-PATH-CANVAS: the commit ends the arm, so the band's pixels must go too
+   //--- P-PATH-CANVAS: the commit ends the arm, so the band's pixels must go too.
+   //--- P-PATH-CANVAS-3 (2026-10-29): AND THEY MUST GO NOW, NOT ON THE NEXT FRAME.
+   //--- This pair used to be DirtyFront() alone — a version bump with no paint — so
+   //--- the dotted band's last frame stayed on the FRONT layer until some unrelated
+   //--- event happened to repaint it. On the finished drawing that is a dotted line
+   //--- lying exactly on top of the solid one the commit just made: «بعضی وقتا دوتا
+   //--- خط میشه». PathCancel already painted here; the commit did not.
    s_pathCursorOk = false;
 #ifdef BIOTAK_RENDER_ENGINE
    REngineExtTimeContent(false);
    REngineDirtyFront();
+   REnginePaint();   // wipe the band off the layer the commit is about to share
 #endif
    if(id != "" && segs >= 1)
    {
@@ -1334,7 +1394,19 @@ void PathDragApply(const datetime curT, const double curP)
    else PathHandleFollow(s_pathDrag);   // a whole-path carry still moves the row
    // P-UI-139: the 50 % markers ride it too — and only when the switch is on, so the
    // default path pays ONE array read per drag step and not one object write.
-   if(PathMidGet(s_pathDrag)) PathMidApply(s_pathDrag);
+   // P-PATH-BUG-8: and when the switch IS on, a carry re-seats the two legs its vertex
+   // owns and writes no witness — a frame is not a press.
+   if(PathMidGet(s_pathDrag))
+   {
+      if(s_pathDragV >= 0)
+      {
+         //--- vertex V owns segment V-1's point 1 and segment V's point 0. V=0 has no
+         //--- V-1 — and onlyK=-1 means "the whole row", so the guard is not optional.
+         if(s_pathDragV > 0) PathMidApply(s_pathDrag, true, s_pathDragV - 1);
+         PathMidApply(s_pathDrag, true, s_pathDragV);
+      }
+      else PathMidApply(s_pathDrag, true);
+   }
 }
 // P-PERF-168 — THE CARRY PAYS THE SAME 16 ms BUDGET. A dot carry writes up to
 // four anchors plus three handle seats per move; at 100..125 events/s that is the
@@ -1440,7 +1512,17 @@ bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, co
          // markers) instead, so deleting one leg from the terminal's own object
          // list destroyed a drawing the user had not touched. The strip bin is
          // the door that takes a whole path (P-UI-136) and it still does.
-         if(PathSegCount(pid) == 0) PathRegDel(pid);
+         if(PathSegCount(pid) == 0)
+         {
+            PathRegDel(pid);      // the handle family (P-UI-146's one sweep)
+            //--- P-PATH-BUG-7 (2026-10-29): AND THE STATE THAT OUTLIVED IT. A path
+            //--- that dies through the terminal's own object list never passes through
+            //--- PathDelete, so its ink row and its 50 % discs were left behind — the
+            //--- discs as OBJECTS ON THE CHART (a dot with no line under it), the ink
+            //--- row as a leak that a later path with the same id would inherit.
+            PathInkForget(pid);
+            PathMidDrop(pid);
+         }
          if(s_pathDrag == pid) PathDragRelease();
          // The handles follow their path: a segment gone RE-PLACES the vertex set,
          // and the last one gone takes the whole family with it (one sweep).
@@ -1645,11 +1727,13 @@ if(pressed && pfx != "")
    //--- own family is spent here, before any other module reads it.
    if(id == CHARTEVENT_OBJECT_CLICK && s_pathArmed && pfx != "" && StringFind(sparam, pfx) == 0)
       return true;
-   if(id == CHARTEVENT_CLICK && StringFind(sparam, "r") >= 0)
-   {
-      if(s_pathArmed) { PathSessionClear(); PathCancel(); return true; }
-      return false;
-   }
+   //--- P-PATH-BUG-5 (2026-10-29): the branch that stood here tested
+   //--- `StringFind(sparam,"r") >= 0` — a "right click" that MT5 never reports on
+   //--- CHARTEVENT_CLICK (its sparam is empty; the button bits arrive on MOUSE_MOVE).
+   //--- It was dead, and it was one string away from being lethal: any sparam that
+   //--- happened to contain an 'r' would have CANCELED an armed path mid-draw.
+   //--- Right-click is already handled where the button really is, in the move
+   //--- stream above. Removed rather than kept "just in case".
    if(id == CHARTEVENT_CLICK)
    {
       if(s_pathDrag != "") PathDragEnd();
