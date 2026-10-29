@@ -181,6 +181,11 @@ void PathArm()
    GestureTakeRelease();   // P-UI-144: a NEW drawing is never gated by the last one — the
                            // arbiter's ONE question is per drawing, so arming clears it
    s_pathArmed = true; ChartViewLockAcquire(); ChartRedraw();
+   //--- P-PERF-171: THE MOVE STREAM IS THIS TOOL'S WHILE IT DRAWS. Every hover owner
+   //--- (the Base/Knot box test, the draw strip's move head) asks GestureMoveOwned()
+   //--- before doing per-move work, and that is what took a vertex drag from 44 ms a
+   //--- move down to the carry's own few ms (see the measurement in GlobalVariables).
+   GestureMoveClaim("path");
    //--- P-PERF-168: a new arm owes its first frame at once (the budget's stamp is
    //--- a leftover of the previous session otherwise, and the rubber band would
    //--- wait up to 16 ms for a frame it can already afford).
@@ -201,6 +206,7 @@ void PathCancel()
 {
    if(!s_pathArmed) return;
    s_pathArmed = false;
+   GestureMoveRelease("path");   // P-PERF-171: the stream goes back to the hover owners
    s_pathPend = false;   // P-PERF-168: a deferred sample never outlives the arm
    s_pathCursorOk = false;   // P-PATH-CANVAS: and neither does the band's tip
 #ifdef BIOTAK_RENDER_ENGINE
@@ -1393,6 +1399,7 @@ void PathFinish()
    s_pathSessionId = "";
    s_pathLastVerMs = 0;
    s_pathArmed = false;
+   GestureMoveRelease("path");   // P-PERF-171: the commit ends the claim with the arm
    ChartViewLockRelease();   // the arm's acquire ends with the commit
    ChartRedraw();
 }
@@ -1403,6 +1410,7 @@ void PathDragRelease()
    s_pathDragV = -1;
    s_pathDragRow = -1; s_pathDragPt = 0;   // P-PERF-170: the row dies with the gesture
    s_pathDragDT = 0; s_pathDragDP = 0.0;
+   GestureMoveRelease("path");   // P-PERF-171: the hover owners get the stream back
    ChartViewLockRelease();
 }
 // ONE snap store, three gestures. `ix` says which anchor each snapshotted segment
@@ -1455,6 +1463,7 @@ void PathVertDragStart(const string id, const int k)
    else if(last >= 0) s_pathDragPt = 1;
    s_pathDragRow = (last >= 0 ? last : -1);
    s_pathDragDT = 0; s_pathDragDP = 0.0;
+   GestureMoveClaim("path");   // P-PERF-171: the dot carry owns every move until it ends
    ChartViewLockAcquire();
    s_pathDragMs = 0;    // P-PERF-168: the first move of a carry is never deferred
    s_pathDragPend = false;
@@ -2012,6 +2021,7 @@ void PathOnDeinit(const int reason)
       s_pathArmed = false;
       ChartViewLockRelease();
    }
+   GestureMoveRelease("path");   // P-PERF-171: a teardown never leaves the stream claimed
    if(reason != REASON_REMOVE) PathHandlesWipe();
    s_pathDrag = "";
    s_pathSel = "";

@@ -1484,12 +1484,51 @@ void DrawStripPublishRect()
 //--- press's whole life, the MOVE STREAM's release witness shortens it to the
 //--- twin-event tail, a new press edge (or a close) ends it.
 #define DSTRIP_OPEN_TAIL_MS      800     // twin-event tail after the release witness
-#define DSTRIP_OPEN_PRESS_MAX_MS 10000   // the longest a press may claim its own clicks
-static uint s_dsOpenerUntil = 0;         // 0 = disarmed; else the press's own deadline
+#define DSTRIP_OPEN_PRESS_MAX_MS 10000   // RETIRED as the token's life — see P-MT5-OPENER
+//--- MT5-ONLY P-MT5-OPENER (2026-10-23) — ONE TOKEN, AND ITS LIFE IS THE TWIN'S.
+//---
+//--- User report, the day P-MT5-ONECLICK shipped: «نوار استریپ و انسلکت شدن ابجکت
+//--- موقع که روی دیگر نقاط کلیک می‌کنم بسته نمیشه». Both halves of that sentence
+//--- are one owner: the dismissal never ran, so neither the strip closed nor its
+//--- `DrawStripClose()` (which writes `OBJPROP_SELECTED = false`) released the
+//--- drawing. It was the OPENER BUDGET.
+//---
+//--- This window was written for MT4, where ONE button-up is reported on TWO
+//--- channels (the object's and the chart's) and BOTH must be spent or the second
+//--- one closes the strip the first one just opened. So it armed TWO tokens, and
+//--- `s_dsOpenerUntil` kept them alive for `DSTRIP_OPEN_PRESS_MAX_MS` = TEN
+//--- SECONDS — the length of a press, from the era when a HOLD fired the open.
+//---
+//--- Two things changed and neither was carried into this line:
+//---   * the open is a CLICK-TOGGLE now (P-UI-113d), so the release has ALREADY
+//---     happened when `DrawStripOpenerArm()` runs. There is no press left to
+//---     wait for: the twin, if it comes at all, is milliseconds away.
+//---   * the entry's `CompatOneClickDedupe` (P-MT5-ONECLICK, same day) DROPS that
+//---     twin before any handler runs — MT5 now delivers ONE click-family event per
+//---     release, by design.
+//--- So the second token was never spent, and it sat there for ten seconds eating
+//--- the first one or two genuine clicks after every open — measured shape: open
+//--- the strip, click the chart, nothing happens (the token eats it), click again,
+//--- it closes. With a ten-second life that is every click the user tries.
+//---
+//--- THE LAW NOW: one release, one click, one token, and a life equal to the
+//--- window in which a second click could still be the same release — MT5Compat's
+//--- own `COMPAT_CLICK_TWIN_MS` (300 ms). Past that window a click IS a new
+//--- gesture and may never be spent by the previous one.
+#define DSTRIP_OPENER_TWIN_MS 300         // == MT5Compat's COMPAT_CLICK_TWIN_MS
+static uint s_dsOpenerUntil = 0;         // 0 = disarmed; else the twin's own deadline
 static uint s_dsOpenerTailUntil = 0;     // the twin-event tail (after the release witness)
-static int  s_dsOpenerN = 0;             // twin events left to spend (one release = two channels)
-void DrawStripOpenerArm()    { s_dsOpenerUntil = GetTickCount() + DSTRIP_OPEN_PRESS_MAX_MS; s_dsOpenerTailUntil = 0; s_dsOpenerN = 2; }
+static int  s_dsOpenerN = 0;             // twin events left to spend (MT5: exactly one)
+void DrawStripOpenerArm()    { s_dsOpenerUntil = GetTickCount() + DSTRIP_OPENER_TWIN_MS; s_dsOpenerTailUntil = 0; s_dsOpenerN = 1; }
 void DrawStripOpenerDisarm() { s_dsOpenerUntil = 0; s_dsOpenerTailUntil = 0; s_dsOpenerN = 0; }
+//--- the READ-ONLY twin of `DrawStripOpenerClickSpent` (P-DRAW-143): "would the
+//--- next click-family event be spent?" — asked by the press-edge net and by the
+//--- click trace, neither of which may consume the token to find out.
+bool DrawStripOpenerLive()
+{
+   if(s_dsOpenerN <= 0) return false;
+   return (TickDeadlinePending(s_dsOpenerUntil) || TickDeadlinePending(s_dsOpenerTailUntil));
+}
 //--- P-UI-155 (2026-10-08) — THE FALLBACK'S OWN TWIN FLAG. A chart-first open
 //--- (hollow interior) may be followed by the same release's object channel;
 //--- that twin must be spent, never closed. Time-bounded (twin channels arrive
@@ -4677,17 +4716,33 @@ void DrawStripClosePicker()
    //--- it. DrawStripPaint asks the same question and answers it the same way.
    if(ObjectFind(0, DrawStripBoardBgName()) >= 0) DrawStripSkinPurgeAt(2);
    if(s_dsPicker == DSTRIP_PICK_NONE && s_dsPN <= 0) return;
-   for(int r = 0; r < DSTRIP_PICK_MAX; r++)
-   {
-      ObjectDelete(0, DrawStripPickName(r));
-      ObjectDelete(0, DrawStripPickIconName(r));
-      ObjectDelete(0, DrawStripPickLabelName(r));
-      ObjectDelete(0, DrawStripPickChipName(r));
-       ObjectDelete(0, DrawStripPickRailName(r));
-        ObjectDelete(0, DrawStripPickGlassName(r));   // P-DRAW-33: the glass sheen
-       ObjectDelete(0, DrawStripPickDelName(r));     // P-DRAW-134: the template row's ✕
-       ObjectDelete(0, DrawStripPickDelFaceName(r)); // ...and its glyph face
-     }
+   // P-MT5-PERF-PICKER (2026-10-28) — MT5-ONLY: TEN SWEEPS, NOT 576 DELETES.
+   // Measured on the live log, not estimated: the mouse move whose press edge
+   // dismisses an open picker printed `[mvus-ds] total=700 press=699`
+   // (2026.10.28 18:13:37, EURUSDb M30) — 699 ms inside ONE move, with the
+   // outer ledger agreeing (`[PERF] ... ui=687 strip=687 took 703ms`). The loop
+   // this replaces was 72 rows x 8 names = 576 `ObjectDelete` calls, and on MT5
+   // each one is a round trip into the chart's object table: this file's own
+   // P-PERF-100 (:4993) measured ~2ms/call at ~1000 objects and blamed exactly
+   // this family for an `OnDeinit reason=3 took 1063ms`. P-PERF-100 converted
+   // `DrawStripClose` to a single prefix sweep and P-PERF-103 (:5014) proved
+   // the leftover per-name probes were themselves the cost — but the picker
+   // kept its hand list, and the picker is the teardown a CLICK reaches.
+   //
+   // Ten, not one: every name here is `PnlDrawS_P<row>` plus an optional
+   // I/T/C/R/G/D/F suffix (builders :1679-1686, :8189-8191), i.e. `PnlDrawS_P`
+   // followed by a DIGIT. Its neighbours under the same letters — PHead*,
+   // PHex*, POp*, PR*/PRecT, Page* (:1690-1716) — are the OPEN panel's head,
+   // records, opacity slider and page seats, so a bare `PnlDrawS_P` sweep would
+   // delete the panel the user is looking at. The ten digit-prefixes cover
+   // rows 0..71 and every suffix variant with no collision (no name in either
+   // tree spells PnlDrawS_P + digit but these), for 10 table walks. MT4 keeps
+   // the hand list: there ObjectDelete is in-process and the loop is free, so
+   // this is a platform divergence and not a behaviour change — the same
+   // objects leave, and each sweep records its prefix (P-PERF-112,
+   // MQL5Compat.mqh:1579) so no delete event reaches the handler.
+   for(int d = 0; d <= 9; d++)
+      ObjectsDeleteAll(0, "PnlDrawS_P" + IntegerToString(d), -1, -1);
     s_dsPicker = DSTRIP_PICK_NONE;
     s_dsPN = 0;
     s_dsPHexY = -1;
@@ -8825,7 +8880,58 @@ bool DrawStripActTap(const int a)
 bool DrawFamilyDelete(const string obj)
 {
    if(obj == "") return false;
-   if(DrawIsIndicatorObject(obj)) return false;   // indicator owns its own family/redraw
+   //--- P-DRAW-147 (2026-10-23) — A BASE BOX IS THE KNOT'S, AND THE BIN MUST ASK
+   //--- THE KNOT. «این حذف می‌زنم حذف نمی‌کنه» — the user's own report against a
+   //--- served `THLevels_BK_5_5758656_BOX`, and the refusal below is why: the
+   //--- Base Box lives under `inpObjectPrefix`, so `DrawIsIndicatorObject` said
+   //--- "the indicator owns it" and this function returned FALSE — silently, with
+   //--- no line in the log and no object gone. MEASURED 21:32:35: the delete
+   //--- button's own click arrived (`[dsclick] ... obj="PnlDrawS_A4I" travel=2
+   //--- inside=1`), so the tap ran and the bin ran; the drawing simply outlived
+   //--- both.
+   //---
+   //--- THE STRIP SERVES THESE OBJECTS (it is opened by the terminal's own
+   //--- OBJECT_CLICK, which hands over a name and never asks this file's prefix
+   //--- filter), so refusing them here is not a rule — it is a hole. A served
+   //--- knot member is the user's delete of that STRUCTURE, and the knot already
+   //--- owns exactly that door: `BaseKnotDelete` wipes the family by prefix,
+   //--- unregisters it and forgets the anchor — the same call the box's own ✕ and
+   //--- the terminal's native delete end in. The bin therefore takes the same
+   //--- road, which is the user's other sentence: «از هر جا که حذف زدم باید
+   //--- یکپارچه باشه برای همه».
+   //---
+   //--- Asked BEFORE the prefix refusal, because the refusal is what made this
+   //--- branch unreachable. Cost: one bounded registry walk, on a delete only.
+   string bkId = BaseKnotDirBoxFor(obj);
+   if(bkId != "")
+   {
+      BaseKnotDelete(bkId);
+      DrawStripDiagEmit("[drawstrip] BINDEL obj=\"" + obj + "\" via=knot id=" + bkId);
+      return true;
+   }
+   if(DrawIsIndicatorObject(obj))
+   {
+      //--- P-DRAW-147: A REFUSAL IS A FACT THE LOG MUST OWN. This line is what the
+      //--- 21:32:35 report could not answer — the bin ran and said nothing.
+      DrawStripDiagEmit("[drawstrip] BINDEL refused obj=\"" + obj + "\" why=indicator");
+      return false;   // indicator owns its own family/redraw
+   }
+   //--- P-DRAW-149 (2026-10-23) — THE LEG RULER IS TH3TOOL'S FAMILY, AND THE BIN
+   //--- MUST ASK ITS OWNER. `LM_…_Line` is one object of five (`_H1`, `_H2`, `_Mid`,
+   //--- the info plate): deleting it here would leave four orphans on the chart and a
+   //--- follower still looking for a line that is gone — the user's second half,
+   //--- «حذف نمی‌شه». `LegMeasureDelete` is the family's one door (it also forgets the
+   //--- follower, the painted state and the ATR anchor), so the bin takes it.
+   if(StringFind(obj, TH3_LEG_PREFIX) == 0)
+   {
+      int legLen = StringLen(obj);
+      if(legLen > 5 && StringSubstr(obj, legLen - 5) == "_Line")
+      {
+         LegMeasureDelete(StringSubstr(obj, 0, legLen - 5));
+         DrawStripDiagEmit("[drawstrip] BINDEL obj=\"" + obj + "\" via=leg");
+         return true;
+      }
+   }
    // P-MT5-TH3DEL (2026-10-21): A TH3 PATTERN MEMBER IS NOT THE STRIP'S
    // FAMILY. Its owner (TH3Tool) deletes the WHOLE pattern - the objects, the
    // caption, the canvas rows and the model - in one call, and the strip's
@@ -8837,9 +8943,11 @@ bool DrawFamilyDelete(const string obj)
    if(th3Base != "" && TH3PatternStoreFind(th3Base) >= 0)
    {
       TH3FamilyDeleteAll(th3Base);
+      DrawStripDiagEmit("[drawstrip] BINDEL obj=\"" + obj + "\" via=th3 base=" + th3Base);
       return true;
    }
    bool had = (ObjectFind(0, obj) >= 0);
+   DrawStripDiagEmit("[drawstrip] BINDEL obj=\"" + obj + "\" via=family had=" + IntegerToString(had ? 1 : 0));
    bool wasSupp = g_suppressDeleteEvents;
    if(!wasSupp) g_suppressDeleteEvents = true;
    BoxEdgeForget(obj);          // P-UI-132: the box's edge memo is not a chart object
@@ -9575,6 +9683,215 @@ return 0;
 #define DRAW_STRIP_ROUTER_MQH
 
 
+// ══════════════════════════════════════════════════════════════════════════
+// P-DRAW-141 (2026-10-23) — THE CARRY IS A TRANSLATION, NOT A REPAINT.
+//
+// User report: «این درگ کردن نوار استریپ خیلی سنگین شده». It was, and the
+// reason is what a carry frame used to cost: `DrawStripPaint()` re-runs the
+// WHOLE painter — the plate's 9-slice, the grip, the badge, every quick cell
+// (each one re-reads its slot tags with `DrawSlotRead` and rebuilds its tooltip
+// string), the action row, the picker, the gear — and every one of those
+// painters is compare-GUARDED, i.e. one `ObjectGetInteger` per property before
+// a write. A carry frame therefore paid hundreds of terminal calls, string
+// builds and tag parses at 33 Hz — for a gesture whose ONLY change is where the
+// family sits on screen.
+//
+// A carry cannot change a size, a colour, a caption or a z: the layout is the
+// same layout, moved. So the frame is ONE pure translation of the family: the
+// list of names and their seats is measured ONCE, on the press edge, and each
+// frame writes `seat + delta` — two unguarded writes per object, no read, no
+// string, no painter logic. The absolute seats are re-asserted by the next real
+// paint (the release, a tap, a tab switch), which also heals any drift the
+// translation could not see — the compare-guarded writers read the OBJECT, not
+// this cache, so nothing here can make a stale seat permanent.
+//
+// WHO MOVES. Two families share the `PnlDrawS_` prefix and only one of them
+// follows the strip: the GEAR panel (`PnlDrawS_G…`) is its own plate with its
+// own hand (`s_dsGEX/Y`), and P-DRAW-88 keeps the spot it was given. So the
+// filter is `PnlDrawS_` AND NOT `PnlDrawS_G`, and the gear's own carry asks for
+// the mirror image of it. Anything else on the chart is not ours to touch.
+// ══════════════════════════════════════════════════════════════════════════
+#define DSTRIP_CARRY_MAX 160              // the family is ~60 objects; this is air, not a plan
+static string s_dsCarryName[DSTRIP_CARRY_MAX];
+static int    s_dsCarryX[DSTRIP_CARRY_MAX];
+static int    s_dsCarryY[DSTRIP_CARRY_MAX];
+static int    s_dsCarryN     = 0;         // 0 = no cache: a frame paints, exactly as before
+static int    s_dsCarryOX    = 0;         // the origin the cache was measured at
+static int    s_dsCarryOY    = 0;
+static bool   s_dsCarryGear  = false;     // which plate this cache is for
+//--- P-DIAG-161 (temporary, remove with P-DRAW-141): the carry's own cost, one
+//--- line per gesture. `frames` is what the throttle allowed, `sum`/`worst` are the
+//--- translation alone — so a heavy drag is either THIS number or the chart's own
+//--- repaint, and the next report names which instead of guessing.
+static uint   s_dsCarrySum = 0, s_dsCarryWorst = 0;
+static int    s_dsCarryFrames = 0;
+
+bool DrawStripCarryCached() { return (s_dsCarryN > 0); }
+void DrawStripCarryDrop()
+{
+   if(s_dsCarryFrames > 0)
+      Print("[drawstrip] CARRY n=", s_dsCarryN, " frames=", s_dsCarryFrames,
+            " sum=", (int)s_dsCarrySum, "ms worst=", (int)s_dsCarryWorst, "ms",
+            (s_dsCarryGear ? " gear" : " strip"));
+   s_dsCarryN = 0; s_dsCarryGear = false;
+   s_dsCarrySum = 0; s_dsCarryWorst = 0; s_dsCarryFrames = 0;
+}
+
+//--- measure once, on the press edge. `gear` picks the plate: the panel's own
+//--- carry moves the panel and nothing else, the strip's moves the strip.
+void DrawStripCarryBegin(const bool gear)
+{
+   DrawStripCarryDrop();
+   s_dsCarryGear = gear;
+   s_dsCarryOX = (gear ? s_dsGEX : s_dsX);
+   s_dsCarryOY = (gear ? s_dsGEY : s_dsY);
+   int total = ObjectsTotal(0, -1);
+   for(int i = 0; i < total && s_dsCarryN < DSTRIP_CARRY_MAX; i++)
+   {
+      string nm = ObjectName(0, i, -1);
+      if(StringFind(nm, "PnlDrawS_") != 0) continue;         // not this module's
+      bool isGear = (StringFind(nm, "PnlDrawS_G") == 0);
+      if(isGear != gear) continue;                            // the other plate's
+      int t = (int)ObjectGetInteger(0, nm, OBJPROP_TYPE);
+      //--- only the four screen types this module paints, plus the gear's edit
+      //--- fields: a chart object (a drawing, a level) is never in this family.
+      if(t != OBJ_BUTTON && t != OBJ_LABEL && t != OBJ_BITMAP_LABEL &&
+         t != OBJ_RECTANGLE_LABEL && t != OBJ_EDIT) continue;
+      s_dsCarryName[s_dsCarryN] = nm;
+      s_dsCarryX[s_dsCarryN] = (int)ObjectGetInteger(0, nm, OBJPROP_XDISTANCE);
+      s_dsCarryY[s_dsCarryN] = (int)ObjectGetInteger(0, nm, OBJPROP_YDISTANCE);
+      s_dsCarryN++;
+   }
+}
+
+//--- one carry frame: two writes per object, then the one owed frame. The
+//--- occupancy rect the cards read is re-published here so a card placed during
+//--- the gesture clears the plate where it IS, not where it was.
+void DrawStripCarryApply()
+{
+   if(s_dsCarryN <= 0) return;
+   uint t0 = GetTickCount();
+   int ox = (s_dsCarryGear ? s_dsGEX : s_dsX);
+   int oy = (s_dsCarryGear ? s_dsGEY : s_dsY);
+   int dx = ox - s_dsCarryOX, dy = oy - s_dsCarryOY;
+   if(dx == 0 && dy == 0) return;
+   for(int i = 0; i < s_dsCarryN; i++)
+   {
+      ObjectSetInteger(0, s_dsCarryName[i], OBJPROP_XDISTANCE, s_dsCarryX[i] + dx);
+      ObjectSetInteger(0, s_dsCarryName[i], OBJPROP_YDISTANCE, s_dsCarryY[i] + dy);
+   }
+   DrawStripPublishRect();
+   ChartRedraw();
+   uint took = GetTickCount() - t0;
+   s_dsCarrySum += took;
+   if(took > s_dsCarryWorst) s_dsCarryWorst = took;
+   s_dsCarryFrames++;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-DRAW-143 (2026-10-23) — THE PRESS IS THE DISMISSAL'S OWN NET.
+//
+// The report was «استریپ و سلکت هر دو باید برن، این درست نشده» and the live log
+// named the shape of it: with the strip open, clicking a drawing printed
+// `click closed/opened`, clicking a cell printed its tap — and a click on empty
+// chart printed NOTHING. Not one line. The dismissal lives on CHARTEVENT_CLICK,
+// and that event is the one MT5 is free not to deliver: the entry's
+// `CompatOneClickDedupe` drops a chart click that follows an object click, and
+// the UI's own click claim can retire it too. Whichever gate took it, the
+// dismissal never ran — so the strip stayed and `OBJPROP_SELECTED` (which only
+// `DrawStripClose` clears) stayed with it.
+//
+// So the dismissal gets a SECOND, EARLIER channel: the left press EDGE, which
+// the router head computes for every press on every channel and which nothing
+// upstream can dedupe. A press that lands outside every surface the strip owns,
+// and does not name the drawing it serves, is the user saying "not this one" —
+// the strip closes THERE, before the release, and the drawing is released with
+// it.
+//
+// WHAT IT MUST NOT EAT, and why each line is here:
+//   * the plate, the settings panel and its popups (`DrawStripPointInside`) —
+//     a press there is the strip's own hand, and the carries need it tracked;
+//   * a card / the ring menu (`UIPointerOverSurface`) — another owner's pixel;
+//   * the opening gesture (`DrawStripOpenerLive`) — the press that opens is the
+//     same physical press, and closing on it is the P-UI-113c defect again;
+//   * a press that NAMES the served drawing — that is the toggle's, and it must
+//     stay open through a drag of the drawing it serves (P-UI-130);
+//   * a pinned strip (P-DRAW-13: the pin exists to survive exactly this).
+//
+// ══════════════════════════════════════════════════════════════════════════
+// P-DRAW-146 (2026-10-23) — "ON THE DRAWING" IS ASKED OF THE DRAWING.
+//
+// The net above decides by `DrawObjectAtCached`, and that walk REFUSES every
+// name carrying `inpObjectPrefix` (DrawToolbar:268 — "the harmonics, the levels,
+// the boxes and the panels have their own owners"), with two exceptions, the ray
+// and the path. The STRIP, however, serves several of those objects anyway: it
+// is opened by the terminal's own `CHARTEVENT_OBJECT_CLICK`, which hands over
+// `sparam` — a NAME, no hit test involved — and `DrawStripOpenAt` only asks
+// `DrawKindOf` (a type lookup), which a prefixed box answers like any other
+// rectangle.
+//
+// So the two halves of one question disagreed. MEASURED in the terminal log,
+// 21:24:49–21:25:32, twelve times in forty-three seconds, one shape:
+//
+//   21:24:49.175  click opened on "THLevels_BK_5_5058890_BOX" selected=true
+//   21:24:49.248  press-away dismissed at 938,414 obj="THLevels_BK_5_5058890_BOX"
+//   21:24:50.222  press-away dismissed at 938,414 obj="THLevels_BK_5_5058890_BOX"
+//
+// Same pixel as the drawing, dismissed as if it were empty chart: the walk
+// returned "" for a `THLevels`-prefixed box, so every press on the served
+// drawing read as a press AWAY from it. The user's report is exactly this —
+// «برای سلکت بودن و گرفتن گوشه ابجکت و ریسایز کردن اذیت می‌کنه، هی بسته می‌شه»:
+// the strip closed on the press that was meant to grab a corner, and the
+// release's OBJECT_CLICK re-opened it, so the plate flickered on every click.
+//
+// The cure is not "make the net rarer". It is to ask the served OBJECT its own
+// shape (`DrawHitObject` — the same test the walk runs, on one named object),
+// which no namespace can hide, plus its selected handles (`DrawHitSelectedHandle`
+// — MT5's nine controls on a selected box, the very pixels a resize starts on).
+// The walk stays as the third answer, for the drawings only it can name.
+//
+// What this does NOT change: a press on ANOTHER drawing still dismisses (the
+// walk names it and it is not ours), a press on empty chart still dismisses,
+// and a motionless release ON the served drawing still closes it — the
+// single-click deselect of P-UI-113d, which now works for a prefixed box too
+// (`DrawStripReleaseOnDrawing` asks the same helper).
+// ══════════════════════════════════════════════════════════════════════════
+bool DrawStripPressOnServed(const int mx, const int my)
+{
+   if(s_dsObj == "") return false;
+   if(ObjectFind(0, s_dsObj) < 0) return false;
+   //--- 1. THE OBJECT'S OWN SHAPE. Two projections and compares, no walk, and
+   //---    it is the only answer a prefixed drawing can give about itself.
+   if(DrawHitObject(s_dsObj, mx, my)) return true;
+   //--- 2. ITS SELECTED HANDLES. A selected box wears nine controls and MT5
+   //---    resizes from any of them; the construction anchors alone (the two
+   //---    `OBJPROP_TIME/PRICE` pairs) recognise only two of the nine.
+   if(DrawHitSelectedHandle(s_dsObj, mx, my)) return true;
+   //--- 3. THE WALK, for the names it alone resolves (a ray's dot, a path
+   //---    segment, a user drawing under a child stamp). Memo read, not a walk.
+   return (DrawObjectAtCached(mx, my) == s_dsObj);
+}
+
+bool DrawStripPressAway(const int mx, const int my)
+{
+   if(!s_dsOpen || s_dsObj == "") return false;
+   if(s_dsPinned) return false;
+   if(DrawStripPointInside(mx, my)) return false;
+   if(DrawStripOpenerLive()) return false;
+   if(UIPointerOverSurface(mx, my)) return false;
+   //--- P-DRAW-146: THE DRAWING ANSWERS FOR ITSELF. The walk refuses the
+   //--- indicator's own namespace, and the strip serves several of those
+   //--- objects; asking it alone made every press on such a drawing a miss.
+   if(DrawStripPressOnServed(mx, my)) return false;   // the drawing's own press
+   string nm = s_dsObj;
+   Print("[drawstrip] press-away dismissed at ", mx, ",", my, " obj=\"", nm, "\"");
+   if(ObjectFind(0, nm) >= 0 && (bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED))
+      ObjectSetInteger(0, nm, OBJPROP_SELECTED, false);
+   DrawStripClose();
+   ChartRedraw();
+   return true;
+}
+
 void DrawStripGripMove(const int mx, const int my, const bool left)
 {
    // P-DRAW-17: the press EDGE and the latch are the router head's (it runs on
@@ -9598,18 +9915,21 @@ void DrawStripGripMove(const int mx, const int my, const bool left)
             s_dsGGripLive = true;
             s_dsGGripDX = mx - s_dsGEX;
             s_dsGGripDY = my - s_dsGEY;
+            DrawStripCarryBegin(true);    // P-DRAW-141: measure the panel's seats once
          }
          else
          {
             s_dsGripLive = true;
             s_dsGripDX = mx - s_dsX;
             s_dsGripDY = my - s_dsY;
+            DrawStripCarryBegin(false);   // P-DRAW-141: ...and the strip's, once
          }
       }
    }
    if(!left)
    {
       DrawStripGripRelease();
+      DrawStripCarryDrop();   // P-DRAW-141: the gesture is over, the seats are the paint's again
       return;
    }
    int cw = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0); if(cw <= 0) cw = 1920;
@@ -9631,7 +9951,8 @@ void DrawStripGripMove(const int mx, const int my, const bool left)
       if(gx2 == s_dsGEX && gy2 == s_dsGEY) return;
       s_dsGEX = gx2; s_dsGEY = gy2;
       s_dsGearManual = true;   // the hand placed the panel: keep its spot
-      DrawStripPaint();
+      // P-DRAW-141: the panel's frame is a translation too (see the block above).
+      if(DrawStripCarryCached()) DrawStripCarryApply(); else DrawStripPaint();
       return;
    }
    if(!s_dsGripLive) return;
@@ -9649,7 +9970,13 @@ void DrawStripGripMove(const int mx, const int my, const bool left)
    s_dsX = nx; s_dsY = ny;
    GVHomeAnswerNew("STRIP");         // P-UI-158: the hand just moved it — re-claimed per move
    DrawStripHomeSet(s_dsX, s_dsY);   // P-DRAW-41: the hand just moved the home
-   DrawStripPaint();
+   //--- P-DRAW-141: THE CARRY FRAME IS A TRANSLATION, NOT A REPAINT. This call used
+   //--- to be `DrawStripPaint()` — the whole painter, hundreds of guarded reads and
+   //--- rebuilt tooltips per frame, for a gesture that only changes where the family
+   //--- sits. The cache is measured on the press edge above; if it is missing (an
+   //--- enumeration that found nothing) the frame falls back to the painter, so the
+   //--- carry can never freeze on a cache it does not have.
+   if(DrawStripCarryCached()) DrawStripCarryApply(); else DrawStripPaint();
 }
 
 
@@ -9835,7 +10162,24 @@ void DrawStripHoldSelectPoll()
 bool DrawStripClickToggle(const string nm, const bool wasDrag)
 {
     if(nm == "" || ObjectFind(0, nm) < 0) return false;
+    //--- P-DIAG-163 (temporary, remove with the select fix): this function answers
+    //--- false from six gates and prints none of them, which is why «سلکت نمی‌شه» had
+    //--- no owner in the log. One line per click on a drawing while the strip is SHUT,
+    //--- carrying every gate at once. Clicks are rare; the line is bounded by them.
+    if(!s_dsOpen && DrawKindOf(nm) != DK_NONE)
+       Print("[dsopen] nm=\"", nm, "\" drag=", (DrawStripDragLive() ? 1 : 0),
+             " pnl=", g_PnlOpen, " bk=", (BaseKnotSessionActive() ? 1 : 0),
+             " th3=", (TH3SessionActive() ? 1 : 0), " bm=", (TH3BaseMarkArmed() ? 1 : 0),
+             " leg=", (LegMeasureSessionActive() ? 1 : 0),
+             " cp=", (g_waitingForCustomPriceClick ? 1 : 0), " wasDrag=", (wasDrag ? 1 : 0));
     if(DrawIsHTFObject(nm)) return false;   // HTF candles never toggle or open the strip
+    //--- P-PATH-END b (2026-10-29): THE HAND IS DRAWING — THE PLATE IS NOT A
+    //--- GESTURE OF OURS. DrawKindOf already answers DK_NONE for the live path
+    //--- family, but this function is reached from BOTH click channels and the
+    //--- MT5 one (OBJECT_CLICK) arrives first, so the question is asked here as
+    //--- well as in the kind table: one rule, two doors. Nothing after this line
+    //--- may paint while a session is live.
+    if(PathIsSessionName(nm)) return false;
     if(wasDrag) return false;               // P-UI-113d: a drag-release never toggles
     if(DrawStripDragLive()) return false;   // P-UI-130: the terminal is still moving it
     if(g_PnlOpen >= 0) return false;        // modal card/mini owns clicks
@@ -9894,14 +10238,62 @@ bool DrawStripReleaseOnDrawing(const string pressedName, const int px, const int
    // release there is no earlier answer worth trusting, so this fallback takes a
    // live hit test instead of inheriting the same pixel's last 400 ms owner.
    DrawHitCacheClear();
-   return (DrawObjectAtCached(px, py) == s_dsObj);
+   //--- P-DRAW-146: the same helper the press net uses, for the same reason — the
+   //--- walk refuses `inpObjectPrefix` names, and a served BaseKnot box is one.
+   return DrawStripPressOnServed(px, py);
 }
 
 //--- THE EVENT ROUTER. Called from the entry's OnChartEvent tail (Full only):
 //--- it sees the button clicks the terminal reports and the clicks that land
 //--- anywhere else (which dismiss the strip, TV-style).
+//--- P-DIAG-162 (temporary): the move's own microsecond stamps, written by the
+//--- first MOUSE_MOVE block and read by the last one.
+static uint s_mvA = 0, s_mvB = 0, s_mvC = 0;
+//--- P-DIAG-162b (temporary, remove with the lag fix): A SHUT-STRIP MOVE NEVER REACHES
+//--- THE OPEN STRIP'S LEDGER. The only `[mvus-ds]` print lives in the second MOUSE_MOVE
+//--- branch, but a move with the strip shut returns at the guard below it — so the day's
+//--- 94..177 ms `strip=` lines had no owner named at all. `s_mvTop` is stamped at the
+//--- branch entry (always), `s_mvD` at the end of the chase, and `s_mvHeld` says which
+//--- path ran (a press-edge move stamps no segments; the print says so instead of
+//--- reporting the previous move's).
+static uint s_mvTop = 0, s_mvD = 0;
+static bool s_mvHeld = false;
 bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   //--- P-PERF-171 (2026-10-29) — THE MOVE HEAD IS NOT EVERY GESTURE'S.
+   //--- MEASURED on the live chart, one vertex dot dragged on AUDUSDb,H1: this head
+   //--- cost 9..14 ms on EVERY move of that drag (`strip=` in `[mvus-avg]`), beside the
+   //--- Base/Knot hover's up to 25 ms and the path's own 1..9. Three owners were
+   //--- serving one gesture, so the terminal delivered 12..18 moves a second — the
+   //--- «سنگینی» the user reports.
+   //--- While another gesture owns the stream and the strip is SHUT there is nothing
+   //--- here to serve: a toggle only ever opens from a press edge, and a press edge
+   //--- that belongs to a path dot is the path's (P-PATH-END already forbids the plate
+   //--- from opening under the hand). An OPEN strip keeps its moves untouched — its
+   //--- hover and its dismissal are the user's business, not the gesture's.
+   //--- The edge store is written before the return for the same reason as the knot's:
+   //--- a stale `true` would turn the next real move into a phantom press edge.
+   if(id == CHARTEVENT_MOUSE_MOVE && !s_dsOpen && GestureMoveOwned())
+   {
+      s_dsLeftPrev  = (((int)StringToInteger(sparam) & 1) != 0);
+      s_dsLeftPress = false;
+      return false;
+   }
+   //--- P-DIAG-160 (temporary, remove with P-DRAW-143): NAME THE GATE. A click with
+   //--- the strip open used to leave NO trace anywhere, so "it does not close" had
+   //--- no owner to name. One line per click-family event while the strip is open,
+   //--- carrying every flag the dismissal below reads. Bounded by the user's own
+   //--- clicks, and it prints nothing with the strip shut.
+   if((id == CHARTEVENT_CLICK || id == CHARTEVENT_OBJECT_CLICK) && s_dsOpen)
+      Print("[dsclick] id=", id, " xy=", (int)lparam, ",", (int)dparam, " obj=\"", sparam,
+            "\" peek=", (UIPeekClickClaim() ? 1 : 0),
+            " opLive=", (DrawStripOpenerLive() ? 1 : 0),
+            " twin=", (s_dsTwinOwed ? 1 : 0),
+            " gSpent=", (s_dsGearPressSpent ? 1 : 0),
+            " travel=", s_dsTravel,
+            " inside=", (DrawStripPointInside((int)lparam, (int)dparam) ? 1 : 0),
+            " plate=", s_dsX, ",", s_dsY, ",", s_dsW, "x", s_dsH,
+            " gear=", s_dsGear, "@", s_dsGEX, ",", s_dsGEY, ",", s_dsGearW0, "x", s_dsGearH);
    // P-UI-113d: the button-up's OWN fact, measured once in the click head below
    // and read by the dismissal at the tail of this one call (the two halves are
    // one invocation, so this is a local, not state).
@@ -9985,6 +10377,11 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
    // while it is OPEN. Computed once here, read by both.
    if(id == CHARTEVENT_MOUSE_MOVE)
    {
+      //--- P-DIAG-162 (temporary): the strip is the UI half's biggest owner in the
+      //--- day's ledger (82 of 136 slow moves had strip == ui), and the ms clock
+      //--- cannot say which of its three blocks. Microseconds, read by the entry.
+      uint _mvA = CompatUsNow();
+      s_mvTop = _mvA; s_mvHeld = false;   // P-DIAG-162b: the entry is stamped on every move
       int tmx = (int)lparam, tmy = (int)dparam;
       int mstate = (int)StringToInteger(sparam);
       bool tleft = ((mstate & 1) != 0);
@@ -10037,6 +10434,12 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
             FillChildStampArm(s_dsPressObj);   // P-DRAW-64 addendum 6: the hand's own ride
              DrawStripOpenerDisarm();   // P-UI-113c: a NEW press is never the old gesture
              DrawStripHoldSelectionDisarm();  // P-UI-113g: nor may the repair fight it
+             //--- P-DRAW-143: THE PRESS IS THE DISMISSAL'S NET — the click channel can
+             //--- be deduped away (measured: a click on empty chart with the strip open
+             //--- produced NO line at all), the press edge cannot. It sits here, before
+             //--- the latch, so a press that dismissed the strip never also names a
+             //--- drawing for the release to re-open on.
+             if(DrawStripPressAway(tmx, tmy)) return true;
              DrawStripHoldLatch(tmx, tmy);   // names the press hit + sets the cycle (was the step's call)
             //--- P-DRAW-84 (2026-09-29) — THE PANEL'S BUTTONS, ON THE PRESS EDGE.
             // Every painter in this file is born OBJPROP_SELECTABLE=false (3317,
@@ -10100,6 +10503,7 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
           s_dsOpenerTailUntil = GetTickCount() + DSTRIP_OPEN_TAIL_MS;
        }
         if(!tleft) DrawStripColorHoverAt(tmx, tmy);
+        uint _mvB = CompatUsNow();   // P-DIAG-162: the press edge/travel/stamp is over
        //--- P-DRAGF2 (2026-10-04) — THE CHASE IS THE DRAWING'S, NOT THE STRIP'S. The
        //--- follow used to sit BELOW the shut-strip guard (the second MOUSE_MOVE branch,
        //--- with the grip carry), so with the strip shut a dragged fibo's stack moved
@@ -10159,6 +10563,7 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
                DrawStripDiagEmit("[drawstrip] PENSTACKARM obj=\"" + s_psDragObj + "\" travel=" +
                                  IntegerToString(s_dsTravel));
          }
+         uint _mvC = CompatUsNow();   // P-DIAG-162b: the arm probes are over
          if(tleft) FibPenDragFollow((int)lparam, (int)dparam);
          if(tleft) PenStackDragFollow((int)lparam, (int)dparam);   // P-DRAW-74c: the rows ride the hand too
          else
@@ -10174,6 +10579,9 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
             PenStackDragDisarm();
             s_dsArmTried = "";   // P-DRAGF3c: the next press earns a fresh arm attempt
          }
+      uint _mvD = CompatUsNow();   // P-DIAG-162b: the chase is over
+      //--- P-DIAG-162: the stamps the last move block reads.
+      s_mvA = _mvA; s_mvB = _mvB; s_mvC = _mvC; s_mvD = _mvD; s_mvHeld = true;
     }
 
     // P-DRAW-17: THE OPEN PATH RUNS BEFORE THE GUARD — the guard below says the strip
@@ -10323,6 +10731,34 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
     // ever cascaded, and every fill fell through to the 2 s orphan sweep
     // («fill دیرتر پاک میشه», measured: ORPHAN drops for Rectangle _FL while
     // no CASCADE line preceded them). Deletes skip the gate, clicks keep it.
+    //--- P-DIAG-162b (temporary): THE SHUT-STRIP MOVE'S OWN LEDGER. The open strip's
+    //--- print sits in the second MOUSE_MOVE branch, BELOW this guard — so a move with
+    //--- the strip shut (the normal state, and the Path drag's own state) paid the whole
+    //--- branch and reported nothing but the ms `strip=` bucket. Same four segments,
+    //--- same once-a-second gate; `path=press` means the press-edge block ran and no
+    //--- segment was stamped (the previous move's are never reported as this one's).
+    if(id == CHARTEVENT_MOUSE_MOVE)
+    {
+       uint _mvX = CompatUsNow();
+       uint _mvTot2 = (uint)((_mvX - s_mvTop) / 1000);
+       if(_mvTot2 >= 4)
+       {
+          static uint _mvGate2 = 0;
+          uint _mvNow2 = GetTickCount();
+          if(_mvGate2 == 0 || _mvNow2 - _mvGate2 >= 1000)
+          {
+             _mvGate2 = _mvNow2;
+             if(s_mvHeld)
+                Print("[mvus-ds2] total=", (int)_mvTot2,
+                      " press=", (int)((s_mvB - s_mvA) / 1000),
+                      " arm=", (int)((s_mvC - s_mvB) / 1000),
+                      " follow=", (int)((s_mvD - s_mvC) / 1000),
+                      " tail=", (int)((_mvX - s_mvD) / 1000));
+             else
+                Print("[mvus-ds2] total=", (int)_mvTot2, " path=press");
+          }
+       }
+    }
     if(!s_dsOpen && id != CHARTEVENT_OBJECT_DELETE) return false;
      //--- P-DRAW-84: the gear panel's press already acted (7337). This release is
      //--- the SAME gesture on the other channel: it must be spent here, or the
@@ -10580,6 +11016,27 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
    {
       int st = (int)StringToInteger(sparam);
       DrawStripGripMove((int)lparam, (int)dparam, ((st & 1) != 0));
+      // P-DIAG-162 (temporary): the move's four stages in microseconds. Printed at
+      // most once a second, and only when the whole move costs more than 4 ms — the
+      // one line that can name the strip's owner instead of the ms ledger's 15.6 ms
+      // buckets. `press` = the edge/latch block, `drag` = the followers, `grip` = the
+      // carry. Remove with the lag fix.
+      uint _mvD = CompatUsNow();
+      uint _mvTot = (uint)((_mvD - s_mvA) / 1000);
+      if(_mvTot >= 4)
+      {
+         static uint _mvGate = 0;
+         uint _mvNow = GetTickCount();
+         if(_mvGate == 0 || _mvNow - _mvGate >= 1000)
+         {
+            _mvGate = _mvNow;
+            Print("[mvus-ds] total=", (int)_mvTot,
+                  " press=", (int)((s_mvB - s_mvA) / 1000),
+                  " arm=", (int)((s_mvC - s_mvB) / 1000),
+                  " follow=", (int)((s_mvD - s_mvC) / 1000),
+                  " grip=", (int)((_mvD - s_mvD) / 1000));
+         }
+      }
       // P-DRAGF2: the chase itself moved to the UNGUARDED move branch above — a
       // drawing's followers are not the strip's to carry. This branch keeps the grip
       // carry, which IS the strip's own gesture.
@@ -10638,14 +11095,41 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
         //--- board — the one scrub left is the grip carry, which `DrawStripGripRelease`
         //--- is, and which is asked on the line below as it always was.
         DrawStripGripRelease();   // motionless releases emit no MOVE (P-LM-13 net)
-        // P-UI-113i: THE RELEASE'S OWN DRAWING IS NEVER AN OUTSIDE CLICK. The press
-
-       // owner is accepted even if the terminal's control shifts under the hand,
-       // and the release pixel gets the same body/control hit test as a still press.
-       // Selection is not consulted here: selected and unselected drawings therefore
-       // cannot take different paths through dismissal (P-UI-113h's selected handle
-       // is geometry, not a special privilege).
-       if(DrawStripReleaseOnDrawing(relPressObj, rcx, rcy)) return false;
+        //--- P-DRAW-142 (2026-10-23) — THE ORDER OF THE THREE VERDICTS, AND WHY IT
+        //--- IS THIS ORDER. The user's report is one sentence with two halves:
+        //--- «نوار استریپ و انسلکت شدن ابجکت ... بسته نمیشه». Both are this branch.
+        //---
+        //---   1. A DRAG-RELEASE IS NEVER A CLICK (P-UI-113d). Measured first,
+        //---      because the two checks below both ASK about the pixel, and a hand
+        //---      that moved a drawing 64 px still ended on it.
+        //---   2. THE GESTURE'S OWN TWIN IS SPENT, NEVER CLOSED (P-MT5-TWIN). The
+        //---      fallback open of a hollow interior arms it, and that twin IS a
+        //---      chart click on the drawing — the one click that must not reach
+        //---      verdict 3.
+        //---   3. A CLICK ON THE SERVED DRAWING CLOSES IT. This used to `return
+        //---      false` — "the release is on the drawing, so it is not an outside
+        //---      click" — which was written for the OPENING release (P-UI-113i),
+        //---      and the opener window above now owns that case. What the veto was
+        //---      left doing was killing the toggle on MT5's CHART channel: a hollow
+        //---      box fires no OBJECT_CLICK from inside its own interior, so the
+        //---      single click that P-UI-113d promises deselects-and-closes reached
+        //---      this line and did NOTHING — the strip stayed up and the drawing
+        //---      stayed selected. It closes here now, through the same owner the
+        //---      OBJECT_CLICK channel uses (`DrawStripClose` writes SELECTED=false).
+        //---   4. PIN, then outside-click dismissal, exactly as before.
+       if(relWasDrag) return false;
+       if(DrawStripTwinSpent()) return false;
+       if(DrawStripReleaseOnDrawing(relPressObj, rcx, rcy))
+       {
+          string nmCl = s_dsObj;
+          if(nmCl != "" && ObjectFind(0, nmCl) >= 0 &&
+             (bool)ObjectGetInteger(0, nmCl, OBJPROP_SELECTED))
+             ObjectSetInteger(0, nmCl, OBJPROP_SELECTED, false);   // single-click deselect
+          Print("[drawstrip] click closed on \"", nmCl, "\" (chart channel)");
+          DrawStripClose();
+          ChartRedraw();
+          return true;
+       }
       // P-DRAW-13: pin survives outside clicks (only ✕ paths, Del and Esc dismiss).
       if(s_dsPinned) return false;
       //--- MT5-ONLY P-MT5-TWIN (2026-10-23): THE SECOND CHANNEL OF THE OPEN.
@@ -10658,12 +11142,6 @@ bool DrawStripOnEvent(const int id, const long &lparam, const double &dparam, co
       //--- costs the second channel and nothing else - a later, genuine click
       //--- still dismisses (the flag is one-shot and 800 ms bounded).
       if(DrawStripTwinSpent()) return false;
-      // P-UI-113d: A DRAG-RELEASE IS NOT A DISMISSAL (the box mini-strip's own
-      // `dragRel` / BK_CLICK_SLOP rule, measured in the click head above). Reading
-      // it as one is the second way a strip vanished on the user's own hand: hold
-      // on a drawing, the strip appears, the hand drifts two digits, let go — and
-      // the toolbar they were reaching for is gone.
-      if(relWasDrag) return false;
       //--- P-PAL-20 — THE WITNESS, BECAUSE WORKING IS SILENT. This dismissal used to
       //--- be the death of a colour pick («یک رنگ انتخاب می‌کنم کل استریپ بسته می‌شه»):
       //--- the popup the strip itself opened is not the plate, so `PointInside` read

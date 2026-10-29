@@ -225,6 +225,20 @@ static uint   g_s1ClickHandledMs = 0;   // the twin-event dedupe (two transports
 
 void HandsetHandleAtXY(const string hn, const int cx, const int cy, const int half, const string bmp)
 {
+   // P-PERF-157e (2026-10-29) — THE RUNG IS ASSERTED ONCE, NOT EVERY PASS.
+   //
+   // The ZORDER write below used to ride EVERY pass, and the pass rode every
+   // mouse move: one terminal write per marker per move for a property that
+   // cannot drift (nothing else in the tree writes ZORDER). MEASURED on the
+   // live chart as part of `[mvus] hs=9..62ms`. The memo is the WRITER's own
+   // memory, not an OBJPROP_ZORDER read (the zorder audit bans those in
+   // product code): a handle we create gets the rung in the create branch,
+   // and one a pre-rung build left behind is lifted on its first pass here.
+   static string s_zSeen[8];
+   static int    s_zN = 0;
+   bool zKnown = false;
+   for(int zi = 0; zi < s_zN; zi++) if(s_zSeen[zi] == hn) { zKnown = true; break; }
+
    if(ObjectFind(0, hn) < 0)
    {
       if(!ObjectCreate(0, hn, OBJ_BITMAP_LABEL, 0, 0, 0)) return;
@@ -233,12 +247,18 @@ void HandsetHandleAtXY(const string hn, const int cx, const int cy, const int ha
       ObjectSetInteger(0, hn, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, hn, OBJPROP_BACK, false);
       ObjectSetInteger(0, hn, OBJPROP_ZORDER, Z_CHART_LABEL);
+      zKnown = true;
+      if(s_zN < 8) { s_zSeen[s_zN] = hn; s_zN++; }
    }
    // The rung is re-asserted on every pass, UNGUARDED: a handle a pre-rung build
    // drew keeps ObjectCreate's default 0 until something lifts it. It is not
    // read back — the zorder audit bans OBJPROP_ZORDER reads in product code
    // (a diagnostic, not a product question, P-UI-31's rule).
-   ObjectSetInteger(0, hn, OBJPROP_ZORDER, Z_CHART_LABEL);
+   if(!zKnown)
+   {
+      ObjectSetInteger(0, hn, OBJPROP_ZORDER, Z_CHART_LABEL);
+      if(s_zN < 8) { s_zSeen[s_zN] = hn; s_zN++; }
+   }
    // the BMPFILE re-push forces MT4 to re-decode — change-guarded (P-LM-15)
    if((string)ObjectGetString(0, hn, OBJPROP_BMPFILE, 0) != bmp)
    {
@@ -865,6 +885,39 @@ bool GestureTakeAllowed(const string name)
 //--- answers that in its own words now, and the caller prints it beside its own witness:
 //--- one string, written on the press edge only (nothing on a tick, nothing per frame).
 string GestureTakeWhy() { return g_gestureTakeWhy; }
+//+------------------------------------------------------------------+
+//| P-PERF-171 — WHO OWNS THE MOVE STREAM.                            |
+//|                                                                   |
+//| MEASURED 2026-10-29 on the live chart, dragging ONE vertex dot of |
+//| a path on AUDUSDb,H1 (the user's own report: «نقاط درگ میکنم سنگین |
+//| هنوز»). The `[mvus-avg]` ledger printed the per-move average of    |
+//| every owner, six seconds of the gesture:                          |
+//|                                                                   |
+//|   n=15 tot=22 ind=13 hs=4  knot=8  strip=9                        |
+//|   n=14 tot=29 ind=28 hs=9  knot=19 strip=1                        |
+//|   n=18 tot=20 ind=7  hs=5  knot=1  strip=12                       |
+//|   n=12 tot=44 ind=32 hs=7  knot=25 strip=11                       |
+//|                                                                   |
+//| The path's own half — the handle ride, `hs` — is 1..9 ms. The two |
+//| owners that are NOT in this gesture spend more than it does: the  |
+//| Base/Knot hover (up to 25 ms) and the draw strip's move head (9-14 |
+//| ms) both run on every move of a drag neither of them started. The |
+//| total is 17..44 ms a move, so the terminal delivers 12..18 moves a |
+//| second instead of the ~60 the hand produces — and THAT is the      |
+//| heaviness, not the carry.                                         |
+//|                                                                   |
+//| The product already has the law this needs: a gesture belongs to  |
+//| ONE owner and the others do not touch its events (P-UI-144's      |
+//| take). `GestureTake*` above answers "may I START this?", which is |
+//| a press-edge question. This is the other half — "is the stream    |
+//| already spoken for?" — asked once per move by every hover owner.  |
+//| Cost: one compare per move when nobody is dragging, and the drag  |
+//| itself gets the terminal back.                                    |
+//+------------------------------------------------------------------+
+static string g_moveOwner = "";
+void GestureMoveClaim(const string who) { g_moveOwner = who; }
+void GestureMoveRelease(const string who) { if(g_moveOwner == who) g_moveOwner = ""; }
+bool GestureMoveOwned() { return (g_moveOwner != ""); }
 //--- THE CENSUS, beside the arbiter it measures (P-UI-142). «It did not work» is not a
 //--- verdict; the ORDER the terminal speaks is. This answers, for one reproduction, the
 //--- only question no amount of reading can: does a native draw started ON our own
