@@ -79,6 +79,19 @@ static bool   s_pathLeft        = false;
 static string s_pathDrag        = "";      // path id under the hand ("" = no drag)
 static int    s_pathDragV       = -1;      // P-PERF-166: the VERTEX the hand holds (-1 = whole path)
 static bool   s_pathMoved       = false;
+//--- P-PERF-170 (2026-10-29) — THE CARRY READS NOTHING, BECAUSE THE PRESS ALREADY DID.
+//--- A dot carry used to re-derive its own seat every frame: PathVertex() to read the
+//--- anchor back out of the terminal (ObjectFind + ObjectGetInteger + ObjectGetDouble),
+//--- then ChartTimePriceToXY() to turn it into pixels again — to learn a number the press
+//--- had in its hand already. The held vertex's point IS the snap row the press recorded,
+//--- moved by exactly the (dt,dp) the geometry just took, so the frame keeps that
+//--- arithmetic in two scalars and the seat becomes one projection plus two writes:
+//--- 11 terminal round-trips per frame -> 5, with the dot and the line reading the same
+//--- numbers by construction (they cannot disagree, so the dot cannot drift off its line).
+static int    s_pathDragRow     = -1;      // snap row that owns the held vertex (-1 = none)
+static int    s_pathDragPt      = 0;       // ...and which of its two anchors (0/1)
+static long   s_pathDragDT      = 0;       // the frame's time translation
+static double s_pathDragDP      = 0.0;     // ...and its price translation
 static datetime s_pathSnapT     = 0;       // cursor time under the press (drag origin)
 static double s_pathSnapP       = 0.0;     // ... and price
 static int    s_pathPressX      = 0;
@@ -369,6 +382,60 @@ int PathSegCount(const string id)
    s_segMemoN[m]  = n;
    return n;
 }
+// P-PATH-BUG-9 (2026-10-29) — THE DOTS COME FROM THE SEGMENTS THAT EXIST, NOT FROM A
+// COUNT THAT STOPS AT THE FIRST HOLE.
+//
+// `PathSegCount` stops at the first index it cannot find, and it is RIGHT to: nearly
+// every caller indexes `0..n-1` and hands those names straight to the terminal, so a
+// hole would make them address objects that are not there. The HANDLE pass is the one
+// caller that is not shaped like that — what it needs is the set of VERTICES, and a
+// vertex exists for every segment that exists, hole or not.
+// MEASURED today on the user's own screenshot (1920x1080, the AUDUSDb path): 7 dots on
+// a polyline that carried TWO more strokes meeting at an apex with NO dot at all —
+// `D4(969,637) -> apex(985,510) -> D5(1062,691)`, a line the hand can neither grab nor
+// delete, sitting exactly where a vertex belongs. That is the report verbatim:
+// «هر نقطه درگ مینم یک خط دیگه زیرش هستش» — a line under the dot that is not the dot's
+// line. It is the orphan class of P-UI-146/P-PATH-BUG-6 reached by the one door that
+// sweep cannot see: a segment whose vertex index sits past a hole in the index run.
+//
+// The walk below collects the indices it FINDS instead of stopping at the first one it
+// does not, and derives the vertex set from them. A gap longer than PATH_GAP_MAX ends
+// it, so a single stray high index cannot drag the walk to 255 on every press.
+#define PATH_INDEX_MAX 256
+#define PATH_GAP_MAX   4
+int PathVerticesOf(const string id, int &v[])
+{
+   ArrayResize(v, 0);
+   if(id == "") return 0;
+   //--- P-PATH-BUG-9: THE WALK IS THE ANSWER, not a shortcut on top of the count.
+   //--- The first spelling of this asked `PathSegCount` and only walked when a segment
+   //--- sat at exactly index n — which misses the case that matters: a hole anywhere
+   //--- BEFORE n hides every leg after it, and the count cannot tell. Cost is n + a few
+   //--- ObjectFind on a press / a release / a chart change (never on a frame), and a
+   //--- normal 6-leg path pays 11 of them.
+   int gap = 0;
+   for(int i = 0; i < PATH_INDEX_MAX; i++)
+   {
+      if(ObjectFind(0, PathSegName(id, i)) < 0)
+      {
+         if(ArraySize(v) == 0) break;              // no segment 0: not a path at all
+         if(++gap > PATH_GAP_MAX) break;           // a stray high index ends the walk
+         continue;
+      }
+      gap = 0;
+      //--- segment i owns vertices i and i+1; the list stays ascending because i only
+      //--- ever grows, so the duplicate of a shared vertex is the only case to skip
+      for(int q = 0; q < 2; q++)
+      {
+         int k = i + q;
+         int m = ArraySize(v);
+         if(m > 0 && v[m - 1] == k) continue;
+         ArrayResize(v, m + 1);
+         v[m] = k;
+      }
+   }
+   return ArraySize(v);
+}
 void PathRegAdd(const string id)
 {
    for(int i = 0; i < ArraySize(s_pathIds); i++)
@@ -414,18 +481,44 @@ void PathChildrenDrop(const string id, const string tail)
       if(StringFind(nm, pre) == 0) ObjectDelete(0, nm);
    }
 }
+// P-PATH-BUG-9 (2026-10-29) — A SEGMENT IS SWEPT BY NAME, NOT BY A COUNT.
+// Every delete route walked `for(i=0; i<PathSegCount(id); i++)`, and that count is the
+// CONTIGUOUS PREFIX of the index run. A family whose run has a hole (a refused
+// ObjectCreate, a partial native delete, a reload in the middle of a sweep) therefore
+// lost only the legs before the hole and kept the rest on the chart forever — the
+// P-UI-146 orphan class in its last hiding place: a line with no dot and no owner.
+// A segment's tail is all digits; a handle's is `H<k>` and a marker's `M<k>`, so one
+// name walk separates them without a second store.
+void PathSegSweep(const string id)
+{
+   if(id == "") return;
+   const string pre = PathPrefix() + id + "_";
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+   {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, pre) != 0) continue;
+      string tail = StringSubstr(nm, StringLen(pre));
+      int tl = StringLen(tail);
+      if(tl == 0) continue;
+      bool digits = true;
+      for(int c = 0; c < tl; c++)
+      {
+         int ch = (int)StringGetChar(tail, c);
+         if(ch < 48 || ch > 57) { digits = false; break; }
+      }
+      if(digits) ObjectDelete(0, nm);
+   }
+}
 // The handles go with the path, always as one family (P-LOG-10 law 4). It sits ABOVE
 // PathRegDel on purpose: P-UI-146 makes the registrar the one sweep, and MQL4 has no
 // prototype that is not a warning (warning 46), so the order carries the dependency.
 void PathHandlesDrop(const string id)
 {
-   int m = PathSegCount(id);
-   if(m > 0)   // the parent is whole: the count is exact and this is the cheap pass
-   {
-      for(int k = 0; k <= m; k++) ObjectDelete(0, PathHandleName(id, k));
-      return;
-   }
-   PathChildrenDrop(id, "_H");   // the parent is gone: nothing to count, sweep by name
+   //--- P-PATH-BUG-9: BY NAME. The vertex set can name every dot the pass would paint,
+   //--- but not a dot whose segment has already gone (a native delete of the last leg),
+   //--- and that is the orphan this sweep exists to end. One object-list walk on a
+   //--- DELETE — never on a frame, never on a press.
+   PathChildrenDrop(id, "_H");
 }
 void PathRegDel(const string id)
 {
@@ -456,15 +549,25 @@ void PathSelect(const string id)
 }
 // Vertex k of the path: k=0 is the first segment's anchor, k=n the free end, and
 // every k in between is the shared point of segments k-1 and k.
+// P-PATH-BUG-9: AND IT NO LONGER ASKS THE COUNT. The count is contiguous-only, so
+// `k > n` used to refuse the very vertices a holed family still draws — the dot was
+// placed (PathVerticesOf) and then could not be read back, which is a dot that cannot
+// be grabbed. The vertex's owner is a fact about the OBJECTS: segment k's point 0, or,
+// when k has no segment of its own, segment k-1's point 1. That also drops one memo
+// lookup per call, and this is the tool's second most-called function.
 bool PathVertex(const string id, const int k, datetime &t, double &p)
 {
    t = 0; p = 0.0;
-   int n = PathSegCount(id);
-   if(n <= 0 || k < 0 || k > n) return false;
-   int si = (k == n ? n - 1 : k);
-   int pt = (k == n ? 1 : 0);
-   string nm = PathSegName(id, si);
-   if(ObjectFind(0, nm) < 0) return false;
+   if(id == "" || k < 0) return false;
+   string nm = PathSegName(id, k);
+   int pt = 0;
+   if(ObjectFind(0, nm) < 0)
+   {
+      if(k == 0) return false;              // no segment 0: the path does not exist
+      nm = PathSegName(id, k - 1);          // k is a free end: its owner is the leg before it
+      pt = 1;
+      if(ObjectFind(0, nm) < 0) return false;
+   }
    t = (datetime)ObjectGetInteger(0, nm, OBJPROP_TIME, pt);
    p = ObjectGetDouble(0, nm, OBJPROP_PRICE, pt);
    return (t > 0 && p > 0);
@@ -503,8 +606,11 @@ void PathHandleFollow(const string id)
 }
 void PathHandlesFollowAll(const string id)
 {
-   int n = PathSegCount(id);
-   for(int k = 0; k <= n; k++) PathHandleAt(id, k);
+   //--- P-PATH-BUG-9: the set of VERTICES, not the count of segments. A holed family
+   //--- keeps its dots on the legs that exist instead of losing everything past the hole.
+   int v[];
+   int nv = PathVerticesOf(id, v);
+   for(int i = 0; i < nv; i++) PathHandleAt(id, v[i]);
 }
 // The handle's own hit test — the ONLY surface that can answer "remove", and the
 // only surface that can answer "move this point".
@@ -513,17 +619,19 @@ bool PathDotHit(const int mx, const int my, string &id, int &k)
    id = ""; k = -1;
    if(IsIndicatorHidden()) return false;   // P-UI-160b: no grabbing a hidden path's dot
    if(s_pathSel == "") return false;
-   int n = PathSegCount(s_pathSel);
+   int v[];
+   int nv = PathVerticesOf(s_pathSel, v);   // P-PATH-BUG-9: the same set the pass painted
    int best = 0x7fff;
-   for(int i = 0; i <= n; i++)
+   for(int i = 0; i < nv; i++)
    {
-      if(ObjectFind(0, PathHandleName(s_pathSel, i)) < 0) continue;
+      int vi = v[i];
+      if(ObjectFind(0, PathHandleName(s_pathSel, vi)) < 0) continue;
       datetime t = 0; double p = 0.0;
-      if(!PathVertex(s_pathSel, i, t, p)) continue;
+      if(!PathVertex(s_pathSel, vi, t, p)) continue;
       int x = 0, y = 0;
       if(!ChartTimePriceToXY(0, 0, t, p, x, y)) continue;
       int d = (int)MathSqrt((double)((mx - x) * (mx - x) + (my - y) * (my - y)));
-      if(d <= PATH_DOT_PX && d < best) { best = d; k = i; }
+      if(d <= PATH_DOT_PX && d < best) { best = d; k = vi; }
    }
    if(k < 0) return false;
    id = s_pathSel;
@@ -558,8 +666,8 @@ void PathDelete(const string id, const string why)
    PathWitness("delete id=" + id + " segs=" + IntegerToString(PathSegCount(id)) + " why=" + why);
    if(s_pathDrag == id) PathDragRelease();
    PathSelect("");                       // every handle is the path's CHILD (P-HR-07's rule, one way)
-   int n = PathSegCount(id);
-   for(int i = 0; i < n; i++) ObjectDelete(0, PathSegName(id, i));
+   //--- P-PATH-BUG-9: by name, so a holed run cannot leave its last legs behind
+   PathSegSweep(id);
    PathSegMemoDrop(id);   // P-PERF-168b: the count died with the family
    PathRegDel(id);
    PathInkForget(id);            // P-UI-137: the ink row dies with its path (no leak)
@@ -820,7 +928,7 @@ void PathSweepUnfinished()
    for(int k = 0; k < ArraySize(dead); k++)
    {
       int m = PathSegCount(dead[k]);
-      for(int s = 0; s < m; s++) ObjectDelete(0, PathSegName(dead[k], s));
+      PathSegSweep(dead[k]);   // P-PATH-BUG-9: by name, not by the (possibly short) count
       PathHandlesDrop(dead[k]);
       PathWitness("unfinished session swept id=" + dead[k] + " segs=" + IntegerToString(m));
    }
@@ -1005,14 +1113,9 @@ void PathLockSet(const string id, const bool on)
 string PathMidName(const string id, const int k) { return PathPrefix() + id + "_M" + IntegerToString(k); }
 void PathMidDrop(const string id)
 {
-   int m = PathSegCount(id);
-   if(m > 0)   // the parent is whole: the count is exact and this is the cheap pass
-   {
-      for(int k = 0; k < m; k++) ObjectDelete(0, PathMidName(id, k));
-      ObjectDelete(0, PathMidName(id, m));
-      return;
-   }
-   PathChildrenDrop(id, "_M");   // P-PATH-BUG-6: the parent is gone — sweep by name
+   //--- P-PATH-BUG-9: by name, like the segments and the dots. The count is the
+   //--- contiguous prefix, so a holed family kept every marker past the gap.
+   PathChildrenDrop(id, "_M");
 }
 bool PathMidGet(const string id)
 {
@@ -1298,6 +1401,8 @@ void PathDragRelease()
    if(s_pathDrag == "") return;
    s_pathDrag = "";
    s_pathDragV = -1;
+   s_pathDragRow = -1; s_pathDragPt = 0;   // P-PERF-170: the row dies with the gesture
+   s_pathDragDT = 0; s_pathDragDP = 0.0;
    ChartViewLockRelease();
 }
 // ONE snap store, three gestures. `ix` says which anchor each snapshotted segment
@@ -1339,8 +1444,17 @@ void PathVertDragStart(const string id, const int k)
    PathHandleFollow(id);
    ArrayResize(s_pathSnapNames, 0);
    int n = PathSegCount(id);
+   s_pathDragRow = -1; s_pathDragPt = 0;
    if(k > 0) PathSnapAdd(PathSegName(id, k - 1), 1);
-   if(k < n) PathSnapAdd(PathSegName(id, k), 0);
+   //--- P-PERF-170: which snap row OWNS the held vertex, and which of its two anchors
+   //--- that is. The carry reads the point from here instead of asking the terminal.
+   //--- k<n  -> the row just added for segment k, anchor 0 (it also has a point 1)
+   //--- k==n -> the row for segment n-1, anchor 1 (the free end)
+   int last = ArraySize(s_pathSnapNames) - 1;
+   if(k < n) { PathSnapAdd(PathSegName(id, k), 0); last = ArraySize(s_pathSnapNames) - 1; s_pathDragPt = 0; }
+   else if(last >= 0) s_pathDragPt = 1;
+   s_pathDragRow = (last >= 0 ? last : -1);
+   s_pathDragDT = 0; s_pathDragDP = 0.0;
    ChartViewLockAcquire();
    s_pathDragMs = 0;    // P-PERF-168: the first move of a carry is never deferred
    s_pathDragPend = false;
@@ -1355,16 +1469,32 @@ void PathVertDragStart(const string id, const int k)
 // this chart (hundreds of objects) the ride measured `[mvus] hs=9..62 ms`.
 // A carry knows the bitmap (it never changes mid-gesture) and the position (it is
 // about to be written), so it writes the two distances and asks nothing.
+// P-PERF-170 (2026-10-29) — AND IT NO LONGER ASKS THE OBJECT EITHER. The point it
+// needs is the snap row the press recorded plus this frame's (dt,dp); PathVertex was
+// re-reading it out of the terminal only to arrive at the same number, at the cost of
+// an ObjectFind and two ObjectGet. The dot and the line now read the SAME arithmetic,
+// so they cannot disagree — which is also why a dot can no longer sit a few pixels off
+// its own line while the hand is moving («یک خط دیگه زیرش»).
 void PathHandleCarry(const string id, const int k)
 {
    string hn = PathHandleName(id, k);
-   if(ObjectFind(0, hn) < 0) { PathHandleAt(id, k); return; }   // a birth keeps the full dress
    //--- the F mute can land mid-carry; a parked row is the answer then too
    if(IsIndicatorHidden()) { ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, HANDSET_HANDLE_PARK); return; }
-   datetime t = 0; double p = 0.0;
-   if(!PathVertex(id, k, t, p)) return;
+   if(s_pathDragRow < 0 || s_pathDragRow >= ArraySize(s_pathSnapNames))
+   {   //--- no snap row (a whole-row gesture): the general answer, one lookup, rare
+      datetime vt = 0; double vp = 0.0;
+      if(!PathVertex(id, k, vt, vp)) return;
+      int vx = 0, vy = 0;
+      if(!(vp > 0) || !ChartTimePriceToXY(0, 0, vt, vp, vx, vy))
+      { ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, HANDSET_HANDLE_PARK); return; }
+      ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, vx - CP_HANDLE_HALF);
+      ObjectSetInteger(0, hn, OBJPROP_YDISTANCE, vy - CP_HANDLE_HALF);
+      return;
+   }
+   datetime t = (datetime)((long)(s_pathDragPt == 0 ? s_pathSnapT0[s_pathDragRow] : s_pathSnapT1[s_pathDragRow]) + s_pathDragDT);
+   double   p = (s_pathDragPt == 0 ? s_pathSnapP0[s_pathDragRow] : s_pathSnapP1[s_pathDragRow]) + s_pathDragDP;
    int x = 0, y = 0;
-   if(!(p > 0) || !ChartTimePriceToXY(0, 0, t, p, x, y))
+   if(!(t > 0) || !(p > 0) || !ChartTimePriceToXY(0, 0, t, p, x, y))
    {
       ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, HANDSET_HANDLE_PARK);
       return;
@@ -1374,14 +1504,17 @@ void PathHandleCarry(const string id, const int k)
 }
 void PathDragApply(const datetime curT, const double curP)
 {
-   long dt = (long)(curT - s_pathSnapT);
-   double dp = curP - s_pathSnapP;
+   //--- P-PERF-170: ONE arithmetic, two readers (the segments below and the dot's seat).
+   s_pathDragDT = (long)(curT - s_pathSnapT);
+   s_pathDragDP = curP - s_pathSnapP;
    for(int i = 0; i < ArraySize(s_pathSnapNames); i++)
    {
-      if(ObjectFind(0, s_pathSnapNames[i]) < 0) continue;
+      //--- P-PERF-170: no ObjectFind. ObjectMove on a name that is gone is a silent
+      //--- false, and the guard cost one terminal lookup per row per frame to spare a
+      //--- call that is already cheap when it misses.
       int ix = s_pathSnapIx[i];
-      if(ix != 1) ObjectMove(0, s_pathSnapNames[i], 0, s_pathSnapT0[i] + dt, s_pathSnapP0[i] + dp);
-      if(ix != 0) ObjectMove(0, s_pathSnapNames[i], 1, s_pathSnapT1[i] + dt, s_pathSnapP1[i] + dp);
+      if(ix != 1) ObjectMove(0, s_pathSnapNames[i], 0, s_pathSnapT0[i] + s_pathDragDT, s_pathSnapP0[i] + s_pathDragDP);
+      if(ix != 0) ObjectMove(0, s_pathSnapNames[i], 1, s_pathSnapT1[i] + s_pathDragDT, s_pathSnapP1[i] + s_pathDragDP);
    }
    //--- P-PERF-166 (2026-10-29) — A DOT CARRY MOVES THREE DOTS, NOT THE WHOLE ROW.
    //--- P-PERF-169: AND OF THOSE THREE, ONLY ONE ACTUALLY MOVES. Vertex V lives in
