@@ -102,10 +102,6 @@
 #include "Engine\RenderCore.mqh"
 #endif
 #include "Biotak\PathTool.mqh"
-// P-DRAW-CANVAS (2026-10-29): the user's own tool palette — model, canvas and
-// input in one owner. Needs RenderCore above; sits below PathTool because both
-// are drawing tools and the canvas one owns no state the path reads.
-#include "Biotak\DrawCanvas.mqh"
 
 //                                                                    
 // Cache & Object Management Systems
@@ -273,10 +269,6 @@ int OnInit()
         // first pump if the chart window is not mapped yet).
 #ifdef BIOTAK_RENDER_ENGINE
         RBridgeInit();
-        // P-DRAW-CANVAS (2026-10-29): the user's own drawings live on their own
-        // canvas (Biotak\DrawCanvas.mqh). Loaded after the engine so the platform
-        // helpers exist; the layers themselves are created on the first frame.
-        DrawCanvasInit();
 #endif
         // P-UI-114: right-click era deleted — terminal menu untouched, strip on
         // LEFT hold (DrawStrip.mqh).
@@ -297,7 +289,6 @@ void OnDeinit(const int reason)
     CompatDeinitBegin();   // MT5-ONLY P-PERF-99: no event can be consumed after this
     uint p4d = GetTickCount();   // P-PERF-04: teardown budget (timeframe switch)
 #ifdef BIOTAK_RENDER_ENGINE
-    DrawCanvasDeinit();  // P-DRAW-CANVAS: flush the CSV, then drop the two layers
     RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance
 #endif
     // P-PERF-96 (BUG-13, 2026-10-13) — THE COMPAT LEDGER IS READ, NOT JUST WRITTEN.
@@ -514,13 +505,6 @@ void OnChartEvent(const int id,
   // an event is SCHEDULED, never executed - see the EventHandlers note. Setting
   // the flag here (not in the handlers) is what makes the guarantee hold for
   // every path they call, including ones added later.
-  // P-DRAW-CANVAS (2026-10-29): the user's canvas drawings own their own input —
-  // the palette bar, placement clicks and the selection grab. Ahead of every
-  // object handler, so a click on the palette can never also be read as free
-  // chart, and a placement click never reaches the strip.
-#ifdef BIOTAK_RENDER_ENGINE
-  if(DrawCanvasOnEvent(id, lparam, dparam, sparam)) return;
-#endif
   g_inChartEvent = true;
   CompatFrameBegin();   // MT5-ONLY R-POINTER-FRAME: one frame per event, see MQL5Compat
   uint p4t = GetTickCount();
