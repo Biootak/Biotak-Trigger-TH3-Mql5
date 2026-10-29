@@ -447,6 +447,41 @@ bool CreateATRTradePiece(const string name, const string text, const color textC
     return true;
 }
 
+// P-ANCHOR-CARD (2026-10-28, ported from MT4): the card is a LABEL that
+// prints an as-of trap in its superscript while its four legs were computed
+// live. MEASURED on the MT4 chart: `82.0` over `TRex 12.8` where 82.0/4.266666
+// = 19.2 — one card, two moments. These two helpers are the other half of
+// P-ANCHOR-LAST: the ATR read is already anchored, so the RANGE must be the
+// TrueRange of the SAME bar, or the spread row divides two different bars (his
+// `111.9 (136.5%)` = 111.9 / 82.0). TrueRange, because the previous close's gap
+// is part of the number (ATR_A CalculateTrueRange's own law); -1.0 when the bar
+// has no usable prices, so a genuinely flat bar still prints `0.0 (0.0%)`.
+double TradePlanStructureRange(const ENUM_TIMEFRAMES stf)
+{
+   if(stf == PERIOD_CURRENT) return -1.0;
+   datetime fa = CalcAnchorAt();
+   int shift = 0;
+   if(fa > 0)
+   {
+      shift = iBarShift(Symbol(), stf, fa, false);   // the bar the ATR was read on, never a shift
+      if(shift < 0) shift = 0;                       // not loaded yet: the live bar, the old read
+   }
+   double hi = iHigh(NULL, stf, shift), lo = iLow(NULL, stf, shift), pc = iClose(NULL, stf, shift + 1);
+   if(hi <= 0.0 || lo <= 0.0 || hi < lo) return -1.0;
+   double rng = hi - lo;
+   if(pc > 0.0) rng = MathMax(rng, MathMax(MathAbs(hi - pc), MathAbs(lo - pc)));
+   return rng;
+}
+
+// The card's own witness has to say WHICH bar it read: an as-of card and a live
+// one print the same field names, and a reader of `tradeplan-witness-<symbol>.log`
+// cannot tell them apart.
+string TradePlanAnchorText()
+{
+   datetime fa = CalcAnchorAt();
+   return (fa > 0 ? TimeToString(fa, TIME_DATE | TIME_MINUTES) : (string)"live");
+}
+
 // Countdown to the current chart bar close. Default = the long corner form
 // ("Close in : 22d 12h 32m 13s"); compact = the live-candle tag form with no
 // prefix and no spaces ("22d12h32m13s"). Units below the leading non-zero one
@@ -1041,10 +1076,8 @@ bool DisplayTRexTitleBlock(const string labelPrefix, const STrexCardLayout &L,
         int str2Idx = TradePlanLadderIndex(Period()) + 2;
         if(str2Idx >= TRADEPLAN_LADDER_SIZE) str2Idx = TRADEPLAN_LADDER_SIZE - 1;
         ENUM_TIMEFRAMES stf = CompatTF(TradePlanLadderMinutes(str2Idx));
-        double hi = iHigh(NULL, stf, 0), lo = iLow(NULL, stf, 0), pc = iClose(NULL, stf, 1);
-        double rng = hi - lo;
-        if(pc > 0.0) rng = MathMax(rng, MathMax(MathAbs(hi - pc), MathAbs(lo - pc)));
-        if(hi > 0 && lo > 0 && hi >= lo)
+        double rng = TradePlanStructureRange(stf);   // P-ANCHOR-CARD: the SAME bar the ATR above was read on
+        if(rng >= 0.0)
             spText = DoubleToString(rng / pip, 1) + (atrVal > 0.0 && atrVal != EMPTY_VALUE ? " (" + DoubleToString(rng / atrVal * 100.0, 1) + "%)" : "");
     }
     // ATR superscript above `TR`: current-TF weighted ATR in pips, 1 decimal.
@@ -1236,7 +1269,11 @@ void DisplayATRTradeLabels(const string objectPrefix) {
     // Live variant: slow legs (SL/TP/SB) freeze per chart bar like the
     // professor's block; Eng/Hunter stay live.
     STradePlan plan;
-    if(!TradePlanComputeLive(Period(), plan)) return;
+    // P-ANCHOR-CARD: the card wears the LABEL's bar, not the tick's. The ATR
+    // superscript above it already reads the anchored composite (P-ANCHOR-LAST),
+    // so the four legs and the TP row must come off that same bar; a live leg
+    // under an as-of ATR is the `82.0` / `TRex 12.8` pair the user measured.
+    if(!TradePlanComputeLive(Period(), plan, CalcAnchorAt())) return;
 
     // ONE card layout per pass (P-LBL-09): the margins, the row pitch, the
     // drawn-row set and the centring axis are read inside the owner, and all
@@ -1360,10 +1397,12 @@ void TradePlanWitness(const STradePlan &plan)
     FileWriteString(h, "P-TP4-WITNESS  build " + TH3_SRC_SHORT +
                        "  compiled " +
                        TimeToString(__DATETIME__, TIME_DATE | TIME_MINUTES) + "\r\n");
-    FileWriteString(h, StringFormat("symbol=%s tf=%s bar0=%s  chartMin=%d strMin=%d\r\n",
+    // P-ANCHOR-CARD: an as-of card and a live card print the same field names, so the witness
+    // must say WHICH bar the card read - otherwise a reader cannot tell the two apart.
+    FileWriteString(h, StringFormat("symbol=%s tf=%s bar0=%s  chartMin=%d strMin=%d anchor=%s\r\n",
                                     Symbol(), GetCurrentTimeframe(),
                                     TimeToString(bar0, TIME_DATE | TIME_MINUTES),
-                                    plan.chartMin, plan.strMin));
+                                    plan.chartMin, plan.strMin, TradePlanAnchorText()));
     FileWriteString(h, StringFormat("ATR own=%.4f str=%.4f  (pips; Eng = own/%.6f)\r\n",
                                     plan.ownPips, plan.basePips, TRADEPLAN_ENG_DIVISOR));
     FileWriteString(h, StringFormat("engTrue=%.6f eng=%.1f hunter=%.1f pricicle=%d classic=%d\r\n",
@@ -1600,7 +1639,10 @@ void TradePlanDumpNow()
     STradePlan plan;
     if(!TradePlanComputeLive(Period(), plan)) return;
     TradePlanExportBegin();
-    TpxLine("[DUMP] ===== " + Symbol() + " " + GetCurrentTimeframe() + " =====");
+    // P-ANCHOR-CARD: this dump is the compare-with-the-professor tool, so its PLAN stays LIVE on
+    // purpose (one card door is as-of, this is not a card). It still names the chart's anchor, so
+    // a dump read beside an as-of card cannot be mistaken for the same numbers.
+    TpxLine("[DUMP] ===== " + Symbol() + " " + GetCurrentTimeframe() + "  anchor=" + TradePlanAnchorText() + " =====");
     // P-TP4-STAMP: which binary wrote this file. Without it a dump can be read
     // against the wrong build and every conclusion drawn from it is worthless -
     // that is exactly what happened on NZDUSD (a correct 22:12 card was judged
@@ -1660,7 +1702,9 @@ void TradePlanLiveTick()
     // as the per-event ledger. Built here, it runs once per 2 s pass.
     string labelPrefix = GetLevelObjectPrefix() + "LBL_";
     STradePlan plan;
-    if(!TradePlanComputeLive(Period(), plan)) return;
+    // P-ANCHOR-CARD: the SAME door as the relayout path (DisplayATRTradeLabels) -
+    // one card must not be as-of when it is rebuilt and live on the next 2 s pump.
+    if(!TradePlanComputeLive(Period(), plan, CalcAnchorAt())) return;
     // P-TP4-WITNESS: exact numbers to the per-symbol file, once per chart bar.
     TradePlanWitness(plan);
     // ONE card layout for BOTH branches below (P-LBL-09): the drawn-row set and

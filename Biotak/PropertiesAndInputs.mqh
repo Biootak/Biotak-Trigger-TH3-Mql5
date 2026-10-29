@@ -332,7 +332,7 @@ input double inpTH3BaseStepPercent = 28.125;
 // Its height is typed here, in pips, and Path 1 of TH3LockedStep reads it.
 // The marked leg is a three-step run, so one step = leg/3 (course k = 3 fixed).
 // 0 = OFF: the pattern timeframe's own ATR answers (the default before this knob).
-input double inpTH3PivotBasePips = 0.0;
+input double inpTH3BaseRangePips = 0.0;
 input color inpTH3Color = clrDarkBlue;            // Visual align MT5: was clrForestGreen
 input color inpTH3PipTextColor = clrDarkBlue;     // Visual align MT5: was clrNavy
 input ENUM_LINE_STYLE inpTH3Style = STYLE_SOLID;
@@ -348,7 +348,7 @@ input int inpTH3ZoneBorderWidth = 1;
 // P-TH3-P6e (2026-09-19) — MOTHER-PIVOT OVERLAY SWITCH. OFF = the chart
 // shows only the pattern + ladder (clean chart); ON = the active pattern
 // also wears its matched mother pivot (two dotted bounds + one badge).
-input bool inpShowMotherPivotZone = false;   // P-TH3-DISC: detector zone OFF — the B-marked base is the only mother
+input bool inpShowNestedBaseZone = false;   // P-TH3-DISC: detector zone OFF — the B-marked base is the only mother
 #endif
 
 // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF — the [15] AB=CD group is

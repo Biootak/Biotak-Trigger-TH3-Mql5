@@ -1,14 +1,3 @@
-// ============================================================================
-// OWNED MT5 module - forked from the MetaTrader 4 source on 2026-10-12.
-//   MT4 source : Biotak/Biotak/TradePlanFormulas.mqh
-//
-// MT4 remains the LOGIC reference and tools/parity/module-report.py flags
-// any drift, but nothing regenerates this file: MT5-only changes live here
-// directly, marked MT5-ONLY / P-MT5-* / P-PERF-*.
-//
-// MT5-only changes this file already carries:
-//   * none
-// ============================================================================
 //+------------------------------------------------------------------+
 //|                                        TradePlanFormulas.mqh     |
 //|                                                                  |
@@ -310,12 +299,65 @@ double TradePlanStripPips(const int tfMinutes, const datetime anchor = 0)
    // P-LEGATR: an explicit anchor (knot as-of reads) always wins. A live read
    // with the switch ON resolves to the leg anchor; OFF or no CP found = live.
    datetime eff = anchor;
-   // P-ANCHOR-LAST: the LAST OBJECT switch is the chart-wide read, so it wins
-   // over the older P-LEGATR source; an explicit per-box anchor still wins over both.
-   if(eff <= 0 && CalcAnchorAt() <= 0 && inpUseLegATR) eff = TradePlanLegAnchor(tfMinutes);
+   // P-ANCHOR-LAST (2026-10-27, DELIBERATE): the LAST OBJECT switch has NO vote here.
+   // It used to stand in this guard, so pressing it picked the plan's ATR source and
+   // re-stepped the drawn levels — the one thing it must never move. A label lever
+   // moves labels. An explicit per-box anchor (P-BK-79) still wins over P-LEGATR; the
+   // chart-wide switch is not a source selector at all.
+   if(eff <= 0 && inpUseLegATR) eff = TradePlanLegAnchor(tfMinutes);
    double atr = (eff > 0 ? CalculateWeightedATRAt(tf, eff) : CalculateWeightedATR(tf));
    if(!MathIsValidNumber(atr) || atr <= 0.0 || atr == EMPTY_VALUE) return 0.0;
    return atr / pip;
+}
+
+// P-BK-130 (2026-10-27) — A KNOT'S OWN MINUTES IS NOT A RUNG.
+//
+// P-BK-126 said it for the type's ladder («a knot's time is not a rung»), and it scaled the
+// off-ladder row instead of renaming one. The PLAN kept the other half of the bug: every
+// price it hands out was read through `TradePlanLadderMinutes(TradePlanLadderIndex(x))`, so a
+// 360-minute ask silently became a 240-minute read.
+// MEASURED on the user's own 6h FTR box (`nodeTF 6h`, h = 373.6 pips): the note printed
+// `ATR 6h: 324.9` while the header printed `H4: 324.9` — ONE number under two names — and all
+// four legs are that number times their own constant (TRex 15/64 = 76.2, Trigger 5/8 = 203.1,
+// Pricle 75/64 = 381, Classic 45/16 = 914). So a 6h knot was priced as an H4 knot: entry,
+// stop and every target, from one wrong read.
+//
+// THE RULE, and it is one sentence: read the ATR at the minutes the caller ASKED FOR whenever
+// MT4 carries that series, and let the rung below answer only when it does not — `CompatTF`
+// answers PERIOD_CURRENT for exactly the lengths with no series (8, 45, 700 minutes), and those
+// are SCALED by the project's √-law (P-BK-131 below), never jumped to the chart's own TF and
+// never left wearing the rung's number. A rung asks for a rung, so every on-ladder caller is
+// byte-identical (the ladder's round trip returns its own minutes).
+// COST: an on-ladder ask pays one switch compare and no read; an off-ladder ask pays ONE new
+// cache row per (TF, anchor) — the live path is `g_multiTFCache` by TF, the as-of path is
+// `g_atrAnchorCache` by (TF, anchor) — and a hit on every round after the first.
+double TradePlanATROfOwnTime(const int chartMinutes, const datetime anchor = 0)
+{
+   ENUM_TIMEFRAMES own = CompatTF(chartMinutes);   // PERIOD_CURRENT == no series for this length
+   if(own != PERIOD_CURRENT)
+   {
+      double v = TradePlanStripPips(chartMinutes, anchor);
+      if(MathIsValidNumber(v) && v > 0.0) return v;   // the knot's OWN minutes, read for real
+   }
+   // P-BK-131 (2026-10-27) — NO SERIES IS NOT NO ANSWER: ONE CONTINUOUS RULER.
+   //
+   // The fence above leaves a length MT4 has no bar for (8 / 45 / 700 minutes — his own note read
+   // `700m`) with the rung below's NUMBER, i.e. a 700-minute knot priced as an H4 knot: the same
+   // defect P-BK-130 fixed for 6h, one row over. A knot's price must be a CONTINUOUS function of
+   // its own minutes or two knots cannot be compared at all.
+   // SO: scale the rung below by the project's own √-law — the law P-BK-126 already applies to
+   // the type's row (`BaseKnotRungScale`, BaseKnot_Nodes; `CalculateHybridATR`, ATR_A:378 before
+   // it), so the plan and the table answer the SAME number for the same time and cannot drift.
+   // MEASURED on his H4 row (324.9): 360 -> 397.9, 700 -> 554.9 (x1.7078), D1 stays 999.3 — one
+   // monotone ladder where `700m` used to read 324.9 beside a DIFFERENT `ATR 700m:` in the note.
+   // The rung itself never reaches here (it has a series), and a cold row still degrades to the
+   // rung's own number rather than to a scaled zero.
+   int below = TradePlanLadderMinutes(TradePlanLadderIndex(chartMinutes));
+   double base = TradePlanStripPips(below, anchor);
+   if(!MathIsValidNumber(base) || base <= 0.0) return base;    // cold: the old number, never nothing
+   if(below <= 0 || chartMinutes <= below) return base;        // on the rung: nothing to scale
+   double scaled = base * MathSqrt((double)chartMinutes / (double)below);
+   return (MathIsValidNumber(scaled) && scaled > 0.0 ? scaled : base);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -335,9 +377,11 @@ double TradePlanStripPips(const int tfMinutes, const datetime anchor = 0)
 double TradePlanEngTrue(const int chartMinutes, int &trigMinOut, const datetime anchor = 0)
 {
    int cm = TradePlanLadderMinutes(TradePlanLadderIndex(chartMinutes));
-   trigMinOut = TradePlanTriggerMinutes(cm);
+   trigMinOut = TradePlanTriggerMinutes(cm);          // label only: the trigger ladder's own rung
 
-   double tr = TradePlanStripPips(cm, anchor);      // own-TF composite TR
+   // P-BK-130: the LABEL stays on the ladder slot (`cm`); the READ does not. A 6h ask that
+   // came back as H4's composite priced every leg below it as an H4 leg.
+   double tr = TradePlanATROfOwnTime(chartMinutes, anchor);   // the box' OWN minutes
    return (tr > 0.0) ? tr / TRADEPLAN_ENG_DIVISOR : 0.0;
 }
 
@@ -375,8 +419,7 @@ double TradePlanHunterFromEng(const double engTrue)
    return TradePlanRound1(TRADEPLAN_HUNTER_NUM * engTrue / TRADEPLAN_HUNTER_DEN);
 }
 
-// P-BK-120 (2026-10-22, ported from MT4) — THE TARGET LEGS OFF ANY STOP, not just off
-// the plan's own.
+// P-BK-120 (2026-10-22) — THE TARGET LEGS OFF ANY STOP, not just off the plan's own.
 //
 // The ratios above are the plan's law: TP1 = 7/3 × SL, TP2 = 5 × SL, TP3 = 31/3 × SL,
 // where the plan's own SL is `slTrue = 1.2 × Eng(StructureTF)` of ONE chart TF.
@@ -443,7 +486,10 @@ bool TradePlanCompute(const int chartMinutes, STradePlan &p, const datetime anch
    p.pricicle = 0; p.classic = 0;
 
    // Own strip ATR first: the alt path below derives EVERYTHING from it.
-   p.ownPips = TradePlanStripPips(p.chartMin, anchor);
+   // P-BK-130: `p.chartMin` is the LADDER SLOT — what strMin / trigMin / the SB rule are
+   // measured from — and it is NOT the ATR's time. The read is the caller's own minutes, so a
+   // 6h box is priced on 6h and its note's `ATR 6h:` stops equalling the header's `H4:`.
+   p.ownPips = TradePlanATROfOwnTime(chartMinutes, anchor);
 
    bool altForm = (inpUseAltTradeFormulas && p.ownPips > 0.0);
    if(altForm)
@@ -483,7 +529,9 @@ bool TradePlanCompute(const int chartMinutes, STradePlan &p, const datetime anch
    }
    else
    {
-      double eT = TradePlanEngTrue(p.chartMin, p.trigMin, anchor);
+      // P-BK-130: the Eng is read at the SAME minutes `ownPips` was (the box' own), or the
+      // entry's stop and the legs' base would be two times on one ruler (P-BK-127).
+      double eT = TradePlanEngTrue(chartMinutes, p.trigMin, anchor);
       // P-UI-57: finite-first (see the SL gate above) — NaN Eng must read as
       // "not ready", never as rounded garbage.
       if(!MathIsValidNumber(eT) || eT <= 0.0) return false;

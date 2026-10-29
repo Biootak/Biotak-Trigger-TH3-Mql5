@@ -340,9 +340,9 @@ int ValidateInputs()
     }
     // P-TH3-PB-MAN (2026-09-21): the hand-typed pivot base, in pips. 0 = OFF.
     // P-UI-57: finite gate first (NaN would pass the range test below).
-    if(!MathIsValidNumber(inpTH3PivotBasePips) ||
-       inpTH3PivotBasePips < 0.0 || inpTH3PivotBasePips > 2000.0) {
-        Print("  ERROR: TH3 Pivot Base Pips (", DoubleToString(inpTH3PivotBasePips, 1), ") out of range");
+    if(!MathIsValidNumber(inpTH3BaseRangePips) ||
+       inpTH3BaseRangePips < 0.0 || inpTH3BaseRangePips > 2000.0) {
+        Print("  ERROR: TH3 Pivot Base Pips (", DoubleToString(inpTH3BaseRangePips, 1), ") out of range");
         Print("   Valid range: 0.0 - 2000.0 (0 = OFF, the pattern TF's own ATR)");
         return INIT_PARAMETERS_INCORRECT;
     }

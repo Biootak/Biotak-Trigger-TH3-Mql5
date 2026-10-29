@@ -616,8 +616,11 @@ double GetATRForTimeframe(const int targetMinutes) {
     // P-ANCHOR-LAST: the overview and every caller of this owner read the
     // anchored composite, not the 30-second live cache (the anchor cache is the
     // only cache keyed by the bar, so a stale live row can never answer here).
-    if(CalcAnchorAt() > 0)
-        return CalculateWeightedATR(CompatTF(targetMinutes));
+    // The anchor is read ONCE into `fa` and the as-of leg is the caller's own
+    // timeframe, never the 30 s live cache below this branch.
+    datetime fa = CalcAnchorAt();
+    if(fa > 0)
+        return CalculateWeightedATRAt(CompatTF(targetMinutes), fa);
 
     // AUDIT FIX: Validate current time (use cached frame time)
     datetime currentTime = CacheGetFrameTime();
@@ -1356,8 +1359,13 @@ double CalculateWeightedATRAt(const ENUM_TIMEFRAMES tf, const datetime anchor)
 //| call `CalculateWeightedATRLive` explicitly.                       |
 //+------------------------------------------------------------------+
 double CalculateWeightedATR(ENUM_TIMEFRAMES tf = PERIOD_CURRENT) {
-    datetime fa = CalcAnchorAt();
-    if(fa > 0) return CalculateWeightedATRAt(tf, fa);
+    // P-ANCHOR-LAST (2026-10-28, aligned with MT4): the anchor is for LABELS,
+    // never for the geometry funnel. This wrapper IS the funnel - every level,
+    // zone and target reads it - so it stays LIVE, byte-identically to MT4
+    // (`ATR_A.mqh`: `return CalculateWeightedATRLive(tf);`). The anchored reads
+    // go through `GetATRForTimeframe` / `CalculateWeightedATRAt` above, which
+    // ask `CalcAnchorAt()` themselves. Routing the wrapper made ENTRY/SL/TP move
+    // onto the anchor bar while the chart's levels were drawn live.
     return CalculateWeightedATRLive(tf);
 }
 
