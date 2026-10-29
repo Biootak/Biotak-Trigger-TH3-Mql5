@@ -93,7 +93,19 @@
 #include "Biotak\BaseKnotTool.mqh"
 // P-HR-01: Horizontal Ray (Tools cell → 1 click places; same layer, same rule).
 #include "Biotak\HRayTool.mqh"
+// MT5-ONLY (P-PATH-CANVAS, 2026-10-29): the path's rubber band is painted on the
+// engine's FRONT layer instead of dragging a chart object behind the cursor, so
+// PathTool has to see the engine's declarations. RenderCore pulls only
+// RenderPlatform (pure MQL calls) and needs no product module, which is why it
+// is safe this early; the bridge (the product seam) still comes last.
+#ifdef BIOTAK_RENDER_ENGINE
+#include "Engine\RenderCore.mqh"
+#endif
 #include "Biotak\PathTool.mqh"
+// P-DRAW-CANVAS (2026-10-29): the user's own tool palette — model, canvas and
+// input in one owner. Needs RenderCore above; sits below PathTool because both
+// are drawing tools and the canvas one owns no state the path reads.
+#include "Biotak\DrawCanvas.mqh"
 
 //                                                                    
 // Cache & Object Management Systems
@@ -261,6 +273,10 @@ int OnInit()
         // first pump if the chart window is not mapped yet).
 #ifdef BIOTAK_RENDER_ENGINE
         RBridgeInit();
+        // P-DRAW-CANVAS (2026-10-29): the user's own drawings live on their own
+        // canvas (Biotak\DrawCanvas.mqh). Loaded after the engine so the platform
+        // helpers exist; the layers themselves are created on the first frame.
+        DrawCanvasInit();
 #endif
         // P-UI-114: right-click era deleted — terminal menu untouched, strip on
         // LEFT hold (DrawStrip.mqh).
@@ -281,6 +297,7 @@ void OnDeinit(const int reason)
     CompatDeinitBegin();   // MT5-ONLY P-PERF-99: no event can be consumed after this
     uint p4d = GetTickCount();   // P-PERF-04: teardown budget (timeframe switch)
 #ifdef BIOTAK_RENDER_ENGINE
+    DrawCanvasDeinit();  // P-DRAW-CANVAS: flush the CSV, then drop the two layers
     RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance
 #endif
     // P-PERF-96 (BUG-13, 2026-10-13) — THE COMPAT LEDGER IS READ, NOT JUST WRITTEN.
@@ -449,6 +466,9 @@ int OnCalculate(const int rates_total,
 //+------------------------------------------------------------------+
 //| ChartEvent function                                              |
 //+------------------------------------------------------------------+
+// P-DIAG-166: the timer's worst body, defined beside OnTimer below — declared here
+// because the average ledger inside OnChartEvent reads it (definition before use).
+uint DiagUsTimerMax();
 void OnChartEvent(const int id,
                   const long &lparam,
                   const double &dparam,
@@ -472,7 +492,8 @@ void OnChartEvent(const int id,
   // its close path writes OBJPROP_SELECTED=false, a card switch flips twice
   // and looks dead, a click-to-plant tool plants two points. Dropped here,
   // before ANY handler runs. Full note: MT5Compat\MQL5Compat.mqh.
-  if(CompatOneClickDedupe(id, sparam)) return;
+  // P-DRAW-148: ...and only when the object click was OURS (see ClickOwnedByUs).
+  if(CompatOneClickDedupe(id, sparam, ClickOwnedByUs(sparam))) return;
   // BUG-15 (2026-10-13, resolved 2026-10-16) — NO LEAVE EVENT EXISTS ON EITHER
   // PLATFORM, SO THERE IS NOTHING TO FILTER HERE.
   //
@@ -493,15 +514,29 @@ void OnChartEvent(const int id,
   // an event is SCHEDULED, never executed - see the EventHandlers note. Setting
   // the flag here (not in the handlers) is what makes the guarantee hold for
   // every path they call, including ones added later.
+  // P-DRAW-CANVAS (2026-10-29): the user's canvas drawings own their own input —
+  // the palette bar, placement clicks and the selection grab. Ahead of every
+  // object handler, so a click on the palette can never also be read as free
+  // chart, and a placement click never reaches the strip.
+#ifdef BIOTAK_RENDER_ENGINE
+  if(DrawCanvasOnEvent(id, lparam, dparam, sparam)) return;
+#endif
   g_inChartEvent = true;
   CompatFrameBegin();   // MT5-ONLY R-POINTER-FRAME: one frame per event, see MQL5Compat
   uint p4t = GetTickCount();
+  //--- P-DIAG-162 (temporary): microseconds for the event the hand feels. The ms
+  //--- ledger below cannot resolve anything under one 15.6 ms Windows tick, so a
+  //--- 30 ms mouse move reads "indicator=0 ui=0" — the reason the lag has no owner
+  //--- in the log. These four stamps bracket the same three calls and name them.
+  uint p4u0 = CompatUsNow();
   OnChartEventHandler(id,lparam,dparam,sparam);
+  uint p4u1 = CompatUsNow();
   uint p4a = GetTickCount() - p4t;
   p4t = GetTickCount();
   // P-UI-114: the strip opens on a LEFT hold inside DrawStripOnEvent below.
   // --- Circular menu / settings panels / palette ---
   HandleUIChartEvent(id,lparam,dparam,sparam);
+  uint p4u2 = CompatUsNow();
   // P-DRAW-08: the drawing strip's own buttons and its dismiss clicks. Its own
   // owner, its own objects — it shares no state with the panels.
   //
@@ -518,6 +553,7 @@ void OnChartEvent(const int id,
   uint p4sT = GetTickCount();
   DrawStripOnEvent(id,lparam,dparam,sparam);
   uint p4s = GetTickCount() - p4sT;
+  uint p4u3 = CompatUsNow();
   // P-PAL-19 (2026-10-02) — THE ONE BRIDGE. DrawStrip is include 99 and the panels
   // are 124, and MQL4 needs a definition before its use, so the strip cannot call
   // `PalOpenDraw` itself: it leaves a REQUEST (DrawStripPalAsk) and this line — the
@@ -559,6 +595,101 @@ void OnChartEvent(const int id,
   if(g_PalOpen && PalKindIsDrawing(g_PalKind) && DrawStripPalTargetLive())
      DrawStripSurfacePublish(g_PalX, g_PalY, PalW(), PalH());
   uint p4b = GetTickCount() - p4t;
+  //--- P-DIAG-162 (temporary): ONE line per second at most, only when the move
+  //--- costs more than a frame. `strip=` is carved out of `ui=` (P-PERF-58), and
+  //--- `knot`/`ray`/`abcd`/`leg`/`hs`/`cp` are carved out of `indicator=`, so the
+  //--- names below are disjoint and the biggest one is the owner.
+  //--- P-DIAG-164 (2026-10-29): OBJECT_DRAG is in the gate too — a drag's own
+  //--- event was the one channel this ledger could not see, and `rest=` is the
+  //--- leftover nobody has named yet (it must read ~0 once every owner has a
+  //--- stamp). `nm=` is the object the terminal named, so ours and the
+  //--- terminal's own tools can be told apart in the same log.
+  if(id == CHARTEVENT_MOUSE_MOVE || id == CHARTEVENT_OBJECT_DRAG)
+  {
+     uint _usTot = (uint)((p4u3 - p4u0) / 1000);
+     if(_usTot >= 8)
+     {
+        static uint _usGate = 0;
+        uint _usNow = GetTickCount();
+        if(_usGate == 0 || _usNow - _usGate >= 1000)
+        {
+           _usGate = _usNow;
+           int _usInd  = (int)((p4u1 - p4u0) / 1000);
+           int _usOwn  = (int)((DiagUsKnot() + DiagUsRay() + DiagUsAbcd() +
+                                DiagUsLeg() + DiagUsHs() + DiagUsCp()) / 1000);
+           Print("[mvus] id=", id, " total=", (int)_usTot,
+                 " ind=", _usInd,
+                 " knot=", (int)(DiagUsKnot() / 1000),
+                 " ray=", (int)(DiagUsRay() / 1000),
+                 " abcd=", (int)(DiagUsAbcd() / 1000),
+                 " leg=", (int)(DiagUsLeg() / 1000),
+                 " hs=", (int)(DiagUsHs() / 1000),
+                 " cp=", (int)(DiagUsCp() / 1000),
+                 " rest=", (_usInd > _usOwn ? _usInd - _usOwn : 0),
+                 " ui=", (int)((p4u2 - p4u1) / 1000),
+                 " strip=", (int)((p4u3 - p4u2) / 1000),
+                 " nm=\"", sparam, "\"");
+        }
+     }
+  }
+  //--- P-DIAG-165 (temporary): THE AVERAGE, NOT THE OUTLIER. The `[mvus]` gate above
+  //--- prints ONE event per second, so it answers "how bad can a move be" but not "why
+  //--- does the whole gesture feel slow": a gesture is 60-100 moves a second and what
+  //--- the hand feels is the SUM, not the worst sample — a 10 ms move repeated a hundred
+  //--- times hides behind a 40 ms outlier that prints every second. This block adds up
+  //--- EVERY mouse move of the second and prints the per-move average of each owner:
+  //--- the number that has to come down, and the one the sampled line cannot show.
+  if(id == CHARTEVENT_MOUSE_MOVE)
+  {
+     static uint s_anN = 0, s_anTot = 0, s_anInd = 0, s_anRay = 0, s_anAbcd = 0;
+     static uint s_anHs = 0, s_anKnot = 0, s_anLeg = 0, s_anCp = 0, s_anUi = 0, s_anStrip = 0;
+     static uint s_anGate = 0;
+     //--- P-DIAG-166: THE GAP IS THE HAND'S OWN MEASUREMENT. A move that costs 0 ms and
+     //--- arrives 60 ms after the one before it was QUEUED, not computed — so the second
+     //--- half of the answer is the interval between moves (`gmax`, the worst one this
+     //--- second) and the timer body that held the thread (`tmr`, its worst run).
+     static uint s_anPrevMs = 0, s_anGapMax = 0;
+     uint _anNowMs = GetTickCount();
+     if(s_anPrevMs != 0)
+     {
+        uint _g = _anNowMs - s_anPrevMs;
+        if(_g > s_anGapMax) s_anGapMax = _g;
+     }
+     s_anPrevMs = _anNowMs;
+     s_anN++;
+     s_anTot   += (uint)((p4u3 - p4u0) / 1000);
+     s_anInd   += (uint)((p4u1 - p4u0) / 1000);
+     s_anRay   += DiagUsRay()  / 1000;
+     s_anAbcd  += DiagUsAbcd() / 1000;
+     s_anHs    += DiagUsHs()   / 1000;
+     s_anKnot  += DiagUsKnot() / 1000;
+     s_anLeg   += DiagUsLeg()  / 1000;
+     s_anCp    += DiagUsCp()   / 1000;
+     s_anUi    += (uint)((p4u2 - p4u1) / 1000);
+     s_anStrip += (uint)((p4u3 - p4u2) / 1000);
+     uint s_anNow = GetTickCount();
+     if(s_anGate == 0) s_anGate = s_anNow;
+     if(s_anNow - s_anGate >= 1000)
+     {
+        if(s_anN > 0)
+           Print("[mvus-avg] n=", s_anN,
+                 " tot=", (int)(s_anTot / s_anN),
+                 " ind=", (int)(s_anInd / s_anN),
+                 " ray=", (int)(s_anRay / s_anN),
+                 " abcd=", (int)(s_anAbcd / s_anN),
+                 " hs=", (int)(s_anHs / s_anN),
+                 " knot=", (int)(s_anKnot / s_anN),
+                 " leg=", (int)(s_anLeg / s_anN),
+                 " cp=", (int)(s_anCp / s_anN),
+                 " ui=", (int)(s_anUi / s_anN),
+                 " strip=", (int)(s_anStrip / s_anN),
+                 " gmax=", (int)s_anGapMax,
+                 " tmr=", (int)(DiagUsTimerMax() / 1000));
+        s_anGate = s_anNow; s_anN = 0; s_anTot = 0; s_anInd = 0; s_anRay = 0;
+        s_anAbcd = 0; s_anHs = 0; s_anKnot = 0; s_anLeg = 0; s_anCp = 0;
+        s_anUi = 0; s_anStrip = 0; s_anGapMax = 0;
+     }
+  }
   g_inChartEvent = false;  // P-PERF-40: A USER ACTION SETTLES THE FRAME IT OWED — IN THE SAME EVENT.
   //
   // P-PERF-34 made a forced frame inside an event SCHEDULED instead of executed,
@@ -644,8 +775,18 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 //| Timer function - periodic housekeeping                           |
 //+------------------------------------------------------------------+
+//--- P-DIAG-166 (temporary, remove with the lag fix): THE TIMER'S OWN PRICE. A mouse
+//--- move costs under a millisecond and the hand still feels a stutter, so the question
+//--- is no longer "what does a move cost" but "what holds the thread BETWEEN two moves".
+//--- The 250 ms timer is the only other writer on this thread, so its worst body per
+//--- second is the number that answers it. `[mvus-avg] tmr=` reads it and resets it.
+//--- (Declared above OnChartEvent: the ledger reads it, and this compiler needs the
+//--- definition before the use.)
+static uint s_tmrMaxUs = 0;
+uint DiagUsTimerMax() { uint v = s_tmrMaxUs; s_tmrMaxUs = 0; return v; }
 void OnTimer()
 {
+    uint _tmA = CompatUsNow();
 
     // MT5-ONLY PLATFORM CALL - keep the emulated MQL4 series arrays live on a
     // chart that is not ticking (MQL4's arrays always were).
@@ -670,6 +811,12 @@ void OnTimer()
     // terminal for a second and showed nothing. One comparison per 250 ms, and
     // the first line of the function so a still chart settles the label.
     TH3RecorderFlashTick();
+
+    // P-BK-124 (ported from MT4): age out the knot capture's one-second flash.
+    // The press arms a label; the pump that ages the label out rides the TICKS,
+    // so a market that stops ticking (a weekend, a dead symbol) kept the receipt
+    // on the chart for ever. One int compare while no flash is armed.
+    BaseKnotShotFlashTick();
 
     // P-PERF-16: the 250 ms safety refresh behind the cached UI metrics. Resizing
     // the chart also fires a chart-change event (which invalidates immediately);
@@ -766,5 +913,6 @@ void OnTimer()
     // the terminal's log) - while a timer tick ~1 s later reads the real range
     // (`window hi=4410.70000 lo=4230.80000` on XAUUSD,H1). Anything needing the
     // visible window belongs HERE, never in OnInitHandler.
+    { uint _tmD = CompatUsNow() - _tmA; if(_tmD > s_tmrMaxUs) s_tmrMaxUs = _tmD; }
 }
 

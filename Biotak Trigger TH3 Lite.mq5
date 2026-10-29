@@ -96,7 +96,17 @@
 #include "Biotak\BaseKnotTool.mqh"
 // P-HR-01: Horizontal Ray (Lite: nothing arms it, committed rays keep drag/snap/delete).
 #include "Biotak\HRayTool.mqh"
+// MT5-ONLY (P-PATH-CANVAS, 2026-10-29): the rubber band is canvas pixels, so
+// PathTool needs the engine's declarations (see the Full entry's note).
+#ifdef BIOTAK_RENDER_ENGINE
+#include "Engine\RenderCore.mqh"
+#endif
 #include "Biotak\PathTool.mqh"
+// P-DRAW-CANVAS (2026-10-29): the user's own tool palette — model, canvas and
+// input in one owner. Same position as the Full entry: needs RenderCore above,
+// and owns no state PathTool reads. The whole body is inside BIOTAK_RENDER_ENGINE,
+// so the include is harmless on MT4 (it compiles to nothing).
+#include "Biotak\DrawCanvas.mqh"
 
 //                                                                    
 // Cache & Object Management Systems
@@ -196,6 +206,9 @@ int OnInit()
     // first pump if the chart window is not mapped yet).
 #ifdef BIOTAK_RENDER_ENGINE
     RBridgeInit();
+    // P-DRAW-CANVAS: after the engine, so the palette's two layers can register
+    // with a live bridge. It loads its CSV here too.
+    DrawCanvasInit();
 #endif
     uint p4ind = GetTickCount() - p4i;
     P4ReportSlow("OnInit (" + (result == INIT_SUCCEEDED ? "ok" : "fail") + ")" +
@@ -212,6 +225,7 @@ void OnDeinit(const int reason)
     CompatDeinitBegin();   // MT5-ONLY P-PERF-99: no event can be consumed after this
     uint p4d = GetTickCount();
 #ifdef BIOTAK_RENDER_ENGINE
+    DrawCanvasDeinit();  // P-DRAW-CANVAS: flush the CSV, then drop the two layers
     RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance
 #endif
     OnDeinitHandler(reason);
@@ -292,7 +306,15 @@ void OnChartEvent(const int id,
   // MT5-ONLY P-MT5-ONECLICK (2026-10-23): ONE RELEASE, ONE CLICK — see the full
   // note in "Biotak Trigger TH3.mq5". MT5 can deliver a single button-up twice;
   // the second copy reads as a second gesture in every shared handler.
-  if(CompatOneClickDedupe(id, sparam)) return;
+  // P-DRAW-148: ...and only when the object click was OURS (see ClickOwnedByUs).
+  if(CompatOneClickDedupe(id, sparam, ClickOwnedByUs(sparam))) return;
+  // P-DRAW-CANVAS (2026-10-29): the user's canvas drawings own their own input —
+  // the palette bar, placement clicks and the selection grab. Ahead of every
+  // object handler, so a click on the palette can never also be read as free
+  // chart, and a placement click never reaches the strip.
+#ifdef BIOTAK_RENDER_ENGINE
+  if(DrawCanvasOnEvent(id, lparam, dparam, sparam)) return;
+#endif
   // P-PERF-34: scope the frame deferral to this window (see EventHandlers).
   g_inChartEvent = true;
   CompatFrameBegin();   // MT5-ONLY R-POINTER-FRAME: one frame per event, see MQL5Compat

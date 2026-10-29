@@ -33,6 +33,27 @@
 #define PATH_DBL_PX 6
 #define PATH_DOT_PX 14    // the SELECT dot's grab radius (HRay's dot reads GRAB+4)
 #define PATH_PREVIEW_TAG "PREVIEW"
+// P-PERF-168 (2026-10-29) — THE HAND'S FRAME IS 16 ms, NOT EVERY EVENT.
+//
+// The user's report («ابزار path ما هنوز لگ شدید داره») is not arithmetic: the
+// mouse-move handler is a handful of scalars. It is the TERMINAL's bill. Every
+// `ObjectMove`/`ObjectSet*` on a chart object invalidates the chart, and the
+// terminal then repaints it — with this product's 226..637 objects and their
+// indicators that is a whole-chart frame, paid once PER EVENT. A hand at
+// 100..125 events/s therefore asks for 100..125 whole-chart paints a second for
+// a rubber band that only has to follow the cursor.
+//
+// The reference implementation (MQL5 "Chart Drawing Toolkit", the smooth one)
+// pays the same bill and answers it the same way: its `RedrawAllObjectsThrottled`
+// repaints at most once per 16 ms (`if(now - m_lastDragRedrawMs < 16) return;`)
+// and the geometry it stores in between is just numbers. 16 ms ≈ 60 fps is the
+// rate the eye reads as "attached to the hand", and it is the budget adopted
+// here — one frame per 16 ms, the LAST sample always wins.
+//
+// What is throttled is the WRITE to the terminal, never the truth: every event
+// still records its (time, price), and the release/commit paths flush the final
+// sample so a stopped hand never leaves the preview one event behind.
+#define PATH_FRAME_MS 16
 
 // P-LOG-3 (AGENTS law 3): a witness is the FLUSHED file, never `Print` — MT4
 // buffers the journal in RAM and a Print witness reads "nothing happened" long
@@ -56,6 +77,7 @@ static bool   s_pathArmed       = false;
 static bool   s_pathDeleting    = false;   // P-DEL-ATOMIC: our own sweep must not re-enter the watcher
 static bool   s_pathLeft        = false;
 static string s_pathDrag        = "";      // path id under the hand ("" = no drag)
+static int    s_pathDragV       = -1;      // P-PERF-166: the VERTEX the hand holds (-1 = whole path)
 static bool   s_pathMoved       = false;
 static datetime s_pathSnapT     = 0;       // cursor time under the press (drag origin)
 static double s_pathSnapP       = 0.0;     // ... and price
@@ -101,6 +123,33 @@ bool PathGrabBlocked()
 
 bool PathSessionActive() { return s_pathArmed; }
 bool PathViewOwned() { return (s_pathArmed || s_pathDrag != ""); }
+// P-PATH-END: the SHIFT bit of the move stream, remembered for the click that
+// follows it. MQL5 reports the modifiers on MOUSE_MOVE (1 left, 2 right, 4 SHIFT,
+// 8 CTRL, 16 ALT) and NOT on CLICK, so the click has to read the last move.
+// Bits (MQL5 reference, CHARTEVENT_MOUSE_MOVE sparam): bit0 left, bit1 right,
+// bit2 SHIFT, bit3 CTRL, bit4 middle. So SHIFT is `& 4`.
+static bool   s_pathShift       = false;
+static bool   s_pathSwallowClick = false;   // the release click of a shift-end is not a gesture
+//--- P-PERF-168: the frame budget's own state (see PATH_FRAME_MS above).
+static uint   s_pathPrevMs      = 0;      // the last rubber-band frame painted
+static uint   s_pathDragMs      = 0;      // ...and the last dot-carry frame
+static bool   s_pathPend        = false;  // a preview sample is owed its frame
+static bool   s_pathDragPend    = false;  // ...and a carry sample
+static datetime s_pathPendT     = 0;
+static double s_pathPendP       = 0.0;
+static bool   s_pathPrevLive    = false;  // the rubber band's object exists (birth memo)
+//--- P-PATH-CANVAS (2026-10-29): the band's tip, in the engine's own units. The
+//--- painter reads these instead of an object's OBJPROP_TIME/PRICE.
+static bool   s_pathCursorOk    = false;
+static datetime s_pathCursorT   = 0;
+static double s_pathCursorP     = 0.0;
+static bool   s_pathHookMounted = false;
+//--- P-PERF-168b: the segment-count memo (see PathSegCount). One row per id;
+//--- the epoch is the chart's object TOTAL, so any birth or death anywhere on
+//--- the chart re-opens the question once instead of once per call.
+static int    s_segEpoch        = -1;
+static string s_segMemoId[];
+static int    s_segMemoN[];
 void PathArm()
 {
    if(s_pathArmed) return;
@@ -108,11 +157,30 @@ void PathArm()
    GestureTakeRelease();   // P-UI-144: a NEW drawing is never gated by the last one — the
                            // arbiter's ONE question is per drawing, so arming clears it
    s_pathArmed = true; ChartViewLockAcquire(); ChartRedraw();
+   //--- P-PERF-168: a new arm owes its first frame at once (the budget's stamp is
+   //--- a leftover of the previous session otherwise, and the rubber band would
+   //--- wait up to 16 ms for a frame it can already afford).
+   s_pathPrevMs = 0;
+   s_pathPend = false;
+   //--- P-PATH-CANVAS: a fresh arm has no tip yet, and the FRONT slot must know a
+   //--- horizontal pan moves this family too (only while armed — the band is the
+   //--- only time-anchored pixel this tool owns).
+   s_pathCursorOk = false;
+#ifdef BIOTAK_RENDER_ENGINE
+   REngineExtTimeContent(true);
+#endif
 }
 void PathCancel()
 {
    if(!s_pathArmed) return;
    s_pathArmed = false;
+   s_pathPend = false;   // P-PERF-168: a deferred sample never outlives the arm
+   s_pathCursorOk = false;   // P-PATH-CANVAS: and neither does the band's tip
+#ifdef BIOTAK_RENDER_ENGINE
+   REngineExtTimeContent(false);
+   REngineDirtyFront();      // wipe the band's last pixels off the FRONT layer
+   REnginePaint();
+#endif
    ChartViewLockRelease();
    ChartRedraw();
 }
@@ -123,14 +191,168 @@ string PathPrefix()
 }
 string PathSegName(const string id, const int i) { return PathPrefix() + id + "_" + IntegerToString(i); }
 string PathPreviewName() { return PathPrefix() + PATH_PREVIEW_TAG; }
+// P-PERF-167 (2026-10-29) — THE RUBBER BAND IS NOT A DRAWING.
+//
+// The preview is the OBJ_TREND the armed tool drags from the last committed
+// vertex to the cursor, and its END IS THE CURSOR — so while a path is being
+// drawn, the click that PLACES a vertex lands on this object almost every time.
+// `DrawKindOf` reads it by type (OBJ_TREND -> DK_LINE), so the strip's
+// click-toggle served it like one of the user's own trend lines: the whole
+// settings plate (~40 objects) was painted on the vertex click and dismissed by
+// the next one. MEASURED on the live chart today (XAUUSDb,M5 10:33:32 and
+// 10:33:41): `[drawstrip] click opened on "THLevels_PATH_PREVIEW"
+// selected=false` next to `chart event OBJ_CLICK(id=1) [ui=47 strip=47] took
+// 47ms` — one 31..47 ms panel paint per vertex, i.e. on the one channel the hand
+// is using at that moment, for a plate that has nothing to say about a drawing
+// that does not exist yet. MT4 never had this: its strip has no click-toggle at
+// all, so the divergence is ours alone.
+//
+// The exclusion is the tool's OWN rule, not a new one: `PathIdOfName` already
+// refuses this very name as a segment id (`id != PATH_PREVIEW_TAG`, above), so
+// the segment family has never served it — the kind table simply never asked.
+bool PathIsPreviewName(const string nm)
+{
+   if(nm == "") return false;
+   string pn = PathPreviewName();
+   return (pn != "" && nm == pn);
+}
+// P-PATH-END (2026-10-29) — WHILE THE TOOL IS DRAWING, ITS OWN OBJECTS ARE NOT
+// DRAWINGS, AND THE STRIP MAY NOT TOUCH THEM.
+//
+// MEASURED on the live chart today (XAUUSDb,M5 10:47:32, 10:47:33, 10:47:36,
+// 10:47:50 — one line per vertex):
+//   [drawstrip] interior-click relHit="THLevels_PATH_668721825041_0"
+//   [dsopen]    nm="THLevels_PATH_668721825041_0" ...
+//   [drawstrip] click opened on "THLevels_PATH_668721825041_0"
+//   [drawstrip] press-away dismissed at ...
+// Every vertex click lands on the segment that ENDS at the cursor (the one the
+// click before it drew), the strip serves that segment like one of the user's
+// drawings, paints its whole plate (~40 objects, the 31..47 ms `strip=` bucket),
+// and `UIPointerOverSurface` then eats the NEXT click because the plate now sits
+// on the cursor. That second half is why the path could not be FINISHED: the
+// double-click needs two clicks at one pixel, and the second one is swallowed by
+// the panel the first one opened. The P-PERF-167 exclusion above covers the
+// preview only; the session's SEGMENTS are the ones that grow under the hand.
+//
+// So the whole live session — preview AND segments — is DK_NONE while the tool is
+// armed. Once PathFinish commits it, `s_pathArmed` is false and the same names
+// are an ordinary path again (selectable, servable, draggable).
+// P-PATH-END b (2026-10-29, user: «درست نشده باز هم هم لگ داره و هم درست قطع
+// نمیشه» — SECOND REPORT): THE QUESTION WAS TOO NARROW.
+//
+// The first spelling asked `s_pathArmed && name starts with THIS session id`,
+// and the terminal log of the second attempt (AUDUSDb,H1 11:11:57) answered it:
+//   [dsclick] DEDUPE dropped CHART_CLICK (obj="BiotakMenuV2_..._ToolsIcon4")  <- the tool was just pressed
+//   [drawstrip] interior-click relHit="THLevels_PATH_81527182532_0"
+//   [dsopen] nm="THLevels_PATH_81527182532_0" ... [PERF] CLICK took 78ms strip=62
+// `_0` existed BEFORE the first vertex of this attempt (there is no commit
+// between the icon press and this click): it is the segment of an EARLIER,
+// unfinished session that survived a reload/TF switch and was then adopted and
+// REGISTERED by PathAdoptOrphans — so the id test said "not my session" and the
+// strip served it, painting its 62 ms plate under the hand on the one click that
+// was meant to place a vertex. That is both symptoms at once: the plate's paint
+// (62..78 ms per click, 46 ms per mouse-move while it sits open) is the lag, and
+// the plate sitting on the cursor is what swallows the next click, so the
+// double-click that FINISHES the path can never complete.
+//
+// So the question is not "is this the current session's id" but "is a session
+// LIVE at all": while the hand is drawing, the whole path FAMILY — segments,
+// vertex handles, 50 % markers and the rubber band, whatever id they carry —
+// answers DK_NONE, and every consumer (strip, hit test, selection, delete) gets
+// that one answer. A REGISTERED path is the exception and keeps behaving like
+// any other drawing, because that is what it is: a drawing the user already
+// committed, and the strip is the only place its colour/width can be edited.
+bool PathSessionLive()
+{
+   return (s_pathArmed || s_pathSegCount > 0 || s_pathSessionId != "");
+}
+bool PathIsSessionName(const string nm)
+{
+   if(nm == "") return false;
+   string pfx = PathPrefix();
+   if(pfx == "" || StringFind(nm, pfx) != 0) return false;   // not the path family
+   if(nm == PathPreviewName()) return true;                  // the rubber band is never a drawing
+   if(!PathSessionLive()) return false;                      // no hand drawing: ordinary drawings
+   //--- ARMED IS THE WHOLE FAMILY, registered or not: a leftover path the user
+   //--- abandoned mid-draw is still "under the hand" the moment the tool is
+   //--- pressed again, and that is exactly the click the log caught (an OLD id's
+   //--- `_0` opening a 62 ms plate on the first vertex of a NEW attempt).
+   if(s_pathArmed) return true;
+   //--- the family's id, read the same way PathIdOfName reads it (`<id>_<digits>`)
+   string rest = StringSubstr(nm, StringLen(pfx));
+   int us = -1;
+   for(int i = 0; i < StringLen(rest); i++)
+      if(StringGetChar(rest, i) == 95) us = i;
+   string id = (us > 0 ? StringSubstr(rest, 0, us) : "");
+   if(id != "")
+      for(int i = 0; i < ArraySize(s_pathIds); i++)
+         if(s_pathIds[i] == id) return false;                // a committed path: served as before
+   return true;
+}
+// P-PERF-168b (2026-10-29) — THE SEGMENT COUNT IS A STRUCTURAL FACT, NOT A
+// PER-MOVE SCAN.
+//
+// `PathSegCount` is the tool's most-called function: a vertex projection asks it
+// (PathVertex), the carry asks it (PathDragApply), every handle pass asks it
+// (PathHandleAt -> PathVertex), the orphan walk and the delete watcher ask it.
+// Each call was a walk of `ObjectFind` from index 0 to the first hole — n+1
+// terminal round-trips AND n+1 string builds, on every mouse move. A six-leg
+// path paid ~28 of them per move (read off the call graph; MQL5Compat's ledger
+// counts each one as `obj find live`).
+//
+// The count is a fact about the OBJECT SET, and that set only changes when
+// something is born or dies. `ObjectsTotal` states that fact in one call, and
+// PathAdoptOrphans already leans on it for the same reason (P-PERF-157b). So the
+// memo is keyed by the chart's total: unchanged total -> the answer is still
+// true; changed total -> every row is dropped and the next ask walks once.
+// `PathSegMemoDrop` is the explicit half, for the one case a total cannot see
+// (a segment deleted while an unrelated object is born in the same instant).
+void PathSegMemoDrop(const string id)
+{
+   for(int i = 0; i < ArraySize(s_segMemoId); i++)
+      if(s_segMemoId[i] == id)
+      {
+         int n = ArraySize(s_segMemoId);
+         for(int j = i; j < n - 1; j++)
+         {
+            s_segMemoId[j] = s_segMemoId[j + 1];
+            s_segMemoN[j]  = s_segMemoN[j + 1];
+         }
+         ArrayResize(s_segMemoId, n - 1);
+         ArrayResize(s_segMemoN,  n - 1);
+         return;
+      }
+}
+// The whole memo, dropped. The chart-change channel calls it: that is the one
+// moment the object set can have moved without a total this tool watched (a
+// birth and a death in the same instant net to the same count), and it is also
+// the moment PathAdoptOrphans re-establishes the truth anyway.
+void PathSegMemoReset()
+{
+   ArrayResize(s_segMemoId, 0);
+   ArrayResize(s_segMemoN, 0);
+   s_segEpoch = -1;
+}
 int PathSegCount(const string id)
 {
+   int total = ObjectsTotal(0, 0, -1);   if(total != s_segEpoch)
+   {
+      s_segEpoch = total;
+      ArrayResize(s_segMemoId, 0);
+      ArrayResize(s_segMemoN, 0);
+   }
+   int m = ArraySize(s_segMemoId);
+   for(int i = 0; i < m; i++) if(s_segMemoId[i] == id) return s_segMemoN[i];
    int n = 0;
    for(int i = 0; i < 256; i++)
    {
       if(ObjectFind(0, PathSegName(id, i)) < 0) break;
       n++;
    }
+   ArrayResize(s_segMemoId, m + 1);
+   ArrayResize(s_segMemoN, m + 1);
+   s_segMemoId[m] = id;
+   s_segMemoN[m]  = n;
    return n;
 }
 void PathRegAdd(const string id)
@@ -301,10 +523,11 @@ void PathDelete(const string id, const string why)
    PathSelect("");                       // every handle is the path's CHILD (P-HR-07's rule, one way)
    int n = PathSegCount(id);
    for(int i = 0; i < n; i++) ObjectDelete(0, PathSegName(id, i));
+   PathSegMemoDrop(id);   // P-PERF-168b: the count died with the family
    PathRegDel(id);
    PathInkForget(id);            // P-UI-137: the ink row dies with its path (no leak)
    PathMidDrop(id);              // P-UI-139: ...and its 50 % markers with it (one sweep)
-   if(s_pathDrag == id) s_pathDrag = "";
+   if(s_pathDrag == id) { s_pathDrag = ""; s_pathDragV = -1; }
    if(s_pathClick == id) s_pathClick = "";
    // P-DEL-ATOMIC: the terminal queues one event per deleted segment; the family is
    // already gone, so the rest of those events must not re-enter and redraw.
@@ -320,6 +543,9 @@ void PathSessionClear()
    if(pfx != "" && s_pathSessionId != "")
       for(int i = 0; i < s_pathSegCount; i++) ObjectDelete(0, PathSegName(s_pathSessionId, i));
    ObjectDelete(0, PathPreviewName());
+   s_pathPrevLive = false;   // P-PERF-168: the memo dies with the object
+   s_pathPend = false;
+   s_pathCursorOk = false;   // P-PATH-CANVAS: no anchor, no band to paint
    g_suppressDeleteEventsUntilMs = GetTickCount() + 250;
    s_pathDeleting = deleting;
    s_pathAnchorT = 0; s_pathAnchorP = 0;
@@ -361,24 +587,124 @@ bool PathPressHit(const int mx, const int my, string &id)
    }
    return (id != "");
 }
+#ifdef BIOTAK_RENDER_ENGINE
+//+------------------------------------------------------------------+
+//| P-PATH-CANVAS — the rubber band, rasterized into the FRONT layer  |
+//+------------------------------------------------------------------+
+// The band is the one part of this tool that MOVES: it follows the cursor on
+// every MOUSE_MOVE. As an OBJ_TREND it cost two ObjectMove calls per event and
+// one whole-chart invalidation per event — at 100..125 events/s the terminal
+// was asked to repaint a 226..637-object chart a hundred times a second for a
+// dashed line. As pixels it costs a buffer write and rides the engine's own
+// 16 ms frame budget (PATH_FRAME_MS), exactly like the reference toolkit's
+// `RedrawAllObjectsThrottled`.
+//
+// Style 2 is the engine's DOT pattern (RLinePixelOn: x%3==0), the same dashed
+// read the object carried (STYLE_DOT), and the tip gets a 3 px dot so the next
+// click's landing point is visible at the resolution of the hand.
+void PathPaintRubber(uint &fg[], const int w, const int h)
+{
+   if(!s_pathArmed || !s_pathCursorOk) return;
+   if(s_pathAnchorT <= 0 || !(s_pathAnchorP > 0)) return;
+   int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+   if(!RPlatTimePriceToXY((long)s_pathAnchorT, s_pathAnchorP, x1, y1)) return;
+   if(!RPlatTimePriceToXY((long)s_pathCursorT, s_pathCursorP, x2, y2)) return;
+   //--- RPlotSeg/RPlotDot write into the engine's FRONT buffer, which IS `fg` here
+   const uint ink = RCol(PATH_COLOR, 255);
+   RPlotSeg(x1, y1, x2, y2, ink, PATH_WIDTH, 2);
+   RPlotDot(x2, y2, 3, ink);
+}
+class CPathRubberHook : public IRPaintHook
+{
+public:
+   virtual void RPaintExt(uint &fg[], int w, int h) { PathPaintRubber(fg, w, h); }
+};
+CPathRubberHook s_pathRubberHook;
+#endif
+
 void PathPreviewMove(const datetime t, const double p)
 {
    if(s_pathAnchorT <= 0 || !(s_pathAnchorP > 0)) return;
+#ifdef BIOTAK_RENDER_ENGINE
+   //--- P-PATH-CANVAS (2026-10-29) — THE BAND IS PIXELS, NOT AN OBJECT.
+   //---
+   //--- The reference implementation (MQL5 "Chart Drawing Toolkit", 37 126 lines)
+   //--- owns exactly ONE ObjectCreate in the whole product — an OBJ_LABEL for the
+   //--- measure readout — and paints every drawing as a pixel run on a full-chart
+   //--- CCanvas. Its rubber band cannot lag because a mouse move costs buffer
+   //--- writes: no terminal round-trip, no chart invalidation, no object to move.
+   //--- Our engine is the same idea with layers, and IRPaintHook has been declared
+   //--- in RenderCore since R-RENDER-ENGINE with no owner. The band takes it: the
+   //--- FRONT slot already has the bitmap, the frame key and the paint timer, so
+   //--- the move below writes two numbers and asks for one frame.
+   s_pathCursorT = t; s_pathCursorP = p; s_pathCursorOk = true;
+   REngineDirtyFront();
+   if(REnginePaint())
+   {
+      //--- the object the previous build drew is retired on the first canvas frame
+      if(s_pathPrevLive) { ObjectDelete(0, PathPreviewName()); s_pathPrevLive = false; }
+      return;
+   }
+   s_pathCursorOk = false;   // engine not up yet (first frames): fall back to the object
+#endif
    string nm = PathPreviewName();
-   if(ObjectFind(0, nm) < 0)
-      ObjectCreate(0, nm, OBJ_TREND, 0, s_pathAnchorT, s_pathAnchorP, t, p);
-   ObjectSetInteger(0, nm, OBJPROP_COLOR, PATH_COLOR);
-   ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DOT);
-   ObjectSetInteger(0, nm, OBJPROP_WIDTH, PATH_WIDTH);
-   ObjectSetInteger(0, nm, OBJPROP_RAY_LEFT, false);
-   ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, nm, OBJPROP_SELECTED, false);
-   ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(0, nm, OBJPROP_BACK, false);
-   ObjectSetInteger(0, nm, OBJPROP_ZORDER, Z_BOX_RAY);
-   ObjectMove(0, nm, 0, s_pathAnchorT, s_pathAnchorP);
-   ObjectMove(0, nm, 1, t, p);
+   //--- P-PERF-166 (2026-10-29) — THE PREVIEW WEARS ITS DRESS ONCE, NOT EVERY MOVE.
+   //--- This call runs on EVERY mouse move while the tool is armed (PathOnChartEvent's
+   //--- MOUSE_MOVE branch), and it used to write ten OBJPROP_* values per move to say
+   //--- what the object already said: ten terminal calls that change nothing, on the
+   //--- one channel the hand feels as «the Path tool lags». The dress is a constant of
+   //--- the tool (PATH_COLOR / STYLE_DOT / PATH_WIDTH), so it belongs to the object's
+   //--- BIRTH; the move below carries the two anchors and nothing else. A preview that
+   //--- was deleted (commit / cancel) is a birth again — the find decides it.
+   //--- P-PERF-168 (2026-10-29): the BIRTH is a one-time question, not a
+   //--- per-move one. The `ObjectFind` below used to run on every mouse move to
+   //--- answer "does the rubber band exist" — a terminal round-trip per event for
+   //--- a fact this file already owns (it creates the object and deletes it in
+   //--- PathFinish / PathSessionClear). The memo is self-healing: if either move
+   //--- comes back false the object died under us (a reload, a wipe) and the next
+   //--- sample is a birth again.
+   if(!s_pathPrevLive)
+   {
+      if(ObjectFind(0, nm) < 0)
+      {
+         ObjectCreate(0, nm, OBJ_TREND, 0, s_pathAnchorT, s_pathAnchorP, t, p);
+         ObjectSetInteger(0, nm, OBJPROP_COLOR, PATH_COLOR);
+         ObjectSetInteger(0, nm, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(0, nm, OBJPROP_WIDTH, PATH_WIDTH);
+         ObjectSetInteger(0, nm, OBJPROP_RAY_LEFT, false);
+         ObjectSetInteger(0, nm, OBJPROP_RAY_RIGHT, false);
+         ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, nm, OBJPROP_SELECTED, false);
+         ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
+         ObjectSetInteger(0, nm, OBJPROP_BACK, false);
+         ObjectSetInteger(0, nm, OBJPROP_ZORDER, Z_BOX_RAY);
+      }
+      s_pathPrevLive = true;
+   }
+   bool okA = ObjectMove(0, nm, 0, s_pathAnchorT, s_pathAnchorP);
+   bool okB = ObjectMove(0, nm, 1, t, p);
+   if(!okA || !okB) s_pathPrevLive = false;
+}
+// P-PERF-168 — ONE FRAME PER 16 ms, AND THE LAST SAMPLE ALWAYS WINS.
+// The armed branch calls this on every MOUSE_MOVE; the sample is recorded either
+// way, so the next event inside the same frame carries the newest coordinates and
+// a stopped hand is at most one frame behind (the commit click reads its own
+// pixel, so the committed geometry is never the buffered one).
+void PathPreviewFrame(const datetime t, const double p)
+{
+   if(s_pathAnchorT <= 0 || !(s_pathAnchorP > 0)) return;
+   s_pathPendT = t; s_pathPendP = p; s_pathPend = true;
+   uint now = GetTickCount();
+   if(s_pathPrevMs != 0 && (uint)(now - s_pathPrevMs) < PATH_FRAME_MS) return;
+   s_pathPrevMs = now;
+   s_pathPend = false;
+   PathPreviewMove(s_pathPendT, s_pathPendP);
+}
+void PathPreviewFlush()
+{
+   if(!s_pathPend) return;
+   s_pathPend = false;
+   PathPreviewMove(s_pathPendT, s_pathPendP);
 }
 void PathNormalise(const string id)
 {
@@ -393,11 +719,65 @@ void PathNormalise(const string id)
          ObjectSetInteger(0, nm, OBJPROP_SELECTED, false);
    }
 }
-void PathAdoptOrphans()
+// P-PERF-157b (2026-10-29) — THE ADOPT WALK IS AN ATTACH NET, NOT A PAN TAX.
+// The twin of HRayAdoptOrphans (see the measurement there: a 703 ms
+// CHART_CHANGE with 156 ms accounted; both walks are the O(chart) work in the
+// other 547 ms). An unchanged object TOTAL means nothing was born or died since
+// the last walk, so nothing new can be an orphan — one terminal read, no walk.
+// `force` is the attach caller's (PathOnInit), which must always walk.
+//--- P-PATH-END c (2026-10-29): A HALF-DRAWN SESSION NEVER BECOMES A DRAWING.
+//--- A HARD restart (`tools/mt5-reload.ps1` closes the terminal) never runs
+//--- PathOnDeinit, so the segments of the path the hand was in the middle of
+//--- drawing stayed on the chart - and the adopt walk below then REGISTERED them
+//--- as a finished path. MEASURED 2026-10-29 (AUDUSDb,H1 11:11:57, the first
+//--- click after a reload): `relHit="THLevels_PATH_81527182532_0"` was a segment
+//--- of exactly such a leftover, and the plate it opened is both the lag and the
+//--- click that gets eaten.
+//--- The mark an unfinished session leaves is its TOOLTIPS: PathMakeSegment
+//--- writes PathTooltip(idx+1) per segment (2 points, 3 points, ...) while
+//--- PathFinish rewrites every segment to PathTooltip(segs) (ONE label for the
+//--- whole drawing). So a family whose first and last segment disagree was never
+//--- committed, and it dies here - before the adopt walk can register it. A
+//--- one-segment family cannot tell the two apart and is left alone (a one-leg
+//--- path is a legal drawing).
+void PathSweepUnfinished()
 {
    string pfx = PathPrefix();
    if(pfx == "") return;
    int n = ObjectsTotal(0, 0, -1);
+   string dead[];
+   for(int i = 0; i < n; i++)
+   {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, pfx) != 0) continue;
+      string id;
+      if(!PathIdOfName(nm, id) || id == "") continue;
+      bool seen = false;
+      for(int k = 0; k < ArraySize(dead); k++) if(dead[k] == id) seen = true;
+      if(seen) continue;
+      int m = PathSegCount(id);
+      if(m < 2) continue;
+      string t0 = ObjectGetString(0, PathSegName(id, 0), OBJPROP_TOOLTIP);
+      string t1 = ObjectGetString(0, PathSegName(id, m - 1), OBJPROP_TOOLTIP);
+      if(t0 == t1) continue;   // committed: one label on every segment
+      int d = ArraySize(dead); ArrayResize(dead, d + 1); dead[d] = id;
+   }
+   for(int k = 0; k < ArraySize(dead); k++)
+   {
+      int m = PathSegCount(dead[k]);
+      for(int s = 0; s < m; s++) ObjectDelete(0, PathSegName(dead[k], s));
+      PathHandlesDrop(dead[k]);
+      PathWitness("unfinished session swept id=" + dead[k] + " segs=" + IntegerToString(m));
+   }
+}
+void PathAdoptOrphans(const bool force = false)
+{
+   string pfx = PathPrefix();
+   if(pfx == "") return;
+   int n = ObjectsTotal(0, 0, -1);
+   static int s_adoptTotal = -1;
+   if(!force && n == s_adoptTotal) return;
+   s_adoptTotal = n;
    for(int i = 0; i < n; i++)
    {
       string nm = ObjectName(0, i, 0, -1);
@@ -425,6 +805,10 @@ void PathAdoptOrphans()
       PathRegAdd(id);
       PathNormalise(id);
    }
+   // The sweep above can DELETE an orphan dot, so the total it entered with is
+   // no longer the chart's — re-read it or the next event pays one walk for our
+   // own cleanup.
+   s_adoptTotal = ObjectsTotal(0, 0, -1);
 }
 // P-UI-136 — THE STRIP WRITES THE WHOLE PATH, NEVER ONE SEGMENT. The strip's slot
 // writer aims at ONE name (`DrawSlotWrite(name, …)`), and a path is N segments: a
@@ -788,12 +1172,21 @@ void PathCommitVertex(const datetime t, const double p)
    }
    s_pathAnchorT = t;
    s_pathAnchorP = p;
+   s_pathPrevMs = 0;   // P-PERF-168: the rubber band re-anchors on the very next move
 }
 void PathFinish()
 {
    string id = s_pathSessionId;
    int segs = s_pathSegCount;
    ObjectDelete(0, PathPreviewName());
+   s_pathPrevLive = false;   // P-PERF-168: the memo dies with the object
+   s_pathPend = false;
+   //--- P-PATH-CANVAS: the commit ends the arm, so the band's pixels must go too
+   s_pathCursorOk = false;
+#ifdef BIOTAK_RENDER_ENGINE
+   REngineExtTimeContent(false);
+   REngineDirtyFront();
+#endif
    if(id != "" && segs >= 1)
    {
       PathRegAdd(id);
@@ -817,6 +1210,7 @@ void PathDragRelease()
 {
    if(s_pathDrag == "") return;
    s_pathDrag = "";
+   s_pathDragV = -1;
    ChartViewLockRelease();
 }
 // ONE snap store, three gestures. `ix` says which anchor each snapshotted segment
@@ -851,6 +1245,7 @@ void PathSnapAdd(const string nm, const int ix)
 void PathVertDragStart(const string id, const int k)
 {
    s_pathDrag = id;
+   s_pathDragV = k;         // P-PERF-166: a dot carry owns three dots, not the whole row
    s_pathMoved = false;
    s_pathPrimed = false;    // P-UI-142: same rule for a single-point edit
    PathSelect(id);
@@ -860,6 +1255,8 @@ void PathVertDragStart(const string id, const int k)
    if(k > 0) PathSnapAdd(PathSegName(id, k - 1), 1);
    if(k < n) PathSnapAdd(PathSegName(id, k), 0);
    ChartViewLockAcquire();
+   s_pathDragMs = 0;    // P-PERF-168: the first move of a carry is never deferred
+   s_pathDragPend = false;
    PathWitness("drag start id=" + id + " vertex=" + IntegerToString(k));
 }
 void PathDragApply(const datetime curT, const double curP)
@@ -873,13 +1270,49 @@ void PathDragApply(const datetime curT, const double curP)
       if(ix != 1) ObjectMove(0, s_pathSnapNames[i], 0, s_pathSnapT0[i] + dt, s_pathSnapP0[i] + dp);
       if(ix != 0) ObjectMove(0, s_pathSnapNames[i], 1, s_pathSnapT1[i] + dt, s_pathSnapP1[i] + dp);
    }
-   PathHandleFollow(s_pathDrag);   // the handles ride the carry, one probe per vertex
+   //--- P-PERF-166 (2026-10-29) — A DOT CARRY MOVES THREE DOTS, NOT THE WHOLE ROW.
+   //--- Vertex k lives in segment k's anchor 0 and segment k-1's point 1, so only the
+   //--- seats k-1, k and k+1 can have changed; this call used to re-project EVERY dot
+   //--- of the path on every move of the hand (a seven-segment path: eight handles, each
+   //--- a find + two property reads + a projection + a marker write). The dot is the
+   //--- only surface a vertex edit can move, and the release's own follow (PathDragEnd
+   //--- -> PathDragRestore -> PathHandleFollow) still re-seats the whole row once, so a
+   //--- coalesced final frame is repaired where it always was.
+   if(s_pathDragV >= 0)
+   {
+      int nv = PathSegCount(s_pathDrag);
+      for(int hv = s_pathDragV - 1; hv <= s_pathDragV + 1; hv++)
+         if(hv >= 0 && hv <= nv) PathHandleAt(s_pathDrag, hv);
+   }
+   else PathHandleFollow(s_pathDrag);
    // P-UI-139: the 50 % markers ride it too — and only when the switch is on, so the
    // default path pays ONE array read per drag step and not one object write.
    if(PathMidGet(s_pathDrag)) PathMidApply(s_pathDrag);
 }
+// P-PERF-168 — THE CARRY PAYS THE SAME 16 ms BUDGET. A dot carry writes up to
+// four anchors plus three handle seats per move; at 100..125 events/s that is the
+// same whole-chart bill the rubber band was paying, and the hand cannot read more
+// than 60 of those frames anyway.
+void PathDragApplyFrame(const datetime curT, const double curP)
+{
+   s_pathPendT = curT; s_pathPendP = curP; s_pathDragPend = true;
+   uint now = GetTickCount();
+   if(s_pathDragMs != 0 && (uint)(now - s_pathDragMs) < PATH_FRAME_MS) return;
+   s_pathDragMs = now;
+   s_pathDragPend = false;
+   PathDragApply(s_pathPendT, s_pathPendP);
+}
+void PathDragFlush()
+{
+   if(!s_pathDragPend) return;
+   s_pathDragPend = false;
+   PathDragApply(s_pathPendT, s_pathPendP);
+}
 void PathDragRestore()
 {
+   //--- P-PERF-168: a restore means the hand's buffered sample is void — it must
+   //--- not be flushed after the geometry has been put back where the press found it.
+   s_pathDragPend = false;
    for(int i = 0; i < ArraySize(s_pathSnapNames); i++)
    {
       if(ObjectFind(0, s_pathSnapNames[i]) < 0) continue;
@@ -892,6 +1325,10 @@ void PathDragRestore()
 void PathDragEnd()
 {
    if(s_pathDrag == "") return;
+   //--- P-PERF-168: THE RELEASE OWNS THE LAST SAMPLE. A frame the budget dropped
+   //--- is written here before the carry closes, so the committed geometry is the
+   //--- cursor's last position and never the one before it.
+   PathDragFlush();
    PathWitness("drag end id=" + s_pathDrag + " moved=" + (s_pathMoved ? "yes" : "no"));
    if(s_pathMoved) s_pathEndMs = GetTickCount();
    s_pathPrimed = false;
@@ -901,6 +1338,10 @@ void PathDragEnd()
 bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
    string pfx = PathPrefix();
+   //--- P-PERF-168: a sample the frame budget deferred is painted by the NEXT
+   //--- event of any kind (a click, a key, a chart change) — so the rubber band is
+   //--- never more than one frame behind the cursor when the hand comes to rest.
+   if(id != CHARTEVENT_MOUSE_MOVE && s_pathPend) PathPreviewFlush();
    //--- P-UI-142 (2026-10-02, user: "from that same point I want to draw a trend line
    //--- and THIS one moves too") — THE TERMINAL'S OWN MOTION IS NOT OURS. A press that
    //--- lands on a path is ambiguous: it may be the hand taking the path, or the hand
@@ -936,6 +1377,10 @@ bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, co
       string pid;
       if(PathIdOfName(sparam, pid))
       {
+         // P-PERF-168b: a segment just died — this path's count is re-walked once
+         // (the chart TOTAL may not have moved if something else was born in the
+         // same instant, and the "is the path gone" question below must be exact).
+         PathSegMemoDrop(pid);
          // P-MT5-PARITY (2026-10-21) - PARITY (MT4 PathTool.mqh:907-924): A NATIVE DELETE OF ONE SEGMENT
          // TAKES THAT SEGMENT, NOT THE WHOLE PATH. MT5's P-DEL-ATOMIC swept the
          // entire path (segments + vertex handles + the ink row + the 50 %
@@ -956,6 +1401,7 @@ bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, co
    }
    if(id == CHARTEVENT_CHART_CHANGE)
    {
+      PathSegMemoReset();   // P-PERF-168b: the one channel that can hide a net-zero swap
       PathAdoptOrphans();
       PathFollowAll();
       // P-UI-139: a chart change re-projects the 50 % markers for free (they are
@@ -977,6 +1423,7 @@ bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, co
       bool rightDown = ((st & 2) != 0);
       bool pressed = (leftDown && !s_pathLeft);
       s_pathLeft = leftDown;
+      s_pathShift = ((st & 4) != 0);   // P-PATH-END: the click reads this, not sparam
       //--- P-UI-145: there is no lock state in this file. The arbiter owns ONE stamp that expires
       //--- by itself (GlobalVariables.mqh), and the structural half is right here: a press on
       //--- the BODY selects and never carries, so a native stroke's press can start nothing;
@@ -1018,16 +1465,28 @@ bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, co
                s_pathPrimT = ct; s_pathPrimP = cp;
                return true;
             }
-            PathDragApply(ct, cp);
+            PathDragApplyFrame(ct, cp);   // P-PERF-168: the carry rides the same budget
          }
          return true;
       }
       if(s_pathArmed)
       {
          if(rightDown) { PathSessionClear(); PathCancel(); return true; }
+         //--- P-PATH-END: SHIFT+PRESS IS THE END, ON THE CHANNEL THAT ALWAYS ARRIVES.
+         //--- The move stream is the one place the modifier is reported (CLICK's sparam
+         //--- carries coordinates only), and a press edge is a real down transition, so
+         //--- this cannot fire on a hover: one deliberate press ends the session. The
+         //--- double-click finish below stays as the MT4 gesture.
+         if(s_pathShift && pressed)
+         {
+            if(s_pathSegCount >= 1) PathFinish();
+            else { PathSessionClear(); PathCancel(); }
+            s_pathSwallowClick = true;
+            return true;
+         }
          int sw = 0; datetime ct = 0; double cp = 0;
          if(ChartXYToTimePrice(0, (int)lparam, (int)dparam, sw, ct, cp) && sw == 0 && ct > 0 && cp > 0)
-            PathPreviewMove(ct, cp);
+            PathPreviewFrame(ct, cp);   // P-PERF-168: 60 fps, not one frame per event
          return false;
       }
       //--- P-UI-144 (2026-10-02): THE HAND IS OURS TO GIVE. Three measurements closed the
@@ -1120,6 +1579,19 @@ if(pressed && pfx != "")
       }
       return false;
    }
+   //--- MT5-ONLY P-MT5-TWIN (2026-10-29): ONE CLICK, TWO CHANNELS, AND THE PLATE
+   //--- SAT ON THE FIRST ONE. MT4 delivers a click on one of our objects as the
+   //--- chart click alone; MT5 reports it TWICE, OBJECT_CLICK first and then
+   //--- CHART_CLICK (the `[dsclick] DEDUPE dropped CHART_CLICK` line is that
+   //--- duplicate being spent). The strip's OBJECT_CLICK door runs before the
+   //--- CHART_CLICK branch below, so a vertex click opened the settings plate and
+   //--- painted 62..78 ms of objects UNDER the cursor — the lag the user reports
+   //--- AND the reason the drawing cannot be finished (the plate swallows the
+   //--- next click, so the finishing double-click never lands). While the tool is
+   //--- armed it owns every gesture (the BaseKnot law), so this duplicate of its
+   //--- own family is spent here, before any other module reads it.
+   if(id == CHARTEVENT_OBJECT_CLICK && s_pathArmed && pfx != "" && StringFind(sparam, pfx) == 0)
+      return true;
    if(id == CHARTEVENT_CLICK && StringFind(sparam, "r") >= 0)
    {
       if(s_pathArmed) { PathSessionClear(); PathCancel(); return true; }
@@ -1128,9 +1600,24 @@ if(pressed && pfx != "")
    if(id == CHARTEVENT_CLICK)
    {
       if(s_pathDrag != "") PathDragEnd();
+      if(s_pathSwallowClick) { s_pathSwallowClick = false; return true; }   // P-PATH-END: the shift-end's own release
       if(s_pathArmed)
       {
          if(UIPointerOverSurface((int)lparam, (int)dparam)) return true;
+         //--- P-PATH-END (2026-10-29, user: «چی هم شیفت کلیک میکنم تمام نمیشه و
+         //--- قطع نمیشه ابزار path»): SHIFT+CLICK IS THE DELIBERATE END. The
+         //--- double-click below stays (it is the MT4 gesture and it works again now
+         //--- that the strip no longer paints over the cursor), but a hand that has
+         //--- finished a shape should not have to aim a double-click at one pixel to
+         //--- stop the tool: shift is a modifier the terminal already reports, it can
+         //--- never be a stray chart click, and one press ends the session either way
+         //--- (a shape commits, an empty session just cancels).
+         if(s_pathShift)
+         {
+            if(s_pathSegCount >= 1) PathFinish();
+            else { PathSessionClear(); PathCancel(); }
+            return true;
+         }
          int sw = 0; datetime ct = 0; double cp = 0;
          if(ChartXYToTimePrice(0, (int)lparam, (int)dparam, sw, ct, cp) && sw == 0 && ct > 0 && cp > 0)
          {
@@ -1229,9 +1716,23 @@ void PathOnInit()
    s_pathArmed = false;
    s_pathDrag = "";
    s_pathClick = "";
+   s_pathPrevLive = false;   // P-PERF-168: a new attach owns no rubber band yet
+   s_pathPend = false;
+   s_pathDragPend = false;
    s_pathSel = "";      // a fresh attach owns no selection: the dot is drawn, not adopted
-   PathAdoptOrphans();
+   PathSegMemoReset();  // P-PERF-168b: a new attach inherits no count from the last one
+   PathSweepUnfinished();    // P-PATH-END c: a hard restart's half-drawn session is not a path
+   PathAdoptOrphans(true);   // P-PERF-157b: the attach moment always walks
    PathHandlesWipe();
+   //--- P-PATH-CANVAS (2026-10-29): the rubber band's painter joins the engine's
+   //--- FRONT layer. Mounted once per attach; the flag below lets the deinit
+   //--- unmount only what it mounted (the pointer has exactly one owner at a time).
+#ifdef BIOTAK_RENDER_ENGINE
+   g_rPaintHook = &s_pathRubberHook;
+   s_pathHookMounted = true;
+   REngineExtTimeContent(false);
+#endif
+   s_pathCursorOk = false;
 }
 void PathOnDeinit(const int reason)
 {
@@ -1248,6 +1749,12 @@ void PathOnDeinit(const int reason)
    //--- EVERY reason, not only with the indicator's removal: a timeframe switch
    //--- leaves the preview line and the session's segments on the chart forever.
    PathSessionClear();
+#ifdef BIOTAK_RENDER_ENGINE
+   //--- P-PATH-CANVAS: give the FRONT layer back. A hook left mounted here would
+   //--- paint a dead tool's band on the next attach's first frame.
+   if(s_pathHookMounted) { g_rPaintHook = NULL; s_pathHookMounted = false; }
+   REngineExtTimeContent(false);
+#endif
    if(reason == REASON_REMOVE)
    {
       string pfx = PathPrefix();

@@ -284,6 +284,24 @@ int    g_rBgPresents=0,g_rBgSkips=0;
 int    g_rLastHoverP=-1,g_rLastDragP=-1;
 double g_rMapPmin=0,g_rMapPmax=1,g_rMapK=1;
 
+//==================== product paint hook (P-PATH-CANVAS) ============
+// The reference implementation (MQL5 "Chart Drawing Toolkit") keeps ONE
+// ObjectCreate in 37k lines and paints every drawing as pixels on a full-chart
+// canvas. Our engine is the same idea with layers, so a product family that
+// MOVES every frame (the Path tool's rubber band) can join the FRONT slot
+// instead of dragging a chart object behind the cursor.
+//
+// IRPaintHook already existed for this and had no owner. Two small doors make
+// it usable by a family that stages no RSeg:
+//   - g_rExtTimeContent tells the scroll detector that a horizontal pan moves
+//     this family too (without it a pure pan would leave the band glued to the
+//     old pixels while the candles slide under it);
+//   - REngineDirtyFront() is how the owner says "my pixels changed", which is
+//     the only thing that re-rasters the FRONT slot between two RSeg commits.
+bool g_rExtTimeContent=false;
+void REngineDirtyFront(){ g_rTextsVer++; }
+void REngineExtTimeContent(const bool v){ g_rExtTimeContent=v; }
+
 double RPriceToY(double p){ return (g_rMapPmax-p)*g_rMapK; }
 double RYToPrice(double y){ return g_rMapPmax - (g_rMapK>0 ? y/g_rMapK : 0); }
 void RMapUpdate()
@@ -728,7 +746,7 @@ bool REnginePaint()
       // cannot touch the zone slot, whose pipeline zones are full-width and
       // price-only. The old unconditional pair re-rastered and re-uploaded the
       // whole zone family on every scroll step for a picture that never moved.
-      const bool frontMoves=(ArraySize(g_rSegs)>0 || ArraySize(g_rPatDots)>0 || RHasTimeTexts());
+      const bool frontMoves=(ArraySize(g_rSegs)>0 || ArraySize(g_rPatDots)>0 || RHasTimeTexts() || g_rExtTimeContent);
       if(frontMoves) g_rTextsPresented=-1;
       if(ArraySize(g_rPatBands)>0) g_rZonesPresented=-1;
    }
