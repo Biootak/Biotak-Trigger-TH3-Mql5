@@ -22,6 +22,9 @@
 //|    * settings change : full wipe + repaint (hash)                 |
 //|    * open/close flip : full wipe + repaint (+ alert, if enabled)  |
 //|    * otherwise       : extend the live H/L in place               |
+//|  P-SESS-13: idle also asks ONE more question — "is the family I   |
+//|  built still on the chart?" — through a two-name witness pair, so |
+//|  a foreign sweep repaints on the next tick instead of tomorrow.   |
 //|  TIME-FRAME-FREE NAMES (date-keyed, no period in the name), so a  |
 //|  TF switch keeps every box; REASON_REMOVE sweeps them with the    |
 //|  instance (one inpObjectPrefix wipe, EventHandlers_Tail).         |
@@ -70,6 +73,29 @@ static bool     s_sessCdIsOpen = false;
 static string   s_sessCdText = "";
 static uint     s_sessCdMs = 0;
 
+//--- P-SESS-13: the two witnesses of the last paint. A and Z are the FIRST and
+//--- the LAST object that paint declared — the oldest window's first edge and the
+//--- tail (a ghost tag, the countdown). They bracket the family, so a sweep that
+//--- eats its head or its tail is seen by ONE ObjectFind instead of a walk, and a
+//--- family that was taken from under us repaints on the next tick instead of
+//--- waiting for tomorrow. Cost when healthy: two kernel lookups per 250 ms tick.
+static string   s_sessWitA = "";
+static string   s_sessWitZ = "";
+static uint     s_sessHealMs = 0;   // the self-heal's own budget (see SessionsTick)
+static uint     s_sessEmptyMs = 0;  // P-SESS-14: the last paint that declared NOTHING
+
+//--- P-SESS-15: the coverage of the last paint. A window is only drawn when its
+//--- bars can be scanned, and a chart whose history is still downloading answers
+//--- "no bars" for every window older than what it has - so a paint that lands
+//--- during the sync declares only the newest windows and then looks healthy
+//--- (witnesses exist), and nothing repaints it until the day turns.
+//--- `CoverFrom` is the earliest window that paint WANTED, `BarFloor` the oldest
+//--- bar it actually had: when the floor later recedes past CoverFrom, the tick
+//--- repaints ONCE (and only once: a floor that stops moving buys no repaint).
+static datetime s_sessCoverFrom = 0;
+static datetime s_sessBarFloor = 0;
+static uint     s_sessCovMs = 0;    // the coverage repair's own budget
+
 //+------------------------------------------------------------------+
 //| Names + primitives                                                |
 //+------------------------------------------------------------------+
@@ -92,8 +118,25 @@ color SessBlend(const color base, const int alphaPct)
 }
 
 //+------------------------------------------------------------------+
-//| ONE box door, TWO build-proof bodies (P-SESS-05).                 |
+//| P-SESS-13 — THE WITNESS PAIR.                                     |
 //|                                                                  |
+//| Every primitive below reports the name it just declared. The      |
+//| FIRST name of a paint and the LAST one bracket the whole family:  |
+//| the first is the oldest window's first edge (windows are declared |
+//| oldest..newest), the last is the tail (a ghost tag or the          |
+//| countdown). Two ObjectFind calls per idle tick therefore answer   |
+//| "is the family still on the chart?" without walking it — and a    |
+//| family that a foreign sweep deleted repaints on the next tick     |
+//| instead of waiting for the day to turn.                           |
+//+------------------------------------------------------------------+
+void SessWitness(const string nm)
+{
+   if(s_sessWitA == "") s_sessWitA = nm;
+   s_sessWitZ = nm;
+}
+
+//+------------------------------------------------------------------+
+//| ONE box door, TWO build-proof bodies (P-SESS-05).                 |
 //| A rectangle cannot be trusted to stay hollow: some MT4 builds     |
 //| paint it filled whatever FILL says — ZoneFactory.mqh:143 already  |
 //| pays this exact law (EMPTY boxes there are four border segments), |
@@ -119,6 +162,7 @@ void SessEdge(const string nm, const datetime t1, const double p1, const datetim
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip);
    ObjectMove(0, nm, 0, t1, p1);
    ObjectMove(0, nm, 1, t2, p2);
+   SessWitness(nm);   // P-SESS-13
 }
 
 void SessRect(const string nm, const datetime t1, const double p1, const datetime t2, const double p2,
@@ -145,6 +189,7 @@ void SessRect(const string nm, const datetime t1, const double p1, const datetim
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip);
    ObjectMove(0, nm, 0, t1, p1);
    ObjectMove(0, nm, 1, t2, p2);
+   SessWitness(nm);   // P-SESS-13
 }
 
 void SessLine(const string nm, const datetime t1, const double p1, const datetime t2, const double p2,
@@ -163,6 +208,7 @@ void SessLine(const string nm, const datetime t1, const double p1, const datetim
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip);
    ObjectMove(0, nm, 0, t1, p1);
    ObjectMove(0, nm, 1, t2, p2);
+   SessWitness(nm);   // P-SESS-13
 }
 
 void SessText(const string nm, const datetime t, const double p, const string txt,
@@ -179,6 +225,7 @@ void SessText(const string nm, const datetime t, const double p, const string tx
    ObjectSetInteger(0, nm, OBJPROP_HIDDEN, true);
    ObjectSetString(0, nm, OBJPROP_TOOLTIP, tip);
    ObjectMove(0, nm, 0, t, p);
+   SessWitness(nm);   // P-SESS-13
 }
 
 //+------------------------------------------------------------------+
@@ -186,13 +233,53 @@ void SessText(const string nm, const datetime t, const double p, const string tx
 //| a holiday or beyond-history window degrades to NO object, never   |
 //| to a fake one).                                                   |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| P-SESS-16 (2026-10-29): the deepest bar this chart can actually   |
+//| READ.                                                             |
+//|                                                                  |
+//| MT5's iTime() answers 0 for a slot whose timeseries has not been   |
+//| built yet - even while iBars() still counts the bar. That is the   |
+//| state of the first paints after an attach or a terminal restart,   |
+//| while the oldest end is still syncing, and asking ONLY slot       |
+//| `bars-1` turned it into "there is no history at all": every window |
+//| failed its scan, the paint declared just the live box, and the     |
+//| family looked healthy (a witness existed) so nothing repainted it. |
+//| The measured signature is in the log:                          |
+//|   [SESS] paint bars=100005 floor=1970.01.01 00:00 priced=1          |
+//|                                                                  |
+//| So probe upward for a slot that HAS a stamp, in growing steps      |
+//| (8,16,32,...) - bounded at 20 reads and paid ONLY on that cold     |
+//| path. The answer is deliberately conservative: it is the first     |
+//| readable slot, never deeper than what the scan can prove, so a     |
+//| window older than it is still skipped instead of being priced      |
+//| from its tail bars and drawn short.                               |
+//+------------------------------------------------------------------+
+datetime SessHistFloor()
+{
+   int bars = iBars(NULL, 0);
+   if(bars <= 0) return 0;
+   datetime f = iTime(NULL, 0, bars - 1);
+   if(f > 0) return f;
+   int idx = bars - 1;
+   int step = 8;
+   for(int p = 0; p < 20 && idx > 0; p++)
+   {
+      idx -= step;
+      if(idx < 0) idx = 0;
+      f = iTime(NULL, 0, idx);
+      if(f > 0) return f;
+      step *= 2;
+   }
+   return 0;
+}
+
 bool SessHiLoFor(datetime t1, const datetime t2, double &hi, double &lo)
 {
    hi = 0.0; lo = 0.0;
    if(t2 <= t1) return false;
    int bars = iBars(NULL, 0);
    if(bars <= 0) return false;
-   datetime oldestT = iTime(NULL, 0, bars - 1);
+   datetime oldestT = SessHistFloor();   // P-SESS-16: the deepest READABLE bar
    if(oldestT <= 0) return false;
    if(t2 <= oldestT) return false;
    datetime from = (t1 < oldestT) ? oldestT : t1;
@@ -224,10 +311,21 @@ void SessWipe()
 
 //--- rebuild trigger: settings, slots, master, hide (TF is NOT here:
 //--- a timeframe switch must never repaint the family)
+//
+// P-SESS-14 (2026-10-29) — `Period()` WAS here, and that one term is why a
+// timeframe switch wiped the family. The names are date-keyed and a window's
+// prices come from a bar scan, so a switch changes nothing the paint draws —
+// but the hash differed, SessPaintAll ran, and its first act is SessWipe(). The
+// repaint then reads the NEW timeframe's history, which is still syncing on the
+// tick the switch lands: every `SessHiLoFor` fails, the paint declares nothing,
+// and the tick still marked itself built - so the family stayed empty (no
+// witnesses, no heal, no rebuild) until the day turned. That is the user's
+// «تایم عوض میکنم دیگه رسم نمیشه»: the wipe was certain, the repaint was not.
+// A switch must leave the family exactly where it is (P-PERF-38b's rule for the
+// level family, and this file's own header).
 long SessViewHash()
 {
    long h = 1181783497276652981;
-   h = h * 31 + (long)Period();
    h = h * 31 + (g_sessMaster ? 1 : 0);
    h = h * 31 + (IsIndicatorHidden() ? 1 : 0);
    h = h * 31 + (long)g_sessHistDays;
@@ -264,6 +362,11 @@ datetime SessLabelAnchor(const datetime endT, const datetime now)
 void SessPaintAll(const datetime now, const int bkr)
 {
    SessWipe();
+   s_sessWitA = "";   // P-SESS-13: the witnesses belong to THIS paint
+   s_sessWitZ = "";
+   //--- P-SESS-15: what this paint asks for, and what history answered with
+   s_sessCoverFrom = 0;
+   s_sessBarFloor = SessHistFloor();   // P-SESS-16: readable depth, not slot bars-1
    s_sessCdNext = 0;
    s_sessCdSlot = -1;
    s_sessCdIsOpen = false;
@@ -303,6 +406,10 @@ void SessPaintAll(const datetime now, const int bkr)
       //--- price scan (past: full window · live: up to now)
       for(int w = n0; w < n; w++)
       {
+         //--- P-SESS-15: EVERY window this paint wants, priced or not, counts
+         //--- toward the coverage probe - the ones that failed are exactly the
+         //--- ones a warmer chart could draw.
+         if(s_sessCoverFrom == 0 || wins[w].sU < s_sessCoverFrom) s_sessCoverFrom = wins[w].sU;
          datetime rEnd = (wins[w].eU <= now) ? wins[w].eU : now;
          if(rEnd <= wins[w].sU) continue;
          wins[w].hasPrice = SessHiLoFor(wins[w].sU, rEnd, wins[w].hi, wins[w].lo);
@@ -483,6 +590,15 @@ void SessPaintAll(const datetime now, const int bkr)
          SessText(nmC, SessLabelAnchor(s_sessCdNext, now), cdP, s_sessCdText, SESS_CD_COLOR, SESS_PT_PRICE,
                   ANCHOR_LEFT_LOWER, "next session boundary");
    }
+
+   //--- P-SESS-15 diagnostic (one line per paint: a paint is an event, not a tick)
+   int nPriced = 0;
+   for(int wp = 0; wp < n; wp++) if(wins[wp].hasPrice) nPriced++;
+   PrintFormat("[SESS] paint bars=%d floor=%s wantFrom=%s windows=%d priced=%d witA=%s",
+               iBars(NULL, 0),
+               TimeToString(s_sessBarFloor, TIME_DATE | TIME_MINUTES),
+               TimeToString(s_sessCoverFrom, TIME_DATE | TIME_MINUTES),
+               n, nPriced, s_sessWitA);
 }
 
 //+------------------------------------------------------------------+
@@ -577,6 +693,21 @@ void SessLiveUpdate(const datetime now)
 }
 
 //+------------------------------------------------------------------+
+//| P-SESS-14: is there anything to draw at all? Asked only on the     |
+//| empty-paint path, so the healthy tick never pays for it.           |
+//+------------------------------------------------------------------+
+bool SessAnySlotEnabled()
+{
+   for(int i = 0; i < SESS_SLOTS; i++)
+   {
+      SessSlot s;
+      SessSlotGet(i, s);
+      if(s.enabled) return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
 //| The tick (called from CoopPump's status job — 250 ms, both        |
 //| entries). Order: want → state flips → rebuild-or-extend.          |
 //+------------------------------------------------------------------+
@@ -595,6 +726,12 @@ void SessionsTick()
          s_sessAlertSeeded = false;
          s_sessCdNext = 0;
          s_sessCdText = "";
+         s_sessWitA = "";   // P-SESS-13: no witness outlives its family
+         s_sessWitZ = "";
+         s_sessEmptyMs = 0; // P-SESS-14: no retry owed by a family that was turned off
+         s_sessCoverFrom = 0;   // P-SESS-15: neither is a coverage debt
+         s_sessBarFloor = 0;
+         s_sessCovMs = 0;
          for(int z = 0; z < SESS_SLOTS; z++)
          {
             s_sessWasOpen[z] = false;
@@ -611,6 +748,39 @@ void SessionsTick()
    long h = SessViewHash();
    int day = SessServerDayStamp();
    bool settingsChanged = (s_sessBuilt && h != s_sessHash);
+
+   //--- P-SESS-13 (2026-10-29) — THE FAMILY CAN BE TAKEN FROM UNDER US.
+   //
+   // Every rebuild decision below is a CHANGE: a new hash, a new day, a flip. A
+   // family that a FOREIGN sweep deleted changes none of them, so the renderer
+   // kept believing it was built and nothing ever repainted it - the boxes were
+   // gone until tomorrow. That is not hypothetical: the object-count cleanup's
+   // age rule was eating exactly the objects anchored at a window START (the
+   // measured signature is in EventHandlers' skip, P-SESS-13), and the user sees
+   // "the sessions vanish after a timeframe switch".
+   //
+   // The witness pair answers the one question the hash cannot: is the thing I
+   // built still on the chart? Two ObjectFind calls per idle tick, no walk.
+   // `s_sessHealMs` bounds the repair: if the family cannot be re-created (an
+   // object-count emergency, a chart that refuses new objects), the tick must not
+   // turn into a 4 Hz wipe-and-repaint - one attempt per 5 s, and the failure is
+   // still visible as an empty family rather than a stall.
+   if(s_sessBuilt && (s_sessWitA != "" || s_sessWitZ != ""))
+   {
+      bool gone = ((s_sessWitA != "" && ObjectFind(0, s_sessWitA) < 0) ||
+                   (s_sessWitZ != "" && ObjectFind(0, s_sessWitZ) < 0));
+      if(gone)
+      {
+         uint tHeal = GetTickCount();
+         if(s_sessHealMs == 0 || tHeal - s_sessHealMs >= 5000)
+         {
+            s_sessHealMs = tHeal;
+            s_sessBuilt = false;      // the rebuild branch below repaints this tick
+            s_sessWitA = "";
+            s_sessWitZ = "";
+         }
+      }
+   }
 
    int  flippedSlot = -1;
    bool flippedOpen = false;
@@ -633,10 +803,61 @@ void SessionsTick()
       s_sessWasOpen[sl] = isOpen;
    }
 
+   //--- P-SESS-14: A PAINT THAT DECLARED NOTHING IS NOT A BUILD.
+   //
+   // The paint is wipe-then-declare, so if every window fails its price scan (a
+   // timeframe whose history is still loading, a holiday stretch, an empty
+   // account history) the family is now EMPTY while the renderer believed it
+   // built. Nothing rebuilt it: the hash was stored, the day had not turned, no
+   // slot flipped, and the witness pair was empty so even the heal had nothing
+   // to ask about. The one attempt per 5 s below is the floor - a chart that
+   // genuinely has nothing to draw costs one failed scan per 5 s, not 4 Hz.
+   if(!s_sessBuilt && s_sessEmptyMs != 0 && SessAnySlotEnabled()
+      && GetTickCount() - s_sessEmptyMs < 5000)
+      return;
+
+   //--- P-SESS-15 (2026-10-29) — A PAINT THAT RAN WHILE HISTORY WAS STILL SHORT.
+   //
+   // P-SESS-14 covered the paint that declared NOTHING. This is its narrower
+   // sibling, and the one the user actually sees: attach the indicator (or open a
+   // symbol) while the chart's history is still downloading and every window older
+   // than the loaded bars fails `SessHiLoFor` - so the paint declares only the LIVE
+   // session's box and looks perfectly healthy (a witness exists, the hash matches,
+   // the day has not turned). The earlier sessions stay missing for the rest of the
+   // day, which is the report «سشن روشن است ولی فقط همین یکی می‌آید».
+   //
+   // The answer is a coverage debt, not a timer: the paint records the earliest
+   // window it wanted and the oldest bar it had. When that bar floor later recedes
+   // past the wanted start, history has answered more than it could before, so the
+   // family is rebuilt ONCE. A floor that has stopped moving buys no repaint (a
+   // symbol with genuinely short history costs one probe per tick, zero writes), and
+   // the 1 s budget keeps a streaming download from turning the repair into 4 Hz.
+   //--- P-SESS-16 (2026-10-29) — AND THE FLOOR MAY BE UNKNOWN, NOT JUST SHALLOW.
+   // The debt above asked `s_sessBarFloor != 0`, which silently disabled itself in
+   // exactly the case that needs it: a paint whose deepest read answered 0 owns no
+   // floor at all, so no later probe could ever look "deeper". A floor that is
+   // still unknown is an outstanding debt, not a covered one.
+   if(s_sessBuilt && s_sessCoverFrom != 0
+      && (s_sessBarFloor == 0 || s_sessCoverFrom < s_sessBarFloor))
+   {
+      datetime covFloor = SessHistFloor();
+      if(covFloor > 0 && (s_sessBarFloor == 0 || covFloor < s_sessBarFloor))
+      {
+         uint tCov = GetTickCount();
+         if(s_sessCovMs == 0 || tCov - s_sessCovMs >= 1000)
+         {
+            s_sessCovMs = tCov;
+            s_sessBarFloor = covFloor;   // the floor this rebuild will see
+            s_sessBuilt = false;         // the rebuild branch below repaints
+         }
+      }
+   }
+
    if(!s_sessBuilt || h != s_sessHash || day != s_sessDay || flippedSlot >= 0)
    {
       SessPaintAll(now, bkr);
-      s_sessBuilt = true;
+      s_sessBuilt = (s_sessWitA != "");   // P-SESS-14: nothing declared -> not built
+      s_sessEmptyMs = s_sessBuilt ? 0 : GetTickCount();
       s_sessHash = h;
       s_sessDay = day;
       s_sessAlertSeeded = true;
