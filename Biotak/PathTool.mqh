@@ -144,6 +144,17 @@ static bool   s_pathCursorOk    = false;
 static datetime s_pathCursorT   = 0;
 static double s_pathCursorP     = 0.0;
 static bool   s_pathHookMounted = false;
+//--- P-PATH-CANVAS-2 (2026-10-29): WHERE THE BAND LIVES — DECIDED ONCE PER ARM.
+//---
+//--- The first version asked the engine on EVERY move and fell back to the object
+//--- whenever it answered "no". That answer is NOT stable frame to frame:
+//--- REnginePaint() returns false while the buffers are being rebuilt (a resize, a
+//--- chart change, the first frame after an attach), so one "no" in the middle of a
+//--- gesture built the OBJ_TREND preview while the canvas still held the previous
+//--- frame's band — the hand sees BOTH, which is the user's «بعضی وقتا دوتا خط
+//--- میشه». The choice is a property of the session, not of the frame: decide it
+//--- on the first move of each arm and never draw the losing surface again.
+static int    s_pathBandMode    = 0;   // 0 = undecided, 1 = canvas, 2 = object
 //--- P-PERF-168b: the segment-count memo (see PathSegCount). One row per id;
 //--- the epoch is the chart's object TOTAL, so any birth or death anywhere on
 //--- the chart re-opens the question once instead of once per call.
@@ -166,6 +177,7 @@ void PathArm()
    //--- horizontal pan moves this family too (only while armed — the band is the
    //--- only time-anchored pixel this tool owns).
    s_pathCursorOk = false;
+   s_pathBandMode = 0;   // P-PATH-CANVAS-2: a new arm asks the engine again
 #ifdef BIOTAK_RENDER_ENGINE
    REngineExtTimeContent(true);
 #endif
@@ -638,14 +650,29 @@ void PathPreviewMove(const datetime t, const double p)
    //--- FRONT slot already has the bitmap, the frame key and the paint timer, so
    //--- the move below writes two numbers and asks for one frame.
    s_pathCursorT = t; s_pathCursorP = p; s_pathCursorOk = true;
-   REngineDirtyFront();
-   if(REnginePaint())
+   //--- the session's surface, chosen once (see s_pathBandMode). The decision's own
+   //--- paint IS the band's first frame, so it is never paid twice.
+   if(s_pathBandMode == 0)
    {
-      //--- the object the previous build drew is retired on the first canvas frame
-      if(s_pathPrevLive) { ObjectDelete(0, PathPreviewName()); s_pathPrevLive = false; }
+      REngineDirtyFront();
+      s_pathBandMode = (REnginePaint() ? 1 : 2);
+      if(s_pathBandMode == 1)
+      {
+         if(s_pathPrevLive) { ObjectDelete(0, PathPreviewName()); s_pathPrevLive = false; }
+         return;
+      }
+   }
+   else if(s_pathBandMode == 1)
+   {
+      //--- from here on the answer is IGNORED. A frame the engine skips (a resize
+      //--- rebuilding the buffers) leaves the band one frame stale, which the eye
+      //--- cannot see; building the object for it is what put two lines on the
+      //--- chart. A stale pixel is always better than a second surface.
+      REngineDirtyFront();
+      REnginePaint();
       return;
    }
-   s_pathCursorOk = false;   // engine not up yet (first frames): fall back to the object
+   s_pathCursorOk = false;   // the object path paints its own tip; the hook must not
 #endif
    string nm = PathPreviewName();
    //--- P-PERF-166 (2026-10-29) — THE PREVIEW WEARS ITS DRESS ONCE, NOT EVERY MOVE.
@@ -1259,6 +1286,32 @@ void PathVertDragStart(const string id, const int k)
    s_pathDragPend = false;
    PathWitness("drag start id=" + id + " vertex=" + IntegerToString(k));
 }
+// P-PERF-169 (2026-10-29) — THE CARRY MOVES A HANDLE, IT DOES NOT INTERROGATE IT.
+// HandsetHandleAtXY is written for every caller in the product, so it re-asks three
+// questions a vertex carry already knows the answers to: "is this the right bitmap"
+// (a BMPFILE read), "is it at X", "is it at Y" (two more reads, only to avoid a
+// write that a MOVING handle always needs). Two of those three reads are round-trips
+// into the terminal, and ObjectFind/ObjectGet cost grows with the object count — on
+// this chart (hundreds of objects) the ride measured `[mvus] hs=9..62 ms`.
+// A carry knows the bitmap (it never changes mid-gesture) and the position (it is
+// about to be written), so it writes the two distances and asks nothing.
+void PathHandleCarry(const string id, const int k)
+{
+   string hn = PathHandleName(id, k);
+   if(ObjectFind(0, hn) < 0) { PathHandleAt(id, k); return; }   // a birth keeps the full dress
+   //--- the F mute can land mid-carry; a parked row is the answer then too
+   if(IsIndicatorHidden()) { ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, HANDSET_HANDLE_PARK); return; }
+   datetime t = 0; double p = 0.0;
+   if(!PathVertex(id, k, t, p)) return;
+   int x = 0, y = 0;
+   if(!(p > 0) || !ChartTimePriceToXY(0, 0, t, p, x, y))
+   {
+      ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, HANDSET_HANDLE_PARK);
+      return;
+   }
+   ObjectSetInteger(0, hn, OBJPROP_XDISTANCE, x - CP_HANDLE_HALF);
+   ObjectSetInteger(0, hn, OBJPROP_YDISTANCE, y - CP_HANDLE_HALF);
+}
 void PathDragApply(const datetime curT, const double curP)
 {
    long dt = (long)(curT - s_pathSnapT);
@@ -1271,20 +1324,14 @@ void PathDragApply(const datetime curT, const double curP)
       if(ix != 0) ObjectMove(0, s_pathSnapNames[i], 1, s_pathSnapT1[i] + dt, s_pathSnapP1[i] + dp);
    }
    //--- P-PERF-166 (2026-10-29) — A DOT CARRY MOVES THREE DOTS, NOT THE WHOLE ROW.
-   //--- Vertex k lives in segment k's anchor 0 and segment k-1's point 1, so only the
-   //--- seats k-1, k and k+1 can have changed; this call used to re-project EVERY dot
-   //--- of the path on every move of the hand (a seven-segment path: eight handles, each
-   //--- a find + two property reads + a projection + a marker write). The dot is the
-   //--- only surface a vertex edit can move, and the release's own follow (PathDragEnd
-   //--- -> PathDragRestore -> PathHandleFollow) still re-seats the whole row once, so a
-   //--- coalesced final frame is repaired where it always was.
-   if(s_pathDragV >= 0)
-   {
-      int nv = PathSegCount(s_pathDrag);
-      for(int hv = s_pathDragV - 1; hv <= s_pathDragV + 1; hv++)
-         if(hv >= 0 && hv <= nv) PathHandleAt(s_pathDrag, hv);
-   }
-   else PathHandleFollow(s_pathDrag);
+   //--- P-PERF-169: AND OF THOSE THREE, ONLY ONE ACTUALLY MOVES. Vertex V lives in
+   //--- segment V-1's point 1 and segment V's point 0; vertices V-1 and V+1 are the
+   //--- far ends of those same two segments and are not touched by the carry. The
+   //--- ±1 window re-seated two dots that were already exactly where they belong —
+   //--- and PathVertDragStart's own PathHandleFollow had just placed them. One dot
+   //--- per frame now, on the fast writer.
+   if(s_pathDragV >= 0) PathHandleCarry(s_pathDrag, s_pathDragV);
+   else PathHandleFollow(s_pathDrag);   // a whole-path carry still moves the row
    // P-UI-139: the 50 % markers ride it too — and only when the switch is on, so the
    // default path pays ONE array read per drag step and not one object write.
    if(PathMidGet(s_pathDrag)) PathMidApply(s_pathDrag);
@@ -1329,6 +1376,12 @@ void PathDragEnd()
    //--- is written here before the carry closes, so the committed geometry is the
    //--- cursor's last position and never the one before it.
    PathDragFlush();
+   //--- P-PERF-169: THE RELEASE REPAIRS THE ROW. The carry seats ONE dot per frame
+   //--- (the only one that moves), so this is the pass that re-seats the rest and
+   //--- makes the finished geometry pixel-true — the job the older comment credited
+   //--- to "PathDragEnd -> PathDragRestore -> PathHandleFollow", which only runs on a
+   //--- FOREIGN drag. One whole row per gesture, never per frame.
+   PathHandleFollow(s_pathDrag);
    PathWitness("drag end id=" + s_pathDrag + " moved=" + (s_pathMoved ? "yes" : "no"));
    if(s_pathMoved) s_pathEndMs = GetTickCount();
    s_pathPrimed = false;
