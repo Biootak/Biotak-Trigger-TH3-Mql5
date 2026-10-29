@@ -161,11 +161,32 @@ void HRayNormalise(const string line)
    if((bool)ObjectGetInteger(0, line, OBJPROP_SELECTED))
       ObjectSetInteger(0, line, OBJPROP_SELECTED, false);
 }
-void HRayAdoptOrphans()
+// P-PERF-157b (2026-10-29) — THE ADOPT WALK IS AN ATTACH NET, NOT A PAN TAX.
+//
+// This walk answered every CHARTEVENT_CHART_CHANGE ("chart change is rare, the
+// scan is not hot" — P-HR-02). It is not rare: a drag-scroll emits one every
+// 100 ms, and the walk is one `ObjectsTotal` plus one `ObjectName` PER CHART
+// OBJECT — on the live XAUUSD chart ~900 kernel round trips, and PathTool's
+// twin below walks the same chart again in the same event. MEASURED
+// (2026-10-29 09:29:17): a CHART_CHANGE of 703 ms whose own breakdown accounted
+// for 156 ms (`redraw=156 render[levels=156 overlay=141]`); the other 547 ms
+// sat in the pre-branch handlers, and these two walks are the only O(chart)
+// work there.
+//
+// What the walk can find is a PREVIOUS instance's/build's ray — a fresh one is
+// registered by its creator — i.e. an ATTACH-time answer. So it keeps the net
+// and adds the same fence the info-plate sweep uses (P-PERF-157): an unchanged
+// object TOTAL means nothing was born or died since the last walk, so nothing
+// can be an unadopted orphan — one terminal read, no walk. `force` is the
+// attach caller's (HRayOnInit), which must always walk.
+void HRayAdoptOrphans(const bool force = false)
 {
    string pfx = HRayPrefix();
    if(pfx == "") return;
    int n = ObjectsTotal(0, 0, -1);
+   static int s_adoptTotal = -1;
+   if(!force && n == s_adoptTotal) return;
+   s_adoptTotal = n;
    for(int i = 0; i < n; i++)
    {
       string nm = ObjectName(0, i, 0, -1);
@@ -408,8 +429,9 @@ bool HRayOnChartEvent(const int id, const long &lparam, const double &dparam, co
       if(s_hraySel != "" && ObjectFind(0, s_hraySel) < 0) s_hraySel = "";
       return false;
    }
-   // The dot rides every channel the chart moves in (pan stream included);
-   // orphans are adopted here too — chart change is rare, the scan is not hot.
+   // The dot rides every channel the chart moves in (pan stream included).
+   // P-PERF-157b: the adopt walk rides the same channel but is FENCED (object
+   // total unchanged = no walk) — a pan is not an attach.
    if(id == CHARTEVENT_CHART_CHANGE)
    {
       HRayAdoptOrphans();
@@ -579,7 +601,7 @@ void HRayOnInit()
    s_hrayDrag = "";
    s_hraySel = "";
    s_hrayClick = "";
-   HRayAdoptOrphans();
+   HRayAdoptOrphans(true);   // P-PERF-157b: the attach moment always walks
    HRayHandlesWipe();
 }
 // Deinit safety: a remove must never leave a stuck arm; committed rays are

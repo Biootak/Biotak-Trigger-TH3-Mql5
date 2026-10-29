@@ -236,7 +236,12 @@ void TH3ROPlateAt(const string plate, const ENUM_BASE_CORNER corner,
         ObjectSetInteger(0, plate, OBJPROP_COLOR,       TH3RO_EDGE);
         ObjectSetInteger(0, plate, OBJPROP_BGCOLOR,     TH3RO_FILL);
         ObjectSetInteger(0, plate, OBJPROP_BACK,        false);
-        ObjectSetInteger(0, plate, OBJPROP_SELECTABLE,  false);
+        // P-TH3-DEL4: the plate is the readout's ONE handle. The rows stay
+        // non-selectable (ten draggable labels would be ten ways to break a
+        // readout), so this is the single object the terminal can name — and a
+        // readout the terminal can name is a readout the hand can delete, the
+        // same bargain P-LM-17 struck for the leg's line.
+        ObjectSetInteger(0, plate, OBJPROP_SELECTABLE,  true);
         ObjectSetInteger(0, plate, OBJPROP_HIDDEN,      true);
         ObjectSetInteger(0, plate, OBJPROP_ZORDER,      Z_TH3_RO_PLATE);
         ObjectSetString( 0, plate, OBJPROP_TOOLTIP,     tooltip);
@@ -249,6 +254,11 @@ void TH3ROPlateAt(const string plate, const ENUM_BASE_CORNER corner,
     // writer left with BACK=true slides under every label on the chart.
     if((bool)ObjectGetInteger(0, plate, OBJPROP_BACK))
         ObjectSetInteger(0, plate, OBJPROP_BACK, false);
+    // P-TH3-DEL4: a plate an older build born non-selectable is a plate the
+    // hand cannot name — one read, one write only on the chart that needs it,
+    // so a still frame still costs zero writes.
+    if(!(bool)ObjectGetInteger(0, plate, OBJPROP_SELECTABLE))
+        ObjectSetInteger(0, plate, OBJPROP_SELECTABLE, true);
 }
 
 // One row of ink: created on the first call, then only moved and re-inked.
@@ -449,6 +459,29 @@ void TH3LadderSetVisible(const string base, const bool visible)
 }
 
 //+------------------------------------------------------------------+
+//| P-TH3-BASE-01 (2026-10-24, ported from MT4) -- THE OLD PREFIX    |
+//| DIES ONCE. The overlay objects were `TH3_MP_<pattern>_*` and are |
+//| `TH3_BASE_` now. A previous build's names are ORPHANS: they       |
+//| survive on the chart and paint a second zone beside the new one,  |
+//| so the first draw of every attach walks the object list ONCE       |
+//| (bounded by the chart's own count, never per tick) and deletes     |
+//| the old spelling. A reattach or a template re-apply resets the     |
+//| static and sweeps again - which is exactly when an old chart       |
+//| comes back.                                                       |
+//+------------------------------------------------------------------+
+void TH3LegacyMpPrefixSweep()
+{
+    static bool s_done = false;
+    if(s_done) return;
+    s_done = true;
+    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+    {
+        string nm = ObjectName(0, i, -1, -1);
+        if(StringFind(nm, "TH3_MP_") == 0) ObjectDelete(0, nm);
+    }
+}
+
+//+------------------------------------------------------------------+
 //| P-TH3-DEL1 (2026-09-22) -- THE FAMILY BASE, OFF THE NAME.       |
 //| Pattern names are `ABCD_Pattern_<digits>` (TH3Tool.mqh: the      |
 //| completion stamps GetTickCount()). Any member name — point, line, |
@@ -460,7 +493,11 @@ void TH3LadderSetVisible(const string base, const bool visible)
 string TH3FamilyBaseOf(const string objName)
 {
     string rest = objName;
-    if(StringFind(rest, "TH3_MP_") == 0)
+    // P-TH3-BASE-01: TH3_BASE_ (9) is the current spelling, TH3_MP_ (7) the
+    // legacy one - a hand-delete of either still finds its family.
+    if(StringFind(rest, "TH3_BASE_") == 0)
+        rest = StringSubstr(rest, 9);
+    else if(StringFind(rest, "TH3_MP_") == 0)
         rest = StringSubstr(rest, 7);
     string pre = TH3_PATTERN_PREFIX;
     if(StringFind(rest, pre) != 0) return "";
@@ -691,10 +728,89 @@ bool TH3InfoFamilyPlateGrow(const string base)
     return true;
 }
 
+//+------------------------------------------------------------------+
+//| P-TH3-DEL4 (2026-10-24, ported from MT4) — THE READOUT THE HAND  |
+//| DELETED STAYS DELETED.                                           |
+//|                                                                  |
+//| The report: «اینو حذف میزنم حذف نمیشه به درستی» — the AB=CD       |
+//| caption, deleted by every path the terminal offers, would not    |
+//| leave. Three facts, all measured on MT4 and re-checked here:      |
+//|                                                                  |
+//|   * the family was born `OBJPROP_SELECTABLE=false`               |
+//|     (TH3ROPlateAt above), so the terminal could not select it    |
+//|     and neither the Delete key nor right-click → Delete ever     |
+//|     named it;                                                    |
+//|   * the delete handler had no caption branch at all — MT4's       |
+//|     P-TH3-DEL3 rule ("the caption is display, never a delete      |
+//|     trigger") was retired here with P-MT5-TH3DEL, so a caption    |
+//|     the terminal COULD name would have wiped the whole ABCD;      |
+//|   * and Draw/Verify/heal rebuilt the family on the next pass      |
+//|     anyway.                                                      |
+//|                                                                  |
+//| The three are one rule: a hand-delete of a caption member IS the  |
+//| user saying "this readout is done". So it DISMISSES the readout — |
+//| the rows and the plate go, the pattern, its ladder and its zones  |
+//| stay, and no later pass brings the readout back for that base.    |
+//| A NEW pattern is a new base (`ABCD_Pattern_<tick>`) and gets its  |
+//| own caption, which is the way back.                              |
+//|                                                                  |
+//| The latch is per base, a ring of eight, and it lives beside the   |
+//| visit clock because both are the readout's own lifecycle. It is   |
+//| asked by EVERY path that could paint the family (draw, verify,    |
+//| set-visible, heal, visit-arm), so the state cannot be re-lit by a |
+//| path that forgot the question.                                    |
+//+------------------------------------------------------------------+
+#define TH3_INFO_OFF_MAX 8
+string g_th3InfoOff[TH3_INFO_OFF_MAX];
+int    g_th3InfoOffN = 0;
+
+bool TH3InfoOff(const string base)
+{
+    if(base == "") return false;
+    for(int i = 0; i < g_th3InfoOffN; i++)
+        if(g_th3InfoOff[i] == base) return true;
+    return false;
+}
+
+void TH3InfoOffAdd(const string base)
+{
+    if(base == "" || TH3InfoOff(base)) return;
+    if(g_th3InfoOffN < TH3_INFO_OFF_MAX)
+    {
+        g_th3InfoOff[g_th3InfoOffN] = base;
+        g_th3InfoOffN++;
+        return;
+    }
+    for(int i = 1; i < TH3_INFO_OFF_MAX; i++) g_th3InfoOff[i - 1] = g_th3InfoOff[i];
+    g_th3InfoOff[TH3_INFO_OFF_MAX - 1] = base;
+}
+
+// Do the family's rows still stand LIT? This is the discriminator the delete
+// handler needs, and it is a STATE question, not a clock: every path of OURS
+// masks the rows BEFORE it drops the plate (SetVisible, Verify, Draw's inactive
+// branch), and the rebuild recreates the rows it deleted — so "rows lit" is
+// never true for a drop this module made. A plate that is gone while its rows
+// are still lit was taken by a hand.
+bool TH3InfoRowsLit(const string base)
+{
+    bool any = false;
+    for(int line = 0; line < TH3_INFO_MAX_LINES; line++)
+    {
+        string nm = TH3InfoLineName(base, line);
+        if(ObjectFind(0, nm) < 0) continue;
+        if((int)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != OBJ_ALL_PERIODS) return false;
+        any = true;
+    }
+    return any;
+}
+
 // Show/hide the whole family (the active-pattern rule: at most ONE pattern's
 // caption is visible, and "one" means every line of it AND its plate).
 void TH3InfoFamilySetVisible(const string base, const bool visible)
 {
+    // P-TH3-DEL4: a readout the hand deleted is not re-lit by anyone — not the
+    // mute's show, not a pattern switch, not the 250 ms net.
+    if(TH3InfoOff(base)) { TH3InfoFamilyDelete(base); return; }
     // P-TH3-INFO-08: never show a plate with no rows — it paints as a dark
     // empty bar. Showing is display-only: deleting the orphan loses nothing a
     // redraw cannot recreate.
@@ -764,14 +880,45 @@ void TH3InfoFamilyReposition(const string base, const int topY)
 // deleting one destroys nothing a redraw cannot recreate. Rows count by
 // EXISTENCE (a hidden row still counts), exactly like the reposition guard.
 // Callers: the reposition pass (rare layout moments) and the attach restore.
-void TH3InfoOrphanPlateSweep()
+//
+// P-PERF-157 (2026-10-29) — AND THE SWEEP IS A NET, NOT A PASS. MEASURED on
+// the live MT5 chart: `overlay=` (this walk, inside RepositionAllOverlayLabels)
+// was 156 ms of a 172 ms chart-change redraw and 219 ms of a 219 ms one — on
+// a chart carrying the ~900-object level family the walk is 2 terminal calls
+// per object (ObjectsTotal + ObjectName), and MT5 answers each one through the
+// chart command queue. It ran on EVERY RedrawAllObjects frame: every tick that
+// moved a level, every pan, every 250 ms expiry pass.
+//
+// It also had nothing left to find. Every path that removes a family calls
+// TH3InfoFamilyDelete (the store's own Verify drops a plate whose rows are
+// gone, and TH3FamilyDeleteAll owns the delete cascade), so a plate can only
+// be orphaned by a PREVIOUS instance or build — which is the attach walk
+// (`force`). The pass keeps that net and adds two cheap fences:
+//   * an unchanged object TOTAL means nothing was born or died since the last
+//     walk, so no plate can have lost its rows — one terminal read, no walk;
+//   * otherwise at most one walk per TH3_ORPHAN_SWEEP_MS, so a chart that is
+//     rebuilding its levels (a total that keeps moving) cannot turn this net
+//     into a per-frame tax.
+#define TH3_ORPHAN_SWEEP_MS 10000
+void TH3InfoOrphanPlateSweep(const bool force = false)
 {
-    // MT4 parity: no total-count gate. A row can die in the same frame that
-    // another object is born, leaving the total unchanged; a gate on that
-    // number would then never see the orphan. The walk reads every object but
-    // only `ABCD_Pattern_*_InfoPlate` names are candidates, and it runs on
-    // layout/attach moments rather than every tick.
-    for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+    // MT4 parity: no total-count gate ON THE ANSWER. A row can die in the
+    // same frame that another object is born, leaving the total unchanged —
+    // that case is still covered, because the store's Verify heals every base
+    // the store knows and the attach walk covers the ones it does not. What
+    // the fences below remove is the per-frame re-answer, never an answer.
+    int total = ObjectsTotal(0, -1, -1);
+    static uint s_sweepMs = 0;
+    static int  s_sweepTotal = -1;
+    uint nowMs = GetTickCount();
+    if(!force)
+    {
+        if(total == s_sweepTotal) return;
+        if(s_sweepMs != 0 && nowMs - s_sweepMs < TH3_ORPHAN_SWEEP_MS) return;
+    }
+    s_sweepMs = nowMs;
+    s_sweepTotal = total;
+    for(int i = total - 1; i >= 0; i--)
     {
         string nm = ObjectName(0, i, -1, -1);
         if(StringFind(nm, "ABCD_Pattern_") != 0) continue;
@@ -797,6 +944,9 @@ void TH3InfoOrphanPlateSweep()
 // other orphan (the store-side twin of the chart-wide sweep).
 void TH3InfoFamilyVerify(const string base, const bool isActive)
 {
+    // P-TH3-DEL4: the dismissed readout has nothing to verify — and the heal
+    // net asks here, so this is where a resurrection would have started.
+    if(TH3InfoOff(base)) { TH3InfoFamilyDelete(base); return; }
     int rows = 0;
     for(int line = 0; line < TH3_INFO_MAX_LINES; line++)
         if(ObjectFind(0, TH3InfoLineName(base, line)) >= 0) rows++;
@@ -858,6 +1008,10 @@ bool TH3InfoVisitPending() { return (g_th3InfoVisitUntilMs != 0); }
 // is a drop.
 void TH3InfoVisitArm()
 {
+    // P-TH3-DEL4: a dismissed readout buys no visit — an armed clock would
+    // expire into a drop of whatever caption IS up, i.e. the user's delete
+    // would take a DIFFERENT pattern's readout with it one duration later.
+    if(TH3InfoOff(g_activeABCDPattern)) { g_th3InfoVisitUntilMs = 0; return; }
     int durSec = inpModeLabelDuration;
     if(durSec <= 0) { g_th3InfoVisitUntilMs = 0; return; }   // 0 = permanent
     if(durSec > 86400) durSec = 86400;
@@ -872,6 +1026,35 @@ void TH3InfoFamilyDropActive()
     string base = g_activeABCDPattern;
     if(base == "") return;
     TH3InfoFamilySetVisible(base, false);
+}
+
+// The dismissal's own verb — ONE writer of the latch, called from the terminal's
+// delete (TH3Tool's OBJECT_DELETE branch) and nowhere else. The readout goes
+// and stays gone for this base; the pattern, its ladder and its zones are not
+// touched (the caption is display, and this is the one case where the hand says
+// so explicitly).
+void TH3InfoFamilyDismiss(const string base)
+{
+    if(base == "") return;
+    TH3InfoOffAdd(base);
+    TH3InfoFamilyDelete(base);
+    g_th3InfoVisitUntilMs = 0;
+    // P-TH3-DEL4 witness: one line per dismissal, the same shape the heal net's
+    // own TH3CAP line uses, so a "it came back" report has a number to read.
+    Print("TH3CAP dismissed ", base, " st=", IntegerToString((long)TimeCurrent()));
+    ThrottledChartRedraw();
+}
+
+// The delete handler's question, answered HERE because the family, its rows and the
+// latch are this module's. A member the terminal named that is STILL GONE while its
+// rows stand LIT was taken by a hand; everything else is our own maintenance — a
+// member our rebuild already put back, a family we darkened before dropping the
+// plate, a family already wiped.
+void TH3InfoOnMemberDelete(const string objName, const string base)
+{
+    if(ObjectFind(0, objName) >= 0) return;    // our rebuild put it back
+    if(!TH3InfoRowsLit(base)) return;          // our own drop: the rows went dark first
+    TH3InfoFamilyDismiss(base);
 }
 
 //+------------------------------------------------------------------+
@@ -891,6 +1074,10 @@ void TH3InfoCaptionHeal()
     if(g_activeABCDPattern == "") return;
     if(IsIndicatorHidden()) return;   // P-UI-93: no caption heal under a hidden indicator
     string base = g_activeABCDPattern;
+    // P-TH3-DEL4: the user's own delete outranks the heal — a readout that is
+    // gone because a hand took it is not "damaged", and healing it here is
+    // exactly the 250 ms resurrection the report would see.
+    if(TH3InfoOff(base)) return;
     // P-TH3-INFO-13 (2026-09-22): the caption is a TIMED VISITOR first. The
     // user's order: «لیبل مود ها و لیبل abcd باید بعد چند ثانیه حذف بشن
     // هرچی که اطلاعاتی هستش» — every info readout leaves after a few
@@ -939,6 +1126,10 @@ void TH3InfoCaptionHeal()
 int TH3InfoFamilyDraw(const string base, const string text,
                       const bool isActive, const int topY)
 {
+    // P-TH3-DEL4: the draw is the LAST path that could re-light a dismissed
+    // readout, and it runs on every pattern pass — so it asks first, and the
+    // family leaves rather than being rebuilt with a new plate.
+    if(TH3InfoOff(base)) { TH3InfoFamilyDelete(base); return 0; }
     string lines[];
     int n = TH3InfoWrap(text, TH3_INFO_TEXT_MAX, lines);
     if(n <= 0)
@@ -1093,23 +1284,25 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     double pip0 = GetCachedPipSize();   // local: the seed/lock blocks sit above pipSize's decl
     if(pip0 <= 0) pip0 = Point;
 
-    // P-TH3-STEP-16 (2026-10-05) — THE UNIFIED EQUATION. One formula, no
-    // branches: the B-marked mother (mandatory anchor) and the ABCD leg
-    // resonate geometrically (CalculateUnifiedMasterStep, TH3Pivots_B.mqh).
-    // TH3ClosedK above stays as the lock's diagnostic reference only — the
-    // decider ladder is TH3UnifiedK inside the function.
-    double motherSize = TH3ManualBaseStep(inpTH3PivotBasePips, pip0);
+    // P-TH3-BASE-01 (2026-10-24, ported from MT4) — THE UNIFIED EQUATION, BASE
+    // AT 1:1. The trader's Base measurement enters the formula exactly as typed
+    // (CalculateUnifiedMasterStep, TH3Pivots.mqh): no division by 3, no
+    // `2.5 x rung` gate. TH3ClosedK above stays as the lock's diagnostic
+    // reference only — the decider ladder is TH3UnifiedK inside the function.
+    double baseSize = TH3ManualBaseStep(inpTH3BaseRangePips, pip0);   // pips -> price, 1:1
     double uniRatio = (closedOK ? closedRatio : 0.0);
     if(!closedOK && BC_Distance > 0 && CD_Distance > 0)
         uniRatio = CD_Distance / BC_Distance;
     double uniK = TH3UnifiedK(uniRatio);
     double baseUnit = 0;
     string seedHow = "";
-    double uniStep = CalculateUnifiedMasterStep(CD_Distance, uniRatio, motherSize, seedRung);
+    double uniStep = CalculateUnifiedMasterStep(CD_Distance, uniRatio, baseSize, seedRung);
     if(uniStep > 0) {
         baseUnit = uniStep;
-        seedHow = StringFormat("uni K=%.1f pat=%.1f mom=%.1f th=%.1f%s", uniK,
-                               CD_Distance / pip0, motherSize / pip0, seedRung / pip0,
+        seedHow = StringFormat("uni K=%.1f base=%.1f pat=%.1f th=%.1f%s", uniK,
+                               baseSize / pip0,
+                               TH3StepPatternComponent(CD_Distance, uniRatio) / pip0,
+                               seedRung / pip0,
                                (ownerTF != Period() ? " up" : ""));
     } else if(seedRung > 0) {
         baseUnit = seedRung;
@@ -1121,37 +1314,28 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     if(!atrBasis) baseUnit = (CD_Distance > 0 ? CD_Distance : AB_Distance) * (frequency / 100.0);
 
     // P-TH3-PB-MAN (2026-09-21) — PATH 1 IS HAND-TYPED, NOT DRAWN.
-    // The user types the pivot base's height in the TH3 TOOL card, in pips
-    // (`inpTH3PivotBasePips`); TH3ManualBaseStep turns it into a price and it
+    // The user types the base's height in the TH3 TOOL card, in pips
+    // (`inpTH3BaseRangePips`); TH3ManualBaseStep turns it into a price and it
     // enters TH3LockedStep as pbStep. 0 = OFF: no Path 1 at all, and the seed
-    // below (the pattern TF's own ATR) is the whole answer — which is the
-    // "default from the same timeframe's ATRs" the user asked for. The
-    // detector's own candidate (TH3NodeStepAt) no longer answers the LOCK: a
-    // hand-typed number is an instruction, a scanned one is not, and the two
-    // must never be averaged into each other. (The detector still answers the
-    // SEED above, as the synthesis' mother factor.)
-    // P-TH3-PB-RET8 (2026-09-22) — THE TYPED NUMBER IS A RETRACE: one R wears
-    // eight candidate steps (TH3RetraceBestStep, TH3Pivots.mqh). The winner is
-    // the candidate nearest the ABCD step (closedStep: pattern momentum, 60%)
-    // and the owner TF's rung (seedRung: fractal volatility, 40%) — the TF
-    // comparison rides inside those two anchors, so no new bar read is added.
-    // The ref is CLOSED step, never the synthesis: synth already blends TH and
-    // the mother, so anchoring Path 1 to it and then locking Path 1 against it
-    // is a circle that fires LOCKED by construction. ABCD-anchored Path 1 vs
-    // synthesis Path 2 lets TH3LockedStep arbitrate two INDEPENDENT answers.
-    // The caption words it as `ret <q>`.
-    double pbRaw = motherSize;  // same hand thickness the synthesis above consumes
-    double pbStep = pbRaw;
+    // below (the pattern TF's own TH rung) is the whole answer — which is the
+    // "default from the same timeframe's own ruler" the user asked for.
+    // P-TH3-BASE-01 (2026-10-24, ported from MT4) — THE TYPED NUMBER IS THE
+    // BASE, 1:1. The 8-state retrace reading (P-TH3-PB-RET8) used to REWRITE
+    // this number into a candidate step before the lock saw it. That is the
+    // same guess the /3 was, one layer over, so it no longer touches the value:
+    // the base the hand typed is the base the formula uses, and the retrace
+    // state is still measured and reported (`ret 4/3` in the log) as a READING.
+    // The ref is CLOSED step, never the synthesis: anchoring Path 1 to the
+    // synth and then locking Path 1 against it is a circle.
+    double pbRaw = baseSize;   // same hand thickness the synthesis above consumes
+    double pbStep = pbRaw;     // 1:1 — no candidate rewrite on the base input
     string retHow = "";
     if(pbRaw > 0)
     {
         double retRef = (closedOK && closedStep > 0 ? closedStep : 0.0);
         double bS = 0, bQ = 0; int bI = -1;
         if(TH3RetraceBestStep(pbRaw, retRef, seedRung, bS, bQ, bI) && bS > 0)
-        {
-            pbStep = bS;
-            retHow = StringFormat("ret %s", TH3RetraceQName(bI));
-        }
+            retHow = StringFormat("ret %s", TH3RetraceQName(bI));   // shown, never applied
     }
 
     // P-TH3-STEP-16: the lock is now a SECOND OPINION, never the decider.
@@ -1462,9 +1646,16 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
             ENUM_ANCHOR_POINT anchor = ANCHOR_CENTER;
             
             // Get candle High/Low for this point
-            int labelBarIndex = iBarShift(NULL, 0, pointTimes[i]);
-            double candleHigh = (labelBarIndex >= 0) ? iHigh(NULL, 0, labelBarIndex) : pointPrices[i];
-            double candleLow = (labelBarIndex >= 0) ? iLow(NULL, 0, labelBarIndex) : pointPrices[i];
+            //
+            // P-PERF-157c (2026-10-29) — THE SERIES IS ALREADY IN MEMORY.
+            // `iHigh(NULL,0,bar)` is one kernel round trip per call on MT5, and
+            // this block runs on EVERY pattern draw — i.e. on every frame of a
+            // point drag. The MQL4 predefined `High[]`/`Low[]` series are the
+            // same bars, already mirrored by CompatRefreshChartData on MT5 and
+            // native on MT4, so the read costs an array index on both.
+            int labelBarIndex = iBarShift(NULL, 0, pointTimes[i]);   // one kernel call, four points
+            double candleHigh = (labelBarIndex >= 0 && labelBarIndex < Bars) ? High[labelBarIndex] : pointPrices[i];
+            double candleLow  = (labelBarIndex >= 0 && labelBarIndex < Bars) ? Low [labelBarIndex] : pointPrices[i];
             
             // Position label relative to candle High/Low (not point price)
             //              High/Low     (         
@@ -1692,26 +1883,36 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     //
     // Pass 2 — find the START bar of the mother leg:
     //   From the END bar, walk further back and find the HIGHEST high
-    //   (bearish) or LOWEST low (bullish) — that is the mother start.
+    //   (bearish) or LOWEST low (bullish) — that is the base leg's start.
     //   No distance gate; just the global max/min before the end bar.
     //
-        // Size check: mother leg must be >= CD * 0.80. mlMotherSize feeds the
-        // caption's 1/3M row, so the measure stays even though its ticks are gone
-        // (P-TH3-D4h).
-    double mlMotherSize = 0;
+        // Size check: the base leg must be >= CD * 0.80. mlBaseLeg feeds the
+        // caption's `baseleg` ratio, so the measure stays even though its ticks
+        // are gone (P-TH3-D4h).
+    double mlBaseLeg = 0;
     double mlRatio      = 0;
     {
         int    barA      = iBarShift(NULL, 0, tA);
-        int    lookback  = MathMin(500, iBars(NULL, 0) - 1);
+        // P-PERF-157c (2026-10-29) — THE TWO PASSES READ THE SERIES, NOT THE
+        // TERMINAL. They scan up to 500 bars twice, i.e. up to 1000
+        // `iHigh`/`iLow` calls, and MT5 prices each of those as a kernel round
+        // trip. MEASURED on the live chart: `[mvus] total=50 ind=50 abcd=49`
+        // for ONE point-drag frame, and this block is the only per-bar work in
+        // DrawABCDPattern's path. `High[]`/`Low[]` are the same bars (native
+        // MQL4 series, mirrored by CompatRefreshChartData on MT5), so the scan
+        // costs an array index per bar on both platforms — the answer is
+        // identical, the round trips are gone.
+        int    lookback  = MathMin(500, Bars - 1);
         double atrWindow = TH3PatternStepRung();
         if(atrWindow <= 0) atrWindow = CD_Distance;
+        if(lookback < 1 || barA < 0) lookback = 0;
 
         // --- Pass 1: END bar = bar with extreme closest to pA before barA ---
         int    bestEndBar  = -1;
         double bestEndDist = 1e9;
         for(int k = barA + 1; k <= lookback; k++)
         {
-            double ext  = dirDown ? iLow(NULL, 0, k) : iHigh(NULL, 0, k);
+            double ext  = dirDown ? Low[k] : High[k];
             double dist = MathAbs(ext - pA);
             if(dist <= atrWindow && dist < bestEndDist)
             {
@@ -1727,7 +1928,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         {
             for(int k = bestEndBar + 1; k <= lookback; k++)
             {
-                double ext = dirDown ? iHigh(NULL, 0, k) : iLow(NULL, 0, k);
+                double ext = dirDown ? High[k] : Low[k];
                 if(dirDown ? (ext > bestStartVal) : (ext < bestStartVal))
                 {
                     bestStartVal = ext;
@@ -1739,14 +1940,14 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         // Size check
         if(bestEndBar >= 0 && bestStartBar >= 0)
         {
-            double endExt   = dirDown ? iLow (NULL,0,bestEndBar)
-                                      : iHigh(NULL,0,bestEndBar);
-            mlMotherSize = MathAbs(bestStartVal - endExt);
+            double endExt   = dirDown ? Low [bestEndBar]
+                                      : High[bestEndBar];
+            mlBaseLeg = MathAbs(bestStartVal - endExt);
         }
 
         // P-TH3-D4h (2026-09-21, user: «تیک های مادر»): the mother-leg ticks are
         // RETIRED — _MPTick (start) and _MPTickB (end), lime/red width-3. The
-        // measurement above STAYS (mlMotherSize feeds the caption); only the two
+        // measurement above STAYS (mlBaseLeg feeds the caption); only the two
         // objects go, swept here so an older build's ticks die on redraw. Never
         // create them again.
         // P-PERF-RET3 (2026-10-12): guarded; after one redraw these are gone on
@@ -2248,13 +2449,13 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     if(ObjectFind(0, mainObjName + "_HitLine")  >= 0) ObjectDelete(0, mainObjName + "_HitLine");
     if(ObjectFind(0, mainObjName + "_HitLabel") >= 0) ObjectDelete(0, mainObjName + "_HitLabel");
 
-    // P-TH3-P6e + P-TH3-D4 — MOTHER PIVOT AT D, ON THE CHART.
+    // P-TH3-P6e + P-TH3-D4 - BASE PIVOT AT D, ON THE CHART.
     // The matcher (TH3Pivots.mqh) answers which six-condition pivot the
-    // placed D hit (tD,pD); this is its ink — ACTIVE pattern only, one badge
+    // placed D hit (tD,pD); this is its ink - ACTIVE pattern only, one badge
     // per chart (the clean-chart rule). Two dotted bounds (extreme +
     // key line, pivot bar -> D, BACK=true so candles stay on top) plus
     // Head/Tail markers at the pivot bar (extreme + keyPrice) plus one
-    // compact badge at D: "[ H1 Mother Pivot | 8.7p | FRESH ]".
+    // compact badge at D: "[ H1 Base | 8.7p | FRESH ]".
     // D is the collision point, so wantHigh = dirDown: a bearish D is a
     // high, a bullish D a low. tol = half the live step, the same ruler
     // the tip corroboration uses. Everything wears the TH3_MP_ prefix:
@@ -2262,15 +2463,19 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // sweep it bulk, and a render with no match DELETES the five objects,
     // so no stale zone survives a drag.
     // mpState feeds the corner info label (diagnostics): the chart always
-    // says WHY no mother zone is drawn — off / none / TF+state — so a
+    // says WHY no base zone is drawn — off / none / TF+state — so a
     // missing badge is a readable verdict, never a silent mystery.
-    string mpState = "MP:none";
+    // P-TH3-BASE-01 (2026-10-24, ported from MT4): the prefix WAS `TH3_MP_`.
+    // A rename without the sweep leaves a previous build's zone painting
+    // beside this one, so the old spelling is deleted once per attach.
+    TH3LegacyMpPrefixSweep();
+    string mpState = "BASE:none";
     bool mpActive = (g_activeABCDPattern == mainObjName);
-    string mpHi = "TH3_MP_" + mainObjName + "_Hi";
-    string mpLo = "TH3_MP_" + mainObjName + "_Lo";
-    string mpHead = "TH3_MP_" + mainObjName + "_Head";
-    string mpTail = "TH3_MP_" + mainObjName + "_Tail";
-    string mpBadge = "TH3_MP_" + mainObjName + "_Badge";
+    string mpHi = "TH3_BASE_" + mainObjName + "_Hi";
+    string mpLo = "TH3_BASE_" + mainObjName + "_Lo";
+    string mpHead = "TH3_BASE_" + mainObjName + "_Head";
+    string mpTail = "TH3_BASE_" + mainObjName + "_Tail";
+    string mpBadge = "TH3_BASE_" + mainObjName + "_Badge";
     TH3PivotSix mp;
     // Pillars 1+4 (P-TH3-MP2): the mother must predate the pattern origin
     // A (P-TH3-D4: X retired), and distance is scored in closed-step units.
@@ -2279,8 +2484,8 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // tier-1 entry only; the matcher's ladder widens it to reach a far mother.
     datetime mpAnchor = tA;
     double   mpAnchorPrice = pA;
-    bool mpShow = (inpShowMotherPivotZone && mpActive && atrBasis
-                   && TH3MotherPivotAt(tD, pD, dirDown, 0.5 * baseUnit, mp,
+    bool mpShow = (inpShowNestedBaseZone && mpActive && atrBasis
+                   && TH3NestedBasePivotAt(tD, pD, dirDown, 0.5 * baseUnit, mp,
                                        mpAnchor, (closedOK ? closedStep : 0.0), true,
                                        mpAnchorPrice));
     if(mpShow) {
@@ -2373,10 +2578,10 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
         }
         double mpThickPips = (mpTop - mpBot) / pipSize;
         string mpFlip = ((mp.isHigh != dirDown) ? " | FLIP" : "");
-        string mpText = StringFormat("[ %s Mother Pivot | %.1fp | %s%s ]",
+        string mpText = StringFormat("[ %s Base | %.1fp | %s%s ]",
                                      TH3TfName(mp.tf), mpThickPips,
                                      (mp.mitigated ? "MITIGATED" : "FRESH"), mpFlip);
-        mpState = StringFormat("MP:%s %s%s", TH3TfName(mp.tf),
+        mpState = StringFormat("BASE:%s %s%s", TH3TfName(mp.tf),
                                (mp.mitigated ? "MIT" : "FRESH"), mpFlip);
         double mpMid = (mpTop + mpBot) / 2.0;
         // P-UI-97: the badge's ink is resolved where it is computed and then worn,
@@ -2406,12 +2611,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                 ObjectSetString(0, mpBadge, OBJPROP_TEXT, mpText);
         }
     } else {
-        if(!inpShowMotherPivotZone) mpState = "MP:off";
-        else if(!mpActive) mpState = "MP:idle";
+        if(!inpShowNestedBaseZone) mpState = "BASE:off";
+        else if(!mpActive) mpState = "BASE:idle";
         // P-TH3-D4b: a miss on the ACTIVE pattern is logged with its own
         // inputs, so the log says whether D found no pivot or was never
         // allowed to look (off/idle/no-step). Rare path (one draw), not per tick.
-        if(inpShowMotherPivotZone && mpActive && atrBasis)
+        if(inpShowNestedBaseZone && mpActive && atrBasis)
         {
             Print("TH3: no mother at D ", TimeToString(tD), " @ ",
                   DoubleToString(pD, Digits), " dirDown=", (dirDown ? "1" : "0"),
@@ -2480,12 +2685,12 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     // ruler = the pattern's own span |D-A| (a base farther than the pattern
     // is long is another pattern's base). ONE dotted BACK line, origin bar
     // -> D at the origin price, plus an ORG token in the info state —
-    // no second badge (the clean-chart rule). Same TH3_MP_ prefix, same
+    // no second badge (the clean-chart rule). Same TH3_BASE_ prefix, same
     // delete discipline as the Tier-1 set above.
-    string mpOrg = "TH3_MP_" + mainObjName + "_Org";
+    string mpOrg = "TH3_BASE_" + mainObjName + "_Org";
     TH3PivotSix org;
     double orgSpan = MathAbs(pD - pA);   // P-TH3-D4: span measured to the placed D
-    bool orgShow = (inpShowMotherPivotZone && mpActive && atrBasis && orgSpan > 0
+    bool orgShow = (inpShowNestedBaseZone && mpActive && atrBasis && orgSpan > 0
                     && TH3OriginPivotAt(tD, pD, dirDown, orgSpan, mpAnchor, org));
     if(orgShow) {
 #ifdef BIOTAK_RENDER_ENGINE
@@ -2593,17 +2798,21 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
                                       uniRatio,
                                       uniK,
                                       (uniRatio > 0 ? CalculateFibonacciDeviation(uniRatio) : 0.0));
-    string rowMother = "Mother: none";
-    if(pbRaw > 0)
-        rowMother = StringFormat("Mother hand %.1fp", pbRaw / pipSize);
-    string rowCalc  = StringFormat("pattern %.1fp rung %.1fp uni %.1fp",
-                                   (CD_Distance / uniK) / pipSize,
+    string rowBase;
+    if(baseSize > 0)
+        rowBase = StringFormat("Base %.1fp | Pattern %.1fp | Step %.1fp",
+                               baseSize / pipSize,
+                               TH3StepPatternComponent(CD_Distance, uniRatio) / pipSize,
+                               stepPips);
+    else
+        rowBase = StringFormat("Base auto (TH) | Pattern %.1fp | Step %.1fp",
+                               TH3StepPatternComponent(CD_Distance, uniRatio) / pipSize,
+                               stepPips);
+    string rowCalc  = StringFormat("rung %.1fp | closed %.1fp",
                                    seedRung / pipSize,
-                                   baseUnit / pipSize);
-    string rowLock  = StringFormat("base %.1fp %s final %.1fp %s",
-                                   pbStep / pipSize,
+                                   (closedOK ? closedStep / pipSize : 0.0));
+    string rowLock  = StringFormat("lock %s | %s",
                                    (stepLocked ? "LOCKED" : "UNLOCKED"),
-                                   stepPips,
                                    (hitOK ? "proved" : "seed"));
     string rowLadder = StringFormat("Targets T1 %s T3 %s T5 %s T7 %s",
                                     DoubleToString(targetLevels[0], Digits),
@@ -2617,9 +2826,9 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     string rowLive;
     if(atrBasis) {
         rowLive = StringFormat("Step %.1fp", stepPips);
-        if(mlMotherSize > 0) {
-            mlRatio = baseUnit / mlMotherSize;
-            rowLive += StringFormat(" | momleg %.2f", mlRatio);
+        if(mlBaseLeg > 0) {
+            mlRatio = baseUnit / mlBaseLeg;
+            rowLive += StringFormat(" | baseleg %.2f", mlRatio);
         }
     } else {
         rowLive = StringFormat("Step %.1f%% | freq", frequency);
@@ -2637,7 +2846,7 @@ void DrawABCDPattern(string mainObjName, datetime tA, double pA, datetime tB, do
     int rowY    = inpABCDInfoYDistance;
     int infoLines = TH3InfoFamilyDraw(mainObjName,
                                        rowIdentity + "\n" + rowLegs + "\n" + rowPrices + "\n" +
-                                       rowHarmonic + "\n" + rowMother + "\n" + rowCalc + "\n" +
+                                       rowHarmonic + "\n" + rowBase + "\n" + rowCalc + "\n" +
                                        rowLock + "\n" + rowLadder + "\n" + rowMid + "\n" + rowLive,
                                        isActive, rowY);
     // P-TH3-INFO-13: a redraw that TOUCHED the active family re-arms its

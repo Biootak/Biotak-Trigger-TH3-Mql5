@@ -111,6 +111,30 @@ bool RBridgeActive() { return g_rbrArmed; }
 bool RBridgeZonesStale() { return g_rbrZonesStale; }
 void RBridgeZonesMarkStale() { g_rbrZonesStale=true; }   // the OFF render skipped the staging
 
+// P-PERF-158 (2026-10-29) — THE STAGING STORE GROWS IN BLOCKS, NOT ONE REC AT A
+// TIME.
+//
+// Every `RBridge*Add` below appends with a bare `ArrayResize(x, n+1)`, and each
+// of those recs holds MQL strings (`RLine.name`, `RText.name/text/font`,
+// `RZoneRec.name`, ...). A plain `ArrayResize` to n+1 reallocates the block and
+// copies EVERY rec it already holds, and MQL's copy of a string field is a
+// StringAddRef/Release pair — so one rebuild pass that stages N rungs pays N
+// allocations and N*(N-1)/2 rec copies (a 144-rung ladder: 144 allocations,
+// ~10 300 rec copies, most of them carrying string handles). The ladder is
+// re-staged on every wipe/rebuild — attach, timeframe switch, topology change,
+// the `levels WIPE` the ledger already names — and the pattern family is
+// re-staged per drag event, so this is the allocator (and the string refcount)
+// churn of the picture, not a startup edge.
+//
+// The third argument of ArrayResize is the reserve: the call then guarantees
+// memory for new_size + reserve elements, so growth inside that window is an
+// ArraySize bump with NO reallocation and NO copy. 64 covers the steady ladder
+// (one block per rebuild) and the zone ladder is the same order. Semantics are
+// untouched: ArraySize() still returns n+1, the `!=n+1` failure tests still
+// read the size, and the commit's shrink-to-exact below still trims what a pass
+// did not produce.
+#define RBR_STAGE_RESERVE 64
+
 bool RBrNameIn3(const string nm)
 {
    for(int i=0;i<3;i++) if(g_rbrPin[i]!="" && g_rbrPin[i]==nm) return true;
@@ -219,7 +243,7 @@ void RBridgeLevelLine(const string name,const double price,const color clr,const
       g_rbrLines[hit].seen=true;
       return;
    }
-   if(ArrayResize(g_rbrLines,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrLines,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrLines[n].name=name;   g_rbrLines[n].price=price;
    g_rbrLines[n].argb=argb;   g_rbrLines[n].style=style;
    g_rbrLines[n].width=width; g_rbrLines[n].seen=true;
@@ -251,7 +275,7 @@ void RBridgeLevelLabel(const string name,const double price,const string text,
       g_rbrTexts[hit].seen=true;
       return;
    }
-   if(ArrayResize(g_rbrTexts,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrTexts,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrTexts[n].name=name;   g_rbrTexts[n].price=price;
    g_rbrTexts[n].text=text;   g_rbrTexts[n].argb=argb;
    g_rbrTexts[n].size=fontSize; g_rbrTexts[n].font=fontName;
@@ -339,7 +363,7 @@ void RBridgeZone(const string name,const double top,const double bottom,const co
       g_rbrZones[hit].seen=true;
       return;
    }
-   if(ArrayResize(g_rbrZones,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrZones,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrZones[n].name=name;
    g_rbrZones[n].step=StructureZoneStepFromName(name);
    g_rbrZones[n].top=top; g_rbrZones[n].bottom=bottom;
@@ -585,7 +609,7 @@ void RBridgePatternSeg(const string name,const long t1,const double p1,const lon
          g_rbrPatSegs[i].seen=true;
          return;
       }
-   if(ArrayResize(g_rbrPatSegs,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrPatSegs,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrPatSegs[n].name=name;
    g_rbrPatSegs[n].t1=t1; g_rbrPatSegs[n].p1=p1;
    g_rbrPatSegs[n].t2=t2; g_rbrPatSegs[n].p2=p2;
@@ -618,7 +642,7 @@ void RBridgePatternBand(const string name,const long t0,const long t1,
          g_rbrPatBands[i].seen=true;
          return;
       }
-   if(ArrayResize(g_rbrPatBands,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrPatBands,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrPatBands[n].name=name;
    g_rbrPatBands[n].t0=t0; g_rbrPatBands[n].t1=t1;
    g_rbrPatBands[n].p0=p0; g_rbrPatBands[n].p1=p1;
@@ -646,7 +670,7 @@ void RBridgePatternDot(const string name,const long t,const double price,
          g_rbrPatDots[i].seen=true;
          return;
       }
-   if(ArrayResize(g_rbrPatDots,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrPatDots,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrPatDots[n].name=name;
    g_rbrPatDots[n].t=t; g_rbrPatDots[n].price=price;
    g_rbrPatDots[n].radius=radius; g_rbrPatDots[n].argb=argb;
@@ -677,7 +701,7 @@ void RBridgePatternText(const string name,const long t,const double price,const 
          g_rbrPatTexts[i].seen=true;
          return;
       }
-   if(ArrayResize(g_rbrPatTexts,n+1)!=n+1) return;
+   if(ArrayResize(g_rbrPatTexts,n+1,RBR_STAGE_RESERVE)!=n+1) return;
    g_rbrPatTexts[n].name=name;
    g_rbrPatTexts[n].t=t; g_rbrPatTexts[n].price=price;
    g_rbrPatTexts[n].text=text; g_rbrPatTexts[n].argb=argb;

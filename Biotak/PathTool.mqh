@@ -107,6 +107,7 @@ static string s_pathIds[];                 // registry of committed path ids
 static string s_pathSel      = "";        // the SELECTED path (the dot's owner)
 static string s_pathClick     = "";        // P-UI-146: nothing arms a delete on the chart any more
 static uint   s_pathEndMs     = 0;         // the last carry that MOVED (its trailing click reads it)
+static string s_pathEndId     = "";        // ...and WHICH path that carry moved (read-only peek)
 static datetime s_pathAnchorT = 0;         // last committed vertex (session live)
 static double s_pathAnchorP   = 0.0;
 static int    s_pathSegCount  = 0;         // committed segments of the live session
@@ -1597,10 +1598,43 @@ void PathDragEnd()
    //--- FOREIGN drag. One whole row per gesture, never per frame.
    PathHandleFollow(s_pathDrag);
    PathWitness("drag end id=" + s_pathDrag + " moved=" + (s_pathMoved ? "yes" : "no"));
-   if(s_pathMoved) s_pathEndMs = GetTickCount();
+   if(s_pathMoved) { s_pathEndMs = GetTickCount(); s_pathEndId = s_pathDrag; }
    s_pathPrimed = false;
    PathDragRelease();
    ChartRedraw();
+}
+//--- P-PATH-END d (2026-10-29, user: «ابزار path درگش و جابجایی نقاطش سنگین هستش»):
+//--- THE RELEASE THAT ENDS A CARRY IS NOT A CLICK.
+//
+// `s_pathEndMs` has been written by PathDragEnd since P-UI-146 and read by NOBODY:
+// the intent («its trailing click reads it») was in the file, the reader was not. So
+// the button-up that ends a MOVED carry fell through BOTH click doors as if it were
+// a fresh tap —
+//   · the path's own branch repeated PathSelect + PathHandleFollow, re-seating a
+//     whole dot row for a path the press had already selected (one round of
+//     ObjectMove per handle per release), and
+//   · the strip's toggle found a committed path SEGMENT (PathIsSessionName answers
+//     false for a registered id), opened its plate and paid the measured
+//     156/526/541 ms under a hand that was only letting go.
+// Both are the same question, so it is asked once, here: "did a carry of THIS path
+// MOVE and end inside the terminal's own 400 ms double-click window?" A still press
+// that ends a carry stamps nothing (PathDragEnd writes only when s_pathMoved), so a
+// genuine select-then-act tap is untouched.
+//
+// READ-ONLY, NEVER CONSUMED: MT5 reports one button-up twice (OBJECT_CLICK, then
+// CHART_CLICK - P-MT5-TWIN), and a consumed stamp would let the second door open the
+// plate the first one refused. The deadline itself is the expirer.
+bool PathCarryJustEndedId(const string id)
+{
+   if(id == "" || s_pathEndId == "" || s_pathEndMs == 0) return false;
+   if(GetTickCount() - s_pathEndMs > PATH_DBL_MS) return false;   // uint: wrap-safe
+   return (id == s_pathEndId);
+}
+bool PathCarryJustEnded(const string nm)
+{
+   string id = "";
+   if(!PathIdOfName(nm, id)) return false;
+   return PathCarryJustEndedId(id);
 }
 bool PathOnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
@@ -1931,6 +1965,12 @@ if(pressed && pfx != "")
       string did = ""; int hk = -1;
       if(pfx != "" && PathDotHit((int)lparam, (int)dparam, did, hk))
       {
+         //--- P-PATH-END d (2026-10-29): THE RELEASE THAT ENDED A MOVED CARRY OF THIS
+         //--- PATH IS SPENT. The press already selected it, and the row the carry left
+         //--- behind is pixel-true (PathDragEnd re-seats it). Repeating the select and
+         //--- the follow here was one whole dot row of ObjectMove/read per release,
+         //--- under a hand that was only letting go.
+         if(PathCarryJustEndedId(did)) { s_pathClick = ""; return true; }
          //--- P-UI-142: a release that trails the terminal's own motion selects and
          //--- arms NOTHING — the hand was busy drawing something else, and a witness
          //--- armed here is the second half of a delete the user never asked for.
@@ -1957,6 +1997,9 @@ if(pressed && pfx != "")
       string pid = "";
       if(pfx != "" && PathPressHit((int)lparam, (int)dparam, pid))
       {
+         //--- P-PATH-END d: the segment release that ended this path's own carry owes
+         //--- nothing either — it is the same hand, one event later.
+         if(PathCarryJustEndedId(pid)) { s_pathClick = ""; return true; }
          // P-UI-138: locked = no handles, no witness, nothing to arm. A still press on
          // a locked path is a no-op that the strip's own hold still owns (the hold is
          // polled from the cursor, not from this event).

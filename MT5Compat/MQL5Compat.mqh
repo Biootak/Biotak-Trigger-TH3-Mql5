@@ -34,6 +34,14 @@ struct CompatLedger {
    long periodCalls;                 // Period()
    long marketInfoCalls;             // MarketInfo()
    long bidAskCalls;                 // Bid / Ask
+   // P-PERF-156: the OBJECT side - what the memo answered, what still crossed
+   // into the terminal, and what the crossings cost. `omSyncUs` is the honest
+   // number: microseconds spent inside synchronous (queue-draining) calls.
+   long omFindHit, omFindLive;       // ObjectFind from memory / from the chart
+   long omGetHit, omGetLive;         // property reads, same split
+   long omSetSkip, omSetWrite;       // enqueues the memo removed / it made
+   long omRebirth, omTouch, omFlush; // identity changes, user touches, sweeps
+   long omSyncUs;                    // us paid to the terminal's sync calls
 };
 static CompatLedger g_cl;
 
@@ -63,15 +71,43 @@ void CompatLedgerReport(const string tag)
          " | iBarShift=", CL("b", g_cl.barShiftCalls, g_cl.barShiftMs),
          " | Period()=", IntegerToString(g_cl.periodCalls),
          " MarketInfo=", IntegerToString(g_cl.marketInfoCalls),
-         " Bid/Ask=", IntegerToString(g_cl.bidAskCalls));
+         " Bid/Ask=", IntegerToString(g_cl.bidAskCalls),
+         " | obj find memo/live=", IntegerToString(g_cl.omFindHit), "/",
+         IntegerToString(g_cl.omFindLive),
+         " get memo/live=", IntegerToString(g_cl.omGetHit), "/",
+         IntegerToString(g_cl.omGetLive),
+         " set skip/write=", IntegerToString(g_cl.omSetSkip), "/",
+         IntegerToString(g_cl.omSetWrite),
+         " sync=", IntegerToString(g_cl.omSyncUs), "us",
+         " birth=", IntegerToString(g_cl.omRebirth),
+         " touch=", IntegerToString(g_cl.omTouch),
+         " flush=", IntegerToString(g_cl.omFlush));
    g_cl.refreshCalls = 0; g_cl.refreshMs = 0;
    g_cl.seriesFull = 0; g_cl.seriesShift = 0; g_cl.seriesBars = 0;
    g_cl.atrCalls = 0; g_cl.atrMs = 0; g_cl.atrFallback = 0;
    g_cl.atrMemoHit = 0; g_cl.atrMemoMiss = 0;
    g_cl.barShiftCalls = 0; g_cl.barShiftMs = 0;
    g_cl.periodCalls = 0; g_cl.marketInfoCalls = 0; g_cl.bidAskCalls = 0;
+   g_cl.omFindHit = 0; g_cl.omFindLive = 0; g_cl.omGetHit = 0; g_cl.omGetLive = 0;
+   g_cl.omSetSkip = 0; g_cl.omSetWrite = 0;
+   g_cl.omRebirth = 0; g_cl.omTouch = 0; g_cl.omFlush = 0; g_cl.omSyncUs = 0;
 #endif
 }
+
+//--- P-PERF-59 (2026-10-23) — THE LEDGERS GET A CLOCK THAT CAN SEE.
+//
+// Every `[W][PERF]` number in this product is a GetTickCount() delta, and
+// GetTickCount() steps in the Windows tick — 15.625 ms here. That is why the
+// day's log carries the same eight values over and over (47, 63, 78, 94, 109,
+// 125, 141, 156 — n x 15.6) and why the owner of a mouse-move stall could not
+// be named: every phase under one tick reads 0 ms, so a 30 ms move can report
+// "ring=0 panel=0 hold=0". EventHandlers:7191 says exactly this and points at
+// the next step — "anything finer needs GetMicrosecondCount(), which is
+// MT5-only". This file is the only MT5-only source in the tree, so the clock
+// lives here and the shared modules keep their GetTickCount arithmetic.
+//
+// One call, no allocation: the value is a plain read of the platform counter.
+uint CompatUsNow() { return (uint)GetMicrosecondCount(); }
 
 // Bid / Ask were plain macro expansions of SymbolInfoDouble. They are now
 // counting functions so the ledger can see them; the VALUE is identical.
@@ -921,7 +957,46 @@ void CompatRefreshChartData(const int knownBars   = -1,
         const uint nowMs = GetTickCount();
         const bool due = (s_lastFullSyncMs == 0) ||
                          ((nowMs - s_lastFullSyncMs) >= (uint)COMPAT_FULL_SYNC_MIN_MS);
-        if(due)
+        // P-MT5-SERIES-01 (MT5-PAR-013/014, 2026-10-28) — A COUNT THAT WENT UP
+        // BY ONE IS NOT YET A NEW BAR. `bars == g_seriesSyncedAt + 1` has TWO
+        // causes on MT5: the terminal opened a bar at the newest end (the shift
+        // below is right), and a history download appended ONE bar at the OLDEST
+        // end (the shift is wrong: every slot moves one bar too new and the
+        // current bar lands at index 0 AND 1). MT4 cannot make that distinction
+        // because the terminal owns its arrays; `tools/research/series_sync_parity.py`
+        // replays both causes and shows the shipped branch corrupting the whole
+        // series on the second one, permanently — the state machine only re-syncs
+        // on the NEXT count change. So the shift now asks the question the count
+        // cannot answer: did the newest bar's TIME move?
+        const bool grewByOne = (g_seriesBars > 0 && g_seriesBars == g_seriesSyncedAt &&
+                                bars == g_seriesSyncedAt + 1);
+        // The one kernel read pays for itself only in the branch that needs it:
+        // OnCalculate hands the newest bar's time over for free (livTime), and
+        // OnInit/OnTimer are the only callers that must ask the terminal.
+        const datetime newTime = grewByOne ? ((livTime > 0) ? livTime
+                                                            : iTime(_Symbol, PERIOD_CURRENT, 0))
+                                           : (datetime)0;
+        const bool newBar = (grewByOne && newTime > g_seriesTime[0]);
+        // P-MT5-SERIES-01b — THE THROTTLE NOW GATES THE COPY ONLY. The shift is
+        // O(bars) scalar moves and ZERO kernel crossings; the 500 ms floor exists
+        // to stop a download turning every tick into a full-history CopyRates.
+        // Gating the shift with it cost something else: when it held, the code
+        // fell through and wrote the LIVE high/low/close into index 0 while that
+        // slot still carried the PREVIOUS bar's Time and Open — one torn bar, and
+        // the first frame of a new bar painted from two bars at once.
+        //
+        // WHICH EVENTS COULD HIT IT (checked, not assumed). The stamp only exists
+        // after a successful full copy, so the window opens on the event that
+        // caused that copy: an attach, a history append, a count jump. An
+        // ORDINARY timeframe switch is NOT one of them — the terminal
+        // deinitialises the indicator on REASON_CHARTCHANGE (P-PERF-95 in
+        // EventHandlers.mqh:1204-1216 says exactly this of the other static in
+        // that file), and a fresh instance re-initialises this static to 0, so
+        // the first frame after a switch is always `due`. What survives is the
+        // rarer pair the review left standing: the timeframe LOCK toggle, which
+        // moves Period() without a reload, and any count-change copy that lands
+        // within 500 ms before a bar opens.
+        if(newBar || due)
         {
             // R-TF-UNIT: stamp AFTER a successful copy, not before.
             // Stamping before meant: if CopyRates fails (history still
@@ -953,9 +1028,10 @@ void CompatRefreshChartData(const int knownBars   = -1,
             // than exactly +1 is a timeframe switch or a history download, not
             // a new bar, and falls through to the full copy; so does a history
             // shorter than iBars reported (g_seriesBars then lags the stamp),
-            // and a first sync.
-            if(g_seriesBars > 0 && g_seriesBars == g_seriesSyncedAt &&
-               bars == g_seriesSyncedAt + 1)
+            // and a first sync. P-MT5-SERIES-01 adds the fourth: a +1 whose
+            // NEWEST bar did not move is a download that reached the oldest end,
+            // and the shift would move every slot one bar too new — full copy.
+            if(newBar)
             {
                 const int n = g_seriesBars;
                 ArrayResize(g_seriesTime,  n + 1);
@@ -973,14 +1049,16 @@ void CompatRefreshChartData(const int knownBars   = -1,
                 }
                 g_seriesBars     = n + 1;
                 g_seriesSyncedAt = bars;
-                s_lastFullSyncMs  = nowMs;
+                // P-MT5-SERIES-01b: no stamp here. The 500 ms floor throttles the
+                // full-history COPY (the expensive call it exists to protect);
+                // stamping on the shift made a download that landed just after a
+                // new bar wait out a window it had not earned.
                 // MT5-ONLY FIX (2026-10-13): the shifted-in new bar's Time and
                 // Open. The foot block below only refreshes High/Low/Close, so
                 // without these two lines index 0 (and, from the NEXT shift on,
                 // index 1 too) kept the previous bar's time and open - a silent
                 // off-by-one the whole history accumulated bar by bar.
-                g_seriesTime[0] = (livTime > 0) ? livTime
-                                                 : iTime(_Symbol, PERIOD_CURRENT, 0);
+                g_seriesTime[0] = newTime;
                 g_seriesOpen[0] = (livOpen != EMPTY_VALUE) ? livOpen
                                                            : iOpen(_Symbol, PERIOD_CURRENT, 0);
 #ifdef COMPAT_LEDGER
@@ -1051,7 +1129,19 @@ void CompatRefreshChartData(const int knownBars   = -1,
     // P-MT5-PERF: when called from OnCalculate the live values arrive as
     // parameters (already in MQL5 memory — zero extra kernel crossings).
     // Unknown callers (OnTimer, OnInit) still fall back to the scalar reads.
-    if(g_seriesBars > 0)
+    //
+    // P-MT5-SERIES-01b: `bars == g_seriesSyncedAt` — the arrays must be aligned
+    // with the count the caller just reported. When a count change was NOT
+    // applied (throttled, or a copy that failed), index 0 still belongs to the
+    // PREVIOUS bar, and writing this tick's high/low/close into it made one slot
+    // speak two bars: Time[0]/Open[0] from the old one, High/Low/Close from the
+    // new one. ZoneFactory reads Time[0] for the zone end edge and the shared
+    // code reads Close[0] for currentPrice, so the first frame of that bar was
+    // built from a pair that never existed. Holding the last consistent snapshot
+    // for the rest of the window is MT4-inconsistent by a few hundred ms and
+    // self-heals; tearing index 0 was inconsistent forever as far as that frame
+    // is concerned, and silent.
+    if(g_seriesBars > 0 && bars == g_seriesSyncedAt)
     {
         if(livClose != EMPTY_VALUE && livHigh != EMPTY_VALUE && livLow != EMPTY_VALUE)
         {
@@ -1082,6 +1172,25 @@ void CompatRefreshChartData(const int knownBars   = -1,
 // NOTE: the MT5-only redundant-property-write filter was REMOVED (2026-10-03,
 // "exactly like MT4 - nothing more"). Every ObjectSet* call below now reaches
 // the terminal like it does on MT4.
+//
+// P-PERF-156 (2026-10-28) REPLACES THAT DECISION WITH THE DOCUMENTED ONE. The
+// official reference says the two halves of this API are not the same kind of
+// call at all: ObjectSet* / ObjectCreate / ObjectMove are ASYNCHRONOUS - they
+// only enqueue a command on the chart - while every function that REQUESTS a
+// property (ObjectGet*, ObjectFind, ObjectName, ObjectsTotal, ObjectsDeleteAll)
+// "uses a synchronous call, which means that the function waits for the
+// execution of all commands that have been enqueued for this chart prior to its
+// call, that is why this function can be time consuming", and the docs add that
+// this must be considered "when working with a large number of objects on a
+// chart". So the 2026-10-03 removal cut the wrong side: it guaranteed a deeper
+// queue for every guard read to drain. The product is written in the guard
+// pattern - `if(ObjectGet… != v) ObjectSet…` - hundreds of times a frame, which
+// is the lag the delete-sweeping of the previous round could not reach, and
+// what the memo below now removes: a program-owned property answer comes from
+// memory after its first touch, and a value the terminal already holds is never
+// enqueued again. Read MT5ObjMemo.mqh for the allowlist and the invalidation
+// argument. MT4 never includes this folder, so its traffic stays exactly MT4's.
+#include "MT5ObjMemo.mqh"
 
 #ifndef OBJPROP_TIME1
 #define OBJPROP_TIME1  ((ENUM_OBJECT_PROPERTY_INTEGER)2010)
@@ -1122,12 +1231,20 @@ bool ObjectSetDoubleCompat(const long chart_id, const string name, const ENUM_OB
 {
     if(prop == OBJPROP_PRICE1) return ObjectSetDoubleRealMod(chart_id, name, OBJPROP_PRICE, 0, value);
     if(prop == OBJPROP_PRICE2) return ObjectSetDoubleRealMod(chart_id, name, OBJPROP_PRICE, 1, value);
-    return ObjectSetDoubleReal(chart_id, name, prop, value);
+    // P-PERF-156: the terminal already holds this value - do not enqueue a
+    // second command for it. Allowlisted properties only (MT5ObjMemo.mqh).
+    if(OmSkipDbl(chart_id, name, (int)prop, 0, value)) return true;
+    const bool ok = ObjectSetDoubleReal(chart_id, name, prop, value);
+    if(ok) OmNoteDbl(chart_id, name, (int)prop, 0, value);
+    return ok;
 }
 
 bool ObjectSetDoubleCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier, const double value)
 {
-    return ObjectSetDoubleRealMod(chart_id, name, prop, modifier, value);
+    if(OmSkipDbl(chart_id, name, (int)prop, modifier, value)) return true;
+    const bool ok = ObjectSetDoubleRealMod(chart_id, name, prop, modifier, value);
+    if(ok) OmNoteDbl(chart_id, name, (int)prop, modifier, value);
+    return ok;
 }
 
 double ObjectGetDoubleReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier)
@@ -1139,9 +1256,19 @@ double ObjectGetDoubleReal(const long chart_id, const string name, const ENUM_OB
 
 double ObjectGetDoubleCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_DOUBLE prop, const int modifier = 0)
 {
-    if(prop == OBJPROP_PRICE1) return ObjectGetDoubleReal(chart_id, name, OBJPROP_PRICE, 0);
-    if(prop == OBJPROP_PRICE2) return ObjectGetDoubleReal(chart_id, name, OBJPROP_PRICE, 1);
-    return ObjectGetDoubleReal(chart_id, name, prop, modifier);
+    // P-PERF-156: an allowlisted read is answered from memory - the whole
+    // point, because a property request is the SYNCHRONOUS half of this API
+    // and every one of them drains the chart queue the pass just filled.
+    double memo;
+    if(OmKnownDbl(chart_id, name, (int)prop, modifier, memo)) return memo;
+    const uint _t = OmMark();
+    double v;
+    if(prop == OBJPROP_PRICE1) v = ObjectGetDoubleReal(chart_id, name, OBJPROP_PRICE, 0);
+    else if(prop == OBJPROP_PRICE2) v = ObjectGetDoubleReal(chart_id, name, OBJPROP_PRICE, 1);
+    else v = ObjectGetDoubleReal(chart_id, name, prop, modifier);
+    OmSpend(_t, 0);
+    OmLearnDbl(chart_id, name, (int)prop, modifier, v);
+    return v;
 }
 
 //+------------------------------------------------------------------+
@@ -1180,12 +1307,27 @@ long ObjectGetIntegerRealT(const long chart_id, const string name, const ENUM_OB
 
 long ObjectGetIntegerCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier = 0)
 {
-    return ObjectGetIntegerRealT(chart_id, name, prop, modifier);
+    // P-PERF-156: the guard read this product lives on, answered from memory
+    // once the terminal has been asked for it - see MT5ObjMemo.mqh for what is
+    // allowed to be remembered (STATE, SELECTED, TIME*, PRICE* never are).
+    long memo;
+    if(OmKnownInt(chart_id, name, (int)prop, modifier, memo)) return memo;
+    const uint _t = OmMark();
+    const long v = ObjectGetIntegerRealT(chart_id, name, prop, modifier);
+    OmSpend(_t, 0);
+    OmLearnInt(chart_id, name, (int)prop, modifier, v);
+    return v;
 }
 
 long ObjectGetIntegerCompat(const long chart_id, const string name, const int prop, const int modifier = 0)
 {
-    return ObjectGetIntegerRealT(chart_id, name, (ENUM_OBJECT_PROPERTY_INTEGER)prop, modifier);
+    long memo;
+    if(OmKnownInt(chart_id, name, prop, modifier, memo)) return memo;
+    const uint _t = OmMark();
+    const long v = ObjectGetIntegerRealT(chart_id, name, (ENUM_OBJECT_PROPERTY_INTEGER)prop, modifier);
+    OmSpend(_t, 0);
+    OmLearnInt(chart_id, name, prop, modifier, v);
+    return v;
 }
 
 string ObjectGetStringReal(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_STRING prop, const int modifier)
@@ -1272,12 +1414,22 @@ bool ObjectSetIntegerCompat(const long chart_id, const string name, const ENUM_O
 {
     if(prop == OBJPROP_TIME1) return ObjectSetIntegerRealMod(chart_id, name, OBJPROP_TIME, 0, value);
     if(prop == OBJPROP_TIME2) return ObjectSetIntegerRealMod(chart_id, name, OBJPROP_TIME, 1, value);
-    return ObjectSetIntegerReal(chart_id, name, prop, value);
+    // P-PERF-156: an unchanged value is not a command. Writes are the cheap
+    // half of this API (asynchronous enqueues) but every one of them is work
+    // the NEXT synchronous call has to execute - so skipping them makes both
+    // halves faster. Allowlist only.
+    if(OmSkipInt(chart_id, name, (int)prop, 0, value)) return true;
+    const bool ok = ObjectSetIntegerReal(chart_id, name, prop, value);
+    if(ok) OmNoteInt(chart_id, name, (int)prop, 0, value);
+    return ok;
 }
 
 bool ObjectSetIntegerCompat(const long chart_id, const string name, const ENUM_OBJECT_PROPERTY_INTEGER prop, const int modifier, const long value)
 {
-    return ObjectSetIntegerRealMod(chart_id, name, prop, modifier, value);
+    if(OmSkipInt(chart_id, name, (int)prop, modifier, value)) return true;
+    const bool ok = ObjectSetIntegerRealMod(chart_id, name, prop, modifier, value);
+    if(ok) OmNoteInt(chart_id, name, (int)prop, modifier, value);
+    return ok;
 }
 
 // MT5-ONLY: the MQL4 int property-id form (see the note above the
@@ -1388,12 +1540,24 @@ int ObjectFindReal(const long chart_id, const string name)
 
 int ObjectFindCompat(const string name)
 {
-    return ObjectFindReal(0, name);
+    return ObjectFindCompat(0, name);
 }
 
 int ObjectFindCompat(const long chart_id, const string name)
 {
-    return ObjectFindReal(chart_id, name);
+    // P-PERF-156: the existence gate in front of nearly every path. MQL5 makes
+    // it a synchronous call and prices it BY THE NUMBER OF OBJECTS ON THE
+    // CHART; MT4 answers it from its own list. After one look the memo owns the
+    // answer for this name, and loses it the moment the name's identity
+    // changes - our create/delete, a sweep, or the terminal's own
+    // OBJECT_CREATE/OBJECT_DELETE event for a name the user touched.
+    int memoWin;
+    if(OmKnownFind(chart_id, name, memoWin)) return memoWin;
+    const uint _t = OmMark();
+    const int r = ObjectFindReal(chart_id, name);
+    OmSpend(_t, 1);
+    OmLearnFind(chart_id, name, r);
+    return r;
 }
 
 //+------------------------------------------------------------------+
@@ -1592,14 +1756,19 @@ bool CompatConsumeObjEvent(const int id, const string nm)
 {
    if(nm == "") return false;
    const uint now = GetTickCount();
+   bool ours = false;
    if(id == CHARTEVENT_OBJECT_CREATE)
-      return g_objTokInit && CompatTokenRead(g_objTokCreate, nm, now);
-   if(id == CHARTEVENT_OBJECT_DELETE)
-   {
-      if(g_objTokInit && CompatTokenRead(g_objTokDelete, nm, now)) return true;
-      return CompatDeleteMatchesPrefix(nm, now);
-   }
-   return false;
+      ours = (g_objTokInit && CompatTokenRead(g_objTokCreate, nm, now));
+   else if(id == CHARTEVENT_OBJECT_DELETE)
+      ours = (g_objTokInit && CompatTokenRead(g_objTokDelete, nm, now)) ||
+             CompatDeleteMatchesPrefix(nm, now);
+   // P-PERF-156: the memo's event seam rides the SAME line the entries already
+   // call for every event, so no new subscription and no shared line moves. A
+   // create/delete the wrapper tokenised is our own command executing; a click,
+   // drag, in-place edit or dialog change is the user, and the memo has to stop
+   // answering for that object.
+   OmEventHook(id, 0, nm, ours);
+   return ours;
 }
 
 // P-PERF-99 (2026-10-16): the deinit gate stays - tokens/records have no
@@ -1649,7 +1818,7 @@ bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJEC
                         const int sub_window, const datetime time1, const double price1)
 {
    const bool r = ObjectCreateReal6(chart_id, name, type, sub_window, time1, price1);
-   if(r) CompatNoteObjOp(false, name);
+   if(r) { CompatNoteObjOp(false, name); OmNoteCreate(chart_id, name, sub_window); }
    return r;
 }
 
@@ -1658,7 +1827,7 @@ bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJEC
                         const datetime time2, const double price2)
 {
    const bool r = ObjectCreateReal8(chart_id, name, type, sub_window, time1, price1, time2, price2);
-   if(r) CompatNoteObjOp(false, name);
+   if(r) { CompatNoteObjOp(false, name); OmNoteCreate(chart_id, name, sub_window); }
    return r;
 }
 
@@ -1668,7 +1837,7 @@ bool ObjectCreateCompat(const long chart_id, const string name, const ENUM_OBJEC
                         const datetime time3, const double price3)
 {
    const bool r = ObjectCreateReal10(chart_id, name, type, sub_window, time1, price1, time2, price2, time3, price3);
-   if(r) CompatNoteObjOp(false, name);
+   if(r) { CompatNoteObjOp(false, name); OmNoteCreate(chart_id, name, sub_window); }
    return r;
 }
 
@@ -1682,7 +1851,7 @@ bool ObjectDeleteReal(const long chart_id, const string name)
 bool ObjectDeleteCompat(const long chart_id, const string name)
 {
    const bool r = ObjectDeleteReal(chart_id, name);
-   if(r) CompatNoteObjOp(true, name);
+   if(r) { CompatNoteObjOp(true, name); OmNoteDelete(chart_id, name); }
    return r;
 }
 
@@ -1699,9 +1868,13 @@ int ObjectsDeleteAllRealPrefix(const long chart_id, const string prefix,
 
 #define ObjectsDeleteAll ObjectsDeleteAllCompat
 
+// P-PERF-156: a sweep removes names this file cannot enumerate, so the whole
+// generation goes stale at once - O(1), and the frame that swept has nothing
+// left to remember.
 int ObjectsDeleteAllCompat(const long chart_id, const int sub_window = -1, const int type = -1)
 {
    CompatTokenizeDeleteAll(chart_id, "", sub_window, type);
+   OmFlushAll();
    return ObjectsDeleteAllRealSub(chart_id, sub_window, type);
 }
 
@@ -1709,6 +1882,7 @@ int ObjectsDeleteAllCompat(const long chart_id, const string prefix,
                            const int sub_window = -1, const int type = -1)
 {
    CompatTokenizeDeleteAll(chart_id, prefix, sub_window, type);
+   OmFlushAll();
    return ObjectsDeleteAllRealPrefix(chart_id, prefix, sub_window, type);
 }
 
@@ -1778,12 +1952,37 @@ void CompatWarmUiSkins()
 
 static uint   g_ccObjMs = 0;      // when the last OBJECT click was dispatched
 static string g_ccObjName = "";   // ...and what it named
+static bool   g_ccObjOurs = false;   // P-DRAW-148: does that click own the release?
 static uint   g_ccChartMs = 0;    // when the last CHART click was dispatched
 
 // Returns true when this event is the SECOND channel of a release that has
 // already been dispatched - the caller drops it, exactly as if MT4 had sent
 // only one. Call it for CHARTEVENT_CLICK and CHARTEVENT_OBJECT_CLICK only.
-bool CompatOneClickDedupe(const int id, const string sparam)
+
+//--- P-DRAW-148 (2026-10-23) — THE TWIN IS OURS, AND ONLY OURS.
+//
+// The rule above is right about the SHAPE: MT5 reports one button-up twice, so the
+// chart click that follows an object click is the same physical release and the
+// shared handlers are written for one. What it never asked is WHOSE object click
+// it was following — and on a chart that carries another product's objects, the
+// answer is "not ours":
+//
+//   [dsclick] DEDUPE dropped CHART_CLICK (obj="BTRS_OBJ_63661149136134_FG" 0ms before)
+//
+// That line repeats on every click the user makes anywhere on the chart. `BTRS_OBJ_*`
+// is not built by this program (no such name in this tree), it sits over the chart,
+// and every click on it armed this drop — so the CHART click, which is the only
+// channel that can open the strip on a drawing the terminal will not name, was
+// thrown away. MEASURED against the user's own report «این چیزها اصلا سلکت و حذف
+// نمی‌شه»: their two trend lines are `LM_…_Line` (a leg ruler, and `DrawStripAnchorOwner`
+// says the strip serves it), the press named it (`PENSTACKARM obj="LM_…_Line"`), and
+// the release never reached the toggle because a foreign object owned the drop.
+//
+// So the caller now says whether the object click was on a name this product builds
+// or serves. A foreign one arms nothing: its click means nothing to us, and the
+// chart click behind it is the user's own release. Our own objects keep the exact
+// behaviour they had.
+bool CompatOneClickDedupe(const int id, const string sparam, const bool ours)
 {
    // The entry calls this for EVERY event (one line, so the parity checker can
    // see the shim call on it), so the non-click traffic - the mouse-move stream
@@ -1800,14 +1999,21 @@ bool CompatOneClickDedupe(const int id, const string sparam)
       const bool same = (g_ccObjMs != 0 && now - g_ccObjMs <= COMPAT_CLICK_TWIN_MS
                          && sparam == g_ccObjName);
       if(same) { g_ccObjMs = 0; g_ccChartMs = 0; return true; }
-      g_ccObjMs = now; g_ccObjName = sparam; g_ccChartMs = 0;
+      g_ccObjMs = now; g_ccObjName = sparam; g_ccObjOurs = ours; g_ccChartMs = 0;
       return false;
    }
    if(id == CHARTEVENT_CLICK)
    {
-      if(g_ccObjMs != 0 && now - g_ccObjMs <= COMPAT_CLICK_TWIN_MS)
-      { g_ccObjMs = 0; g_ccChartMs = 0; return true; }
-      g_ccChartMs = now; g_ccObjMs = 0; g_ccObjName = "";
+      if(g_ccObjMs != 0 && g_ccObjOurs && now - g_ccObjMs <= COMPAT_CLICK_TWIN_MS)
+      {
+         // P-DIAG-160 (temporary, remove with P-DRAW-143): the one drop that can
+         // eat a genuine dismissal — name it while the strip is being chased.
+         Print("[dsclick] DEDUPE dropped CHART_CLICK (obj=\"", g_ccObjName, "\" ",
+               (int)(now - g_ccObjMs), "ms before)");
+         g_ccObjMs = 0; g_ccChartMs = 0; return true;
+      }
+      // A FOREIGN object click leaves nothing armed: the chart click is the release.
+      g_ccChartMs = now; g_ccObjMs = 0; g_ccObjName = ""; g_ccObjOurs = false;
       return false;
    }
    return false;

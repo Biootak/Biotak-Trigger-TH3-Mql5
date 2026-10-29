@@ -45,6 +45,10 @@ def main():
     ap.add_argument("--sym", default=None, help="substring filter on the symbol name")
     ap.add_argument("--context", type=int, default=3)
     ap.add_argument("--all", action="store_true", help="print identical symbols too")
+    ap.add_argument("--scan", action="store_true",
+                    help="no bodies: classify EVERY symbol and rank by change size. "
+                         "SAME means identical after norm_body (comments/whitespace aside); "
+                         "DRIFT means the code itself differs.")
     a = ap.parse_args()
 
     p4 = os.path.join(MR.MT4_BIOTAK, a.module)
@@ -56,6 +60,35 @@ def main():
     s4 = symbols(side_lines(p4, True))
     s5 = symbols(side_lines(p5, False))
     names = list(s4.keys()) + [n for n in s5.keys() if n not in s4]
+
+    if a.scan:
+        rows = []
+        for name in names:
+            if a.sym and a.sym.lower() not in name.lower():
+                continue
+            b4 = s4.get(name, [[]])[0]
+            b5 = s5.get(name, [[]])[0]
+            if b4 and b5 and MR.norm_body("\n".join(b4)) == MR.norm_body("\n".join(b5)):
+                rows.append((0, name, len(b4), len(b5), "SAME"))
+                continue
+            raw = list(difflib.unified_diff(b4, b5, lineterm="", n=0))
+            adds = sum(1 for l in raw if l.startswith("+") and not l.startswith("+++"))
+            dels = sum(1 for l in raw if l.startswith("-") and not l.startswith("---"))
+            tag = "EXTRA" if not b4 else ("MISSING" if not b5 else "DRIFT")
+            rows.append((adds + dels, name, len(b4), len(b5),
+                         "+%d/-%d %s" % (adds, dels, tag)))
+        rows.sort(reverse=True)
+        print("%-44s %5s %5s  %s" % ("symbol", "MT4", "MT5", "change"))
+        print("-" * 78)
+        for _, name, l4, l5, tag in rows:
+            if tag == "SAME" and not a.all:
+                continue
+            print("%-44s %5d %5d  %s" % (name, l4, l5, tag))
+        print("-" * 78)
+        same = sum(1 for r in rows if r[4] == "SAME")
+        print("%d symbols: %d SAME, %d changed" % (len(rows), same, len(rows) - same))
+        return 0
+
     rc = 0
     for name in names:
         if a.sym and a.sym.lower() not in name.lower():

@@ -130,6 +130,19 @@ JUSTIFY = [
      "mt5"),
     (r'^\s*ObjectDelete\(0, \w+ \+ "[^"]*"\);\s*$',
      "unguarded delete; MT5 guards it with an existence probe", "mt4"),
+    # --- MT5-ONLY P-PERF-155 (2026-10-28): the sub-menu chrome dies in ONE
+    # --- prefix sweep here (the family is btnPrefix + "Sub..." by construction,
+    # --- and this module already sweeps that prefix on init and in DeleteMenu).
+    # --- MT4 keeps the per-name list because its deletes are in-process. The
+    # --- sweep deletes the same eight objects, so this is a cost shape, not a
+    # --- behaviour change — and it is the shape the live log priced at ~1.2ms
+    # --- per call (576 deletes = 699ms in one mouse move).
+    (r'^\s*ObjectDelete\(0, Sub(P|p)\w*(\(\s*\)|\(k\))\);\s*$',
+     "chrome deleted per name; MT5 sweeps the Sub family (P-PERF-155)",
+     "mt4", "BiotakMenu.mqh"),
+    (r'^\s*for\(int k = 0; k < SUB_PAGER_DOTS_MAX; k\+\+\)\s*$',
+     "MT4's pager-dot loop; MT5's sweep covers the dots (P-PERF-155)",
+     "mt4", "BiotakMenu.mqh"),
     (r'bool objectExists = inCache && cache\.exists;',
      "object-existence from the cache, still re-probed with ObjectFind", "mt5"),
     (r'if\(inCache && cache\.exists && ObjectFind\(0, \w+\[i\]\.name\) < 0\) \{',
@@ -327,6 +340,16 @@ JUSTIFY = [
      "both", "BiotakMenu_Ring.mqh"),
     (r'^if\((len <= room\) return k;|CircRailRun\(box, k\) <= room\) return k;)$',
      "the fit walk's comparison, unchanged", "both", "BiotakMenu_Ring.mqh"),
+    # --- P-DIAG-162 (MT5-only): the move-cost meter. Print-only, gated to one
+    # --- line per second and only when a mouse move costs > 8 ms; it reads
+    # --- GetTickCount and writes the journal, and computes nothing the chart
+    # --- shows. MT4 has no counterpart because it has no mouse-move stream.
+    # The module key here is the FILE (mod = basename(p5)), not the display
+    # heading "ENTRY" - a scope that does not match is a justification that
+    # silently never applies (the trap this entry itself fell into once).
+    (r'^.*(if\(id == CHARTEVENT_MOUSE_MOVE\)|_usTot|_usGate|_usNow).*$',
+     "P-DIAG-162 move-cost meter: Print-only, 1/s, no arithmetic",
+     "mt5", "Biotak Trigger TH3.mq5"),
 ]
 
 # mq5 shells use minutes where MQL4 used PERIOD_* constants for the *standard*

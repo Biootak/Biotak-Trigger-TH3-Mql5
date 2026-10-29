@@ -1743,7 +1743,9 @@ int TH3RestorePatternsFromChart()
     if(done > 0) Print("TH3: restored ", done, " pattern(s) from chart with current build");
     // P-TH3-INFO-06b: the attach moment is the other place orphans are born
     // (previous builds' families on a re-added chart) — sweep once, here.
-    TH3InfoOrphanPlateSweep();
+    // P-PERF-157: `force` — this is the one caller that must walk the whole
+    // chart whatever the fences in the sweep say.
+    TH3InfoOrphanPlateSweep(true);
     ThrottledChartRedraw();
     return done;
 }
@@ -2087,6 +2089,15 @@ void LegHandleAt(const string hn, const datetime t, const double p,
 // would be the lie that made the two states look alike in the first place.
 bool LegMeasureSelected(const string base)
 {
+    // P-MT5-LEGSEL (2026-10-24): WHILE OUR HAND HOLDS THE LEG, THE FACE IS THE
+    // PRESS'S ANSWER. The carry parks `OBJPROP_SELECTABLE` for its duration (that
+    // is what stops the terminal's own drag from moving the line under the dots),
+    // and MT5 clears SELECTED the moment the flag goes off. Asking the terminal
+    // here then made the family swap to its resting face mid-drag and back on
+    // release — the «دایره‌ها به هم می‌ریزن» report, one layer down. The press
+    // photographed the answer (`s_legSelWanted`), and that photo is the reader
+    // until the gesture ends and puts the flag back.
+    if(s_legDragMode != 0 && s_legDragBase == base) return s_legSelWanted;
     string ln = base + "_Line";
     return ObjectFind(0, ln) >= 0 &&
            ObjectGetInteger(0, ln, OBJPROP_SELECTED) != 0;
@@ -2184,46 +2195,35 @@ void LegMeasureRideChart()
 // P-LM-18: the SELECTED face — when the line carries MT4's own selection the
 // solid dots swap to the hollow pair, so a selected leg reads at a glance
 // («حالت سلکتش با سلکت نبودنش ... یک شکله»).
+// ══════════════════════════════════════════════════════════════════════════
+// MT5-ONLY — P-LM-27 (2026-10-24): A LEG ON MT5 WEARS NO RINGS.
+//
+// The user's decision, on his own screenshots of a drawn leg on MT5: «این
+// دایره‌ها که روش گذاشتیم بردار». The three handles were screen-pixel bitmaps
+// with their own placement writer — the ONE part of a measurement the terminal
+// never knows about — so they were also the part a terminal-side move, a repaint
+// or a zoom could leave a pixel or a frame behind the line (the «نقاط از خط جدا
+// می‌شن» report of this session). A line alone cannot come apart from itself.
+//
+// NOTHING ELSE IS GIVEN UP, because no behaviour read the icons: `LegMeasureHitTest`
+// projects the two anchors itself (ChartTimePriceToXY) and hit-tests the ends and
+// the midpoint in PIXELS, so grabbing an endpoint, grabbing the middle and
+// grabbing the body all still answer exactly as before — with the line as the
+// only visible evidence, which is precisely what was asked for. The drag, the
+// plate, the selection face (line width) and the delete cascade are untouched.
+//
+// The MT4 tree keeps its rings (this request was for MT5, and this repository is
+// the MT5 copy). Older builds left `_H1/_H2/_Mid` on every chart that drew a leg
+// before this line existed and no sweep ever removed them, so this pass DELETES
+// them: the first follow / ink / timer tick after the upgrade strips the rings of
+// every leg that still carries one.
+// ══════════════════════════════════════════════════════════════════════════
 void LegMeasureHandles(const string base, const datetime t1, const double p1,
                        const datetime t2, const double p2, const color ink)
 {
-    bool up  = (ink == LEG_BULL_INK);
-    bool sel = LegMeasureSelected(base);
-    string bmpH = up ? (sel ? LEG_HANDLE_UP_SEL_RES     : LEG_HANDLE_UP_RES)
-                     : (sel ? LEG_HANDLE_DN_SEL_RES     : LEG_HANDLE_DN_RES);
-    string bmpM = up ? (sel ? LEG_HANDLE_UP_MID_SEL_RES : LEG_HANDLE_UP_MID_RES)
-                     : (sel ? LEG_HANDLE_DN_MID_SEL_RES : LEG_HANDLE_DN_MID_RES);
-    // P-UI-160b (2026-10-16): the F mute parks the family's three icons. They
-    // are screen-pixel BITMAP_LABELs — no TF mask reaches them (the P-UI-98d
-    // fact the handset handles already answer) — so a hidden chart must PARK
-    // them off-window, exactly like the CP marker and the S1 pair. This is the
-    // family's ONE placement seat: the ride, the follower, the ink and the hide
-    // pass all come through here, so no channel can leave a ring visible while
-    // the mute is on.
-    if(IsIndicatorHidden())
-    {
-        LegHandleAtXY(base + "_H1", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_HALF, bmpH);
-        LegHandleAtXY(base + "_H2", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_HALF, bmpH);
-        LegHandleAtXY(base + "_Mid", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_MID_HALF, bmpM);
-        return;
-    }
-    LegHandleAt(base + "_H1", t1, p1, LEG_HANDLE_HALF, bmpH);
-    LegHandleAt(base + "_H2", t2, p2, LEG_HANDLE_HALF, bmpH);
-    int sx, sy, tx, ty;
-    if(ChartTimePriceToXY(0, 0, t1, p1, sx, sy) &&
-       ChartTimePriceToXY(0, 0, t2, p2, tx, ty))
-        // P-LM-19: EXACTLY the midpoint — the pixel midpoint of the two projected
-        // ends, no bar snapping (a chart-space midpoint lands on a bar OPEN and
-        // off the line's middle on any slope: «جایی پرتی نره»). Rounding to the
-        // nearest pixel keeps the dot inside one pixel of the true half on every
-        // slope, and the 11px canvas's own centre offset is what sits it ON the
-        // line rather than beside it.
-        LegHandleAtXY(base + "_Mid",
-                      (int)MathRound(((double)sx + (double)tx) * 0.5),
-                      (int)MathRound(((double)sy + (double)ty) * 0.5),
-                      LEG_HANDLE_MID_HALF, bmpM);
-    else
-        LegHandleAtXY(base + "_Mid", LEG_HANDLE_PARK, LEG_HANDLE_PARK, LEG_HANDLE_MID_HALF, bmpM);
+    if(ObjectFind(0, base + "_H1") >= 0)  ObjectDelete(0, base + "_H1");
+    if(ObjectFind(0, base + "_H2") >= 0)  ObjectDelete(0, base + "_H2");
+    if(ObjectFind(0, base + "_Mid") >= 0) ObjectDelete(0, base + "_Mid");
 }
 
 // ── the leg's whole ink — ONE owner for a fresh measurement, a drag step and the
@@ -2237,6 +2237,20 @@ void LegMeasureInk(const string base, const datetime t1, const double p1,
                    const datetime t2, const double p2, const color ink, const bool create)
 {
     string ln = base + "_Line";
+    //--- MT5-ONLY P-MT5-LEGSEL (2026-10-24) — THE LINE KEEPS ITS SELECTION ACROSS
+    //--- OUR OWN WRITES. MEASURED on the rectangle (P-MT5-SELKEEP): MT5 drops an
+    //--- object's SELECTED flag on a programmatic property write, while MT4 keeps
+    //--- it. Every pass below writes anchors/colour/width, so selecting a leg and
+    //--- then touching it (a strip colour, a selection repaint, the migration)
+    //--- silently lost the selection — and with it the width and the hollow rings
+    //--- that ARE the selected face (P-LM-18/20). The flag is read before the
+    //--- writes and put back only when OUR writes dropped it; a click that walked
+    //--- away clears it before this function runs, so it is never re-selected.
+    bool wasSel = (ObjectFind(0, ln) >= 0 && (bool)ObjectGetInteger(0, ln, OBJPROP_SELECTED));
+    // P-MT5-LEGSEL: the flag stays parked for the WHOLE press, not only once the
+    // carry has moved — the take press borrowed it too (LegMeasurePressFlagOff)
+    // and this writer must not hand it back mid-gesture.
+    bool dragOwnsLine = ((s_legDragMode != 0 && s_legDragBase == base) || s_legFlagBase == base);
     // P-UI-160b (2026-10-16): while the F mute is on, this family's line wears
     // the TIMEFRAMES mask (chart-space — the zones' own mechanism) and its icons
     // park. The create branch below is unreachable under the mute (the toggle and
@@ -2249,7 +2263,7 @@ void LegMeasureInk(const string base, const datetime t1, const double p1,
         {
             if((int)ObjectGetInteger(0, ln, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS)
                 ObjectSetInteger(0, ln, OBJPROP_TIMEFRAMES, OBJ_NO_PERIODS);
-            LegMeasureHandles(base, t1, p1, t2, p2, ink);   // its own hidden branch parks
+            LegMeasureHandles(base, t1, p1, t2, p2, ink);   // P-LM-27: strips the rings
         }
         return;
     }
@@ -2280,7 +2294,7 @@ void LegMeasureInk(const string base, const datetime t1, const double p1,
         // cannot move the line out from under its discs, and re-owning it here
         // would re-arm that drag in the very pass that is replacing it. Every
         // other leg still re-owns; the drag is a single-base gesture.
-        bool dragOwnsThis = (s_legDragMode != 0 && s_legDragBase == base);
+        bool dragOwnsThis = ((s_legDragMode != 0 && s_legDragBase == base) || s_legFlagBase == base);
         if(!dragOwnsThis && !ObjectGetInteger(0, ln, OBJPROP_SELECTABLE))
             ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, true);
         if(dragOwnsThis)
@@ -2302,10 +2316,15 @@ void LegMeasureInk(const string base, const datetime t1, const double p1,
         int w = LegMeasureLineWidth(base);
         if((int)ObjectGetInteger(0, ln, OBJPROP_WIDTH) != w)
             ObjectSetInteger(0, ln, OBJPROP_WIDTH, w);
+        //--- P-MT5-LEGSEL: our writes above may have dropped the terminal's own
+        //--- flag; put back the one the pass found (never a new one).
+        if(wasSel && !dragOwnsLine && (bool)ObjectGetInteger(0, ln, OBJPROP_SELECTABLE) &&
+           !(bool)ObjectGetInteger(0, ln, OBJPROP_SELECTED))
+            ObjectSetInteger(0, ln, OBJPROP_SELECTED, true);
     }
 
-    // the handles: a ring at each end and the mid one (P-LM-11/14, baked icons,
-    // P-LM-17: direction-coloured) — and nothing else: P-LM-12 retired the head
+    // P-LM-27: no rings any more (MT5) — this call is the sweep that takes the
+    // icons an older build left behind; the line is the whole visible family.
     LegMeasureHandles(base, t1, p1, t2, p2, ink);
 }
 
@@ -2644,6 +2663,7 @@ void LegMeasureFollowAll()
             ObjectDelete(0, base + "_Info");
             ObjectDelete(0, base + "_Info2");
             ObjectDelete(0, base + "_Info3");
+            LegMeasureSelShadowForget(base);   // P-LM-20: the painted state dies with the leg
             LegMeasureForget(i);
             continue;                  // i now names the next measurement
         }
@@ -2694,6 +2714,22 @@ static datetime s_legPressT;                        // the cursor, in chart spac
 static double   s_legPressP;
 static int    s_legPressX = 0, s_legPressY = 0;     // ... and in pixels (the moved test)
 static bool   s_legEditLeft      = false;           // edge-detect of the edit gesture
+//--- P-MT5-LEGSEL (2026-10-24) — the press's own photograph of the selection, and
+//--- the leg whose SELECTABLE we parked for the press's duration. `s_legFlagBase`
+//--- is the ONE latch: set on the press, cleared by the release/mouse-up click or
+//--- the 4 s heal. `s_legSelWanted` is what the face should read while the
+//--- terminal's own flag is off (the drag hides it), never a second authority:
+//--- at rest LegMeasureSelected still asks the terminal.
+static string s_legFlagBase      = "";
+static bool   s_legSelAtPress    = false;
+static bool   s_legSelWanted     = false;
+static uint   s_legFlagMs        = 0;
+static uint   s_legReadMs        = 0;              // the drag readout's ATR budget
+static uint   s_legRideMs        = 0;              // the mouse-move handle-ride budget
+#define LEG_DRAG_READ_MS   120   // the plate's numbers, while the hand is moving
+#define LEG_DRAG_FRAME_MS  16    // the carry's own paint cadence (~60 fps)
+#define LEG_RIDE_MS         40   // the handles' pan ride (~25 fps); the timer is the net
+#define LEG_PRESS_HEAL_MS 4000   // a release that never reached the chart ends the press
 // P-LM-20: the selection the family LAST painted for, per measurement. MT4's own
 // selection can change outside any event we see (the object list, a script, a
 // keyboard Delete that cleared the chart), so this is a SHADOW of the terminal's
@@ -2814,6 +2850,91 @@ void LegMeasureDragSelectable(const string base, const bool draggable)
     ObjectSetInteger(0, ln, OBJPROP_SELECTABLE, draggable);
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P-MT5-LEGSEL (2026-10-24) — THE LINE HAS ONE WRITER PER GESTURE, FROM THE
+// PRESS, NOT FROM THE FIRST MOVED PIXEL.
+//
+// MEASURED, and the user's report is exactly it («نقاط از خط جدا می‌شن»):
+// P-LM-21 turns the line's SELECTABLE off once our carry has ALREADY started.
+// The press that starts it lands on a selectable trend line, so MT5 arms its
+// OWN drag first and moves the line on the terminal's paint schedule while the
+// rings are screen objects it knows nothing about — the line slides out from
+// under the dots for the first part of every gesture. Turning the flag off after
+// the drag began ends one loop of that race, not the race (P-LM-21's own
+// comment says so, one layer down).
+//
+// So the flag goes off ON THE PRESS EDGE for BOTH legs of the gesture: the take
+// press (P-LM-11's first touch, which only selects) and the carry press. The
+// terminal is therefore never handed a draggable object while our hand is on it,
+// the ink pass is the only writer, and the line and its three rings can only
+// ever be written together. The flag comes back on the release (or the
+// mouse-up CLICK, which is the only edge a motionless press reports) together
+// with the selection the press found — so P-LM-17's native menu, Delete and the
+// object list answer the leg again the moment the hand leaves it.
+//
+// A press whose release never reaches the chart (released outside the terminal)
+// is healed by time: `LEG_PRESS_HEAL_MS` puts the flag back, and the OBJECT_DRAG
+// handler below keeps the rings glued for the rest of that drag.
+void LegMeasurePressFlagOff(const string base, const bool wantSel)
+{
+    string ln = base + "_Line";
+    if(ObjectFind(0, ln) < 0) return;
+    s_legFlagBase   = base;
+    s_legFlagMs     = GetTickCount();
+    s_legSelAtPress = (bool)ObjectGetInteger(0, ln, OBJPROP_SELECTED);
+    s_legSelWanted  = (s_legSelAtPress || wantSel);
+    LegMeasureDragSelectable(base, false);
+}
+
+void LegMeasurePressFlagOn(const string fallback = "")
+{
+    string base   = (s_legFlagBase != "" ? s_legFlagBase : fallback);
+    bool   wanted = s_legSelWanted;
+    s_legFlagBase = "";
+    s_legFlagMs   = 0;
+    if(base == "") return;
+    LegMeasureDragSelectable(base, true);
+    string ln = base + "_Line";
+    if(ObjectFind(0, ln) < 0) { s_legSelWanted = false; return; }
+    bool selNow = (bool)ObjectGetInteger(0, ln, OBJPROP_SELECTED);
+    if(wanted && !selNow)
+        ObjectSetInteger(0, ln, OBJPROP_SELECTED, true);
+    s_legSelWanted = false;
+    // ONE pass paints the face the restored flag asks for (width + the three
+    // rings), so a release can never leave half of the family in the state the
+    // gesture had borrowed.
+    LegMeasureSelectionRepaint(base);
+}
+
+// The carry's own frame: the tick throttle is 100 ms (CHART_REDRAW_THROTTLE_MS),
+// i.e. ten frames a second, and a line that is written at the mouse's own rate
+// but painted at ten a second visibly steps behind the cursor. A live gesture is
+// not the tick path — the same distinction P-UI-75b made for the panels — so the
+// carry pays ONE frame per its own 16 ms window and marks the tick throttle as
+// paid, which is what keeps the following tick from re-painting the same frame.
+void LegMeasureDragFrame()
+{
+    static uint s_lastFrameMs = 0;
+    uint now = GetTickCount();
+    if(s_lastFrameMs != 0 && (uint)(now - s_lastFrameMs) < LEG_DRAG_FRAME_MS) return;
+    s_lastFrameMs = now;
+    ChartRedraw();
+    g_lastChartRedrawTime = now;
+}
+
+// The handles' pan ride, on the mouse stream, on a budget. The timer and
+// CHART_CHANGE keep the unthrottled owner; an idle move that changed nothing
+// still costs ~3 terminal reads per handle per leg, and on a chart carrying the
+// full ladder that tax is paid on every pixel of every drag.
+void LegMeasureRideTick()
+{
+    if(s_legDragMode != 0) return;   // the carry places the rings itself, per step
+    uint now = GetTickCount();
+    if(s_legRideMs != 0 && (uint)(now - s_legRideMs) < LEG_RIDE_MS) return;
+    s_legRideMs = now;
+    LegMeasureRideChart();
+}
+
 // One drag step: re-anchor the WHOLE family from the dragged anchor(s). This is
 // what makes the drag inseparable — the same writer the fresh draw and the
 // migration use (LegMeasureInk) rewrites line, handles and head from ONE pair
@@ -2857,20 +2978,46 @@ void LegMeasureDragApply(const datetime curT, const double curP)
     // composite is TTL-cached per TF (P-LM-19: the same owner the labels read, so
     // a bar that did not move is not re-read), and the visit's clock re-arms so a
     // long drag cannot expire the plate under the user's finger.
+    //
+    // P-PERF-153 (2026-10-24) — AND ITS ATR WALK IS ON A BUDGET. MEASURED in the
+    // live log: `[mvus] total=48 ind=48` on a single move of a leg carry. The
+    // readout asks three reference TFs plus a walk of up to eight more for the
+    // owner, and `CalculateWeightedATRAt` pays a full composite per (TF, bar) the
+    // first time that bar is asked — so EVERY step that crossed a bar re-ran up to
+    // eleven six-period composites inside the mouse event. The hand needs the
+    // line and its rings at the mouse's rate; the NUMBERS are read by the eye at
+    // a glance. So the numbers are recomputed at most once per LEG_DRAG_READ_MS
+    // (the release always recomputes once, exactly), while the plate keeps moving
+    // with the hand using the text it already carries. What the eye loses is a
+    // 120 ms lag on a percentage; what the hand gains is its frame budget back.
     int idx = LegMeasureIndex(base);
     if(idx >= 0 && g_legPlateUp[idx])
     {
-        string txt[]; color acc; int otf; bool trusted;
-        LegMeasureReadout(nt1, np1, nt2, np2, txt, acc, otf, trusted);
-        if(trusted)
+        uint nowRead = GetTickCount();
+        bool due = (s_legReadMs == 0 || (uint)(nowRead - s_legReadMs) >= LEG_DRAG_READ_MS);
+        if(due)
         {
+            s_legReadMs = nowRead;
+            string txt[]; color acc; int otf; bool trusted;
+            LegMeasureReadout(nt1, np1, nt2, np2, txt, acc, otf, trusted);
             // P-LM-19: the accent the plate wears is the SAME direction answer the
             // line just drew — a readout whose colour disagrees with the leg it is
             // measuring is the old violet bug with a new seat.
-            LegMeasureTrack(base, txt, dragInk);
-            g_legShownUntil[idx] = GetTickCount() + LEG_INFO_SHOW_MS;
-            LegMeasureBoxFromAnchors(base, nt1, np1, nt2, np2, false);
+            if(trusted) LegMeasureTrack(base, txt, dragInk);
         }
+        // the visit's clock re-arms on every step, readout or not — a slow drag
+        // must never let the plate expire under the hand (P-LM-09).
+        g_legShownUntil[idx] = nowRead + LEG_INFO_SHOW_MS;
+        // P-PERF-154 (2026-10-24) — THE PLATE MOVES ON THE SAME BUDGET IT READS ON.
+        // MEASURED: a plate placement is ~25 terminal calls (four objects moved,
+        // three rows re-measured by PnlRawTextW, three OBJPROP_TEXT comparisons),
+        // and the carry used to pay all of it on EVERY mouse-move pixel — around
+        // 60×/s on the same event that already writes the line. The line is what
+        // the hand is judged by; the box is a readout the eye reads at a glance.
+        // So the box re-projects at the readout's own 120 ms (8×/s, the same
+        // cadence as its numbers), and the drag's per-step cost collapses to the
+        // line's own writes. The release still places it exactly, once.
+        if(due) LegMeasureBoxFromAnchors(base, nt1, np1, nt2, np2, false);
     }
     CalcAnchorFollow(base, LegReadAnchor(nt1, nt2));   // P-ANCHOR-LAST: the read follows the moving tip
 }
@@ -2883,14 +3030,10 @@ void LegMeasureDragAbort()
     string base = s_legDragBase;
     s_legDragMode = 0;
     s_legDragBase = "";
+    s_legReadMs = 0;
     ChartViewLockRelease();           // P-UI-90: exactly one release per acquire
     if(ObjectFind(0, base + "_Line") >= 0)
     {
-        // P-LM-21: the hand is off — the native gestures P-LM-17 promised answer
-        // the line again. This restore runs on every abort path (the right-click
-        // restore, the vanished-line let-go), so the flag cannot stay off behind
-        // a gesture that ended.
-        LegMeasureDragSelectable(base, true);
         // P-LM-19: the restored leg keeps its OWN direction ink — the snapshot was
         // of a coloured leg, and putting it back violet would repaint a cancelled
         // drag in a colour that leg never had.
@@ -2904,6 +3047,13 @@ void LegMeasureDragAbort()
             LegMeasureBoxFromAnchors(base, s_legSnapT1, s_legSnapP1,
                                      s_legSnapT2, s_legSnapP2, false);
     }
+    // P-LM-21 / P-MT5-LEGSEL: the hand is off — the native gestures P-LM-17
+    // promised answer the line again, and the face the press found is put back in
+    // the same pass. LAST, so its own repaint is the final write of the gesture.
+    // This restore runs on every abort path (the right-click restore, the
+    // vanished-line let-go), so the flag cannot stay off behind a gesture that
+    // ended — and the latch is cleared even when the line is already gone.
+    LegMeasurePressFlagOn();
 }
 
 // The release. A MOVED press commits where the finger is (the pass already wrote
@@ -2917,13 +3067,16 @@ void LegMeasureDragEnd()
     string base = s_legDragBase;
     s_legDragMode = 0;
     s_legDragBase = "";
+    s_legReadMs = 0;
     ChartViewLockRelease();           // P-UI-90: exactly one release per acquire
+    // P-LM-21 / P-MT5-LEGSEL: the drag owned the line's draggable flag for its
+    // duration; the release gives it back WITH the face the press found, or
+    // P-LM-17's right-click menu and Delete go deaf on every leg the user ever
+    // dragged. The latch is cleared even when the line is gone (a delete during
+    // the carry), so the next press starts from a known state.
+    LegMeasurePressFlagOn();
     string ln = base + "_Line";
     if(ObjectFind(0, ln) < 0) return;
-    // P-LM-21: the drag owned the line's draggable flag for its duration; the
-    // release gives it back, or P-LM-17's right-click menu and Delete go deaf on
-    // every leg the user ever dragged.
-    LegMeasureDragSelectable(base, true);
 
     if(!s_legDragMoved)
     {
@@ -2963,9 +3116,18 @@ void LegMeasureDragEnd()
 // the Delete key found no selection — the user's «چرا نمیشه حذفش کرد».
 void LegMeasureClickFinalize()
 {
-    if(s_legDragMode == 0) return;
-    if(s_legDragMoved) return;      // a real drag ends on its MOUSE_MOVE release
-    LegMeasureDragEnd();            // a still press WAS a click: end it as one
+    if(s_legDragMode != 0)
+    {
+        if(s_legDragMoved) return;   // a real drag ends on its MOUSE_MOVE release
+        LegMeasureDragEnd();         // a still press WAS a click: end it as one
+        return;
+    }
+    // P-MT5-LEGSEL (2026-10-24): the TAKE press ends HERE. It started no carry, so
+    // no MOUSE_MOVE release will ever end it; the button-up CLICK is its only edge,
+    // and it is also the edge that must give the line its SELECTABLE flag and its
+    // face back (without it a take press left the leg permanently un-draggable
+    // from the terminal's side).
+    if(s_legFlagBase != "") LegMeasurePressFlagOn(s_legFlagBase);
 }
 
 // P-LM-20 (2026-09-21): the terminal's OWN selection event.
@@ -2999,10 +3161,19 @@ bool LegMeasureOnObjectClick(const string objName)
 // a mouse event that moved nothing costs reads only.
 bool LegMeasureEditMouse(const int mx, const int my, const string buttons)
 {
+    // P-MT5-LEGSEL: a press whose button-up never reached the chart (released
+    // outside the terminal) must not park the line's SELECTABLE flag for the rest
+    // of the session. One unsigned compare per move; the gesture is 4 s old.
+    if(s_legFlagBase != "" && s_legDragMode == 0 && s_legFlagMs != 0 &&
+       (uint)(GetTickCount() - s_legFlagMs) >= LEG_PRESS_HEAL_MS)
+        LegMeasurePressFlagOn(s_legFlagBase);
     // P-LM-16b: the dots ride the chart in the pan's own event — BEFORE any
     // gate, because a drag-pan fires MOUSE_MOVE while no gesture of ours is
-    // live (guarded writes: a still chart costs reads only)
-    LegMeasureRideChart();
+    // live (guarded writes: a still chart costs reads only). P-PERF-153: on a
+    // budget now — a carry places its own rings per step, and the 250 ms timer is
+    // the net under a pan; paying the full ride on every pixel of every move was
+    // pure reads on a chart that had not moved.
+    LegMeasureRideTick();
 
     bool leftDown  = (StringFind(buttons, "1") >= 0);
     bool rightDown = (StringFind(buttons, "2") >= 0);
@@ -3020,16 +3191,16 @@ bool LegMeasureEditMouse(const int mx, const int my, const string buttons)
         if(rightDown) { LegMeasureDragAbort(); return true; }
         if(!leftDown) { LegMeasureDragEnd();   return true; }   // release = final
         ChartViewLockAssert();         // P-BK-14: re-assert every step (P-UI-90)
-        // P-LM-21: from the FIRST held move on, MT4's native drag has no claim on
-        // this line. The terminal armed it at the press (the line is SELECTABLE,
-        // P-LM-17) and moves the trendline on its own paint schedule, while the
-        // three discs are separate bitmaps it knows nothing about — the line
-        // slides out from under them and the family comes apart mid-drag
-        // («دایره ها از خط جدا میشه»). Turning the flag off ONCE the gesture is a
-        // drag cancels the armed drag, and the ink pass below is then the ONLY
-        // writer of the line's anchors, so line and discs land together every
-        // event. A STILL press never reaches here, so a click never borrows the
-        // flag — the terminal's own selection (P-LM-20) answers it untouched.
+        // P-LM-21: from the FIRST held move on, the terminal's native drag has no
+        // claim on this line. The terminal armed it at the press (the line is
+        // SELECTABLE, P-LM-17) and moves the trendline on its own paint schedule,
+        // while the three discs are separate bitmaps it knows nothing about — the
+        // line slides out from under them and the family comes apart mid-drag
+        // («دایره ها از خط جدا میشه»). P-MT5-LEGSEL moved the flag OFF one edge
+        // earlier (the press itself), so by the time this branch runs the native
+        // drag was never armed; the call stays as the guarded, idempotent second
+        // half of that rule (one read per step when it is already off), and the
+        // ink pass below is the ONLY writer of the line's anchors.
         LegMeasureDragSelectable(s_legDragBase, false);
         int subWin; datetime curT; double curP;
         if(ChartXYToTimePrice(0, mx, my, subWin, curT, curP))
@@ -3062,16 +3233,24 @@ if(pressed)
          if(!GestureTakeAllowed(base))
          {
             GestureTakeNote(base);
+            // P-MT5-LEGSEL: the take press selects, and it must not become the
+            // terminal's own drag either — the flag is parked from THIS edge and
+            // restored by the button-up CLICK (LegMeasureClickFinalize).
+            LegMeasurePressFlagOff(base, true);
             LegMeasurePlateShow(base);
             return true;
          }
          // the press is ours: snapshot what the press found, take the view, and
          // bring the readout along for the ride
          string ln = base + "_Line";
-        s_legDragBase  = base;
-        s_legDragMode  = mode;
-        s_legDragMoved = false;
-        Print("[LM] carry base=", base, " mode=", IntegerToString(mode), " why=", GestureTakeWhy());   // P-UI-144: the carry's own half of the proof
+         s_legDragBase  = base;
+         s_legDragMode  = mode;
+         s_legDragMoved = false;
+         s_legReadMs    = 0;   // P-PERF-153: the first step always reads the numbers
+         // P-MT5-LEGSEL: the flag goes off ON THE PRESS EDGE, before the snapshot
+         // and before MT5 arms its own drag — the carry is then the only writer.
+         LegMeasurePressFlagOff(base, true);
+         Print("[LM] carry base=", base, " mode=", IntegerToString(mode), " why=", GestureTakeWhy());   // P-UI-144: the carry's own half of the proof
         s_legSnapT1 = (datetime)ObjectGetInteger(0, ln, OBJPROP_TIME, 0);
         s_legSnapP1 = ObjectGetDouble(0, ln, OBJPROP_PRICE, 0);
         s_legSnapT2 = (datetime)ObjectGetInteger(0, ln, OBJPROP_TIME, 1);
@@ -3592,7 +3771,14 @@ bool LegMeasureMouseMove(int mx, int my, const string buttons)
         }
         // P-LM-12: the preview is the dashed line and NOTHING else — the head
         // it used to wear was retired with the committed drawing's own head.
-        return false;
+        //--- P-MT5-LEGPREVIEW (2026-10-24) — AND IT OWES ITS FRAME. This used to
+        //--- answer false, and the entry only paints when this call answers true:
+        //--- so the preview line was created and moved on every held move while
+        //--- the terminal was never asked to repaint it. The user drew a leg and
+        //--- saw NOTHING until the release («این موقع کشیدنش چیزی و خط نشون
+        //--- نمیدن»). The answer is "the event is consumed", not "a drawing
+        //--- completed", and the caller's frame is what the preview was missing.
+        return true;
     }
 
     // ── release edge: finalise ──
@@ -3618,6 +3804,118 @@ bool LegMeasureMouseMove(int mx, int my, const string buttons)
 
     s_legLastLeft = leftDown;
     return false;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P-MT5-LEGDRAG (2026-10-24) — THE TERMINAL'S OWN MOVE IS STILL THE FAMILY'S.
+//
+// A leg's line stays SELECTABLE (P-LM-17: right-click Properties/Delete, the
+// keyboard and the object list answer it like any other drawing), so a hand that
+// moves it from the terminal's side — the native drag of a selected leg, an
+// anchor edit in the Properties dialog, the object list — moves the LINE and
+// tells us nothing. The three rings are screen objects and do not follow on
+// their own, so the family came apart for as long as the next 250 ms net took.
+//
+// MT5 reports that move on CHARTEVENT_OBJECT_DRAG with the object's own name
+// (the same channel BaseKnot follows its box on), and the Properties dialog on
+// CHARTEVENT_OBJECT_CHANGE. Both land here, and this pass does ONE thing: it
+// re-projects the handles and the plate from the anchors the TERMINAL now
+// holds. It never writes the line — an anchor write would cancel the native
+// drag mid-flight (P-BK-15's measured fact) and turn the user's gesture into a
+// one-event stutter.
+void LegMeasureRideOne(const string base)
+{
+    string ln = base + "_Line";
+    if(ObjectFind(0, ln) < 0) return;
+    datetime t1 = (datetime)ObjectGetInteger(0, ln, OBJPROP_TIME, 0);
+    double   p1 = ObjectGetDouble(0, ln, OBJPROP_PRICE, 0);
+    datetime t2 = (datetime)ObjectGetInteger(0, ln, OBJPROP_TIME, 1);
+    double   p2 = ObjectGetDouble(0, ln, OBJPROP_PRICE, 1);
+    if(t1 <= 0 || t2 <= 0) return;   // not a two-anchor line: not ours to project
+    LegMeasureHandles(base, t1, p1, t2, p2, (color)ObjectGetInteger(0, ln, OBJPROP_COLOR));
+    int idx = LegMeasureIndex(base);
+    if(idx >= 0 && g_legPlateUp[idx])
+        LegMeasureBoxFromAnchors(base, t1, p1, t2, p2, false);   // the visitor follows too
+}
+
+bool LegMeasureOnObjectDrag(const string nm)
+{
+    if(nm == "") return false;
+    if(StringFind(nm, TH3_LEG_PREFIX) != 0) return false;
+    int len = StringLen(nm);
+    if(len < 6 || StringSubstr(nm, len - 5) != "_Line") return false;
+    if(s_legDragMode != 0) return false;   // OUR carry already writes both halves per step
+    string base = StringSubstr(nm, 0, len - 5);
+    // Only a MEASUREMENT this instance knows. `LM_prev_Line` is the draw preview:
+    // it is not selectable and never moves from the terminal's side, but it wears
+    // the family's prefix and SUFFIX, so an unfiltered pass would have answered it
+    // by creating `LM_prev_H1/_H2/_Mid` — three orphan rings around a dashed
+    // line, left on the chart by a gesture that was never a measurement (measured
+    // on the object list, 2026-10-24). The registry is the membership test.
+    if(LegMeasureIndex(base) < 0) return false;
+    LegMeasureRideOne(base);
+    return true;
+}
+
+// ── the session's own teardown ────────────────────────────────────────────
+// P-MT5-LEGPREVIEW (2026-10-24): the preview is not namespaced under
+// `inpObjectPrefix` (its name is fixed — `LM_prev_Line`), so the removal sweep
+// never saw it. A draw cancelled by a timeout, a crash, a TF switch or a chart
+// close therefore left the dashed line on the chart forever, and the next
+// instance found it as a foreign object because `PathAdoptOrphans`-style
+// adoption does not exist for this tool. The preview dies with EVERY reason —
+// the same rule P-UI-180 wrote for the path — and the session's state goes with
+// it, so a reload can never resume a gesture nobody is holding.
+void LegMeasureOnDeinit(const int reason)
+{
+    if(s_legDragMode != 0)
+    {
+        if(reason == REASON_REMOVE)
+        {
+            // the objects are going anyway: drop the state, never write geometry
+            s_legDragMode = 0;
+            s_legDragBase = "";
+            s_legReadMs   = 0;
+        }
+        else LegMeasureDragAbort();   // TF switch / params: put the leg back where it was
+    }
+    if(s_legFlagBase != "")
+    {
+        if(reason == REASON_REMOVE)
+        {
+            s_legFlagBase  = "";
+            s_legSelWanted = false;
+            s_legSelAtPress = false;
+        }
+        else LegMeasurePressFlagOn(s_legFlagBase);
+    }
+    if(g_legSess.active)
+    {
+        g_legSess.active = false;
+        g_legSess.step   = 0;
+        s_legLastLeft    = false;
+    }
+    s_legEditLeft = false;
+    s_legReadMs   = 0;
+    LegPreviewClear();
+    if(reason == REASON_REMOVE) ObjectsDeleteAll(0, "LM_prev_");
+}
+
+void LegMeasureOnInit()
+{
+    // a preview written by an instance that died mid-draw (or by the previous
+    // side of a TF switch) is never a drawing of this one
+    LegPreviewClear();
+    s_legDragMode    = 0;
+    s_legDragBase    = "";
+    s_legDragMoved   = false;
+    s_legFlagBase    = "";
+    s_legSelWanted   = false;
+    s_legSelAtPress  = false;
+    s_legEditLeft    = false;
+    s_legLastLeft    = false;
+    s_legReadMs      = 0;
+    s_legRideMs      = 0;
 }
 
 //+------------------------------------------------------------------+
@@ -3680,7 +3978,7 @@ void TH3CompletePattern()
     UpdateTH3FrequencyLabel(g_th3FreqOverride);
     // P-TH3-PB-OFF (2026-09-21): the session ENDS here — the 5th stage (drag
     // the pivot base) is retired; the base is hand-typed in the TH3 TOOL card
-    // (`inpTH3PivotBasePips` -> TH3ManualBaseStep -> TH3LockedStep Path 1).
+    // (`inpTH3BaseRangePips` -> TH3ManualBaseStep -> TH3LockedStep Path 1).
     g_th3Session.state = TH3_SESSION_IDLE;
     TH3HoverGuardReset();   // P-TH3-PERF-03
     ThrottledChartRedraw();
@@ -3690,7 +3988,7 @@ void TH3CompletePattern()
 // TH3BaseDraftDraw / TH3BaseStageSkip / TH3BaseStageCommit / TH3BaseStageMouse
 // lived here: press = one node edge, drag = rubber band, release = commit as
 // Path 1 of TH3LockedStep (behind the SHIFT modifier, P-TH3-PB-DRAG). The base
-// is hand-typed now (`inpTH3PivotBasePips`), so there is no gesture, no draft
+// is hand-typed now (`inpTH3BaseRangePips`), so there is no gesture, no draft
 // and no skip. History in git log.
 
 //+------------------------------------------------------------------+
@@ -3802,7 +4100,7 @@ void TH3BaseMarkCommit(const datetime t1, const double p1,
         Print("TH3: base mark ignored - edges less than 1 pip apart, click again.");
         return;   // stay armed on the SAME first edge
     }
-    g_th3PivotBasePips = bpips;
+    g_th3BaseRangePips = bpips;
     s_th3BaseMarkArmed = false;
     s_th3BaseMarkHas1  = false;
     s_bmDragDown = false; s_bmDragMoved = false;
@@ -3926,10 +4224,10 @@ void TH3BaseEditorShow(const datetime t1, const double p1,
 // centre, applies the new height around them; builds the band when missing.
 void TH3BaseEditorSync()
 {
-    if(g_th3PivotBasePips <= 0) { ObjectDelete(0, TH3_BASE_EDITOR); return; }
+    if(g_th3BaseRangePips <= 0) { ObjectDelete(0, TH3_BASE_EDITOR); return; }
     double pip = GetCachedPipSize();
     if(pip <= 0) pip = Point;
-    double h = g_th3PivotBasePips * pip;
+    double h = g_th3BaseRangePips * pip;
     if(h <= 0) return;
     datetime t1 = 0, t2 = 0;
     double center = 0;
@@ -3992,8 +4290,8 @@ void TH3BaseEditorOnDrag()
     if(pip <= 0) pip = Point;
     double bpips = TH3BasePipsFromPrices(a, b, pip);
     if(bpips <= 0) return;
-    if(MathAbs(bpips - g_th3PivotBasePips) < 0.5) return;   // dust
-    g_th3PivotBasePips = bpips;
+    if(MathAbs(bpips - g_th3BaseRangePips) < 0.5) return;   // dust
+    g_th3BaseRangePips = bpips;
     RuntimeSettingsSaveOverridesThrottled();   // OV_PBP now
     UpdateAllTH3Objects();
 }
@@ -4066,8 +4364,8 @@ void TH3BaseEditorOnDelete()
         ChartViewLockRelease();
     }
     if(ObjectFind(0, TH3_BASE_EDITOR) >= 0) return;
-    if(g_th3PivotBasePips <= 0) return;
-    g_th3PivotBasePips = 0.0;
+    if(g_th3BaseRangePips <= 0) return;
+    g_th3BaseRangePips = 0.0;
     RuntimeSettingsSaveOverridesThrottled();
     UpdateAllTH3Objects();
     Print("TH3: base editor deleted - BASE PIPS back to OFF (pattern TF ATR).");
@@ -4519,8 +4817,27 @@ void OnABCDMouseEvent(int id, long lparam, double dparam, string sparam) {
         //
         // The user's rule: whatever door the delete came through, the whole
         // family leaves the chart NOW.
+        //
+        // P-TH3-DEL4 (2026-10-24, ported from MT4) — EXCEPT THE CAPTION, WHICH
+        // IS AN ANSWER. MT4's DEL3 rule existed to keep a caption DROP (routine
+        // maintenance) from wiping a healthy ABCD; because MT5 never delivers
+        // our own drops here, that half has no meaning on this platform. What
+        // survives is the user's half: the plate is now SELECTABLE (TH3ROPlateAt)
+        // precisely so the hand can name the readout, and a hand that names the
+        // readout is saying "this caption is done" — not "delete my pattern".
+        // So a caption member dismisses the readout (rows and plate, latched per
+        // base) and leaves the pattern, its ladder and its zones standing. Every
+        // other door keeps MT5's whole-family rule above.
         string baseName = TH3FamilyBaseOf(sparam);
         if(baseName == "") return;
+        // The family is intact, the hand named the caption: the readout goes,
+        // the pattern stays. (TH3InfoOnMemberDelete re-checks "still gone" and
+        // "rows lit" so our own maintenance can never dismiss anything.)
+        if(TH3IsInfoLabelName(sparam) && TH3FamilyAnchorsAlive(baseName))
+        {
+            TH3InfoOnMemberDelete(sparam, baseName);
+            return;
+        }
         TH3FamilyDeleteAll(baseName);
         ThrottledChartRedraw();
         return;
@@ -5166,15 +5483,19 @@ void TH3_ExportCurrentSample(const string patternName = "")
    double ratioBC_AB = (legAB > 0) ? legBC / legAB : 0.0;
    double ratioCD_BC = (legBC > 0) ? legCD / legBC : 0.0;
    double kFactor = TH3UnifiedK(ratioCD_BC);
-   double motherIn = TH3ManualBaseStep(inpTH3PivotBasePips, pip);
+   double baseIn = TH3ManualBaseStep(inpTH3BaseRangePips, pip);   // 1:1, pips -> price
    int cdBars = TH3ClosedBars(pat.C.time, pat.D.time);
    int ownerTF = TH3ClosedOwnerTF(cdBars);
    double rung = TH3PatternStepRungTF(ownerTF);
    if(rung <= 0) rung = TH3PatternStepRung();
-   double stepMother = (motherIn >= 2.5 * rung) ? (motherIn / 3.0) : motherIn;
-   if(stepMother <= 0) stepMother = rung;
-   double stepPattern = (kFactor > 0) ? legCD / kFactor : 0.0;
-   double baseUnit = CalculateUnifiedMasterStep(legCD, ratioCD_BC, motherIn, rung);
+   //--- P-TH3-BASE-01 (ported from MT4 2026-10-28): the two components come
+   //--- from the formula's OWN owners. The `/3 when >= 2.5*rung` rule had
+   //--- survived HERE as a private copy, so the dataset's Step_Mother column
+   //--- disagreed with the step the chart drew - one input, two numbers.
+   //--- One arithmetic, one owner: TH3Pivots.mqh.
+   double stepBase = TH3StepBaseComponent(baseIn, rung);
+   double stepPattern = TH3StepPatternComponent(legCD, ratioCD_BC);
+   double baseUnit = CalculateUnifiedMasterStep(legCD, ratioCD_BC, baseIn, rung);
    if(baseUnit <= 0)
       baseUnit = (rung > 0) ? rung
                  : ((legCD > 0 ? legCD : MathAbs(pat.B.price - pat.A.price)) * (GetCurrentTH3Frequency() / 100.0));
@@ -5271,14 +5592,14 @@ void TH3_ExportCurrentSample(const string patternName = "")
    row[10] = DoubleToString(pat.D.price, Digits);
    row[11] = IntegerToString(Digits);
    row[12] = DoubleToString(pip, Digits);
-   row[13] = DoubleToString(motherIn / pip, 1);
+   row[13] = DoubleToString(baseIn / pip, 1);
    row[14] = DoubleToString(legAB / pip, 1);
    row[15] = DoubleToString(legBC / pip, 1);
    row[16] = DoubleToString(legCD / pip, 1);
    row[17] = DoubleToString(ratioBC_AB, 3);
    row[18] = DoubleToString(ratioCD_BC, 3);
    row[19] = DoubleToString(kFactor, 3);
-   row[20] = DoubleToString(stepMother / pip, 1);
+   row[20] = DoubleToString(stepBase / pip, 1);
    row[21] = DoubleToString(stepPattern / pip, 1);
    row[22] = DoubleToString(baseUnit / pip, 1);
    row[23] = DoubleToString(lv[0], Digits);
@@ -5376,10 +5697,10 @@ void TH3_ExportCurrentSample(const string patternName = "")
       FileWrite(fh, "  Ratio_CD_BC: " + DoubleToString(ratioCD_BC, 3));
       FileWrite(fh, "  K_Factor: " + DoubleToString(kFactor, 3));
       FileWrite(fh, "MOTHER_PIVOT:");
-      FileWrite(fh, "  Size_Pips: " + DoubleToString(motherIn / pip, 1));
+      FileWrite(fh, "  Size_Pips: " + DoubleToString(baseIn / pip, 1));
       FileWrite(fh, "  Type: \"External_Historical_Shelf\"");
       FileWrite(fh, "FORMULA_OUTPUT:");
-      FileWrite(fh, "  Step_Mother: " + DoubleToString(stepMother / pip, 1));
+      FileWrite(fh, "  Step_Mother: " + DoubleToString(stepBase / pip, 1));
       FileWrite(fh, "  Step_Pattern: " + DoubleToString(stepPattern / pip, 1));
       FileWrite(fh, "  Final_Step_BaseUnit: " + DoubleToString(baseUnit / pip, 1));
       FileWrite(fh, "LADDER_TARGETS:");

@@ -428,6 +428,8 @@ EDrawKind DrawKindOf(const string name)
    if(FibPenIsChild(name)) return DK_NONE;    // P-DRAW-74b: nor the fibo's stacked pen
    if(FibPenFamIsChild(name)) return DK_NONE;   // P-LOOK: nor a look's caps or wash
    if(PenStackIsChild(name)) return DK_NONE;   // P-DRAW-74c: nor the line pen's rows - served, hit and learned never
+   if(PathIsSessionName(name)) return DK_NONE; // P-PATH-END: the LIVE session (preview + its segments) is never served - the plate it would paint then eats the click that finishes the path
+   if(PathIsPreviewName(name)) return DK_NONE; // P-PERF-167: nor the path's in-progress rubber band (its end IS the cursor, so a vertex click would open the strip on it)
    int t = DrawObjectType(name);
    if(t < 0) return DK_NONE;
    return DrawKindOfType(t);
@@ -963,17 +965,41 @@ string DrawSelectedObjectAt(const int px, const int py)
 
 string DrawObjectAt(const int px, const int py)
 {
-   string sel = DrawSelectedObjectAt(px, py);
-   if(sel != "") return sel;
+   // P-PERF-157 (2026-10-29) — ONE WALK, NOT TWO.
+   //
+   // This used to ask `DrawSelectedObjectAt` first (a full ObjectsTotal +
+   // ObjectName walk with a SELECTED read per candidate) and then walk the
+   // SAME list again for the plain hit. MEASURED on the live MT5 chart: a
+   // CLICK cost a constant 47 ms (`chart event CLICK ... strip=47` on every
+   // click in the session), and the strip's only press-edge work is this
+   // function — 2 terminal calls per object on a ~900-object chart, twice.
+   //
+   // The two answers keep their ORDER (a selected shape still wins over a
+   // plain one, and within each class the last created still wins), so this
+   // is the same function with one walk instead of two: the first selected
+   // hit returns at once, the first plain hit is remembered and returned only
+   // after the whole list has been asked about selection.
    int total = ObjectsTotal(0, -1, -1);
+   string plain = "";
    for(int i = total - 1; i >= 0; i--)
    {
       string nm = ObjectName(0, i, -1, -1);
-      if(nm == "" || (DrawIsIndicatorObject(nm) && !DrawIsHRay(nm) && !DrawIsPathSeg(nm))) continue;   // P-HR-04/P-UI-136: rays and paths are served
+      if(nm == "") continue;
+      // P-HR-04/P-UI-136: the indicator's own objects are refused, except the
+      // rays and paths the user really can grab.
+      bool ours = DrawIsIndicatorObject(nm);
+      if(ours && !DrawIsHRay(nm) && !DrawIsPathSeg(nm)) continue;
       if(DrawKindOf(nm) == DK_NONE) continue;
-      if(DrawHitObject(nm, px, py)) return nm;
+      // The SELECTED half is the user's own drawings only — an indicator ray
+      // was never in DrawSelectedObjectAt's list, and it must not enter it now.
+      if(!ours && (bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED))
+      {
+         if(DrawHitObject(nm, px, py) || DrawHitSelectedHandle(nm, px, py)) return nm;
+         continue;   // selected but not under the hand: the plain pass could not hit it either
+      }
+      if(plain == "" && DrawHitObject(nm, px, py)) plain = nm;
    }
-   return "";
+   return plain;
 }
 
 // ══════════════════════════════════════════════════════════════════════════

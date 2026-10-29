@@ -100,16 +100,16 @@
 // matcher picked the NEAREST fresh pivot; the user's eye picks the node the
 // market has visited and leaned on. Three named, tunable choices (not course
 // numbers): a mother's touches, its thickness in steps, and its age.
-#define TH3_MP_TOUCH_W        25.0    // per separate touch after declare
-#define TH3_MP_TOUCH_MAX      6       // touches capped (a wall is not ten walls)
-#define TH3_MP_THICK_W        20.0    // per step of node thickness (capped)
-#define TH3_MP_THICK_MAX      2.0     // thickness credited up to 2 steps
-#define TH3_MP_AGE_BONUS      15.0    // predates the pattern origin: the insider ban
-#define TH3_MP_LAUNCH_BONUS   40.0    // the launch test: X->A leg starts in-node
-#define TH3_MP_TOL_STEP       0.5     // tier 1: half a step (the old tol)
-#define TH3_MP_TOL_WIDE       1.5     // tier 2: one and a half steps
-#define TH3_MP_TOL_SPAN       3.0     // tier 3: three steps (the far mother)
-#define TH3_MP_TOUCH_TOL      0.5     // a touch = within half the node's step
+#define TH3_NB_TOUCH_W        25.0    // per separate touch after declare
+#define TH3_NB_TOUCH_MAX      6       // touches capped (a wall is not ten walls)
+#define TH3_NB_THICK_W        20.0    // per step of node thickness (capped)
+#define TH3_NB_THICK_MAX      2.0     // thickness credited up to 2 steps
+#define TH3_NB_AGE_BONUS      15.0    // predates the pattern origin: the insider ban
+#define TH3_NB_LAUNCH_BONUS   40.0    // the launch test: X->A leg starts in-node
+#define TH3_NB_TOL_STEP       0.5     // tier 1: half a step (the old tol)
+#define TH3_NB_TOL_WIDE       1.5     // tier 2: one and a half steps
+#define TH3_NB_TOL_SPAN       3.0     // tier 3: three steps (the far mother)
+#define TH3_NB_TOUCH_TOL      0.5     // a touch = within half the node's step
 
 // One found pivot, on one timeframe.
 //
@@ -724,14 +724,14 @@ double CalculateDynamicPivotScore(const TH3PivotSix &piv, const double targetPri
 //| to the reference bar, on the pivot's OWN tf. Returns 0 when the  |
 //| read fails — absence, never a guess. Pure: no objects.           |
 //+------------------------------------------------------------------+
-int TH3MotherTouches(const int tf, const double level, const datetime confirmTime,
+int TH3NestedBaseTouches(const int tf, const double level, const datetime confirmTime,
                      const datetime tRef, const double step)
 {
     if(tf <= 0 || level <= 0 || step <= 0 || tRef <= confirmTime) return 0;
     int cBar = iBarShift(NULL, tf, confirmTime);
     int rBar = iBarShift(NULL, tf, tRef);
     if(cBar < 0 || rBar < 0 || rBar >= cBar) return 0;
-    double tol = TH3_MP_TOUCH_TOL * step;
+    double tol = TH3_NB_TOUCH_TOL * step;
     int touches = 0;
     bool inside = false;
     for(int j = cBar - 1; j >= rBar; j--)
@@ -754,7 +754,7 @@ int TH3MotherTouches(const int tf, const double level, const datetime confirmTim
 //| market lifted off is a mother even when the exact open is a bar  |
 //| beside it. Pure: no objects, no reads beyond the zone test.      |
 //+------------------------------------------------------------------+
-bool TH3MotherLaunch(const double lo, const double hi,
+bool TH3NestedBaseLaunch(const double lo, const double hi,
                      const double legStart, const double legEnd)
 {
     if(lo <= 0 || hi <= 0 || hi < lo || legStart <= 0) return false;
@@ -774,7 +774,7 @@ bool TH3MotherLaunch(const double lo, const double hi,
 //| - distance, in step units (a near tie still breaks nearer)       |
 //| Score is bounded in its parts; the matcher compares totals.      |
 //+------------------------------------------------------------------+
-double TH3MotherScore(const TH3PivotSix &piv, const double targetPrice,
+double TH3NestedBaseScore(const TH3PivotSix &piv, const double targetPrice,
                       const int tf_structure, const int tf_macro,
                       const double refStep, const int touches,
                       const double nodeStep, const bool launchOK,
@@ -792,16 +792,16 @@ double TH3MotherScore(const TH3PivotSix &piv, const double targetPrice,
     else                            score += 12.0;
     if(piv.mitigated) score -= 12.0;    // mitigated, not disqualified
 
-    int t = touches; if(t > TH3_MP_TOUCH_MAX) t = TH3_MP_TOUCH_MAX;
-    score += t * TH3_MP_TOUCH_W;
+    int t = touches; if(t > TH3_NB_TOUCH_MAX) t = TH3_NB_TOUCH_MAX;
+    score += t * TH3_NB_TOUCH_W;
 
     double thickSteps = 0;
     if(nodeStep > 0) thickSteps = MathAbs(piv.price - piv.keyPrice) / nodeStep;
-    if(thickSteps > TH3_MP_THICK_MAX) thickSteps = TH3_MP_THICK_MAX;
-    score += thickSteps * TH3_MP_THICK_W;
+    if(thickSteps > TH3_NB_THICK_MAX) thickSteps = TH3_NB_THICK_MAX;
+    score += thickSteps * TH3_NB_THICK_W;
 
-    if(predatesOrigin) score += TH3_MP_AGE_BONUS;
-    if(launchOK)       score += TH3_MP_LAUNCH_BONUS;
+    if(predatesOrigin) score += TH3_NB_AGE_BONUS;
+    if(launchOK)       score += TH3_NB_LAUNCH_BONUS;
 
     if(refStep > 0) {
         double distSteps = MathAbs(piv.price - targetPrice) / refStep;
@@ -819,7 +819,7 @@ double TH3MotherScore(const TH3PivotSix &piv, const double targetPrice,
 //| tolerance is a LADDER, not a gate: a candidate inside any tier   |
 //| competes on score; the tiers only decide who gets to compete.    |
 //+------------------------------------------------------------------+
-bool TH3MotherPivotAt(const datetime tRef, const double pRef,
+bool TH3NestedBasePivotAt(const datetime tRef, const double pRef,
                       const bool wantHigh, const double tol,
                       TH3PivotSix &out,
                       const datetime anchorTime = 0,
@@ -848,9 +848,9 @@ bool TH3MotherPivotAt(const datetime tRef, const double pRef,
     // the score decides. Tier 1 = the caller's own tol (backward-compat
     // with the old single-tol callers and the §9 tests), tier 2/3 = the
     // wide tiers that reach the FAR mother the old code could not see.
-    double tol1 = MathMax(tol, TH3_MP_TOL_STEP * step);
-    double tol2 = MathMax(tol1, TH3_MP_TOL_WIDE * step);
-    double tol3 = MathMax(tol2, TH3_MP_TOL_SPAN * step);
+    double tol1 = MathMax(tol, TH3_NB_TOL_STEP * step);
+    double tol2 = MathMax(tol1, TH3_NB_TOL_WIDE * step);
+    double tol3 = MathMax(tol2, TH3_NB_TOL_SPAN * step);
 
     datetime aEff = (anchorTime > 0 ? anchorTime : tRef);
     bool found = false;
@@ -880,7 +880,7 @@ bool TH3MotherPivotAt(const datetime tRef, const double pRef,
             double d = MathAbs(c.price - pRef);
             if(d > tol3) continue;          // the ladder's widest tier
             // the motherness score decides, not the gate:
-            int touches = TH3MotherTouches(c.tf, c.price, c.confirmTime, tRef, step);
+            int touches = TH3NestedBaseTouches(c.tf, c.price, c.confirmTime, tRef, step);
             // the launch test needs the leg's two ends. Inside the matcher the
             // only leg we know is anchor -> D (pRef): the near end is the
             // anchor's price — unknowable from a time alone — so the matcher
@@ -889,11 +889,11 @@ bool TH3MotherPivotAt(const datetime tRef, const double pRef,
             // arrives here as the two optional leg params below (P-TH3-D4).
             double legStart = (launchAnchorPrice > 0 ? launchAnchorPrice : pRef);
             double legEnd   = pRef;
-            bool launchOK = TH3MotherLaunch(MathMin(c.price, c.keyPrice),
+            bool launchOK = TH3NestedBaseLaunch(MathMin(c.price, c.keyPrice),
                                             MathMax(c.price, c.keyPrice),
                                             legStart, legEnd);
             bool predates = (c.time < aEff);
-            double s = TH3MotherScore(c, pRef, tf_structure, tf_macro, refStep,
+            double s = TH3NestedBaseScore(c, pRef, tf_structure, tf_macro, refStep,
                                       touches, step, launchOK, predates);
             if(s > bestScore || (s == bestScore && d < bestDist))
             { bestScore = s; bestDist = d; out = c; found = true; }
@@ -1661,60 +1661,16 @@ bool TH3RealDAt(const datetime tC, const double pC, const bool legDown,
 }
 
 //+------------------------------------------------------------------+
-//| P-TH3-LOCK (2026-09-19) — PATH 1 OF THE LOCKED STEP: THE NODE.   |
-//| The mother pivot whose node D collided with carries its own      |
-//| step: |key_line - node_edge| — the node's thickness itself. The  |
-//| matcher finds the mother, this reads its node. Returns 0 when no |
-//| mother answers (absence, never a guess). Pure domain.            |
+//| P-TH3-BASE-02 (2026-10-24, ported from MT4) — TWO DEAD /3 READERS |
+//| DELETED.                                                          |
+//|                                                                   |
+//| `TH3NodeStepAt` (the node's own thickness as a step) and          |
+//| `TH3MacroSpanStep` (|D - wick| / 3) were both left behind by       |
+//| P-TH3-STEP-16 when it retired the fragmented synthesis: a grep of  |
+//| the whole tree found the definitions and no caller in the product, |
+//| on either side. They were the last place a step could be built by  |
+//| dividing, so they go with the division they carried.               |
 //+------------------------------------------------------------------+
-double TH3NodeStepAt(const datetime tRef, const double pRef, const bool wantHigh,
-                     const double tol, TH3PivotSix &out,
-                     const datetime anchorTime = 0,
-                     const double refStep = 0.0,
-                     const bool allowFlip = false,
-                     const double launchAnchorPrice = 0.0)
-{
-    // P-TH3-STEP-12b (2026-09-21) — ONE matcher, ONE set of parameters.
-    // The synthesis used to call this with every optional at its default
-    // (no anchor, no refStep, no flip) while the mother-zone drawing on the
-    // same D called TH3MotherPivotAt with anchor=A, refStep=closedStep,
-    // allowFlip=true and the A-origin leg. Two matchers for one concept with
-    // different gates can only disagree: the chart drew a mother the formula
-    // reported as zero — the user's «مادر صفر» while a blue box sat on the
-    // chart. Every caller now hands in the same terms, so a mother the chart
-    // draws is a mother this measures, and vice versa.
-    // P-TH3-STEP-13b: a MISS clears `out` (valid=false). The matcher only
-    // writes `out` on a hit, so without this the caller's struct keeps its
-    // garbage and TH3MacroSpanStep reads a phantom wick (the caption's giant
-    // digit rows on XAUUSD M15).
-    if(!TH3MotherPivotAt(tRef, pRef, wantHigh, tol, out,
-                         anchorTime, refStep, allowFlip, launchAnchorPrice))
-    {
-        out.valid = false; out.time = 0; out.price = 0; out.keyPrice = 0;
-        return 0.0;
-    }
-    double s = MathAbs(out.price - out.keyPrice);
-    return (s > 0 ? s : 0.0);
-}
-
-//+------------------------------------------------------------------+
-//| P-TH3-STEP-13 — MACRO SPAN: WICK, NOT BODY.                       |
-//| The unified formula: Step = |collision - wick extremum| / k. The  |
-//| pivot's extreme is out.price (the wick tip); keyPrice is the body |
-//| line (cond-4). XAUUSD M15: body 4363 vs wick 4344 — 19 pips of    |
-//| lie when the body is read. |D - price|/3 = 1020/3 = 340 pips.     |
-//| Pure domain: numbers in, one number out. Pinned `macrospan:` in   |
-//| Biotak_TH3_Test.mq4.                                              |
-//+------------------------------------------------------------------+
-double TH3MacroSpanStep(const double pRef, const TH3PivotSix &mp)
-{
-    if(pRef <= 0 || !mp.valid || mp.price <= 0) return 0.0;
-    double span = MathAbs(pRef - mp.price);
-    // Garbage guard: a span between two positive prices is always below the
-    // bigger one — a phantom wick (uninitialised struct) reads astronomic.
-    if(span <= 0 || span >= pRef) return 0.0;
-    return span / 3.0;
-}
 
 //+------------------------------------------------------------------+
 //| P-TH3-PB-MAN (2026-09-21) — THE HAND-TYPED BASE, AS A PRICE.    |
@@ -1856,22 +1812,34 @@ double TH3UnifiedK(const double ratio)
    return 1.0;   // major extension: the leg itself is the unit
 }
 
-double CalculateUnifiedMasterStep(const double legCD, const double ratio,
-                                  const double motherPivotInput, const double thRung)
+// Step 1 of the formula: the base component, exactly as the trader entered it.
+// P-TH3-BASE-02 (2026-10-28, ported from MT4): the `/3` "macro span" branch is
+// gone. It read a hand's own base as a span three times too wide whenever the
+// number was >= 2.5 x the rung, so one input produced two different steps - and
+// the trader's own number is 1:1 by definition (his «مبنا رو دستی دادم»).
+double TH3StepBaseComponent(const double baseInput, const double thRung)
 {
-   // 1. Mother Pivot Component (Mandatory Anchor)
-   // If input is macro span (>= 2.5 * thRung), divide by 3; otherwise it is knot size:
-   double step_mother = (motherPivotInput >= 2.5 * thRung) ? (motherPivotInput / 3.0) : motherPivotInput;
-   if(step_mother <= 0) step_mother = thRung; // fallback guard only
+   if(baseInput > 0.0) return baseInput;   // 1:1 - the hand's own number
+   return (thRung > 0.0) ? thRung : 0.0;   // nothing entered: the fractal rung
+}
 
-   // 2. ABCD Pattern Component
+// Step 2 of the formula: the leg quantised by its own retrace class.
+double TH3StepPatternComponent(const double legCD, const double ratio)
+{
+   if(legCD <= 0.0) return 0.0;
    double k = TH3UnifiedK(ratio);
+   return (k > 0.0) ? (legCD / k) : legCD;
+}
 
-   double step_pattern = legCD / k;
+// Step 3: the two components resonate. One formula, every chart.
+double CalculateUnifiedMasterStep(const double legCD, const double ratio,
+                                  const double baseInput, const double thRung)
+{
+   double step_base    = TH3StepBaseComponent(baseInput, thRung);
+   double step_pattern = TH3StepPatternComponent(legCD, ratio);
 
-   // 3. THE UNIFIED GEOMETRIC RESONANCE (one single formula for ALL charts):
-   double finalStep = MathSqrt(step_mother * step_pattern);
-   if(finalStep <= 0.0) finalStep = (step_pattern > 0) ? step_pattern : thRung;
+   double finalStep = MathSqrt(step_base * step_pattern);
+   if(finalStep <= 0.0) finalStep = (step_pattern > 0.0) ? step_pattern : thRung;
 
    return finalStep;
 }
@@ -1887,7 +1855,7 @@ double CalculateUnifiedMasterStep(const double legCD, const double ratio,
 //|                                                                    |
 //| P-TH3-PB-MAN (2026-09-21): NOTHING IS DRAWN ANY MORE. Path 1 is   |
 //| the hand-typed base (`TH3ManualBaseStep` above, from               |
-//| `inpTH3PivotBasePips`); the caller passes nodeStep = 0 — the      |
+//| `inpTH3BaseRangePips`); the caller passes nodeStep = 0 — the      |
 //| detector's own candidate no longer answers here. The function      |
 //| itself is unchanged (numbers in, one number out), so the pins      |
 //| below still hold whatever the source of pbStep is.                 |

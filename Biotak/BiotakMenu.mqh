@@ -2486,21 +2486,23 @@ int SubPageCount()
 {
    if(!SubIsPaged()) return 1;
    int ps = SubPageSize();
-   return (CAT_COUNT + ps - 1) / ps;
+   return (CircCellCount() + ps - 1) / ps;   // TH3TOOL-OFF: pages hold SLOTS, not catalog indices
 }
 // Only the items on the current page are real; the rest park off-screen.
 bool SubItemOnPage(const int i)
 {
+   int cell = CircCatCell(i);   // TH3TOOL-OFF: -1 = retired cell, no slot at all
+   if(cell < 0) return false;
    if(!SubIsPaged()) return true;
-   return ((i / SubPageSize()) == g_ToolsPage);
+   return ((cell / SubPageSize()) == g_ToolsPage);
 }
 int SubVisibleRows()
 {
    int n;
    if(!SubIsPaged())
-      n = CAT_COUNT;
+      n = CircCellCount();                                  // TH3TOOL-OFF: slots, not indices
    else
-      n = CAT_COUNT - g_ToolsPage * SubPageSize();
+      n = CircCellCount() - g_ToolsPage * SubPageSize();
    int rows = (n + SUB_GRID_COLS - 1) / SUB_GRID_COLS;
    int cap  = SubPageRowsCap();
    if(rows < 1)   return 1;
@@ -2570,18 +2572,17 @@ void SubPlaceItem(const int i, int &x, int &y)
    int cw, ch, ox, oy;
    SubChartRect(cw, ch, ox, oy);
    int mode = SubMode();
-
    if(mode == SUB_MODE_GRID || mode == SUB_MODE_GRID_PAGED)
    {
       if(!SubItemOnPage(i)) { x = CIRC_HIDE_POS; y = CIRC_HIDE_POS; return; }
       int px, py, pw, ph;
       SubPanelRect(px, py, pw, ph);
-      int k = SubIsPaged() ? (i % SubPageSize()) : i;
+      int cell = CircCatCell(i);                              // TH3TOOL-OFF: the SLOT lays the tile
+      int k = SubIsPaged() ? (cell % SubPageSize()) : cell;
       x = px + SUB_GRID_PAD + (k % SUB_GRID_COLS) * SUB_GRID_PITCH + SUB_CELL_VIS / 2;
       y = py + SUB_GRID_HDR + (k / SUB_GRID_COLS) * SUB_GRID_PITCH + SUB_CELL_VIS / 2;
       return;
    }
-
    if(mode == SUB_MODE_RAIL)
    {
       int ux = 0, uy = 0;
@@ -2762,15 +2763,11 @@ string SubPagerDot(const int k) { return g_UI.btnPrefix + "SubPagerDot" + Intege
 
 void SubChromeDelete()
 {
-   ObjectDelete(0, SubPanelBg());
-   ObjectDelete(0, SubPanelDot());
-   ObjectDelete(0, SubPanelHdr());
-   ObjectDelete(0, SubPanelCnt());
-   ObjectDelete(0, SubPagerPrev());
-   ObjectDelete(0, SubPagerNext());
-   ObjectDelete(0, SubPagerTxt());
-   for(int k = 0; k < SUB_PAGER_DOTS_MAX; k++)
-      ObjectDelete(0, SubPagerDot(k));
+   // P-PERF-155 (2026-10-28) — MT5-ONLY: ONE SWEEP, NOT 13 DELETES. Every name
+   // in the eight builders above is btnPrefix + "Sub" + Panel|Pager, so the
+   // prefix is exactly this chrome family — the same scope :969 and DeleteMenu
+   // already sweep. MT4 keeps the per-name list.
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Sub");
 }
 
 // The panel backdrop: one bitmap label, offset by the BMP's baked shadow margin
@@ -3514,18 +3511,16 @@ void CreateToolsMenu()
    // cannot coexist with the main ring at r=64: 44px buttons + their glow overlap.
    // P-UI-161: the sweep is RING_MAX_SEATS, not the live count — a star toggled
    // while the Tools menu is open must not leave the previous set's tail behind.
-   for(int i = 0; i < RING_MAX_SEATS; i++)
-   {
-      // P-UI-163c: the WHOLE seat family, the way DeleteRing's own sweep names it —
-      // the badge objects (alive while the feature is on) are part of the seat, so
-      // leaving them behind was the same bare-artifact class one layer down. The
-      // restore path is already complete: DeleteToolsMenu's CircCreateItem(i) walks
-      // CircCreateBadge (P-UI-163's own create-if-missing).
-      ObjectDelete(0, CircIcon(i));
-      ObjectDelete(0, CircBg(i));
-      ObjectDelete(0, CircBadgeBg(i));
-      ObjectDelete(0, CircBadgeTxt(i));
-   }
+   // P-PERF-155 (2026-10-28) — MT5-ONLY: the same three prefix sweeps DeleteRing
+   // now uses (the seat family is btnPrefix + CircIcon/CircBg/CircBadge by
+   // construction, and CircIndexFromName says so); 68 per-name deletes on the
+   // gesture that OPENS the fan is the class the picker measured at ~1.2ms each.
+   // P-UI-163c stays satisfied: the badges die with the seat they belong to, and
+   // the restore path is already complete — DeleteToolsMenu's CircCreateItem(i)
+   // walks CircCreateBadge (P-UI-163's own create-if-missing).
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "CircIcon");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "CircBg");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "CircBadge");
    SubChromeCreate();                           // panel backdrop + header + pager
    for(int t = 0; t < CAT_COUNT; t++) ToolsCreateItem(t);
    DrawStripDiagEmit(StringFormat("[P-UI-168] fan open=1 cells=%d placed=%d", CAT_COUNT, CircPlacedCountLive()));
@@ -3536,14 +3531,13 @@ void CreateToolsMenu()
 // wiped the ring, and recreating it here would leak objects onto the chart.
 void DeleteToolsMenu(const bool restoreRing = true)
 {
-   for(int t = 0; t < CAT_COUNT; t++)
-   {
-      ObjectDelete(0, ToolsBg(t));
-      ObjectDelete(0, ToolsIcon(t));
-      ObjectDelete(0, ToolsBadgeBg(t));
-      ObjectDelete(0, ToolsBadgeTxt(t));
-      ObjectDelete(0, ToolsStar(t));   // P-UI-161: the membership mark dies with its cell
-   }
+   // P-PERF-155 (2026-10-28) — MT5-ONLY: ONE SWEEP, NOT 80 DELETES. CAT_COUNT × 5
+   // per-name ObjectDelete on the gesture that CLOSES the fan; DeleteMenu below
+   // already kills this exact family with one `btnPrefix + "Tools"` sweep, and
+   // ToolsIndexFromName is the file's own statement that ToolsBg/ToolsIcon/
+   // ToolsBadge/ToolsBadgeTxt/ToolsStar (P-UI-161's membership mark) are the
+   // whole cell family. MT4 keeps the loop — there each delete is in-process.
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");
    SubChromeDelete();                           // panel + header + pager + dots
    g_ToolsOpen = false;
    g_ToolsPage = 0;                             // next open starts on page 1 again
@@ -3572,14 +3566,10 @@ void SubRebuild()
 {
    if(!g_ToolsOpen) return;
    SubChromeDelete();
-   for(int t = 0; t < CAT_COUNT; t++)
-   {
-      ObjectDelete(0, ToolsBg(t));
-      ObjectDelete(0, ToolsIcon(t));
-      ObjectDelete(0, ToolsBadgeBg(t));
-      ObjectDelete(0, ToolsBadgeTxt(t));
-      ObjectDelete(0, ToolsStar(t));   // P-UI-161
-   }
+   // P-PERF-155 (2026-10-28) — MT5-ONLY: the same one sweep as DeleteToolsMenu.
+   // This path runs on a resize/TF-shape change under the pointer, so its 80
+   // deletes were the ones the user felt as a stutter, not as a close.
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "Tools");
    // A shorter chart pages MORE, so the current page may no longer exist.
    int pages = SubPageCount();
    if(g_ToolsPage > pages - 1) g_ToolsPage = pages - 1;
@@ -3636,15 +3626,22 @@ void CircRelayoutIfNeeded()
 void DeleteRing()
 {
    s_circChromeGen++;   // P-PERF-55: the family is gone - a later apply must not be skipped
-   // P-UI-161: the sweep is RING_MAX_SEATS, not the live count — a name a previous
-   // (larger) mask wrote must not survive the star that removed its seat.
-   for(int i = 0; i < RING_MAX_SEATS; i++)
-   {
-      ObjectDelete(0, CircIcon(i));
-      ObjectDelete(0, CircBg(i));
-      ObjectDelete(0, CircBadgeBg(i));
-      ObjectDelete(0, CircBadgeTxt(i));
-   }
+   // P-PERF-155 (2026-10-28) — MT5-ONLY: THREE SWEEPS, NOT 68 DELETES.
+   // The same law the picker teardown measured the day before: 576 unguarded
+   // ObjectDelete calls priced at 699ms on a live mouse move (`[mvus-ds]
+   // total=700 press=699`), while this function's own owner DeleteMenu timed
+   // its three prefix sweeps at `circ=0 tools=0 sub=0` ms. Per-call terminal
+   // work, not the event — and every name here is btnPrefix + CircIcon/CircBg/
+   // CircBadge + a row number, so the three prefixes cover the seat family
+   // exactly: the orb (CircOrb*), the chip buttons (CircBtn) and the tooltip
+   // (CircTip*) keep their names and stay. P-UI-161's intent gets stronger, not
+   // weaker: a sweep reaches a tail a previous, larger mask wrote, because it
+   // never asks how many seats there were. MT4 keeps the loop — there each
+   // delete is in-process. `CircIndexFromName` is the file's own statement that
+   // these three prefixes ARE the seat family, so nothing here widens a scope.
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "CircIcon");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "CircBg");
+   ObjectsDeleteAll(0, g_UI.btnPrefix + "CircBadge");
 }
 
 void DeleteMenu()
@@ -5143,14 +5140,20 @@ int RingFeatureClick(const int feat)
    //   return REFRESH_NONE;
    //}
    // TH3TOOL-ON (2026-09-19): restored from TH3TOOL-OFF.
-   else if(feat == CIR_TH3)
-   {
-      // P-UI-96: the press ARMS the AB=CD draw. One owner for the whole
-      // decision (enable + mode repairs + the session itself) lives in
-      // `CircArmTH3Draw`; the ENABLED switch this branch used to flip is the
-      // TH3 TOOL card's row 0.
-      refreshFlags = CircArmTH3Draw();
-   }
+   // TH3TOOL-OFF (2026-10-24): parked again, and this branch is the tool's THIRD
+   // and last way in. The cell that could press it has no seat (`CircCatRetired`
+   // in BiotakMenu_Ring.mqh) and no grid slot (`CircCatCell`), so `feat` can
+   // never arrive as CIR_TH3 — commented for that guarantee, not because a live
+   // press is expected. `CircArmTH3Draw` keeps its body: it is the arm owner the
+   // day this comes back, and nothing else calls it.
+   //else if(feat == CIR_TH3)
+   //{
+   //   // P-UI-96: the press ARMS the AB=CD draw. One owner for the whole
+   //   // decision (enable + mode repairs + the session itself) lives in
+   //   // `CircArmTH3Draw`; the ENABLED switch this branch used to flip is the
+   //   // TH3 TOOL card's row 0.
+   //   refreshFlags = CircArmTH3Draw();
+   //}
     else if(feat == CIR_HTF)
     {
        SetHTFVisible(!g_UI.showHTF);

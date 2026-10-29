@@ -21,6 +21,9 @@
 #ifndef EVENT_HANDLERS_MQH
 #define EVENT_HANDLERS_MQH
 
+// P-BK-107: the knot's own read, witnessed - it needs DrawStripDiagEmit, so it sits here.
+#include "BaseKnot_Witness.mqh"
+
 // P-BK-113: the selected knot's owner-TF ATRs (ATR is above BaseKnotTool, so the walk
 // lives here — MT5 keeps the MT4 include site, flattened into this hub).
 #include "BaseKnot_Owner.mqh"
@@ -220,6 +223,58 @@ void CustomPriceMarkerSync()
 // resurrected handle over a mode that no longer owns a ladder is the bug).
 void HandsetMarkersRide()
 {
+    // P-PERF-157e (2026-10-29) — THE RIDE IS A RE-PROJECTION, NOT A HEARTBEAT.
+    //
+    // MEASURED on the live MT5 chart (XAUUSDb,H4, 10:03:15..10:03:38, the
+    // `[mvus]` line with the P-DIAG-164 stamps): `hs=9..62 ms cp=0 rest=0` on
+    // plain mouse moves, i.e. THIS call owned the entire residual the four
+    // per-tool stamps could not name. It ran on every move: three markers,
+    // each paying four chart reads, an ObjectFind, a BMPFILE read, two
+    // distance reads and an UNGUARDED ZORDER write — whether or not anything
+    // had moved. A marker's screen position is a function of (chart box,
+    // price scale, price, latch) and nothing else, so the ride asks that key
+    // first and returns when it is unchanged: five reads instead of ~thirty,
+    // and zero writes on a still frame. A pan/zoom changes the scale, a
+    // resize changes the box, and a reveal / mute / arm is a latch change —
+    // each still lands here on the very event that changed it.
+    static bool   s_rPrimed  = false;
+    static bool   s_rHidden  = false;
+    static bool   s_rLines   = false;
+    static bool   s_rArmed   = false;
+    static bool   s_rCpArmed = false;
+    static bool   s_rCpShown = false;
+    static bool   s_rS1Shown = false;
+    static bool   s_rCreated = false;
+    static int    s_rType    = -1;
+    static int    s_rW = 0, s_rH = 0;
+    static double s_rMin = 0.0, s_rMax = 0.0;
+    static double s_rCp = 0.0, s_rA = 0.0, s_rB = 0.0;
+
+    bool   rHidden  = IsIndicatorHidden();
+    bool   rLines   = g_linesVisible;
+    bool   rArmed   = g_s1LinesArmed;
+    bool   rCpArmed = g_cpLineArmed;
+    bool   rCpShown = g_cpHandleShown;
+    bool   rS1Shown = g_s1HandleShown;
+    bool   rCreated = g_customPriceLineCreated;
+    int    rType    = (int)g_thStartPointType;
+    int    rW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+    int    rH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+    double rMin = ChartGetDouble(0, CHART_PRICE_MIN);
+    double rMax = ChartGetDouble(0, CHART_PRICE_MAX);
+    double rCp  = (rCreated ? ObjectGetDouble(0, g_customPriceHorizontalLineName, OBJPROP_PRICE, 0) : 0.0);
+    double rA   = g_s1MarkAbovePrice;
+    double rB   = g_s1MarkBelowPrice;
+    if(s_rPrimed && rHidden == s_rHidden && rLines == s_rLines && rArmed == s_rArmed &&
+       rCpArmed == s_rCpArmed && rCpShown == s_rCpShown && rS1Shown == s_rS1Shown &&
+       rCreated == s_rCreated && rType == s_rType && rW == s_rW && rH == s_rH &&
+       rMin == s_rMin && rMax == s_rMax && rCp == s_rCp && rA == s_rA && rB == s_rB)
+       return;
+    s_rPrimed = true;  s_rHidden = rHidden;  s_rLines = rLines;   s_rArmed = rArmed;
+    s_rCpArmed = rCpArmed; s_rCpShown = rCpShown; s_rS1Shown = rS1Shown;
+    s_rCreated = rCreated; s_rType = rType;   s_rW = rW;         s_rH = rH;
+    s_rMin = rMin;     s_rMax = rMax;       s_rCp = rCp;        s_rA = rA; s_rB = rB;
+
     CustomPriceMarkerSync();
     if(g_thStartPointType != TH_START_POINT_CUSTOM_PRICE)
     {
@@ -1384,15 +1439,50 @@ int CustomPriceResolveSource(double &priceOut, bool &overrideFlagOut)
 //|                                                                  |
 //| Cost: one chart enumeration at init only (no per-frame work).     |
 //+------------------------------------------------------------------+
-bool TH3SiblingUnitOnChart()
+// P-ARCH-03b (2026-10-29) — A RELOAD IS NOT A DUPLICATE, AND IT MUST NOT KILL
+// THE UNIT THAT IS ARRIVING.
+//
+// `th3 > 1` means "two entries in THIS chart's list spell our own name". That is
+// the right question for two copies somebody really attached, and it is the
+// WRONG answer during every reload: MT5 starts the NEW instance before it runs
+// the OLD one's OnDeinit, so a template apply / parameter change / terminal
+// restart leaves the outgoing copy in the list for the handful of milliseconds
+// the incoming instance spends in OnInit. MEASURED on the live terminal
+// (AUDUSDb,H1 today): 09:45:04.310 and 10:32:20.741 both read
+// `ui skins warmed` + `leftovers@oninit` (the NEW unit's own init) and then, in
+// the SAME millisecond, P-ARCH-03 and an `OnDeinit reason=8` — reason 8 is
+// REASON_INITFAILED, i.e. that deinit was the refused unit's OWN. Three of the
+// three P-ARCH-03 lines in the whole day are that shape, all on one chart, and
+// each one left the chart with NO unit at all — the report the user reads as
+// «یکی روی اون یکی اثر میذاره».
+//
+// So the same-name case no longer refuses at init. It arms a LATE re-check
+// (first pump, ~250 ms after the reload has settled): a real second attachment
+// is still there, a reload is gone. The FOREIGN-sibling case (Full + Lite on one
+// chart, a name that is not ours) stays an immediate refusal — that pair is
+// permanent and incompatible, not a hand-off.
+//
+// The two instances on TWO charts are untouched by any of this: the oracle is
+// `ChartIndicatorsTotal(0, 0)`, the CURRENT chart's own list, so a unit on
+// EURUSD can never see, count or refuse a unit on XAUUSD. Everything the two
+// instances share through the terminal is chart-keyed on purpose (GlobalVariables
+// `Biotak_*_<chartId>` / `Biotak_HTF_<chartId>_*`, engine resources
+// `BTRS_<ChartID()>_*`, the adoption/name-scheme stamps), and chart objects are
+// per-chart by construction — so the two units are separate fingerprints by
+// design, and nothing in this function is what keeps them apart.
+#define P_ARCH03_SETTLE_MS 250
+bool g_siblingDupPending = false;   // same-name duplicate seen at init; re-check owed
+
+int TH3SiblingScanNames(string &names, bool &foreignSibling)
 {
    string mine = "Biotak Trigger TH3";
    #ifdef BUILD_LITE
       mine = mine + " Lite";
    #endif
    int total = ChartIndicatorsTotal(0, 0);
-   int th3 = 0, other = 0;
-   string names = "";
+   int th3 = 0;
+   names = "";
+   foreignSibling = false;
    int mineLen = StringLen(mine);
    for(int i = 0; i < total; i++)
    {
@@ -1404,20 +1494,51 @@ bool TH3SiblingUnitOnChart()
       names += nm;
       // A DIFFERENT UNIT is a name that does not end with ours. The folder prefix
       // (`BiotakProject\`) is not part of the identity, the tail is.
-      if(StringLen(nm) < mineLen || StringSubstr(nm, StringLen(nm) - mineLen) != mine) other++;
+      if(StringLen(nm) < mineLen || StringSubstr(nm, StringLen(nm) - mineLen) != mine) foreignSibling = true;
    }
-   // `other > 0`: a sibling of the other unit (or the same-name file from another
-   // folder) is attached. `th3 > 1`: two entries that BOTH spell our own name —
-   // that is two attachments of one unit and the same interference.
-   if(other > 0 || th3 > 1)
+   return th3;
+}
+
+void TH3SiblingReport(const int th3, const string names, const bool refused)
+{
+   Print("[E][ARCH] P-ARCH-03: ", th3, " builds of this indicator on ONE chart: ", names,
+         " — they paint the SAME object names, so each one deletes what the other drew "
+         "(missing price bands, a countdown re-created every second, two writers on the "
+         "TRex card's colours). ",
+         (refused ? "This unit will not load. Remove all but ONE and re-add it."
+                  : "Both are live; remove all but ONE."));
+}
+
+bool TH3SiblingUnitOnChart()
+{
+   string names = "";
+   bool foreignSibling = false;
+   const int th3 = TH3SiblingScanNames(names, foreignSibling);
+   // A foreign sibling is a permanent pair (Full + Lite): refuse, as before.
+   if(foreignSibling)
    {
-      Print("[E][ARCH] P-ARCH-03: ", th3, " builds of this indicator on ONE chart: ", names,
-            " — they paint the SAME object names, so each one deletes what the other drew "
-            "(missing price bands, a countdown re-created every second, two writers on the "
-            "TRex card's colours). This unit will not load. Remove all but ONE and re-add it.");
+      TH3SiblingReport(th3, names, true);
       return true;
    }
+   // Our own name twice is EITHER a real second attachment OR the outgoing copy
+   // of a reload (P-ARCH-03b above). Armed, never refused, decided late.
+   if(th3 > 1) g_siblingDupPending = true;
    return false;
+}
+
+// The late answer. Called from CoopPump (both entries): one bool compare once it
+// has run, and it runs once per attach.
+void TH3SiblingUnitLateCheck()
+{
+   if(!g_siblingDupPending) return;
+   static uint s_since = 0;
+   if(s_since == 0) { s_since = GetTickCount(); return; }          // let the reload settle
+   if(GetTickCount() - s_since < (uint)P_ARCH03_SETTLE_MS) return;
+   g_siblingDupPending = false;
+   string names = "";
+   bool foreignSibling = false;
+   const int th3 = TH3SiblingScanNames(names, foreignSibling);
+   if(th3 > 1 || foreignSibling) TH3SiblingReport(th3, names, false);
 }
 
 // P-UI-142 — LATE discrete restore (Full only, from InitializeUISupport AFTER the
@@ -2018,6 +2139,15 @@ int OnInitHandler() {
     // follow invisibly, and the perceived switch lag drops by the full spike.
     // A fresh attach keeps the inline order - MT4's shape, legacy shapes exist
     // before frame one - so this diverges only on the MT5 relaunch path.
+    // P-MT5-LEGPREVIEW (2026-10-24): the leg's state starts from nothing on EVERY
+    // attach. The preview object is not namespaced, so an instance that died
+    // mid-draw (a crash, a terminal close) leaves `LM_prev_Line` on the chart — and
+    // the old session's latches must not be inherited by a fresh run. This runs
+    // HERE, not in the deferred tail: a preview cleanup 250 ms after the switch is
+    // a frame the user can see.
+#ifndef BUILD_LITE
+    LegMeasureOnInit();
+#endif
     if(deferHeavyInit) {
         g_attachTailPending = true;   // the entries' OnTimer -> TailRestoreDeferred()
     } else {
@@ -2280,6 +2410,9 @@ void OnDeinitHandler(const int reason) {
 #endif
     BaseKnotOnDeinit(reason);   // P-BK-02: never leave scroll locked / ghost preview behind
     HRayOnDeinit(reason); PathOnDeinit(reason);   // P-HR-01 / P-UI-136: never leave a stuck arm behind
+#ifndef BUILD_LITE
+    LegMeasureOnDeinit(reason);   // P-MT5-LEGPREVIEW: the leg's preview/session dies with EVERY reason
+#endif
     p49knot = GetTickCount() - p49t; p49t = GetTickCount();
     CustomPriceDragLockOff();   // P-UI-53: same rule for the custom-price drag lock
     // P-UI-90: THE NET, for EVERY deinit reason. Whatever the counters of the
@@ -2345,7 +2478,8 @@ void OnDeinitHandler(const int reason) {
         ObjectsDeleteAll(0, "TH3_Structure_");
 #ifndef BUILD_LITE
         ObjectsDeleteAll(0, TH3_PATTERN_PREFIX);  // Clean up AB=CD pattern objects
-        ObjectsDeleteAll(0, "TH3_MP_");            // P-TH3-P6e: mother-pivot overlay (own prefix)
+        ObjectsDeleteAll(0, "TH3_BASE_");          // P-TH3-BASE-01: the nested-base overlay (own prefix)
+        ObjectsDeleteAll(0, "TH3_MP_");            // P-TH3-BASE-01: the same overlay under its OLD prefix - a chart drawn by a previous build must not keep a second zone
         ObjectsDeleteAll(0, TH3_TEMP_PREFIX);     // Clean up any temp drawing objects
         // P-LM-01c: the leg-measure family (line + arrow + plate + its 3 lines)
         // rides its own namespace, so removing the indicator removes all six
@@ -4239,6 +4373,53 @@ void P4ReportSlow(const string what, const uint ms, const uint budget)
 
 string P4MsTag(const uint ms) { return IntegerToString((int)ms); }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P-DRAW-148 (2026-10-23) — WHOSE CLICK IS THIS?
+//
+// `CompatOneClickDedupe` drops the chart click that follows an object click,
+// because MT5 reports one button-up twice. It never asked whose object it was,
+// and one of those objects is a PAINT SURFACE:
+//
+//   [dsclick] DEDUPE dropped CHART_CLICK (obj="BTRS_OBJ_63661149136134_FG" 0ms before)
+//
+// `BTRS_OBJ_…_FG` is this product's own render-engine canvas (Engine/RenderPlatform,
+// `RPlatObjName`). MT5 fires OBJECT_CLICK for it on EVERY click that lands on the
+// chart rather than on a control — it is `OBJPROP_SELECTABLE=0`, and on MT5 that
+// flag governs SELECTION, not the click event. So the canvas's click armed the drop
+// and the CHART click — the only channel that can open the strip on a drawing the
+// terminal will not name for us — was thrown away, on every single click.
+//
+// That is the user's report, exactly: «این چیزها اصلا سلکت و حذف نمی‌شه» against the
+// two `LM_…_Line` leg rulers. Their press names the line (`PENSTACKARM obj="LM_…_Line"`),
+// the release is delivered, and the strip never hears it.
+//
+// So the question is not "is this object ours" but "does this click OWN the release".
+// A paint surface does not: its click carries no action, and the chart click behind
+// it is the user's own release. The UI families and the drawings we serve do own it —
+// they act on the object click, and the chart click of the same release must not
+// become a second gesture.
+//
+// `DrawKindOf` is deliberately NOT the test: it answers by TYPE, and a canvas is a
+// bitmap label while a foreign rectangle is still a rectangle — a type test cannot
+// tell "a drawing" from "a surface". The families are name families, so names decide.
+// ══════════════════════════════════════════════════════════════════════════
+bool ClickOwnedByUs(const string nm)
+{
+   if(nm == "") return false;
+   //--- THE ENGINE'S CANVAS IS A SURFACE, NEVER A CONTROL. It is named
+   //--- `BTRS_OBJ_<chartid>_FG|BG|ZG` (Engine/RenderPlatform:31) and it is the one
+   //--- object every empty-chart click lands on.
+   if(StringFind(nm, "BTRS_OBJ_") == 0) return false;
+   if(StringFind(nm, "PnlDrawS_") == 0) return true;      // the drawing strip
+   if(StringFind(nm, "Pnl") == 0) return true;            // cards, palette, popovers
+   if(StringFind(nm, "BiotakMenuV2_") == 0) return true;  // ring, orb, chip, tool fan
+   if(StringFind(nm, "BIOMENU_") == 0) return true;       // the overlay rows
+   if(StringFind(nm, TH3_LEG_PREFIX) == 0) return true;   // the LM_ leg ruler
+   int p = StringLen(inpObjectPrefix);
+   if(p > 0 && StringLen(nm) >= p && StringSubstr(nm, 0, p) == inpObjectPrefix) return true;
+   return false;
+}
+
 //==============================================================================
 // P-PERF-32 — ONE OWNER FOR THE STRUCTURE SWITCHES (card 11 rows 1-6)
 //
@@ -4450,7 +4631,7 @@ void BaseKnotEngPump()
     ArrayInitialize(ab, 0.0);      // explicit: the push below reads them for every `mins`
     ArrayInitialize(st, 0.0);
     ArrayInitialize(pric, 0.0); ArrayInitialize(clas, 0.0);
-   BaseKnotOwnerATRPump(); int n = BaseKnotEngNeeds(mins, anchors);
+   BaseKnotOwnerATRPump(); int n = BaseKnotEngNeeds(mins, anchors); BaseKnotShotFlashTick();   // P-BK-124: 1 int compare/round, clears the capture flash 1 s after a press
    for(int i = 0; i < n && i < BK_ENG_ROW_MAX; i++)
    {
        // P-BK-50: one plan call feeds every push; a cold plan pushes ZEROES.
@@ -5824,8 +6005,25 @@ void RoutCustomPriceGesture(const int id, const long &lparam, const double &dpar
                 if(g_s1OwnActive)
                     Step1HandleOwnDragMove((int)lparam, (int)dparam);
             }
-            else if(!g_customPriceLineDragging && !g_s1DragLive)
+            else if(!g_customPriceLineDragging && !g_s1DragLive &&
+                    (pressEdge || (g_customPriceLineCreated &&
+                     (bool)ObjectGetInteger(0, g_customPriceHorizontalLineName, OBJPROP_SELECTED))))
             {
+                // P-PERF-157d (2026-10-29) — THE CLAIM'S HIT TESTS ARE THE
+                // PRESS'S, NOT THE STREAM'S. MEASURED on the live MT5 chart:
+                // `[mvus] total=9..11 ind=9..11` on a plain move and 15..48
+                // held, with knot/ray/abcd/leg all 0 — the residual was this
+                // block. It ran its whole pixel test set (CustomPriceGrabAt,
+                // Step1HandleUnderCursor twice, Step1NearerThanCustom, the
+                // selection guard: ~20 terminal round trips) on EVERY held
+                // move, including the ones where the press had provably
+                // landed elsewhere (a TH3 point, a box, a path, a ray). A
+                // claim can only be BORN on the press edge or from the
+                // terminal's own grab (P-UI-98i's second opinion) — both are
+                // already the two terms of the claim below, and the gate now
+                // says so. The adoption branch above still owns a native
+                // handle drag (`g_s1DragLive`), and a missed edge is still
+                // answered on the edge's own move, so nothing lost a path.
                 // P-UI-98e: the step-1 handle's claim comes FIRST at the press
                 // edge — a press on its row belongs to it, and `s1Claimed` is the
                 // one term the custom-price claim below yields to. The ROW is
@@ -6241,8 +6439,40 @@ bool AnyStripTextFieldFocused()
 }
 #endif
 
+//--- P-DIAG-162 (2026-10-23, temporary — remove with the lag fix): the
+//--- indicator half of a MOUSE_MOVE is four owners and the ms ledger can only
+//--- say "indicator=47ms", which is three ticks of noise. These are microsecond
+//--- stamps, written where each owner is called and read by the entry's own
+//--- `[mvus]` line. Zero cost when the line is not printed.
+static uint s_usKnot = 0;
+static uint s_usRay  = 0;
+// P-DIAG-163 (2026-10-24): the leg ruler and the TH3 pattern tool were the two
+// remaining owners inside `ind=` — the user's «حس سنگینی» needs an owner, not a
+// guess. Same pattern, same removal condition: gone with the lag fix.
+static uint s_usLeg  = 0;
+static uint s_usAbcd = 0;
+// P-DIAG-164 (2026-10-29): the RESIDUAL of `ind=` is what the three drag
+// reports share. With knot/ray/abcd/leg all reading 0 the live log still
+// carried `[mvus] total=9..11 ind=9..11` on a plain move and 15..48 held —
+// i.e. an owner inside the router that none of the four stamps covered. The
+// only always-on callers left are the handset ride (markers + click sweep)
+// and the custom-price gesture stream, so they get a stamp each. Remove with
+// the lag fix, same condition as the four above.
+static uint s_usHs   = 0;
+static uint s_usCp   = 0;
+uint DiagUsKnot() { return s_usKnot; }
+uint DiagUsRay()  { return s_usRay; }
+uint DiagUsLeg()  { return s_usLeg; }
+uint DiagUsAbcd() { return s_usAbcd; }
+uint DiagUsHs()   { return s_usHs; }
+uint DiagUsCp()   { return s_usCp; }
+
 void OnChartEventHandler(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+    // P-DIAG-164: every stamp belongs to THIS event. Without the reset an
+    // OBJECT_DRAG print would carry the last mouse move's `leg`/`abcd` and
+    // read as work the drag never did.
+    s_usKnot = 0; s_usRay = 0; s_usLeg = 0; s_usAbcd = 0; s_usHs = 0; s_usCp = 0;
     // BKCORNER-TOAST: the note's clock stops while the cursor is on it. One int
     // compare per event; the callee returns on one flag when no toast is up.
     if(id == CHARTEVENT_MOUSE_MOVE) BaseKnotCornerToastHover((int)lparam, (int)dparam);
@@ -6252,9 +6482,16 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // Base / Knot tool FIRST: while armed it owns every mouse gesture (no
     // chart-click leak into custom-price/TH3/panels), and committed boxes own
     // their badge/drag/delete events in every state.
-    if(BaseKnotOnChartEvent(id, lparam, dparam, sparam)) return;
+    uint _usT = CompatUsNow();
+    bool _bk = BaseKnotOnChartEvent(id, lparam, dparam, sparam);
+    s_usKnot = CompatUsNow() - _usT;
+    if(_bk) { s_usRay = 0; return; }
     // P-HR-01 / P-UI-136: the Horizontal Ray and the Path own their arm click and their committed drags.
-    if(HRayOnChartEvent(id, lparam, dparam, sparam) || PathOnChartEvent(id, lparam, dparam, sparam)) return;
+    _usT = CompatUsNow();
+    bool _rp = HRayOnChartEvent(id, lparam, dparam, sparam);
+    if(!_rp) _rp = PathOnChartEvent(id, lparam, dparam, sparam);
+    s_usRay = CompatUsNow() - _usT;
+    if(_rp) return;
 
     // P-UI-100b (2026-09-22): THE DETECTOR OF "A FOREIGN OBJECT JUST APPEARED".
     //
@@ -6672,23 +6909,38 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         //
         // V key   Toggle TH3 Tool — TH3TOOL-ON (2026-09-19): restored.
         //
-#ifndef BUILD_LITE
-        if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
-        {
-            // P-MT5-PARITY (2026-10-21) - PARITY (MT4 EventHandlers_Router.mqh:460): the key is a bare
-            // toggle. MT5's own "cancel every other tool" sweep tore a live
-            // ray/path/box/leg session down on the press; MT4 never did that.
-            ToggleTH3Tool();
-            ThrottledChartRedraw();
-            return;
-        }
-#endif
+        // TH3TOOL-OFF (2026-10-24): the ABCD drawing tool is PARKED, not deleted —
+        // the user's call («ابزار th3tool … کامنت بشه»، «فعلا این ابزار خوب توسعه
+        // پیدا نکرده … نمیخوام توی محصول اصلی باشه»، «فقط ABCD، لگ‌متر بماند»,
+        // «حذف نمیخوام کامنت بشه بعد شاید بخوام روش کار بکنم»).
+        //
+        // WHY THE ARM AND NOT THE DISPATCHER: this key and the ring cell
+        // (`CircCatRetired`) are the ONLY two ways a draw session can start, and
+        // both are now commented — so `TH3SessionActive()` can never be true and
+        // every drawing branch inside `OnABCDMouseEvent` goes cold on its own.
+        // The dispatcher itself MUST stay: the leg meter (P-LM-17) and the
+        // caption delete (P-TH3-DEL4) ride the same call.
+        //
+        // TO BRING IT BACK: uncomment this block and drop the CAT_TH3 line in
+        // `CircCatRetired` (BiotakMenu_Ring.mqh). Nothing else moved.
+        //
+        //#ifndef BUILD_LITE
+        //if(IsHotkeyPressed(lparam, sparam, inpTH3ToolKey))
+        //{
+        //    // P-MT5-PARITY (2026-10-21) - PARITY (MT4 EventHandlers_Router.mqh:460): the key is a bare
+        //    // toggle. MT5's own "cancel every other tool" sweep tore a live
+        //    // ray/path/box/leg session down on the press; MT4 never did that.
+        //    ToggleTH3Tool();
+        //    ThrottledChartRedraw();
+        //    return;
+        //}
+        //#endif
 
         //
         // P key   Arm the leg meter (a measurement only).
         // P-TH3-PB-OFF (2026-09-21): the old coupling that stored a dragged leg
         // on the active pattern as its pivot base is retired — the base is
-        // hand-typed in the TH3 TOOL card (`inpTH3PivotBasePips`), never drawn.
+        // hand-typed in the TH3 TOOL card (`inpTH3BaseRangePips`), never drawn.
         //
 #ifndef BUILD_LITE
         if((int)lparam == 80)   // 'P' — toggle Leg Measure session (same as ring CIR_LEG)
@@ -6728,6 +6980,27 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         {
             Print("[TH3 RECORDER] Key 'M' pressed. Capturing sample & exporting AI dataset...");
             TH3_ExportCurrentSample(g_activeABCDPattern);
+            ThrottledChartRedraw();
+            return;
+        }
+#endif
+
+        //
+        // K key   Snapshot the selected BASE KNOT for the AI dataset (P-BK-124:
+        // one press, one folder — shot.png + sample.txt, filed by
+        // tools/bk-shot-sync.js). 'K' = Knot; it is the one letter the panel's
+        // own hotkeys leave free (F L G V C T E R A S W Q X D P B M are taken).
+        //
+        // P-TH3-BK-KEY (2026-10-28, ported from MT4): the whole capture chain
+        // (BaseKnot_Shot: the shot, the 38-key sample, the one-second flash)
+        // had been ported on 2026-10-27 and this DOOR was not — `BaseKnotCaptureSample`
+        // had zero callers, so 'K' did nothing and the flash tick in OnTimer
+        // watched a flag nothing could set. Same guard, same owner as MT4's.
+        //
+#ifndef BUILD_LITE
+        if((int)lparam == 75)   // 'K' — capture the selected knot as a sample
+        {
+            BaseKnotCaptureSample();
             ThrottledChartRedraw();
             return;
         }
@@ -6937,6 +7210,11 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
                   if(StringLen(lkName) < lkPlen) continue;
                   if(StringSubstr(lkName, 0, lkPlen) != inpObjectPrefix) continue;
                   if(StringFind(lkName, "_BK_") >= 0) continue;
+                  // P-SESS-14: the session family owns its own lifecycle (SessWipe /
+                  // SessPaintAll) and is anchored at window starts on purpose — this
+                  // raw prefix walk is a LEVEL wipe and must not eat it. Without this
+                  // line a TF-lock press emptied the session layer.
+                  if(StringFind(lkName, inpObjectPrefix + "SESS_") == 0) continue;
                   ObjectDelete(0, lkName);
                }
             }
@@ -7022,8 +7300,11 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
 #ifndef BUILD_LITE
     if(id == CHARTEVENT_MOUSE_MOVE && LegMeasureSessionActive())
     {
+        // P-MT5-LEGFRAME: a live gesture paints on ITS OWN cadence, not the
+        // tick's 100 ms throttle — at ten frames a second a dashed preview and a
+        // dragged leg step visibly behind the cursor.
         if(LegMeasureMouseMove((int)lparam, (int)dparam, sparam))
-            ThrottledChartRedraw();
+            LegMeasureDragFrame();
         // Do NOT return — ABCD also needs MOUSE_MOVE for its own hover preview.
     }
 
@@ -7033,14 +7314,26 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // family in screen pixels, and every held move rewrites the whole drawing
     // from the same anchors in the same event. Nothing follows anything, so
     // nothing can lag behind (the report P-LM-10 could only chase).
-    if(id == CHARTEVENT_MOUSE_MOVE && LegMeasureEditMouse((int)lparam, (int)dparam, sparam))
-        ThrottledChartRedraw();
+    uint _usLegT = CompatUsNow();
+    bool _legHit = (id == CHARTEVENT_MOUSE_MOVE && LegMeasureEditMouse((int)lparam, (int)dparam, sparam));
+    s_usLeg = CompatUsNow() - _usLegT;
+    if(_legHit) LegMeasureDragFrame();   // P-MT5-LEGFRAME: the gesture's own frame
 
     // P-LM-08/P-LM-11: the object list is the one native delete the family still
-    // answers (nothing of it is selectable) — deleting the LINE there cascades to
-    // the rings, the mid handle, the plate and its three lines here.
+    // answers — deleting the LINE there cascades to the rings, the mid handle, the
+    // plate and its three lines here.
     if(id == CHARTEVENT_OBJECT_DELETE)
         LegMeasureOnObjectDelete(sparam);
+
+    //--- P-MT5-LEGDRAG (2026-10-24) — THE FAMILY FOLLOWS THE TERMINAL'S OWN MOVE.
+    //--- A selectable leg can be moved from the terminal's side (a native drag,
+    //--- the Properties dialog, the object list). The line moves; the three rings
+    //--- are screen objects and do not. MT5 names the object on OBJECT_DRAG and
+    //--- OBJECT_CHANGE, so both re-project the rings and the plate from the
+    //--- anchors the terminal now holds — read-only for the line, so an in-flight
+    //--- native drag is never cancelled (P-BK-15).
+    if(id == CHARTEVENT_OBJECT_DRAG || id == CHARTEVENT_OBJECT_CHANGE)
+        LegMeasureOnObjectDrag(sparam);
 
     // P-LM-13: a MOTIONLESS press/release emits no MOUSE_MOVE on release (an MT4
     // fact), but the click still fires CHARTEVENT_CLICK on button-up — so this is
@@ -7075,7 +7368,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
        id == CHARTEVENT_OBJECT_DRAG ||
        id == CHARTEVENT_OBJECT_DELETE ||
        id == CHARTEVENT_MOUSE_MOVE) {
+        uint _usAbcdT = CompatUsNow();
         OnABCDMouseEvent(id, lparam, dparam, sparam);
+        s_usAbcd = CompatUsNow() - _usAbcdT;
         if((TH3SessionActive() || TH3BaseMarkArmed()) && id == CHARTEVENT_CLICK) {
             return;
         }
@@ -7137,11 +7432,36 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
         uint p28t = GetTickCount();
         uint p28redraw = 0, p28labels = 0, p28leg = 0;
         if(sizeChanged) g_labelsRelayoutNeeded = true;
-        if(viewportChanged) {
-            g_redrawTHLevelsNeeded = true;
-            RedrawAllObjects(false);
-            p28redraw = GetTickCount() - p28t;
-        } else if(sizeChanged) {
+        // P-PERF-157 (2026-10-29) — A PAN/ZOOM IS NOT A REBUILD.
+        //
+        // This branch used to answer every viewport change with
+        //   g_redrawTHLevelsNeeded = true; RedrawAllObjects(false);
+        // i.e. it re-asserted the WHOLE product — the level family, every
+        // label, the tool cards — because the chart had scrolled. MEASURED on
+        // the live MT5 chart (XAUUSD,H1, 09:18:42..09:23:16, one scroll/zoom
+        // session): CHART_CHANGE events of 281, 734, 313, 781, 94, 156, 218,
+        // 187, 562, 219, 94 and 125 ms, with the breakdown naming the body:
+        //   chart change breakdown: redraw=219ms ... render[levels=219 ...]
+        //   chart change breakdown: redraw=172ms ... render[levels=172 overlay=156]
+        // Twelve freezes in five minutes, every one of them a pan.
+        //
+        // NOTHING IN THAT PASS IS THE VIEWPORT'S BUSINESS. Price/time-anchored
+        // objects are re-projected by the TERMINAL on every scroll and zoom
+        // (that is what an anchor means on both platforms), screen-space
+        // objects (corner labels, cards, the strip) do not move at all when
+        // the price scale does, and the ladder's trigger lines and ZONE family
+        // are CANVAS — the entry's RBridgePump owns their repaint at the tail
+        // of this very event (R-RENDER-ENGINE). The three things that really
+        // do depend on the mapping are re-derived below, in this branch, on
+        // their own owners: the countdown tag, the leg meter and the handles.
+        //
+        // A RESIZE is the one layout change that does need work, and it needs
+        // the LABEL pass (the corner stack is measured in pixels), never the
+        // level rebuild — so `redraw=` now stays 0 here by construction and
+        // `labels=` carries the resize. The object-path A/B is unaffected:
+        // with the engine commented out the ladder is chart objects, which the
+        // terminal re-projects exactly the same way.
+        if(sizeChanged) {
             RedrawLabelsOnly();
             p28labels = GetTickCount() - p28t;
         }
@@ -7368,8 +7688,10 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // pending). The tick path sweeps too, so a click that never moves again
     // still commits. And the handset handles ride the same stream (a pan moves
     // the price scale under them — the leg meter's own P-LM-16b answer).
+    uint _usHsT = CompatUsNow();
     HandsetClickSweep();
     HandsetMarkersRide();
+    s_usHs = CompatUsNow() - _usHsT;
     // P-UI-98e: the step-1 handle's gesture walks the same stream as the
     // custom-price line's — and the custom-price line is not the only reason
     // this block exists any more: the handle is armed off the PLACEMENT, and a
@@ -7377,7 +7699,9 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
     // P-SIZE-1500: the custom price line's own gesture stream (press edge, claim,
     // carry, release, tooltip) moved to its own owner above -
     // EventHandlers_Router_Gesture.mqh, called at the exact seat it held.
+    uint _usCpT = CompatUsNow();
     RoutCustomPriceGesture(id, lparam, dparam, sparam);
+    s_usCp = CompatUsNow() - _usCpT;
 
     //  
     // CHARTEVENT_OBJECT_DRAG   Custom Price Line Drag End
@@ -7567,7 +7891,10 @@ void HotkeyAudit()
    keys[n] = inpTriggerLevelsKey;names[n] = "Trigger levels";   n++;
    keys[n] = inpStepModeKey;     names[n] = "Step mode";        n++;
 #ifndef BUILD_LITE
-   keys[n] = inpTH3ToolKey;      names[n] = "TH3 tool";         n++;
+   // TH3TOOL-OFF (2026-10-24): the V key no longer arms anything, so the conflict
+   // table must not advertise it either — a registered-but-dead key is the same
+   // lie as a ring button that draws nothing.
+   //keys[n] = inpTH3ToolKey;      names[n] = "TH3 tool";         n++;
    keys[n] = inpHTFKey;          names[n] = "HTF candles";      n++;
 #endif
    keys[n] = inpATRLabelsKey;    names[n] = "ATR labels";       n++;
@@ -7804,6 +8131,41 @@ void RunIncrementalObjectCleanup()
             if(StringFind(objName, "_BK_") >= 0) continue;   // P-BK-01: never emergency-wipe user drawings
             if(StringFind(objName, "_HRAY_") >= 0) continue;   // P-HR-05: rays are their own layer, same law
 
+            //--- P-SESS-13 (2026-10-29) — A SESSION BOX IS OLD BY DESIGN, AND THIS
+            //--- WALK WAS DELETING IT FOR THAT.
+            //
+            // The rule below is "ours, not under the level prefix, first anchor older
+            // than an hour => delete". The session family satisfies every clause BY
+            // CONSTRUCTION: a box is anchored at its window's START, so last Monday's
+            // box is days old and today's live box opened hours ago. The level prefix
+            // does not cover it either - the family is `inpObjectPrefix + SESS_TAG`
+            // ("THLevels" + "SESS_"), not "THLevels_" - so the walk deleted it object
+            // by object and the renderer never noticed: the view hash had not changed,
+            // the day had not turned and no session had flipped, so nothing repainted
+            // the family until tomorrow. To the user that is "the sessions disappear
+            // after I change the timeframe", because a switch is what grows the object
+            // count past OBJECT_COUNT_INCREASE_THRESHOLD and arms this walk.
+            //
+            // MEASURED (live log 2026-10-29 09:41:34, XAUUSDb H1) - the census left
+            // exactly the objects that are NOT anchored at a window start:
+            //   SESS_0_20261029_BER   (the right edge, anchored at the window END)
+            //   SESS_0_20261029_HIL / LOL / R   (anchored at min(end, now))
+            //   SESS_0_20261030_F*    (ghosts, anchored in the FUTURE)
+            //   SESS_CDN              (the next boundary)
+            // and nothing else: BET/BEB/BEL (anchored at the start), BL (its tag),
+            // HI/LO (their lines) and every past day's box were gone. That is this
+            // line's signature, and no other sweep in the tree produces it.
+            //
+            // The family owns its lifecycle end to end: SessWipe() deletes the whole
+            // namespace and SessPaintAll re-declares it, so it can never leak - which
+            // is the only thing an age rule is here to prevent.
+            //
+            // The tag is spelled here rather than read from Sessions_Draw's SESS_TAG
+            // on purpose: this file is also compiled by `Biotak Sync Compare.mq5`,
+            // which does NOT include the sessions module. The literal is the one copy
+            // that must track it (Sessions_Draw.mqh:41).
+            if(StringFind(objName, indicatorPrefix + "SESS_") == 0) continue;
+
             if(StringFind(objName, "TH3_Structure_") == 0) continue;
             if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;
 
@@ -8020,6 +8382,10 @@ void AdjustFactorValue(int direction)
 
 void CoopPump()
 {
+   // P-ARCH-03b: the sibling proof is asked LATE, here, because the first 250 ms
+   // of a reload are exactly when the outgoing instance is still in the chart's
+   // list. One bool compare once it has answered.
+   TH3SiblingUnitLateCheck();
    uint sliceStart = GetTickCount();
    // P-PERF-35b: THE ORDER IS CHEAP-FIRST, AND THE JOB IDS ARE NOT THE ORDER.
    //
