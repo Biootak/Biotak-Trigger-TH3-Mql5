@@ -24,7 +24,7 @@
     Which project to compile:
     - "workspace" (default): compile current project file in this repository
     - "installed-original": compile original installed indicator path
-    - "installed-refactored": compile refactored installed indicator path
+    - "workspace": the repo's own entry (both entries are built by `all`)
     - "all": compile all of the above
 
 .PARAMETER SourceFile
@@ -49,7 +49,7 @@
 #>
 
 param(
-    [ValidateSet("workspace", "installed-original", "installed-refactored", "all")]
+    [ValidateSet("workspace", "installed-original", "all")]
     [string]$Project = "workspace",
     
     [string]$SourceFile = "",
@@ -768,10 +768,6 @@ $PROJECTS = @{
         Name   = "Biotak Trigger TH3 (Installed Original)"
         Source = if ($resolvedMql5Dir) { Join-Path $resolvedMql5Dir "Indicators\Biotak-Trigger-TH3\Biotak Trigger TH3.mq5" } else { "" }
     }
-    "installed-refactored" = @{
-        Name   = "Biotak Trigger TH3 (Installed Refactored)"
-        Source = if ($resolvedMql5Dir) { Join-Path $resolvedMql5Dir "Indicators\Biotak-Trigger-TH3-Refactored\Biotak Trigger TH3.mq5" } else { "" }
-    }
 }
 
 if ($SourceFile -ne "") {
@@ -786,7 +782,7 @@ if ($SourceFile -ne "") {
 else {
     # Compile project(s)
     $projectsToCompile = if ($Project -eq "all") {
-        @("workspace", "installed-original", "installed-refactored")
+        @("workspace", "installed-original")
     } else {
         @($Project)
     }

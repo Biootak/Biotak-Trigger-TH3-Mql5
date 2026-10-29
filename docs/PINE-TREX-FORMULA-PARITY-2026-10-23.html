@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مقایسهٔ فرمول‌های Pine TRex با Biotak Trigger TH3</title>
+<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f6f3; --card:#ffffff; --ink:#26215c; --muted:#5f5e5a; --line:#e4e2db;
+  --green-bg:#eaf3de; --green-line:#3b6d11; --green-ink:#27500a;
+  --amber-bg:#faeeda; --amber-line:#854f0b; --amber-ink:#633806;
+  --red-bg:#fcebeb;  --red-line:#a32d2d;  --red-ink:#791f1f;
+  --gray-bg:#f1efe8;  --gray-line:#5f5e5a;  --gray-ink:#444441;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:Vazirmatn,"Segoe UI",Tahoma,"Noto Naskh Arabic",sans-serif;line-height:1.75;padding:36px 18px 60px}
+.wrap{max-width:1040px;margin:0 auto}
+code,.mono{font-family:Consolas,"Courier New",monospace;direction:ltr;unicode-bidi:embed}
+h1{font-size:26px;font-weight:600;line-height:1.4}
+h2{font-size:19px;font-weight:600;margin:34px 0 14px;display:flex;align-items:center;gap:10px}
+h2 .num{background:var(--ink);color:#fff;border-radius:8px;min-width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:14px;padding:0 6px}
+.sub{color:var(--muted);font-size:14px;margin-top:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 14px;font-size:12.5px;color:var(--muted)}
+.verdict{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;font-size:15.5px}
+.verdict b{color:var(--red-ink)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:18px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:14px}
+.stat .dot{width:14px;height:14px;border-radius:50%;flex:none}
+.stat .n{font-size:24px;font-weight:600;line-height:1}
+.stat .l{font-size:13px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-top:14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;margin-top:14px;overflow-x:auto}
+table.cmp{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--card)}
+table.cmp th{background:#efede6;text-align:right;padding:10px 12px;font-weight:600;font-size:13px;border-bottom:1px solid var(--line)}
+table.cmp td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+table.cmp tr:last-child td{border-bottom:none}
+.pill{display:inline-block;border-radius:999px;padding:2px 12px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill.red{background:var(--red-bg);color:var(--red-ink);border:1px solid var(--red-line)}
+.pill.green{background:var(--green-bg);color:var(--green-ink);border:1px solid var(--green-line)}
+.pill.amber{background:var(--amber-bg);color:var(--amber-ink);border:1px solid var(--amber-line)}
+.pill.gray{background:var(--gray-bg);color:var(--gray-ink);border:1px solid var(--gray-line)}
+.src{display:block;font-size:11.5px;color:var(--muted);margin-top:3px;direction:ltr;text-align:right}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.duel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.duel h3{font-size:15px;font-weight:600;margin-bottom:10px}
+.fbox{border-radius:10px;padding:10px 14px;font-size:13.5px;margin:8px 0;border:1px solid}
+.fbox .tag{display:block;font-size:11px;font-weight:600;margin-bottom:4px;opacity:.85}
+.fbox.pine{background:var(--red-bg);border-color:var(--red-line);color:var(--red-ink)}
+.fbox.ours{background:var(--green-bg);border-color:var(--green-line);color:var(--green-ink)}
+.fbox.ours.alt{background:var(--red-bg);border-color:var(--red-line);color:var(--red-ink)}
+.note{font-size:12.5px;color:var(--muted);margin-top:8px}
+ol.issues{padding-inline-start:22px;font-size:14px}
+ol.issues li{margin:10px 0}
+.verdict-box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-top:14px;font-size:14.5px}
+.verdict-box ul{padding-inline-start:20px;margin-top:8px}
+.verdict-box li{margin:7px 0}
+.appendix{background:#efede6;border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:14px;font-size:13px}
+.appendix code{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:12px;display:inline-block;margin:3px 0;direction:ltr}
+footer{margin-top:34px;color:var(--muted);font-size:12px;text-align:center}
+svg text{font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>مقایسهٔ فرمول‌های Pine TRex با اندیکاتور Biotak Trigger TH3</h1>
+  <div class="sub">گزارش parity — ۲۳ اکتبر ۲۰۲۶ · منبع: اسنیپت Pine Script v6 (پنل TRex استاد در TradingView) · مقایسه با این ریپو (MT5، فورک منطق MT4) · به‌همراه مقایسهٔ عددی روی EURUSD</div>
+  <div class="chips">
+    <span class="chip">Pine Script v6</span>
+    <span class="chip">TradingView TRex panel</span>
+    <span class="chip">Biotak Trigger TH3 · MT5</span>
+    <span class="chip">۱۰ خانوادهٔ فرمولی</span>
+    <span class="chip">مقایسهٔ عددی EURUSD</span>
+  </div>
+
+  <div class="verdict">
+    <b>verdict:</b> فرمول‌ها «همون» formul‌های اندیکاتور ما نیستند. این کد، واژگان همان پنل استاد را صحبت می‌کند
+    (<code>engsl / hunsl / TP3-TP7-TP15 / TH.long-TH.small</code>) ولی موتور محاسباتی‌اش فرق دارد —
+    فقط یک خانوادهٔ فرمول دقیقاً یکی است، یک نیمه‌هم‌خوان، و بقیهٔ موتور (ATR، APR، Eng/Hunt، SL/TP) متفاوت.
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="dot" style="background:var(--green-line)"></span><div><div class="n">۲</div><div class="l">دقیقاً یکی (step های TH3)</div></div></div>
+    <div class="stat"><span class="dot" style="background:var(--amber-line)"></span><div><div class="n">۳</div><div class="l">نیمه‌هم‌خوان (لچر/پنل)</div></div></div>
+    <div class="stat"><span class="dot" style="background:var(--red-line)"></span><div><div class="n">۴</div><div class="l">متفاوت (موتور ATR/APR/SL/TP)</div></div></div>
+    <div class="stat"><span class="dot" style="background:var(--gray-line)"></span><div><div class="n">۱</div><div class="l">در ما وجود ندارد</div></div></div>
+  </div>
+
+
+  <h2><span class="num">۱</span>این کد چیست؟</h2>
+  <div class="card" style="font-size:14.5px">
+    پنل محاسباتی TradingView برای هستهٔ TRex/TH3، شامل: ATR نُه تایم‌فریم (<code>atr254M1..atr254Y1</code> با
+    <code>request.security</code>)، لچر APR فراكتال (<code>apr66</code> = لنگر روزانه + مقیاس <code>√(minutes/1440)</code>)،
+    لچر نزولی <code>TAPR/tapr/tapr2</code>، خانوادهٔ <code>matr</code> (یک/دو پله پایین‌تر و <code>matrsakhtar</code> دو پله بالا)،
+    خانوادهٔ SL/TP (<code>engsl / hunsl / pivotsl / tp1-3-7-15</code>)، آستانه‌های <code>thlong/thsmall</code>،
+    و نمایش جدولی با گرید نُه‌تایم‌فریمی <code>APR--ATR--LIVE</code> به‌همراه ATR زندهٔ <code>atr55/atr7/atr3</code>.
+    <div class="note">توجه: تعریف <code>avg_atr(...)</code> و <code>mATR</code> در اسنیپت نیامده؛ نام <code>atr254*</code> قویاً پنجرهٔ ~۲۵۴ باره را implies می‌کند (استنباط، نه مشاهده).</div>
+  </div>
+
+  <h2><span class="num">۲</span>نقشهٔ تطابق</h2>
+  <div class="panel">
+  <svg viewBox="0 0 680 580" width="100%" role="img" style="min-width:640px">
+    <title>Parity map</title>
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    <text x="40" y="42" font-size="14" font-weight="500" dominant-baseline="central" fill="#26215c">Parity map — Pine TRex vs Biotak Trigger TH3 (MT5)</text>
+    <text x="165" y="68" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#5f5e5a">Pine Script (TRex)</text>
+    <text x="340" y="68" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#5f5e5a">match</text>
+    <text x="515" y="68" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#5f5e5a">Biotak Trigger TH3 (MT5)</text>
+    <line x1="40" y1="80" x2="640" y2="80" stroke="#b4b2a9" stroke-width="0.5"/>
+    <g>
+      <rect x="40" y="88" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="165" y="104" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">atr254(TF) ×9</text>
+      <text x="165" y="118" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">single 254-avg, 9 TFs</text>
+      <rect x="308" y="98" width="64" height="20" rx="10" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="340" y="108" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#791f1f">differs</text>
+      <line x1="292" y1="108" x2="306" y2="108" stroke="#a32d2d" stroke-width="1"/>
+      <line x1="374" y1="108" x2="386" y2="108" stroke="#a32d2d" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="88" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="515" y="104" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">Trex composite ×8</text>
+      <text x="515" y="118" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">6-leg weighted, shift 1</text>
+    </g>
+    <g>
+      <rect x="40" y="136" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="165" y="152" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">apr66 + APR ladder</text>
+      <text x="165" y="166" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">close×0.0666 + √t</text>
+      <rect x="308" y="146" width="64" height="20" rx="10" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="340" y="156" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#791f1f">differs</text>
+      <line x1="292" y1="156" x2="306" y2="156" stroke="#a32d2d" stroke-width="1"/>
+      <line x1="374" y1="156" x2="386" y2="156" stroke="#a32d2d" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="136" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="515" y="152" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">fixed-% TH ladder</text>
+      <text x="515" y="166" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">price×pct/100, 2.08..533%</text>
+    </g>
+    <g>
+      <rect x="40" y="184" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="165" y="200" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">engsl = mATR×0.1818</text>
+      <text x="165" y="214" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">≈ ×2/11 of mATR</text>
+      <rect x="308" y="194" width="64" height="20" rx="10" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="340" y="204" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#791f1f">differs</text>
+      <line x1="292" y1="204" x2="306" y2="204" stroke="#a32d2d" stroke-width="1"/>
+      <line x1="374" y1="204" x2="386" y2="204" stroke="#a32d2d" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="184" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="515" y="200" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">Eng(TF) = TR/4.266666</text>
+      <text x="515" y="214" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">≈ ×15/64, own-TF composite</text>
+    </g>
+    <g>
+      <rect x="40" y="232" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="165" y="248" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">hunsl = matr + matr3</text>
+      <text x="165" y="262" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">sum of two lower TFs</text>
+      <rect x="308" y="242" width="64" height="20" rx="10" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="340" y="252" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#791f1f">differs</text>
+      <line x1="292" y1="252" x2="306" y2="252" stroke="#a32d2d" stroke-width="1"/>
+      <line x1="374" y1="252" x2="386" y2="252" stroke="#a32d2d" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="232" width="250" height="40" rx="8" fill="#fcebeb" stroke="#a32d2d" stroke-width="0.5"/>
+      <text x="515" y="248" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#791f1f">Hunter = 8/3 × Eng</text>
+      <text x="515" y="262" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">×2.667 of Eng</text>
+    </g>
+    <g>
+      <rect x="40" y="280" width="250" height="40" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="165" y="296" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">tp1 · tp3 · tp7 · tp15</text>
+      <text x="165" y="310" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">mATR × {1,3,7,15}</text>
+      <rect x="308" y="290" width="64" height="20" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="340" y="300" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#633806">partial</text>
+      <line x1="292" y1="300" x2="306" y2="300" stroke="#854f0b" stroke-width="1"/>
+      <line x1="374" y1="300" x2="386" y2="300" stroke="#854f0b" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="280" width="250" height="40" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="515" y="296" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">targets 3/5/15 + TP off SL</text>
+      <text x="515" y="310" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">3× and 15× shared</text>
+    </g>
+    <g>
+      <rect x="40" y="328" width="250" height="40" rx="8" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+      <text x="165" y="344" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#27500a">thlong = 3S − 2P</text>
+      <text x="165" y="358" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#3b6d11">course method 1</text>
+      <rect x="308" y="338" width="64" height="20" rx="10" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+      <text x="340" y="348" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#27500a">exact</text>
+      <line x1="292" y1="348" x2="306" y2="348" stroke="#3b6d11" stroke-width="1"/>
+      <line x1="374" y1="348" x2="386" y2="348" stroke="#3b6d11" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="328" width="250" height="40" rx="8" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+      <text x="515" y="344" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#27500a">longStep = 3S − 2P</text>
+      <text x="515" y="358" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#3b6d11">TH3Math.mqh:907</text>
+    </g>
+    <g>
+      <rect x="40" y="376" width="250" height="40" rx="8" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+      <text x="165" y="392" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#27500a">thsmall = 2S − P</text>
+      <text x="165" y="406" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#3b6d11">course method 1</text>
+      <rect x="308" y="386" width="64" height="20" rx="10" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+      <text x="340" y="396" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#27500a">exact</text>
+      <line x1="292" y1="396" x2="306" y2="396" stroke="#3b6d11" stroke-width="1"/>
+      <line x1="374" y1="396" x2="386" y2="396" stroke="#3b6d11" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="376" width="250" height="40" rx="8" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+      <text x="515" y="392" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#27500a">medStep = 2S − P</text>
+      <text x="515" y="406" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#3b6d11">TH3Math.mqh:908</text>
+    </g>
+    <g>
+      <rect x="40" y="424" width="250" height="40" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="165" y="440" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">matrsakhtar</text>
+      <text x="165" y="454" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">2 rungs up (W/M ×14.2)</text>
+      <rect x="308" y="434" width="64" height="20" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="340" y="444" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#633806">partial</text>
+      <line x1="292" y1="444" x2="306" y2="444" stroke="#854f0b" stroke-width="1"/>
+      <line x1="374" y1="444" x2="386" y2="444" stroke="#854f0b" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="424" width="250" height="40" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="515" y="440" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">structure rung</text>
+      <text x="515" y="454" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">1 rung up since P-TP4-RUNG</text>
+    </g>
+    <g>
+      <rect x="40" y="472" width="250" height="40" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="165" y="488" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">TRex panel table</text>
+      <text x="165" y="502" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">APR--ATR--LIVE grid, 9 TFs</text>
+      <rect x="308" y="482" width="64" height="20" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="340" y="492" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#633806">partial</text>
+      <line x1="292" y1="492" x2="306" y2="492" stroke="#854f0b" stroke-width="1"/>
+      <line x1="374" y1="492" x2="386" y2="492" stroke="#854f0b" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="472" width="250" height="40" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+      <text x="515" y="488" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">ATR overview + TRex card</text>
+      <text x="515" y="502" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">steps 1.5/1.75/2.0, 8 TFs</text>
+    </g>
+    <g>
+      <rect x="40" y="520" width="250" height="40" rx="8" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+      <text x="165" y="536" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#444441">liveM* + atr55/7/3</text>
+      <text x="165" y="550" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#5f5e5a">raw live ATR, no averaging</text>
+      <rect x="308" y="530" width="64" height="20" rx="10" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+      <text x="340" y="540" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#444441">absent</text>
+      <line x1="292" y1="540" x2="306" y2="540" stroke="#5f5e5a" stroke-width="1"/>
+      <line x1="374" y1="540" x2="386" y2="540" stroke="#5f5e5a" stroke-width="1" marker-end="url(#arrow)"/>
+      <rect x="390" y="520" width="250" height="40" rx="8" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+      <text x="515" y="536" font-size="13" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#444441">—</text>
+      <text x="515" y="550" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#5f5e5a">no equivalent in our code</text>
+    </g>
+  </svg>
+  </div>
+
+  <h2><span class="num">۳</span>جدول مقایسهٔ جزءبه‌جزء</h2>
+  <div class="panel" style="padding:0;overflow-x:auto">
+  <table class="cmp">
+    <thead><tr><th style="width:27%">فرمول Pine</th><th style="width:11%">تطابق</th><th>معادل ما (Biotak Trigger TH3 · MT5)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>atr254(TF)</code><span class="src">single ~254-bar average, 9 TFs (M1..12M)</span></td>
+        <td><span class="pill red">متفاوت</span></td>
+        <td>کامپوزیت Trex: میانگین وزنی شش پایهٔ SMA-of-TR (۵/۱۰/۲۱/۶۶/۱۳۲/۲۶۴، وزن ۱/۱/۲/۳/۵/۸، مخرج داینامیک)، W1=iATR(55)، MN=iATR(30)، شیفت ۱، ۸ تایم‌فریم
+        <span class="src">Biotak/ATRCalculations.mqh:55-76 · 979-1013 · 1120-1147 · 1179-1199</span></td>
+      </tr>
+      <tr>
+        <td><code>apr66 + APR ladder</code><span class="src">close×0.0666 + √(minutes/1440)</span></td>
+        <td><span class="pill red">متفاوت</span></td>
+        <td>لچر TH درصد ثابت جدول استاد: <code>price×pct/100</code> با ۲.۰۸٪..۵۳۳.۲۸٪ (MotiveWave) + نرمال‌سازی اختیاری V. قانون √time فقط در fallback <code>CalculateHybridATR</code>
+        <span class="src">Biotak/THCalculations.mqh:52,91 · ConstantsAndEnums.mqh:348-358 · ATRCalculations.mqh:431-483 · THVolNorm.mqh</span></td>
+      </tr>
+      <tr>
+        <td><code>TAPR / tapr / tapr2</code><span class="src">APR ladder, 1 and 2 rungs down</span></td>
+        <td><span class="pill red">مفقود</span></td>
+        <td>— (مفهوم APR در کد ما نیست)</td>
+      </tr>
+      <tr>
+        <td><code>matr / matr3</code><span class="src">ATR one/two rungs down</span></td>
+        <td><span class="pill amber">نیمه</span></td>
+        <td>ناوبری لچر در TradePlan: Trigger = ۲ پله پایین — ما برای انتخاب Eng(TF) به کار می‌بریم، نه به‌عنوان مقدار نمایشی
+        <span class="src">Biotak/TradePlanFormulas.mqh:172-178</span></td>
+      </tr>
+      <tr>
+        <td><code>matrsakhtar</code><span class="src">2 rungs up (W/M ×14.2)</span></td>
+        <td><span class="pill amber">نیمه</span></td>
+        <td>Structure = ۱ پله بالا در نسل فعلی؛ نسل سپتامبر ۲۰۲۶ دو پله بالا بود (همان لکهٔ P-TP4-RUNG)
+        <span class="src">Biotak/TradePlanFormulas.mqh:180-201</span></td>
+      </tr>
+      <tr>
+        <td><code>engsl = mATR×0.1818</code><span class="src">≈ ×2/11 of mATR</span></td>
+        <td><span class="pill red">متفاوت</span></td>
+        <td><code>Eng(TF) = TR_composite(own TF) / 4.266666</code> ≈ ×15/64 — نقش یکسان، ثابت و مبنای ATR متفاوت
+        <span class="src">Biotak/TradePlanFormulas.mqh:110</span></td>
+      </tr>
+      <tr>
+        <td><code>hunsl = matr + matr3</code><span class="src">sum of two lower TFs</span></td>
+        <td><span class="pill red">متفاوت</span></td>
+        <td><code>Hunter = 8/3 × Eng</code> (×2.667) — کاملاً خانوادهٔ متفاوت
+        <span class="src">Biotak/TradePlanFormulas.mqh:120-126</span></td>
+      </tr>
+      <tr>
+        <td><code>tp1 · tp3 · tp7 · tp15</code><span class="src">mATR × {1,3,7,15}</span></td>
+        <td><span class="pill amber">نیمه</span></td>
+        <td>تارگت‌های لیبل ۳×/۵×/۱۵× ATR (floor) + تارگت‌های پلن 7/3×SL، 5×SL، 31/3×SL، 30×SL — ۳× و ۱۵× مشترک؛ میانی ۷ vs ۵
+        <span class="src">Biotak/LabelFunctions.mqh:148-150,161 · TradePlanFormulas.mqh:64-100</span></td>
+      </tr>
+      <tr>
+        <td><code>pivotsl = tp1</code></td>
+        <td><span class="pill red">مفقود</span></td>
+        <td>— (معادلی در کد ما ندارد)</td>
+      </tr>
+      <tr>
+        <td><code>thlong = 3S − 2P</code></td>
+        <td><span class="pill green">دقیق</span></td>
+        <td><code>longStep = 3×atrStructure − 2×atrPattern</code> — course method 1، عیناً یکی
+        <span class="src">Biotak/TH3/TH3Math.mqh:907</span></td>
+      </tr>
+      <tr>
+        <td><code>thsmall = 2S − P</code></td>
+        <td><span class="pill green">دقیق</span></td>
+        <td><code>medStep = 2×atrStructure − 1×atrPattern</code> — ما اسمش «med» است؛ <code>short</code> = میانگین دو Case
+        <span class="src">Biotak/TH3/TH3Math.mqh:908-909</span></td>
+      </tr>
+      <tr>
+        <td>جدول پنل<span class="src">Piv.SL/Hun.SL/ENG.sl · TP3-7-15 · APR--ATR--LIVE grid</span></td>
+        <td><span class="pill amber">نیمه</span></td>
+        <td>معماری پنل یکسان (پنل استاد)، سطرها و اعداد متفاوت: نمای ATR Overview per-TF (ATR + پله‌های ۱.۵/۱.۷۵/۲.۰ + تارگت‌های ۳/۵/۱۵) + کارت TRex (SL/TP1-4 + Eng/Hunter/Pricicle/Classic + StrBond)
+        <span class="src">Biotak/LabelFunctions.mqh:140-163 · TradePlanFormulas.mqh:406-514</span></td>
+      </tr>
+      <tr>
+        <td><code>liveM* + atr55/7/3</code><span class="src">raw live ATR, plotchar invisible</span></td>
+        <td><span class="pill gray">نداریم</span></td>
+        <td>— (دیاگ <code>ATRLEGS</code> ما پایه‌های کامپوزیت را dump می‌کند، نه ATR زندهٔ خام)</td>
+      </tr>
+      <tr>
+        <td><code>enabledPIP / price_to_pip</code></td>
+        <td><span class="pill green">هم‌مفهوم</span></td>
+        <td>تبدیل پیپ در همهٔ سطح‌ها via <code>GetCachedPipSize()</code> — مفهوم یکسان</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2><span class="num">۴</span>نبرد ریاضی — شش مورد کلیدی</h2>
+  <div class="grid2">
+    <div class="duel">
+      <h3>موتور ATR</h3>
+      <div class="fbox pine"><span class="tag">Pine</span><code>atr254(TF)</code> — میانگین تک ~۲۵۴باره per-TF، ۹ تایم‌فریم</div>
+      <div class="fbox ours alt"><span class="tag">ما</span><code>Trex composite</code> — شش پایهٔ SMA-of-TR، وزن ۱/۱/۲/۳/۵/۸، شیفت ۱</div>
+      <div class="note">دوره، نسخ (SMA نه Wilder)، شیفت، و پوشش تایم‌فریم همه فرق دارند.</div>
+    </div>
+    <div class="duel">
+      <h3>لچر فراكتال</h3>
+      <div class="fbox pine"><span class="tag">Pine</span><code>apr66 = close×0.06666</code> + <code>√(minutes/1440)</code></div>
+      <div class="fbox ours alt"><span class="tag">ما</span><code>TH = price×pct/100</code> — درصد ثابت جدول استاد (۲.۰۸٪..۵۳۳.۲۸٪)</div>
+      <div class="note">ما APR نداریم؛ √time فقط در fallback <code>CalculateHybridATR</code> زنده است.</div>
+    </div>
+    <div class="duel">
+      <h3>Engulfing SL</h3>
+      <div class="fbox pine"><span class="tag">Pine</span><code>engsl = mATR × 0.1818</code> (≈ ×2/11)</div>
+      <div class="fbox ours alt"><span class="tag">ما</span><code>Eng = TR_composite / 4.266666</code> (≈ ×15/64)</div>
+      <div class="note">نقش یکسان، ثابت و مبنای ATR متفاوت — مقادیر روی یک داده هم‌زمان یکی نمی‌افتند.</div>
+    </div>
+    <div class="duel">
+      <h3>Hunt SL</h3>
+      <div class="fbox pine"><span class="tag">Pine</span><code>hunsl = matr + matr3</code> (مجموع دو TF پایین‌تر)</div>
+      <div class="fbox ours alt"><span class="tag">ما</span><code>Hunter = 8/3 × Eng</code> (×2.667)</div>
+      <div class="note">کاملاً خانوادهٔ متفاوت؛ ضریب ثابت روی Eng vs مجموع دو ATR لچرپایین.</div>
+    </div>
+    <div class="duel">
+      <h3>آستانهٔ TH — برادری دقیق</h3>
+      <div class="fbox pine"><span class="tag">Pine</span><code>thlong = 3S − 2P</code> · <code>thsmall = 2S − P</code></div>
+      <div class="fbox ours"><span class="tag">ما</span><code>longStep = 3S − 2P</code> · <code>medStep = 2S − P</code></div>
+      <div class="note">course method 1 — عیناً یکی (<code>TH3Math.mqh:907-908</code>)؛ تنها برادری واقعی این مقایسه.</div>
+    </div>
+    <div class="duel">
+      <h3>لچر تارگت‌ها</h3>
+      <div class="fbox pine"><span class="tag">Pine</span><code>mATR × {1, 3, 7, 15}</code></div>
+      <div class="fbox ours"><span class="tag">ما</span>لیبل <code>3× / 5× / 15×</code> ATR · پلن <code>7/3, 5, 31/3, 30 ×SL</code></div>
+      <div class="note">۳× و ۱۵× مشترک؛ میانی Pine ۷× vs ما ۵×؛ لچر SL-based ما جداست.</div>
+    </div>
+  </div>
+
+  <h2><span class="num">۵</span>مقایسهٔ عددی — EURUSD روی یک دادهٔ واحد</h2>
+  <div class="card" style="font-size:14px">
+    <b>چرا عدد؟</b> «فرمول متفاوت» را فقط با عدد می‌شود لمس کرد. هر دو موتور را روی <b>یک سری قیمت واحد</b> اجرا کردیم
+    (EURUSD، Yahoo Finance، واکشی ۲۳ اکتبر ۲۰۲۶) و همهٔ خروجی‌ها را به <b>پیپ</b> (۰.۰۰۰۱) برگرداندیم.
+    اسکریپت: <code>tools/research/parity_numbers.py</code> — خروجی کامل با یک دستور بازتولید می‌شود.
+    <div class="note">
+      آخرین کندل روزانهٔ کامل‌بسته: <b>۲۱ اکتبر ۲۰۲۶</b> با بستهٔ ۱.۱۲۳۴۷ · کندل ۲۳ اکتبر هنوز زنده است (۱.۱۱۹۵۷ هنگام واکشی) ·
+      کندل ۲۲ اکتبر در سری یاهو ناقص بود و حذف شد. همهٔ محاسبات با <b>شیفت ۱</b> (آخرین کندل بسته) — همان قانون خودمان.
+    </div>
+  </div>
+
+  <div class="panel" style="padding:0;overflow-x:auto">
+  <table class="cmp">
+    <thead><tr>
+      <th style="width:25%">مقدار</th><th style="width:13%">Pine (پیپ)</th><th style="width:13%">ما (پیپ)</th><th style="width:9%">نسبت</th><th>یادداشت</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>ATR — H1</td><td class="mono">10.3</td><td class="mono">10.1</td><td class="mono">×1.0</td><td>قریب هم‌خوان — ولی تصادف رژیم بازار، نه یکسانی فرمول</td></tr>
+      <tr><td>ATR — H4</td><td class="mono">20.4</td><td class="mono">21.0</td><td class="mono">×1.0</td><td>همین</td></tr>
+      <tr><td>ATR — D1 (تایم‌فریم چارت)</td><td class="mono">66.6</td><td class="mono">62.2</td><td class="mono">×1.1</td><td>Pine: <code>atr254(D1)</code> · ما: <code>composite(D1)</code></td></tr>
+      <tr><td>ATR — W1</td><td class="mono">176.4</td><td class="mono">131.3</td><td class="mono">×1.3</td><td>واگرایی شروع می‌شود — پنجرهٔ ۲۵۴بارهٔ Pine حدود پنج سال هفتگی را صاف می‌کند</td></tr>
+      <tr><td><code>engsl</code> / <code>Eng</code></td><td class="mono">12.1</td><td class="mono">14.6</td><td class="mono">×0.8</td><td><code>mATR×0.1818</code> vs <code>composite/4.266666</code></td></tr>
+      <tr><td><code>hunsl</code> / <code>Hunter</code></td><td class="mono">30.7</td><td class="mono">38.9</td><td class="mono">×0.8</td><td><code>matr+matr3</code> (H4+H1) vs <code>8/3×Eng</code></td></tr>
+      <tr><td>SL</td><td class="mono">66.6</td><td class="mono">36.9</td><td class="mono">×1.8</td><td>Pine: <code>pivotsl</code> = یک mATR کامل · ما: ۱.۲×Eng(W1) — بزرگ‌ترین شکاف عملی</td></tr>
+      <tr><td><code>thlong</code> / <code>longStep</code></td><td class="mono">159.1</td><td class="mono">63.1</td><td class="mono">×2.5</td><td><b>فرمول عیناً یکی، ورودی‌ها دوگانه</b> — کارت پایین را ببینید</td></tr>
+      <tr><td><code>thsmall</code> / <code>medStep</code></td><td class="mono">112.9</td><td class="mono">63.1</td><td class="mono">×1.8</td><td>همین</td></tr>
+      <tr><td><code>TAPR</code> (apr66)</td><td class="mono">748.9</td><td class="mono">233.7 … 59912.4</td><td class="mono">—</td><td>Pine: ۶.۶۶۶٪ ثابت قیمت · ما: لچر ۲.۰۸٪..۵۳۳.۲۸٪ — معادل تک‌عددی ندارد</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="grid2">
+    <div class="duel">
+      <h3>لچر تارگت Pine — ضریب‌های mATR</h3>
+      <div class="fbox pine"><span class="tag">mATR = 66.6 پیپ</span>
+        tp1 <b class="mono">66.6</b> · tp3 <b class="mono">199.9</b> · tp7 <b class="mono">466.4</b> · tp15 <b class="mono">999.3</b>
+      </div>
+      <div class="note">هر چهار تارگت سادهٔ یک عدد مشترک‌اند: ATR خود تایم‌فریم چارت.</div>
+    </div>
+    <div class="duel">
+      <h3>لچر تارگت ما — ضریب‌های SL</h3>
+      <div class="fbox ours"><span class="tag">SL = 36.9 پیپ</span>
+        TP1 <b class="mono">86.2</b> · TP2 <b class="mono">184.7</b> · TP3 <b class="mono">381.7</b> · TP4 <b class="mono">1108.0</b>
+      </div>
+      <div class="note">لچر ما روی SL سوار است (۷/۳، ۵، ۳۱/۳، ۳۰) که خودش از Eng(W1) می‌آید — نه روی ATR خام.</div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="duel">
+      <h3>۱) یک فرمول، دو ورودی → ۲.۵ برابر فرق</h3>
+      <div class="fbox pine"><span class="tag">Pine</span>S = mATR = <b class="mono">66.6</b> · P = matr = <b class="mono">20.4</b> → <b class="mono">3S−2P = 159.1</b></div>
+      <div class="fbox ours"><span class="tag">ما</span>S = ATR(D1,14) = <b class="mono">63.1</b> · P = ATR(14)@pivot = <b class="mono">63.1</b> → <b class="mono">3S−2P = 63.1</b></div>
+      <div class="note">این تنها «برادری دقیق» گزارش است، ولی Pine ورودی‌ها را از ATR لچرهای متفاوت می‌گیرد، پس عدد نهایی ۲.۵ برابر ما در می‌آید. در دمو بالا pivot = آخرین کندل بسته است، پس P = S و هر سه استپ ما روی ۶۳.۱ می‌افتند؛ با pivot قدیمی‌تر، استپ‌ها باز می‌شوند.</div>
+    </div>
+    <div class="duel">
+      <h3>۲) قریبِ هم‌خوان ≠ هم‌فرمول</h3>
+      <div class="fbox pine"><span class="tag">H1</span><b class="mono">10.3</b> vs ما <b class="mono">10.1</b> — ۲٪</div>
+      <div class="fbox ours"><span class="tag">W1</span><b class="mono">176.4</b> vs ما <b class="mono">131.3</b> — ۳۴٪</div>
+      <div class="note">روی H1/H4 دو موتور تقریباً هم‌وزن می‌شوند — تصادف رژیم آرام، نه یکسانی فرمول. واگرایی روی تایم‌فریم‌های بلند شروع می‌شود.</div>
+    </div>
+    <div class="duel">
+      <h3>۳) SL — بزرگ‌ترین شکاف عملی</h3>
+      <div class="fbox pine"><span class="tag">Pine</span>pivotsl = tp1 = یک mATR کامل = <b class="mono">66.6 پیپ</b></div>
+      <div class="fbox ours"><span class="tag">ما</span>SL = ۱.۲ × Eng(W1) = <b class="mono">36.9 پیپ</b></div>
+      <div class="note">اگر کسی SL پنل Pine را روی چارت ما بخواند، استاپش تقریباً دو برابر استاپ پلن ماست.</div>
+    </div>
+    <div class="duel">
+      <h3>۴) apr66 داخل خود Pine ده برابر است</h3>
+      <div class="fbox pine"><span class="tag">حالت قیمت</span>close × 0.06666 = <b class="mono">748.9 پیپ</b></div>
+      <div class="fbox pine"><span class="tag">حالت پیپ</span>price_to_pip(close × 0.006666) = <b class="mono">74.9 پیپ</b></div>
+      <div class="note">قبل از مقایسه با ما، خود Pine باید تصمیم بگیرد کدام ۷۴۹ است و کدام ۷۵.</div>
+    </div>
+  </div>
+
+  <div class="card" style="font-size:14px">
+    <b>سطر نمایشی ما روی همین داده (D1، شیفت ۱):</b>
+    کامپوزیت <b class="mono">62.2</b> پیپ · پله‌های ۱.۵/میانه/۲.۰ = <b class="mono">93.3 / 108.9 / 124.4</b> ·
+    تارگت‌های لیبل ۳×/۵×/۱۵× = <b class="mono">186 / 311 / 933</b> · ATR زندهٔ Pine روی کندل باز (۵۵/۷/۳) = <b class="mono">56.8 / 52.2 / 45.5</b>.
+  </div>
+
+  <div class="card" style="font-size:13.5px">
+    <b>محدودیت‌های عددی (قبل از استناد):</b>
+    <ol class="issues">
+      <li><b>فید یاهو ≠ بروکر شما:</b> اعداد مطلق با فید بروکر چند پیپ جابه‌جا می‌شوند؛ نسبت‌ها و الگوی شکاف‌ها نمی‌افتند.</li>
+      <li><b>تعریف <code>avg_atr</code>/<code>mATR</code> در Pine نیامده:</b> <code>atr254</code> را SMA-of-TR فرض کردیم؛ نسخهٔ Wilder روی D1 فقط ۱.۵٪ فرق می‌کند (۶۵.۶ vs ۶۶.۶) و <code>engsl</code> را از ۱۲.۱ به ۱۱.۹ می‌برد — حساسیت ناچیز.</li>
+      <li><b><code>matrsakhtar</code> روی ماندگار ۱۰ساله تعریف ندارد:</b> ۱۲۱ کندل ماهانه &lt; ۲۵۴ بار لازم ≈ ۲۱ سال تاریخچه. در TradingView هم با history پیش‌فرض چارت محاسبه نمی‌شود.</li>
+      <li><b>pivot دمو:</b> P را در آخرین کندل بسته خواندیم (P = S)؛ با pivot واقعی که قدیمی‌تر باشد، سه استپ TH3 باز می‌شوند و مقایسهٔ thlong عوض می‌شود.</li>
+      <li><b>پیپ EURUSD = ۰.۰۰۰۱</b>؛ برای فلزات یا yen crosses که پیپ تعریف متفاوتی دارد، اعداد را scale کنید.</li>
+    </ol>
+  </div>
+
+  <h2><span class="num">۶</span>ناسازگاری‌های درونی خود Pine (کشف‌شده هنگام مقایسه)</h2>
+  <div class="card">
+    <ol class="issues">
+      <li><b>apr66 ده برابر بین دو حالت:</b> حالت قیمت <code>close×0.06666</code> ولی حالت پیپ <code>price_to_pip(close×0.006666)</code> — اگر <code>price_to_pip(x)=x/pip</code> باشد، یکی از این دو ده برابر اشتباه است.</li>
+      <li><b>ضریب‌های حالت قیمتی رُندشدهٔ √time با خطا:</b> <code>0.055</code> مقابل <code>√(5/1440)=0.0589</code> (≈۷٪ خطا)؛ بقیه: 0.1↔0.102، 0.2↔0.204، 0.4↔0.408، 2.64↔2.646، 5.47↔5.477.</li>
+      <li><b>aprY1 دومبحثی فرق دارد:</b> حالت قیمت <code>atr254D1×13.3</code> (مبنای ATR) vs حالت پیپ <code>√365×apr66≈19.1×apr66</code> (مبنای APR).</li>
+      <li><b>دقت از دست رفته در matr2:</b> در حالت پیپ قبل از ضرب رُند می‌کند — <code>round(price_to_pip(mATR))×0.1818</code>.</li>
+      <li><b>متغیرهای بی‌مصرف:</b> <code>TAPR/tapr/tapr2/matrsakhtar</code> محاسبه می‌شوند ولی در کد مرئی مصرف‌کننده ندارند (خطوط commented نشان می‌دهد در نسل قبلی tp3/tp7/tp15 روی matrsakhtar سوار بودند).</li>
+      <li><b>مدیریت مرزی:</b> زنجیرهٔ TAPR برای M30 و Y1 صفر می‌شود (case ندارند) — «صفر = فقدان»، که روحاً با قانون ما («0 = absence، هرگز حدس») هم‌خوان است.</li>
+    </ol>
+  </div>
+
+  <h2><span class="num">۷</span>نتیجه‌گیری و توصیه</h2>
+  <div class="verdict-box">
+    <b>این Pine نسخهٔ رسمی formul‌های ما نیست.</b> مقایسهٔ عددی روی EURUSD (بخش ۵) همین را تأیید می‌کند: موتور ATR کاملاً فرق دارد و ثابت‌های SL/TP جداست؛ تنها برادری دقیق، step های دورهٔ TH3 (<code>3S−2P</code> / <code>2S−P</code>) است. درخت MT4 (ریفرنس منطقی‌مان) هیچ‌کدام از <code>254</code> / <code>apr66</code> / <code>0.1818</code> را ندارد — یعنی این Pine یا نسل دیگری از فرمول‌های استاد است یا پورت شخصی third-party؛ نه آنچه ما port کرده‌ایم.
+    <ul>
+      <li><b>اگر هدف بررسی parity بود:</b> مرجع همان پایلپر ثبت‌شده در <code>AGENTS.md</code> است (کامپوزیت Trex + TradePlanFormulas + TH3Math)؛ این اسنیپت را مرجع نگیرید.</li>
+      <li><b>اگر استاد این Pine را فرمول رسمی جدید داده:</b> تصمیمی شبیه به <code>R-ENGONE</code> (۲۰۲۶-09-10) است و باید با جفت‌های same-minute بین دو موتور سنجیده شود، نه با یک اسکرین‌شات. تا آن زمان ثابت‌های فعلی (<code>ENG_DIVISOR 4.266666</code>، <code>SL_COEFF 1.20</code>، <code>Hunter 8/3</code>) لمسی باقی می‌مانند.</li>
+      <li><b>واژگان مشترک است، اعداد نیست:</b> engsl/huntsl/TP3-7-15/Piv.SL واژه‌های خود استادند، ولی پیاده‌سازی ما از اسکرین‌شات‌های TRex او (سپتامبر ۲۰۲۶) مهندسی معکوس شده.</li>
+    </ul>
+  </div>
+
+  <div class="appendix">
+    <b>مرجع سریع ما:</b><br>
+    <code>Biotak/ATRCalculations.mqh</code> — کامپوزیت Trex (۶ پایه، وزن ۱/۱/۲/۳/۵/۸) ·
+    <code>Biotak/TradePlanFormulas.mqh</code> — Eng=TR/4.266666، SL=1.2×Eng(str)، TP=7/3,5,31/3,30×SL ·
+    <code>Biotak/TH3/TH3Math.mqh</code> — long=3S−2P، med=2S−P، short=(long+med)/2 ·
+    <code>Biotak/THCalculations.mqh</code> — price×pct/100 ·
+    <code>Biotak/LabelFunctions.mqh</code> — per-TF ATR، پله‌های 1.5/1.75/2.0، تارگت‌های 3/5/15
+  </div>
+
+  <footer>Biotak Trigger TH3 · MT5 — گزارش parity فرمول‌های Pine · ۲۳ اکتبر ۲۰۲۶ · نسخهٔ متنی: PINE-TREX-FORMULA-PARITY-2026-10-23.md · اعداد: tools/research/parity_numbers.py</footer>
+
+</div>
+</body>
+</html>

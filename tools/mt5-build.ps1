@@ -161,9 +161,68 @@ $summaryPath = Join-Path $logDir "$name-$stamp.summary.txt"
 
 # Start-Process joins the array with spaces WITHOUT quoting, so both paths are
 # wrapped explicitly - "Biotak Trigger TH3.mq5" is two arguments otherwise.
-Start-Process -FilePath $meta -ArgumentList "/compile:`"$src`"", "/log:`"$raw`"" -Wait -WindowStyle Hidden
+#
+# THE BROKER FALLBACK (2026-10-23). On this machine a MetaEditor64.exe spawned
+# from an automation process can die before it writes a log with
+#   0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND
+# ("The procedure entry point ... could not be located in the dynamic link
+# library ...\MetaEditor64.exe") - a modal dialog the caller never sees, and no
+# log at all. The SAME exe launched from Explorer or from Task Scheduler
+# compiles normally, so the exe is not broken: the loader in this process tree
+# is. `mt5-sched-build.ps1` already existed for that, and this is the same
+# broker wired into the standard path so a session never has to know about it:
+# try the direct spawn, and if it produces no log, hand the identical command
+# line to Task Scheduler - which runs it in the user's own interactive session,
+# exactly like a manual F7 - and wait for that log instead.
+function Invoke-MetaCompile {
+    param([string]$Exe, [string]$Source, [string]$LogPath, [int]$TimeoutSec = 300)
+    if (Test-Path $LogPath) { Remove-Item $LogPath -Force }
+    # THE MEMORY OF THE FAILURE. The trap is a property of this machine, not of
+    # one build, and every direct attempt costs the user a modal dialog they have
+    # to dismiss by hand. So the first failure writes this marker and every later
+    # build goes straight to the broker: at most ONE dialog, ever.
+    $marker = Join-Path $logDir '.metaeditor-direct-broken'
+    if (-not (Test-Path $marker)) {
+        try {
+            $p = Start-Process -FilePath $Exe -ArgumentList "/compile:`"$Source`"", "/log:`"$LogPath`"" -Wait -WindowStyle Hidden -PassThru -ErrorAction Stop
+        } catch {
+            Write-Output "direct compile spawn failed: $($_.Exception.Message)"
+        }
+        if (Test-Path $LogPath) { return 'direct' }
+        # P-BUILD-15 (2026-10-24): `0xFFFFFFFF` is parsed by PowerShell 5.1 as
+        # int32 -1, so `-band` returned the NEGATIVE code unchanged and the
+        # [uint32] cast threw "Value was either too large or too small" — the
+        # broker below never ran and the build died with no compile at all.
+        # The `L` suffix makes the mask the int64 it has to be.
+        $code = if ($p) { "0x{0:X8}" -f [uint32]([int64]$p.ExitCode -band 0xFFFFFFFFL) } else { 'spawn-failed' }
+        Set-Content -Path $marker -Value ("$code " + (Get-Date -Format 's')) -Encoding ASCII
+        Write-Output "direct spawn produced no log ($code) - brokering through Task Scheduler from now on"
+    }
 
-if (-not (Test-Path $raw)) { throw "MetaEditor produced no log for $src" }
+    $taskName = "BiotakCompile-" + [System.IO.Path]::GetFileNameWithoutExtension($Source).Replace(' ', '-')
+    $act = New-ScheduledTaskAction -Execute $Exe -Argument "/compile:`"$Source`" /log:`"$LogPath`""
+    $pr  = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+    Register-ScheduledTask -TaskName $taskName -Action $act -Principal $pr -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $last = -1
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $state = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+        if ((Test-Path $LogPath) -and $state -eq 'Ready') {
+            $sz = (Get-Item $LogPath).Length
+            if ($sz -eq $last -and $sz -gt 0) { break }
+            $last = $sz
+        }
+    }
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+    if (Test-Path $LogPath) { return 'scheduler' }
+    return ''
+}
+
+$how = Invoke-MetaCompile -Exe $meta -Source $src -LogPath $raw
+if (-not $how) { throw "MetaEditor produced no log for $src (direct spawn and Task Scheduler both failed)" }
+$pre += "compile: $how"
 
 $lines = Get-Content $raw -Encoding Unicode | ForEach-Object { $_.TrimEnd() }
 $lines | Set-Content -Path $txt -Encoding UTF8

@@ -61,7 +61,25 @@ if ($procs.Count -eq 0) {
     Write-Output "closed cleanly"
 }
 
+# A terminal spawned from an automation process can die before its first window
+# with 0xC0000139 (STATUS_ENTRYPOINT_NOT_FOUND) - the same loader trap the
+# compile half hits, and here the cost is worse: the terminal was just closed, so
+# a silent failure leaves the user with nothing open. So the relaunch is verified,
+# and a relaunch that produced no process is brokered through Task Scheduler
+# (the user's own interactive session, exactly like a double-click).
 Start-Process -FilePath $exe | Out-Null
+Start-Sleep -Seconds 3
+$booted = @(Get-Process terminal64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+if ($booted.Count -eq 0) {
+    Write-Output "direct relaunch produced no process - brokering through Task Scheduler"
+    $taskName = "BiotakTerminalStart"
+    $act = New-ScheduledTaskAction -Execute $exe -WorkingDirectory (Split-Path -Parent $exe)
+    $pr  = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+    Register-ScheduledTask -TaskName $taskName -Action $act -Principal $pr -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+    Start-Sleep -Seconds 3
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+}
 
 $deadline = (Get-Date).AddSeconds($BootTimeoutSec)
 $fresh = @()

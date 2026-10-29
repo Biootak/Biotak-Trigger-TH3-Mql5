@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نحوهٔ محاسبهٔ گام حرکتی در TH3 — با اعداد</title>
+<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f6f3; --card:#ffffff; --ink:#26215c; --muted:#5f5e5a; --line:#e4e2db;
+  --green-bg:#eaf3de; --green-line:#3b6d11; --green-ink:#27500a;
+  --amber-bg:#faeeda; --amber-line:#854f0b; --amber-ink:#633806;
+  --red-bg:#fcebeb;  --red-line:#a32d2d;  --red-ink:#791f1f;
+  --gray-bg:#f1efe8;  --gray-line:#5f5e5a;  --gray-ink:#444441;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:Vazirmatn,"Segoe UI",Tahoma,"Noto Naskh Arabic",sans-serif;line-height:1.75;padding:36px 18px 60px}
+.wrap{max-width:1040px;margin:0 auto}
+code,.mono{font-family:Consolas,"Courier New",monospace;direction:ltr;unicode-bidi:embed}
+h1{font-size:26px;font-weight:600;line-height:1.4}
+h2{font-size:19px;font-weight:600;margin:34px 0 14px;display:flex;align-items:center;gap:10px}
+h2 .num{background:var(--ink);color:#fff;border-radius:8px;min-width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:14px;padding:0 6px}
+h3{font-size:15.5px;font-weight:600;margin:20px 0 8px}
+.sub{color:var(--muted);font-size:14px;margin-top:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 14px;font-size:12.5px;color:var(--muted)}
+.verdict{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;font-size:15.5px}
+.verdict b{color:var(--red-ink)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:18px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:14px}
+.stat .dot{width:14px;height:14px;border-radius:50%;flex:none}
+.stat .n{font-size:24px;font-weight:600;line-height:1}
+.stat .l{font-size:13px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-top:14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;margin-top:14px;overflow-x:auto}
+table.cmp{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--card)}
+table.cmp th{background:#efede6;text-align:right;padding:10px 12px;font-weight:600;font-size:13px;border-bottom:1px solid var(--line)}
+table.cmp td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+table.cmp tr:last-child td{border-bottom:none}
+td.num,th.num{font-family:Consolas,"Courier New",monospace;direction:ltr;text-align:center;white-space:nowrap}
+.pill{display:inline-block;border-radius:999px;padding:2px 12px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill.red{background:var(--red-bg);color:var(--red-ink);border:1px solid var(--red-line)}
+.pill.green{background:var(--green-bg);color:var(--green-ink);border:1px solid var(--green-line)}
+.pill.amber{background:var(--amber-bg);color:var(--amber-ink);border:1px solid var(--amber-line)}
+.pill.gray{background:var(--gray-bg);color:var(--gray-ink);border:1px solid var(--gray-line)}
+.src{display:block;font-size:11.5px;color:var(--muted);margin-top:3px;direction:ltr;text-align:right}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.duel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.duel h3{font-size:15px;font-weight:600;margin-bottom:10px}
+.fbox{border-radius:10px;padding:10px 14px;font-size:13.5px;margin:8px 0;border:1px solid}
+.fbox .tag{display:block;font-size:11px;font-weight:600;margin-bottom:4px;opacity:.85}
+.fbox.pine{background:var(--red-bg);border-color:var(--red-line);color:var(--red-ink)}
+.fbox.ours{background:var(--green-bg);border-color:var(--green-line);color:var(--green-ink)}
+.fbox.ours.alt{background:var(--red-bg);border-color:var(--red-line);color:var(--red-ink)}
+.fbox.ink{background:#eceaf4;border-color:#26215c;color:#26215c}
+.fbox.amber{background:var(--amber-bg);border-color:var(--amber-line);color:var(--amber-ink)}
+.note{font-size:12.5px;color:var(--muted);margin-top:8px}
+ol.issues{padding-inline-start:22px;font-size:14px}
+ol.issues li{margin:10px 0}
+.verdict-box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-top:14px;font-size:14.5px}
+.verdict-box ul{padding-inline-start:20px;margin-top:8px}
+.verdict-box li{margin:7px 0}
+.appendix{background:#efede6;border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-top:14px;font-size:13px}
+.appendix code{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:12px;display:inline-block;margin:3px 0;direction:ltr}
+footer{margin-top:34px;color:var(--muted);font-size:12px;text-align:center}
+svg text{font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>گام حرکتی در TH3 دقیقاً چطور محاسبه می‌شود؟</h1>
+  <div class="sub">راهنمای عددی — ۲۳ اکتبر ۲۰۲۶ · منبع کد: <code>Biotak/TH3/TH3Math.mqh</code> · اعداد: EURUSD واقعی (Yahoo Finance، آخرین کندل بستهٔ ۲۱ اکتبر، شیفت ۱)</div>
+  <div class="chips">
+    <span class="chip">TH3 tools</span>
+    <span class="chip">course method 1</span>
+    <span class="chip">دو ATR → سه کاندید → یک استپ</span>
+    <span class="chip">با اعداد EURUSD</span>
+  </div>
+
+  <div class="verdict">
+    <b>خلاصه:</b> گام حرکتی یک تابع خالص از <b>دو عدد</b> است — <code>S</code> (ATR روزانهٔ ساختار) و <code>P</code>
+    (ATR خودِ چارت، خوانده‌شده در کندل پیوت). از این دو، سه کاندید ساخته می‌شود، <b>مرتب</b> می‌شوند،
+    banda مومنتوم یکی را برمی‌دارد، و پوشش آن را کوچک می‌کند. اگر عدد از آب درنیاید، جواب «استپ نیست» است، نه «استپ کوچک».
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="dot" style="background:var(--amber-line)"></span><div><div class="n">۶۳.۱</div><div class="l">پیپ — S ورودی ثابت: ATR روزانهٔ ۱۴، شیفت ۱</div></div></div>
+    <div class="stat"><span class="dot" style="background:var(--ink)"></span><div><div class="n">۳ ← ۱</div><div class="l">سه کاندید، مرتب، یکی انتخاب می‌شود</div></div></div>
+    <div class="stat"><span class="dot" style="background:var(--red-line)"></span><div><div class="n">۰ = فقدان</div><div class="l">استپ منفی نیست؛ «نداشتن استپ» است</div></div></div>
+    <div class="stat"><span class="dot" style="background:var(--green-line)"></span><div><div class="n">۲۲٬۵۳۸</div><div class="l">پای واقعی که باگ ترتیب را با اندازه‌گیری لو داد</div></div></div>
+  </div>
+
+  <h2><span class="num">۱</span>خط لولهٔ محاسبه — شش مرحله</h2>
+  <div class="panel">
+  <svg viewBox="0 0 680 530" width="100%" role="img" style="min-width:640px">
+    <title>TH3 step pipeline</title>
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+
+    <rect x="90" y="16" width="500" height="58" rx="10" fill="#f1efe8" stroke="#5f5e5a" stroke-width="0.5"/>
+    <text x="340" y="38" font-size="13.5" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#444441">الگوی AB=CD نهایی‌شده</text>
+    <text x="340" y="58" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#5f5e5a">A/B/C/D · کندل پیوت B معلوم باشد (تایم + قیمت)</text>
+    <line x1="340" y1="74" x2="340" y2="94" stroke="#5f5e5a" stroke-width="1" marker-end="url(#arr)"/>
+
+    <rect x="90" y="96" width="500" height="76" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+    <text x="340" y="116" font-size="13.5" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">خواندن دو عدد</text>
+    <text x="340" y="136" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">S = iATR(D1, 14, shift 1)   ·   P = iATR(chart, 14, barB)</text>
+    <text x="340" y="158" font-size="11" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">اگر P خالی/صفر بود → P = S · اگر S کمتر از ۱۰ پیپ بود → میانگین محدودهٔ ۲۰ کندل روزانه</text>
+    <line x1="340" y1="172" x2="340" y2="192" stroke="#5f5e5a" stroke-width="1" marker-end="url(#arr)"/>
+
+    <rect x="90" y="194" width="500" height="58" rx="10" fill="#eceaf4" stroke="#26215c" stroke-width="0.5"/>
+    <text x="340" y="216" font-size="13.5" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#26215c">سه کاندید — course method 1</text>
+    <text x="340" y="236" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#26215c">long = 3S − 2P   ·   med = 2S − P   ·   short = (long + med) / 2</text>
+    <line x1="340" y1="252" x2="340" y2="272" stroke="#5f5e5a" stroke-width="1" marker-end="url(#arr)"/>
+
+    <rect x="90" y="274" width="500" height="58" rx="10" fill="#eceaf4" stroke="#26215c" stroke-width="0.5"/>
+    <text x="340" y="296" font-size="13.5" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#26215c">مرتب‌سازی صعودی + انتخاب با banda مومنتوم</text>
+    <text x="340" y="316" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#26215c">WEAK کوچک‌ترین · NORMAL میانی · STRONG/EXPLOSIVE بزرگ‌ترین — R = |A→B| / (P × √bars)</text>
+    <line x1="340" y1="332" x2="340" y2="352" stroke="#5f5e5a" stroke-width="1" marker-end="url(#arr)"/>
+
+    <rect x="90" y="354" width="500" height="58" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.5"/>
+    <text x="340" y="376" font-size="13.5" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#633806">ضریب پوشش — تنها بخش قابل تنظیم</text>
+    <text x="340" y="396" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#854f0b">عمق: DEEP ×۰.۷۰ / FULL ×۰.۸۵   ·   تأخیر: ۳ کندل ×۰.۹۰ / ۴ و بیشتر ×۰.۸۰</text>
+    <line x1="340" y1="412" x2="340" y2="432" stroke="#5f5e5a" stroke-width="1" marker-end="url(#arr)"/>
+
+    <rect x="90" y="434" width="500" height="76" rx="10" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+    <text x="340" y="454" font-size="13.5" font-weight="500" text-anchor="middle" dominant-baseline="central" fill="#27500a">خروجی: stepPips</text>
+    <text x="340" y="474" font-size="11.5" text-anchor="middle" dominant-baseline="central" fill="#3b6d11">stepPrice ÷ pipSize — داخل تابع قیمت است، بیرون پیپ</text>
+    <text x="340" y="496" font-size="11" text-anchor="middle" dominant-baseline="central" fill="#a32d2d">کاندیدِ انتخاب‌شده ≤ ۰ → false · «۰ = فقدان»، هرگز حدس — فراخوان قدیمی را نگه می‌دارد</text>
+  </svg>
+  </div>
+
+  <h2><span class="num">۲</span>ورودی‌ها: دو ATR، دو تایم‌فریم</h2>
+  <div class="grid2">
+    <div class="duel">
+      <h3>S — «توان ساختار» (ثابت در طول روز)</h3>
+      <div class="fbox amber"><span class="tag">کد</span><code>GetCachedDailyATR()</code> = <code>iATR(NULL, PERIOD_D1, 14, 1)</code></div>
+      <div class="fbox ink"><span class="tag">عدد روی EURUSD</span><b class="mono">۶۳.۱ پیپ</b> — ATR روزانهٔ ۱۴ روی آخرین کندل بسته</div>
+      <div class="note">
+        <b>شیفت ۱ یعنی «فقط روزهای کامل»</b> (تصمیم P-TH3-STEP-01): کندل نیمه‌کارهٔ امروز وارد حساب نیست، پس S در طول روز ثابت است و per-day freeze درست کار می‌کند.
+        دو گارد: اگر ATR کمتر از ۱۰ پیپ یا خالی بود، میانگین محدودهٔ ۲۰ کندل روزانهٔ کامل جایگزین می‌شود؛ مقدار هم در <code>static</code> کش می‌شود تا هر فراخوان دوباره حساب نشود.
+      </div>
+    </div>
+    <div class="duel">
+      <h3>P — «توان الگو» (در کندل پیوت)</h3>
+      <div class="fbox amber"><span class="tag">کد</span><code>iATR(NULL, 0, 14, barB)</code> — ATR(14) خودِ چارت، خوانده‌شده در کندل B</div>
+      <div class="fbox ink"><span class="tag">عدد روی EURUSD</span>H1: <b class="mono">۹.۱</b> · H4: <b class="mono">۱۹.۵</b> · D1: <b class="mono">۶۳.۱</b> · W1: <b class="mono">۱۱۷.۱</b> پیپ</div>
+      <div class="note">
+        P روی <b>کندل پیوت</b> خوانده می‌شود، نه روی کندل جاری — یعنی استپ به ATRِ زمانِ الگو گره خورده، نه به ATRِ لحظهٔ رسم.
+        اگر خواندنش ممکن نباشد (خالی/صفر)، <code>P = S</code> می‌شود: همان «۰ = فقدان، هرگز حدس».
+      </div>
+    </div>
+  </div>
+
+  <h3>دو ورودی کنار هم — و سه کاندید روی هر تایم‌فریم (پیپ)</h3>
+  <div class="panel" style="padding:0;overflow-x:auto">
+  <table class="cmp">
+    <thead><tr>
+      <th>چارت</th><th class="num">P</th><th class="num">P/S</th><th class="num">long = 3S−2P</th><th class="num">med = 2S−P</th><th class="num">short</th><th class="num">WEAK</th><th class="num">NORMAL</th><th class="num">STRONG</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>H1</td><td class="num">9.1</td><td class="num">0.14</td><td class="num">171.1</td><td class="num">117.1</td><td class="num">144.1</td><td class="num">117.1</td><td class="num">144.1</td><td class="num">171.1</td></tr>
+      <tr><td>H4</td><td class="num">19.5</td><td class="num">0.31</td><td class="num">150.4</td><td class="num">106.7</td><td class="num">128.6</td><td class="num">106.7</td><td class="num">128.6</td><td class="num">150.4</td></tr>
+      <tr><td>D1</td><td class="num">63.1</td><td class="num">1.00</td><td class="num">63.1</td><td class="num">63.1</td><td class="num">63.1</td><td class="num">63.1</td><td class="num">63.1</td><td class="num">63.1</td></tr>
+      <tr><td>W1</td><td class="num">117.1</td><td class="num">1.86</td><td class="num" style="color:var(--red-ink)">−44.8</td><td class="num">9.1</td><td class="num" style="color:var(--red-ink)">−17.9</td><td class="num"><span class="pill red">نیست</span></td><td class="num"><span class="pill red">نیست</span></td><td class="num">9.1</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="card" style="font-size:14px">
+    <b>سه نکته که جدول فریاد می‌زند:</b>
+    <ol class="issues">
+      <li><b>روی D1 فرمول «دهگرا» می‌شود:</b> وقتی P = S (پیوت نزدیک)، هر سه کاندید دقیقاً برابر S می‌افتند (۶۳.۱). انتخاب banda دیگر تفاوتی نمی‌سازد — روی چارت روزانه، استپ = ATR روزانه، برای همهٔ bandaها.</li>
+      <li><b>روی W1 استپ عملاً می‌میرد:</b> ATR هفتگی (۱۱۷.۱) تقریباً دو برابر ATR روزانه (۶۳.۱) است، پس <code>long</code> و <code>short</code> منفی می‌شوند و فقط banda قوی‌تر یک استپ ۹.۱ پیپی می‌گیرد. فرمول دوره برای چارت‌های داخل‌روزه ساخته شده؛ روی هفتگی ساختار را رها می‌کند.</li>
+      <li><b>P/S همه‌چیز را تعیین می‌کند:</b> همین یک نسبت، اندازهٔ استپ و زنده‌بودن bandaها را مشخص می‌کند — نمودار بخش ۳ را ببین.</li>
+    </ol>
+  </div>
+
+  <h2><span class="num">۳</span>سه کاندید، مرتب‌سازی، و banda مومنتوم</h2>
+  <div class="card" style="font-size:14.5px">
+    <b>مقدارها از دورهٔ استادند («course method 1»)؛ ترتیب و تخصیص banda از ما.</b>
+    سه کاندید ساخته می‌شود، سپس با insertion sort کوچک به بزرگ مرتب می‌شوند و banda مومنتوم یکی را برمی‌دارد:
+    <div class="grid2" style="margin-top:12px">
+      <div class="duel">
+        <h3>banda مومنتوم از «سرعت» می‌آید، نه از زاویه</h3>
+        <div class="fbox ink"><span class="tag">فرمول</span>R = |pB − pA| ÷ ( P × √bars )</div>
+        <div class="note">
+          <code>bars</code> = دقایق سپری‌شده بین A و B تقسیم بر دقیقهٔ کندل چارت (پایین‌ترین مقدار ۱).
+          R = ۱ یعنی «پای دقیقاً به اندازهٔ ATR خودِ تایم‌فریم». bandaها: WEAK زیر ۱.۰۰ · NORMAL ۱.۰۰–۱.۳۰ ·
+          STRONG ۱.۳۰–۱.۶۰ · EXPLOSIVE ۱.۶۰ و بالاتر. مرز ۱.۶۰ فقط <b>برچسب</b> است: STRONG و EXPLOSIVE هر دو بزرگ‌ترین کاندید را می‌گیرند.
+        </div>
+      </div>
+      <div class="duel">
+        <h3>مرتب‌سازی با اعداد H1</h3>
+        <div class="fbox ours"><span class="tag">کاندیدها</span>long <b class="mono">171.1</b> · med <b class="mono">117.1</b> · short <b class="mono">144.1</b> پیپ</div>
+        <div class="fbox ours"><span class="tag">بعد از sort</span>WEAK ← <b class="mono">117.1</b> · NORMAL ← <b class="mono">144.1</b> · STRONG ← <b class="mono">171.1</b></div>
+        <div class="note">هیچ عدد جدیدی اختراع نمی‌شود؛ فقط «کدام banda کدام مقدار» عوض می‌شود — و صعودی می‌شود.</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>نمودار زندگی کاندیدها نسبت به P/S</h3>
+  <div class="panel">
+  <svg viewBox="0 0 680 400" width="100%" role="img" style="min-width:640px">
+    <title>candidates vs P/S</title>
+    <rect x="70" y="30" width="388.6" height="290" fill="#3b6d11" opacity="0.05"/>
+    <rect x="458.6" y="30" width="129.6" height="290" fill="#854f0b" opacity="0.06"/>
+    <rect x="588.2" y="30" width="51.8" height="290" fill="#a32d2d" opacity="0.06"/>
+
+    <g stroke="#e4e2db" stroke-width="0.5">
+      <line x1="70" y1="30" x2="640" y2="30"/><line x1="70" y1="78.3" x2="640" y2="78.3"/>
+      <line x1="70" y1="126.7" x2="640" y2="126.7"/><line x1="70" y1="175" x2="640" y2="175"/>
+      <line x1="70" y1="271.7" x2="640" y2="271.7"/><line x1="70" y1="320" x2="640" y2="320"/>
+    </g>
+    <g font-size="10.5" fill="#5f5e5a" text-anchor="end">
+      <text x="62" y="30">۲۰۰</text><text x="62" y="78.3">۱۵۰</text><text x="62" y="126.7">۱۰۰</text>
+      <text x="62" y="175">۵۰</text><text x="62" y="227.3">۰</text><text x="62" y="271.7">−۵۰</text><text x="62" y="320">−۱۰۰</text>
+    </g>
+    <text x="24" y="24" font-size="11" fill="#5f5e5a">پیپ</text>
+
+    <line x1="70" y1="223.3" x2="640" y2="223.3" stroke="#5f5e5a" stroke-width="1"/>
+
+    <g stroke="#5f5e5a" stroke-width="0.7" stroke-dasharray="4 3">
+      <line x1="329.1" y1="30" x2="329.1" y2="320"/>
+      <line x1="458.6" y1="30" x2="458.6" y2="320"/>
+      <line x1="501.8" y1="30" x2="501.8" y2="320"/>
+      <line x1="588.2" y1="30" x2="588.2" y2="320"/>
+    </g>
+    <g font-size="10.5" fill="#5f5e5a" text-anchor="middle">
+      <text x="329.1" y="24">۱.۰</text><text x="458.6" y="24">۱.۵</text><text x="501.8" y="24">۱.۶۷</text><text x="588.2" y="24">۲.۰</text>
+    </g>
+
+    <polyline points="70,40.3 458.6,223.3 640,308.7" fill="none" stroke="#26215c" stroke-width="2"/>
+    <polyline points="70,101.4 588.2,223.3 640,250.9" fill="none" stroke="#854f0b" stroke-width="2"/>
+    <polyline points="70,70.9 501.8,223.3 640,272.1" fill="none" stroke="#3b6d11" stroke-width="2"/>
+
+    <g>
+      <circle cx="106.3" cy="223.3" r="4" fill="#26215c"/><text x="106.3" y="240" font-size="11" text-anchor="middle" fill="#26215c">H1</text>
+      <circle cx="150.3" cy="223.3" r="4" fill="#26215c"/><text x="150.3" y="240" font-size="11" text-anchor="middle" fill="#26215c">H4</text>
+      <circle cx="329.1" cy="223.3" r="4" fill="#26215c"/><text x="329.1" y="240" font-size="11" text-anchor="middle" fill="#26215c">D1</text>
+      <circle cx="551.9" cy="223.3" r="4" fill="#a32d2d"/><text x="551.9" y="240" font-size="11" text-anchor="middle" fill="#a32d2d">W1</text>
+    </g>
+
+    <g font-size="10.5" fill="#5f5e5a" text-anchor="middle">
+      <text x="250" y="340">هر سه banda زنده</text>
+      <text x="520" y="340">فقط بعضی</text>
+      <text x="614" y="340">هیچ</text>
+    </g>
+
+    <g font-size="11.5">
+      <line x1="80" y1="362" x2="102" y2="362" stroke="#26215c" stroke-width="2"/><text x="108" y="362" dominant-baseline="central" fill="#26215c">long = 3S−2P</text>
+      <line x1="270" y1="362" x2="292" y2="362" stroke="#854f0b" stroke-width="2"/><text x="298" y="362" dominant-baseline="central" fill="#854f0b">med = 2S−P</text>
+      <line x1="460" y1="362" x2="482" y2="362" stroke="#3b6d11" stroke-width="2"/><text x="488" y="362" dominant-baseline="central" fill="#3b6d11">short = میانگین</text>
+    </g>
+    <text x="340" y="388" font-size="12" text-anchor="middle" fill="#5f5e5a">نسبت P/S — ATR الگو divided by ATR ساختار (S = ۶۳.۱ پیپ)</text>
+  </svg>
+  </div>
+
+  <div class="card" style="font-size:14px">
+    <b>مرزهای مرگ، دقیقاً:</b>
+    <ul style="padding-inline-start:20px;margin-top:8px">
+      <li><b>P/S &lt; ۱.۵ →</b> هر سه banda استپ می‌گیرند. در P/S = ۱ («دهگرا») هر سه برابر S می‌افتند؛ زیر ۱، <code>med</code> کوچک‌ترین و <code>long</code> بزرگ‌ترین است؛ بین ۱ و ۱.۵، <code>long</code> کوچک‌ترین می‌شود.</li>
+      <li><b>P/S ≥ ۱.۵ →</b> <code>long</code> صفر یا منفی؛ WEAK استپ ندارد.</li>
+      <li><b>P/S ≥ ۱.۶۷ (۵/۳) →</b> <code>short</code> هم صفر می‌شود؛ NORMAL هم استپ ندارد.</li>
+      <li><b>P/S ≥ ۲ →</b> <code>med</code> هم صفر؛ هیچ bandai استپ ندارد. تابع <code>false</code> برمی‌گرداند و فراخوان مقدار قبلی را نگه می‌دارد.</li>
+    </ul>
+    <div class="note">نوشتهٔ خود کد: «A negative step is not a small step, it is no step» — استپ منفی یعنی «استپ نیست»، و فراخوان به‌جای یک حدس، همان قبلی را نگه می‌دارد.</div>
+  </div>
+
+  <h2><span class="num">۴</span>یک مثال واقعی، سرتاسر — یک swing صعودی روی H1</h2>
+  <div class="card" style="font-size:14.5px">
+    <div class="grid2">
+      <div>
+        <h3>الگو</h3>
+        <div class="fbox pine"><span class="tag">A — کف</span>۲۱ اکتبر ۰۹:۰۰ · قیمت <b class="mono">1.12171</b></div>
+        <div class="fbox pine"><span class="tag">B — سقف (کندل پیوت)</span>۲۲ اکتبر ۰۳:۰۰ · قیمت <b class="mono">1.12575</b> · ۳۴ کندل عقب‌تر</div>
+        <div class="note">پای A→B برابر <b class="mono">۴۰.۴ پیپ</b> است و <b class="mono">۱۸</b> کندل H1 طول کشیده.</div>
+      </div>
+      <div>
+        <h3>حساب کتاب</h3>
+        <ol class="issues" style="font-size:13.5px">
+          <li><b>P</b> = ATR(H1,14) در کندل B = <b class="mono">۹.۶ پیپ</b> · <b>S</b> = <b class="mono">۶۳.۱ پیپ</b> → P/S = ۰.۱۵</li>
+          <li><b>R</b> = ۴۰.۴ ÷ (۹.۶ × √۱۸) = <b class="mono">۰.۹۹</b> → banda = <b>WEAK</b> (یک مو از مرز ۱.۰۰ پایین‌تر!)</li>
+          <li>کاندیدها: long = <b class="mono">۱۷۰.۰</b> · med = <b class="mono">۱۱۶.۶</b> · short = <b class="mono">۱۴۳.۳</b></li>
+          <li>مرتب: ۱۱۶.۶ &lt; ۱۴۳.۳ &lt; ۱۷۰.۰ → WEAK کوچک‌ترین را برمی‌دارد</li>
+          <li>ضریب پوشش در این دمو ۱.۰ (محور پوشش اندازه‌گیری نشده)</li>
+        </ol>
+      </div>
+    </div>
+    <div class="fbox ours" style="margin-top:12px"><span class="tag">استپ نهایی</span><b class="mono">۱۱۶.۶ پیپ</b> — و پنل این‌طور چاپش می‌کند: <code>skeleton 116.6 pips</code></div>
+    <div class="note">
+      حسابی برای «حساسیت به مرز»: اگر آن پای ۰.۳ پیپ بلندتر بود (یا یک کندل کوتاه‌تر)، R از ۱.۰۰ رد می‌شد،
+      banda می‌شد NORMAL و استپ <b class="mono">۱۴۳.۳</b> پیپ — ۲۳ پیپ بیشتر، بدون هیچ تغییری در فرمول.
+      bandaها مرزهای واقعی‌اند، نه تزئینی.
+    </div>
+  </div>
+
+  <h2><span class="num">۵</span>ضریب پوشش — چرا استپ را کوچک می‌کند</h2>
+  <div class="card" style="font-size:14px">
+    منطق از کامنت خود کد: یک پیوت که کاملاً پوشش خورده، جای کمتری برای حرکت دارد؛ و پوششی که دیر آمده یعنی حرکت خرج شده.
+    پس هر دو محور استپ را <b>کوچک</b> می‌کنند — و این‌ها تنها قسمتی از تابع‌اند که قابل تنظیم‌اند (تصمیم ما، نه عدد دوره):
+    <div class="panel" style="padding:0;overflow-x:auto;margin-top:10px">
+    <table class="cmp">
+      <thead><tr><th>عمق پوشش</th><th class="num">تأخیر ≤ ۲</th><th class="num">تأخیر ۳</th><th class="num">تأخیر ≥ ۴</th></tr></thead>
+      <tbody>
+        <tr><td>NONE / SHALLOW (بدون پوشش یا پوشش بدنه)</td><td class="num">×۱.۰۰</td><td class="num">×۰.۹۰</td><td class="num">×۰.۸۰</td></tr>
+        <tr><td>FULL (بدنهٔ پیوت هم پوشش خورد)</td><td class="num">×۰.۸۵</td><td class="num">×۰.۷۷</td><td class="num">×۰.۶۸</td></tr>
+        <tr><td>DEEP (بدنه + بلعیدن ۲ کندل قدیمی‌تر)</td><td class="num">×۰.۷۰</td><td class="num">×۰.۶۳</td><td class="num">×۰.۵۶</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="note">ضریب‌ها ضرب‌شدنی‌اند (عمق × تأخیر)؛ بدترین حالت DEEP با تأخیر ≥۴ استپ را به ۵۶٪ می‌رساند — یعنی استپ ۱۱۶.۶ پیپیِ مثال بخش ۴ در آن حالت <b class="mono">۶۵.۳</b> پیپ می‌شد.</div>
+  </div>
+
+  <h2><span class="num">۶</span>باگی که مرتب‌سازی حل کرد — اندازه‌گیری‌شده، نه حدسی</h2>
+  <div class="card" style="font-size:14.5px">
+    <div class="grid2">
+      <div class="duel">
+        <h3>مشکل</h3>
+        <div class="fbox pine"><span class="tag">قبل از رفع</span>WEAK ← <code>short</code> · NORMAL ← <code>med</code> · STRONG ← <code>long</code></div>
+        <div class="fbox pine"><span class="tag">جبر</span>short &gt; med ⟺ ۲.۵S − ۱.۵P &gt; ۲S − P ⟺ <b>P &lt; S</b></div>
+        <div class="note">
+          P &lt; S روی <b>هر چارت داخل‌روزه‌ای</b> درست است (ATR ساعتی همیشه کمتر از ATR روزانه) — یعنی در عمل همیشه،
+          پایِ impulse ضعیف‌تر استپ <b>بزرگ‌تری</b> از impulse معمولی می‌گرفت.
+        </div>
+      </div>
+      <div class="duel">
+        <h3>اندازه‌گیری و رفع</h3>
+        <div class="fbox ours"><span class="tag">روی ۲۲٬۵۳۸ پای واقعی</span>WEAK = <b class="mono">۲.۲۶۴ S</b> · NORMAL = <b class="mono">۱.۸۷۰ S</b> → <b>+۲۱.۱٪</b> برای impulse ضعیف‌تر</div>
+        <div class="fbox ours"><span class="tag">رفع</span>sort صعودی + تخصیص یکنواخت — «هیچ عدد جدیدی اختراع نمی‌شود، فقط انتخاب عوض می‌شود»</div>
+        <div class="note">با اعداد همین گزارش: قبل از رفع WEAK روی H1 برابر ۱۴۴.۱ پیپ بود در مقابل NORMAL برابر ۱۱۷.۱ (+۲۳٪)؛ بعد از رفع ۱۱۷.۱ در مقابل ۱۴۴.۱ — صعودی و منطبق با banda.</div>
+      </div>
+    </div>
+    <div class="note">منبع: بلوک کامنت <code>TH3Math.mqh:911-922</code> — همین اندازه‌گیری است که باعث شد تخصیص bandaها از «فرض» به «اندازه‌گیری‌شده» تغییر کند.</div>
+  </div>
+
+  <h2><span class="num">۷</span>این عدد کجا می‌رود؟ و گاردهایش</h2>
+  <div class="grid2">
+    <div class="duel">
+      <h3>سه سطح مصرف</h3>
+      <div class="fbox ours"><span class="tag">۱ · لاگ</span><code>TH3SkeletonDescribe</code> — سطر <code>skeleton key=… step=116.6 pips</code> برای هر الگوی نهایی‌شده</div>
+      <div class="fbox ours"><span class="tag">۲ · لیبل اطلاعات</span>کنار استپ درصدی و استپ «بسته»: <code>skeleton %.1f pips (key %d)</code> — کامنت کد می‌گوید همین خوانش است که «قابل بررسی در برابر بازار» است</div>
+      <div class="fbox ours"><span class="tag">۳ · سنتز لچر</span>ورودیِ ردیف‌های اکتشافی کپشن AB=CD (pattern / rung / uni / base / final) — استپ اسکلت یکی از عددهای ورودیِ ساختِ لچر است</div>
+    </div>
+    <div class="duel">
+      <h3>گاردها — «۰ = فقدان، هرگز حدس»</h3>
+      <div class="fbox pine"><span class="tag">ورودی خراب</span><code>skel</code> نامعتبر، یا S ≤ ۰، یا P ≤ ۰ → <code>false</code> (خروجی دست‌نخورده می‌ماند)</div>
+      <div class="fbox pine"><span class="tag">نتیجه منفی</span>کاندیدِ انتخاب‌شده ≤ ۰ → <code>false</code> — فراخوان مقدار قبلی را نگه می‌دارد</div>
+      <div class="fbox pine"><span class="tag">fallback ها</span>P خوانده نشد → P = S · S کمتر از ۱۰ پیپ → میانگین محدودهٔ ۲۰ کندل روزانهٔ کامل</div>
+      <div class="note">همهٔ سطوح بیرونی واحدشان پیپ است؛ تابع خودش در <b>واحد قیمت</b> کار می‌کند و تبدیل فقط یک‌بار در مرز انجام می‌شود — «یک تغییر واحد، بهتر از تبدیل پراکنده در لیبل، لاگ و پنل».</div>
+    </div>
+  </div>
+
+  <div class="card" style="font-size:14px">
+    <b>حساسیت:</b> اگر S به‌جای <code>iATR</code> (Wilder) با SMA سادهٔ TR محاسبه می‌شد، روی همین داده <b class="mono">۶۶.۱</b> پیپ می‌شد به‌جای <b class="mono">۶۳.۱</b> — یعنی انتخاب «نسخهٔ ATR» همهٔ استپ‌ها را حدود <b>۴.۵٪</b> جابه‌جا می‌کند. کد یکنواخت Wilder (<code>iATR</code>) است؛ همین یکنواختی است که سطوح مختلف را با هم مقایسه‌پذیر نگه می‌دارد.
+  </div>
+
+  <h2><span class="num">۸</span>پیوست — مرجع سریع</h2>
+  <div class="appendix">
+    <b>نقشهٔ کد:</b><br>
+    <code>TH3Math.mqh:47-70</code> — <code>GetCachedDailyATR</code> (iATR D1,14، شیفت ۱، کش per-day، fallback میانگین ۲۰ کندل) ·
+    <code>TH3Math.mqh:796-817</code> — <code>TH3MomentumSpeed</code> (فرمول R) ·
+    <code>TH3Math.mqh:823-829</code> — <code>TH3MomentumFromSpeed</code> ·
+    <code>TH3Math.mqh:210-212</code> — مرزهای R (۱.۰۰ / ۱.۳۰ / ۱.۶۰) ·
+    <code>TH3Math.mqh:900-950</code> — <code>TH3StepFromSkeleton</code> (سه کاندید، sort، ضریب پوشش، گاردها) ·
+    <code>TH3Math.mqh:988-990</code> — خواندن S و P در <code>TH3SkeletonFromBars</code> ·
+    <code>TH3Math.mqh:1050-1058</code> — تبدیل قیمت به پیپ در مرز ·
+    <code>TH3Types.mqh:67-89,106</code> — enum های مومنتوم/پوشش و فیلد <code>stepPips</code> («0 = absent») ·
+    <code>TH3Renderer.mqh:2619</code> — ردیف «Step %.1fp» در کپشن ·
+    <code>UtilityFunctions.mqh:844-851</code> — «skeleton %.1f pips» در لیبل اطلاعات
+  </div>
+
+  <div class="card" style="font-size:13.5px">
+    <b>پیوستِ مرتبط (از گفتگوی امروز):</b> زنجیرهٔ ثابت‌های <code>TradePlanFormulas.mqh</code> هم دقیقاً به همین سبک کسرهای فروپاشیده است:
+    <div class="mono" style="display:block;margin-top:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:12.5px">
+      Eng = 15/64 × composite · Hunter = 5/8 × composite · SL = 9/32 × composite(W1)<br>
+      TP1..TP4 = 21/32 · 45/32 · 93/32 · 135/16 × composite(W1)
+    </div>
+    <div class="note">تمیزی این کسرها یک checksum درونی است: اگر ثابتی از اسکرین‌شات اشتباه خوانده شده باشد، ضریب‌ها کسر زشت می‌شدند. گزارش کامل: <code>docs/PINE-TREX-FORMULA-PARITY-2026-10-23.html</code></div>
+  </div>
+
+  <div class="card" style="font-size:13.5px">
+    <b>بازتولید اعداد:</b> <code>tools/research/th3_step_numbers.py</code> — بدون هیچ وابستگی بیرونی، روی دادهٔ Yahoo موجود در <code>tools/research/eurusd_*.json</code>.
+    دادهٔ روزانهٔ ۲۲ اکتبر در سری یاهو ناقص بود و حذف شد؛ آخرین کندل کامل‌بسته ۲۱ اکتبر است.
+  </div>
+
+  <footer>Biotak Trigger TH3 · MT5 — راهنمای عددی گام حرکتی TH3 · ۲۳ اکتبر ۲۰۲۶ · منبع: Biotak/TH3/TH3Math.mqh</footer>
+
+</div>
+</body>
+</html>
