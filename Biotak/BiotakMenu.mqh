@@ -150,8 +150,9 @@
 #define CIRC_EDGE_TRIGGER 90
 #define CIRC_MIN_RADIUS  40
 //--- P-UI-161/166 — the TRAIN's taper (the near-edge degrade, never the ring): the
-//--- side holds 44 through nine, floors at 35, radius by the chord law capped at
-//--- CIRC_SEAT_CAP (12). The ring itself is TWO circles (P-UI-195), no stack (P-UI-13).
+//--- side holds 44 through nine and floors at 35 from CIRC_SEAT_CAP (12) on. The ring
+//--- itself is TWO circles (P-UI-195), it SHRINKS to fit instead of becoming a train
+//--- (P-UI-218), and nothing is ever stacked (P-UI-13).
 #define CIRC_BTN_MIN     35
 //--- the membership STAR on every Tools cell — same canvas as the badge, so the
 //--- corner seat below is one number (star_off/star_on.bmp, baked by the generator).
@@ -3788,9 +3789,16 @@ void CircApplyMenuPosition()
 
    if(g_UI.menuVisible)
    {
-      for(int i = 0; i < CircPlacedCount(); i++)   // P-UI-161: exactly the built set (frozen mid-drag)
-         CircMoveItem(i);
-      if(g_ToolsOpen)
+      // P-UI-217 (MT4 2026-10-30, ported): the ring's family does not exist while the
+      // fan is open — CreateToolsMenu's sweep took it and five writers gate on
+      // g_ToolsOpen. Walking it here moved DELETED seats, CircMoveItem's P-UI-202 heal
+      // re-created every missing bg, and those plates landed ON TOP of the panel (born
+      // later = painted above, P-LOG-10). The bare discs over the panel columns in the
+      // 2026-10-30 screenshot are exactly these heals.
+      if(!g_ToolsOpen)
+         for(int i = 0; i < CircPlacedCount(); i++)   // P-UI-161: exactly the built set (frozen mid-drag)
+            CircMoveItem(i);
+      else
       {
          SubChromeMove();   // panel + header + pager translate with the orb
          for(int t = 0; t < CAT_COUNT; t++) ToolsMoveItem(t);

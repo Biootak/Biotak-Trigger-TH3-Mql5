@@ -460,15 +460,34 @@ void PathRegAdd(const string id)
 // tail is not digits), so the orphan walk and the delete watcher skip it without
 // a second test.
 string PathHandleName(const string id, const int k) { return PathPrefix() + id + "_H" + IntegerToString(k); }
-bool PathIsHandle(const string nm)
+// P-PATH-BUG-6 (2026-10-30, ported to MT4 the same day) — THE ORPHAN WALK ASKS «IS THIS A
+// CHILD, AND OF WHOM», once for BOTH child families. `PathIdOfName` rightly refuses a tail
+// that is not digits, so a handle (`_H<k>`) AND a 50 % marker (`_M<k>`) land here — the one
+// moment a leftover from an older build can be healed without the user touching the chart.
+// MEASURED 2026-10-30 (XAUUSD M15, the report's screenshot): five blue dots in a row and no
+// line under them. `path_mid_dot.bmp` is 11x11 RoyalBlue `#4169E1` while `cp_handle.bmp` is
+// 19x19 green `#2ECC71`, so those five are `_M<k>` markers — and this walk healed `_H` alone
+// (the retired `PathIsHandle`), so every orphan disc survived every attach. That predicate
+// is folded in here: ONE parse answers "is this a child, and of whom", for both families.
+bool PathChildParent(const string nm, string &id)
 {
+   id = "";
    string pfx = PathPrefix();
    if(pfx == "" || StringFind(nm, pfx) != 0) return false;
    string rest = StringSubstr(nm, StringLen(pfx));
-   int ulast = -1;
-   for(int i = 0; i < StringLen(rest); i++)
-      if(StringGetChar(rest, i) == 95) ulast = i;
-   return (ulast > 0 && ulast + 1 < StringLen(rest) && StringGetChar(rest, ulast + 1) == 72);   // 'H'
+   int us = -1;
+   for(int c = 0; c < StringLen(rest); c++)
+      if(StringGetChar(rest, c) == 95) us = c;
+   if(us <= 0 || us + 2 >= StringLen(rest)) return false;   // needs `_H<k>` / `_M<k>` with a digit
+   int head = (int)StringGetChar(rest, us + 1);
+   if(head != 72 && head != 77) return false;               // 'H' handle · 'M' 50 % marker
+   for(int c = us + 2; c < StringLen(rest); c++)
+   {
+      int ch = (int)StringGetChar(rest, c);
+      if(ch < 48 || ch > 57) return false;
+   }
+   id = StringSubstr(rest, 0, us);
+   return (id != "");
 }
 // P-PATH-BUG-6 (2026-10-29) — A CHILD IS SWEPT BY NAME, NOT BY ITS PARENT'S COUNT.
 // Both child families were dropped by walking 0..PathSegCount(id), which is only
@@ -515,6 +534,19 @@ void PathSegSweep(const string id)
       }
       if(digits) ObjectDelete(0, nm);
    }
+}
+// P-PATH-BUG-6 (2026-10-30) — WHAT THE FAMILY STILL WEARS, re-read by name. The delete
+// answers with its own number: `left=0` says the sweep took segments AND dots AND markers,
+// where a count could read clean while the chart kept the children. One walk per DELETE
+// only (a user action), never per frame.
+int PathFamilyCount(const string id)
+{
+   int n = 0;
+   if(id == "") return 0;
+   const string pre = PathPrefix() + id + "_";
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+      if(StringFind(ObjectName(0, i, 0, -1), pre) == 0) n++;
+   return n;
 }
 // The handles go with the path, always as one family (P-LOG-10 law 4). It sits ABOVE
 // PathRegDel on purpose: P-UI-146 makes the registrar the one sweep, and MQL4 has no
@@ -679,6 +711,11 @@ void PathDelete(const string id, const string why)
    PathRegDel(id);
    PathInkForget(id);            // P-UI-137: the ink row dies with its path (no leak)
    PathMidDrop(id);              // P-UI-139: ...and its 50 % markers with it (one sweep)
+   // P-PATH-BUG-6 (2026-10-30): THE DELETE ANSWERS WITH ITS OWN NUMBERS. `segs=` above is
+   // the PRE-delete count, and a count is exactly what used to hide the leftovers. This
+   // second line re-walks the family AFTER every sweep: `left=0` is the only reading that
+   // proves «بقیاش نمیمونه» from the tool's own side, on the flushed channel (P-LOG-3).
+   PathWitness("swept id=" + id + " left=" + IntegerToString(PathFamilyCount(id)));
    if(s_pathDrag == id) { s_pathDrag = ""; s_pathDragV = -1; }
    if(s_pathClick == id) s_pathClick = "";
    // P-DEL-ATOMIC: the terminal queues one event per deleted segment; the family is
@@ -948,6 +985,7 @@ void PathAdoptOrphans(const bool force = false)
    static int s_adoptTotal = -1;
    if(!force && n == s_adoptTotal) return;
    s_adoptTotal = n;
+   int healed = 0;   // P-PATH-BUG-6: the flushed witness's own count, not the chart's guess
    for(int i = 0; i < n; i++)
    {
       string nm = ObjectName(0, i, 0, -1);
@@ -962,13 +1000,19 @@ void PathAdoptOrphans(const bool force = false)
          //--- see them again because `PathIdOfName` rightly refuses to read a handle as a
          //--- segment. So the sweep lives here, where the family is already being walked, and
          //--- it costs one string scan per prefixed object ONCE per attach.
-         if(PathIsHandle(nm))
+         //--- P-PATH-BUG-6 (2026-10-30): AND THE 50 % MARKERS ARE THE SAME CHILD. The parse
+         //--- is `PathChildParent` now, so a disc left by a deleted path is healed here too
+         //--- (the screenshot's five blue dots were `_M<k>`, which the old handle-only walk never saw).
+         string cid = "";
+         if(PathChildParent(nm, cid) && PathSegCount(cid) == 0)
          {
-            string rest = StringSubstr(nm, StringLen(pfx));
-            int us = -1;
-            for(int c = 0; c < StringLen(rest); c++)
-               if(StringGetChar(rest, c) == 95) us = c;
-            if(us > 0 && PathSegCount(StringSubstr(rest, 0, us)) == 0) ObjectDelete(0, nm);
+            if(ObjectDelete(0, nm))
+            {
+               healed++;
+               //--- the tail as its own two bytes (`_H3` / `_M3`): which family, and which index
+               PathWitness("heal orphan id=" + cid + " child=" + StringSubstr(nm, StringLen(pfx) + StringLen(cid)));
+               i--;   // the delete shifted every later slot down one; re-ask this index
+            }
          }
          continue;
       }
@@ -979,6 +1023,9 @@ void PathAdoptOrphans(const bool force = false)
    // no longer the chart's — re-read it or the next event pays one walk for our
    // own cleanup.
    s_adoptTotal = ObjectsTotal(0, 0, -1);
+   // P-LOG-3: one line per heal, on the flushed channel, once per attach — «nothing
+   // happened» is unprovable without a number from the tool's own side.
+   if(healed > 0) PathWitness("heal done orphans=" + IntegerToString(healed));
 }
 // P-UI-136 — THE STRIP WRITES THE WHOLE PATH, NEVER ONE SEGMENT. The strip's slot
 // writer aims at ONE name (`DrawSlotWrite(name, …)`), and a path is N segments: a

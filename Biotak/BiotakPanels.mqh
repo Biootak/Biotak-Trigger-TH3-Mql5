@@ -5320,6 +5320,46 @@ int PnlResetItem(const int item)
 }
 
 //+------------------------------------------------------------------+
+//| P-UI-RESET-ALL (2026-10-30) — ONE BUTTON, THE WHOLE INDICATOR BACK |
+//| TO THE INPUTS' OWN VALUES.                                        |
+//|                                                                  |
+//| The per-card Reset above walks the rows of the card it was pressed |
+//| on and stops there: every OTHER card's `OV_` override is still on  |
+//| disk and is re-applied on the next attach. This is the global one. |
+//|                                                                  |
+//|   1. the settings store is WIPED — `RuntimeSettingsClearOverrides` |
+//|      is the one door that DELETES `OV_*` (rows, session slots      |
+//|      `OV_SS<n>`, the learned hour `OV_SSBD`), because writing a    |
+//|      default over a key would be re-read as the user's own choice; |
+//|   2. the mirrors are re-seeded from the Inputs dialog              |
+//|      (`RuntimeSettingsInit`) and the loader then finds nothing to  |
+//|      apply — the factory value IS what the inputs say;             |
+//|   3. the session slots go back to the factory table                |
+//|      (`SessSlotsResetToFactory` — 0 IS the preset);                |
+//|   4. the override shadow is primed with what the load read, so the |
+//|      next save is a no-op instead of ~100 writes (P-PERF-27b);     |
+//|   5. the open card is rebuilt and the chart re-rendered WHOLE.     |
+//|                                                                  |
+//| WHERE THINGS STAND IS NOT A SETTING: the orb, the chip and the     |
+//| strip keep the hand's places — their homes live under HOME_/STAR,  |
+//| which this path never touches (P-UI-174/190).                      |
+//+------------------------------------------------------------------+
+int PnlResetAll()
+{
+   const int keys = RuntimeSettingsClearOverrides();   // (1) the store's one wipe
+   RuntimeSettingsInit();                              // (2) seed from the Inputs dialog
+   RuntimeSettingsLoadOverrides();                     //     nothing left to apply
+   SessSlotsResetToFactory();                          // (3) sessions back to the preset table
+   RuntimeSettingsPrimeOverrideShadow();               // (4) the next save writes nothing
+   UpdateCircularItemStates();
+   UpdateCircularBadges();
+   SaveUIStates();
+   if(g_PnlOpen >= 0) PnlRebuildKeepSpot(g_PnlOpen);   // the widgets show the restored values
+   _LOG_GATE_W Print("[UI] reset ALL keys=", keys);
+   return REFRESH_ALL | REFRESH_HTF;                   // (5) every surface, HTF candles included
+}
+
+//+------------------------------------------------------------------+
 //| P-UI-145 (2026-10-13) — THE SEAT REGISTRY: NO UI CONTROL MAY BE    |
 //| DRAGGED OFF ITS SEAT.                                             |
 //|                                                                  |
@@ -7795,6 +7835,7 @@ void PnlCreate(const int item)
    //    rounded skins with the preview's reset/check glyphs. R-PANELUI2.
    int fy=py+PNL_HEAD_H+pairN*PNL_ROW_H;
    PnlFooterBtn(item,"rst",  px+PNL_PAD_X, fy, "Reset", false, "reset");
+   if(item==14) PnlFooterBtn(item,"ral", px+PNL_PAD_X+PnlFootBtnW("Reset")+PNL_BTN_PAD*2, fy, "Reset All", false, "reset");   // P-UI-RESET-ALL: the GENERAL card's third pill — the one Reset that reaches EVERY card
    PnlFooterBtn(item,"done", px+cardW-PNL_PAD_X-PnlFootBtnW("Done"), fy, "Done", true, "check");
 }
 
@@ -9354,6 +9395,17 @@ bool PnlSkinButtonAct(const int mx,const int my)
    const int item = g_PnlOpen;
    if(item < 0 || item == 13) return false;   // the strip owns its own buttons
    // ── the footer pair ──
+   // P-UI-RESET-ALL (2026-10-30): the GENERAL card's third pill. Read back from
+   // the button it was painted on (P-UI-79), never re-derived — and answered
+   // BEFORE `rst`, because on this one card the two pills sit in the same row.
+   if(item == 14 && PnlCtrlRectHit(PnlHead(item,"ral"),mx,my,PNL_BTN_PAD))
+   {
+      UIPressAct("ral");
+      const int fa = PnlResetAll();
+      _LOG_GATE_W Print("[UI] panel reset ALL from item=", item, " flags=", fa);
+      RefreshDisplay(fa);
+      return true;
+   }
    if(PnlCtrlRectHit(PnlHead(item,"rst"),mx,my,PNL_BTN_PAD))
    {
       UIPressAct("rst");
@@ -10550,6 +10602,11 @@ int PnlHandleClick(const string name,const int mouseX,const int mouseY)
       }
       if(name == PnlHead(i, "rst"))
          return PnlResetItem(i);
+      // P-UI-RESET-ALL (2026-10-30): the GENERAL card's global reset. Same door the
+      // coordinate path calls, so a name-delivered press and a press on the skin
+      // land on ONE function.
+      if(name == PnlHead(i, "ral"))
+         return PnlResetAll();
       if(name == PnlHead(i, "pal"))
       {
          PalOpenForItem(i);

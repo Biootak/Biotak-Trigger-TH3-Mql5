@@ -174,6 +174,18 @@ void SessSlotSet(const int idx, const SessSlot &s)
    g_sessSlot[i] = (double)SessSlotPack(s);
 }
 
+//--- P-UI-RESET-ALL (2026-10-30): every slot back to the factory table.
+//--- 0 IS the preset (SessSlotGet falls through to SessSlotFactory), so this
+//--- is the ONE writer that says "no slot has been edited" — the same state a
+//--- chart that never opened the sessions card is in. It is NOT a loop of
+//--- SessSlotSet(preset): that would stamp today's factory values into the
+//--- store, and a later preset change could no longer reach those charts.
+void SessSlotsResetToFactory()
+{
+   for(int i = 0; i < SESS_SLOTS; i++) g_sessSlot[i] = 0.0;
+   g_sessSlotsEdit = 0;
+}
+
 int SessEnabledCount()
 {
    int n = 0;
