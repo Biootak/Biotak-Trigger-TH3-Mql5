@@ -269,6 +269,7 @@ static ENUM_COMBO_STEP_TYPE g_comboComp2Step = COMBO_STEP_TH;     // [05] inpCom
 #define SESS_SLOTS      8
 #define SESS_HIST_MAX   40     // boxes: 0..40 zone days back
 #define SESS_FUT_MAX    5      // ghosts: 0..5 upcoming sessions
+#define SESS_FILL_MAX   100    // P-SESS-14: the filled body's ink kept (%) - 0 = no fill ink
 static bool   g_sessMaster = false;      // [15] master (ring cell + card 15 row 0)
 static int    g_sessHistDays = 5;        // [15] days that get a box
 static int    g_sessFutDays = 1;         // [15] upcoming-session ghosts
@@ -279,6 +280,17 @@ static bool   g_sessPrior = false;       // [15] prior session H/L (dashed)
 static bool   g_sessOverlap = true;      // [15] overlap rectangles (today)
 static bool   g_sessCountdown = true;    // [15] next-boundary countdown text
 static bool   g_sessAlerts = false;      // [15] open/close alerts
+// P-SESS-14/15/18/19/23 (2026-10-30) — the four asks the SESSIONS card grew:
+//   g_sessFill    the LOOK knob, stored as INK the body keeps; the PAINT fades it
+//                 with the house curve (38^2/100 = 14 % visible == the shipped tint).
+//   g_sessDst     ZONE LAW: false = the classic standard-time table, true = each
+//                 city's own clock (its DST term moves the edge).
+//   g_sessTv      the TradingView levels: 0 off, 1 mid, 2 mean, 3 vwap, 4 trend, 5 all.
+//   g_sessStrip   the bottom session divider.
+//   g_sessSrvUtc  BROKER UTC: -13 = AUTO (learn), -12..+14 = hours east of UTC PINNED.
+static int    g_sessFill = 38;           // [15] LOOK: ink % the body keeps
+static bool   g_sessDst = false;         // [15] ZONE: false = standard table, true = city clock
+static int    g_sessTv = 0; static bool g_sessStrip = true; static int g_sessSrvUtc = -13;   // [15] TV LEVELS (0=off 1=mid 2=mean 3=vwap 4=trend 5=all) + STRIP (the bottom divider) + BROKER UTC (-13 = AUTO, -12..+14 = pinned hours) — ONE line, the same shape MT4 carries (P-SESS-18/19/23)
 static int    g_sessSlotsEdit = 0;       // [15] editor's picked slot (view only)
 static double g_sessSlot[SESS_SLOTS];    // [15] packed slot configs (0 = factory preset)
 
@@ -1269,6 +1281,7 @@ void RuntimeSettingsSaveOverrides()
    RSSetNext(p + "SSOL", g_sessOverlap ? 1 : 0);
    RSSetNext(p + "SSCD", g_sessCountdown ? 1 : 0);
    RSSetNext(p + "SSAL", g_sessAlerts ? 1 : 0);
+   RSSetNext(p + "SSFA", g_sessFill); RSSetNext(p + "SSDZ", g_sessDst ? 1 : 0); RSSetNext(p + "SSTV", g_sessTv); RSSetNext(p + "SSTS", g_sessStrip ? 1 : 0); RSSetNext(p + "SSBU", g_sessSrvUtc);   // P-SESS-14/15/18/19/23 (one line: the 1500 ceiling)
    for(int ss = 0; ss < SESS_SLOTS; ss++)
       RSSetNext(p + "SS" + IntegerToString(ss), g_sessSlot[ss]);
    RSShadowCommit();
@@ -1496,6 +1509,7 @@ void RuntimeSettingsLoadOverrides()
     if(GlobalVariableCheck(p + "SSOL")) g_sessOverlap  = (GlobalVariableGet(p + "SSOL") > 0.5);
     if(GlobalVariableCheck(p + "SSCD")) g_sessCountdown = (GlobalVariableGet(p + "SSCD") > 0.5);
     if(GlobalVariableCheck(p + "SSAL")) g_sessAlerts   = (GlobalVariableGet(p + "SSAL") > 0.5);
+    if(GlobalVariableCheck(p + "SSFA")) g_sessFill  = ClampSettingInt((int)GlobalVariableGet(p + "SSFA"), 0, SESS_FILL_MAX); if(GlobalVariableCheck(p + "SSDZ")) g_sessDst = (GlobalVariableGet(p + "SSDZ") > 0.5); if(GlobalVariableCheck(p + "SSTV")) g_sessTv = ClampSettingInt((int)GlobalVariableGet(p + "SSTV"), 0, 5); if(GlobalVariableCheck(p + "SSTS")) g_sessStrip = (GlobalVariableGet(p + "SSTS") > 0.5); if(GlobalVariableCheck(p + "SSBU")) g_sessSrvUtc = ClampSettingInt((int)GlobalVariableGet(p + "SSBU"), -13, 14);   // P-SESS-14/15/18/19/23
     for(int ss = 0; ss < SESS_SLOTS; ss++)
        if(GlobalVariableCheck(p + "SS" + IntegerToString(ss)))
           g_sessSlot[ss] = GlobalVariableGet(p + "SS" + IntegerToString(ss));
@@ -1505,12 +1519,38 @@ void RuntimeSettingsLoadOverrides()
 }
 
 //--- throttled saver (panel/palette drags fire per mouse-move)
+//
+// P-SESS-36 (2026-10-31) — A THROTTLE THAT DROPS IS A LOST CLICK.
+// MEASURED on the live chart: the sessions switch on the RING still saved through
+// this function while the card's own rows had already been moved to the immediate
+// save (P-SESS-34). A switch that lands inside the 500 ms window was therefore
+// DROPPED, the store kept the old value, and the next attach — which is EVERY
+// TIMEFRAME SWITCH (OnDeinit(REASON_CHARTCHANGE) then OnInit) — loaded that old
+// value: the sessions were wiped by the OFF branch of SessionsTick and never came
+// back. «تایم عوض میکنم سشن‌ها حذف میشن و برنمیگردن» is this one line.
+//
+// The window is still worth keeping (a drag really is a stream of events), so the
+// write is DEFERRED instead of discarded: the call sets an OWE, and
+// `RuntimeSettingsSaveDrain()` spends it. The drain rides the 250 ms session tick
+// and — the one that matters — the deinit, i.e. before the next attach reads the
+// store back. Cost in steady state: one bool test per tick.
+static uint s_saveThrottleMs = 0;
+static bool s_saveOwed = false;
+#define RUNTIME_SAVE_THROTTLE_MS 500
 void RuntimeSettingsSaveOverridesThrottled()
 {
-   static uint s_LastSave = 0;
    uint now = GetTickCount();
-   if(now - s_LastSave < 500) return;
-   s_LastSave = now;
+   if(now - s_saveThrottleMs < RUNTIME_SAVE_THROTTLE_MS) { s_saveOwed = true; return; }
+   s_saveThrottleMs = now;
+   s_saveOwed = false;
+   RuntimeSettingsSaveOverrides();
+}
+bool RuntimeSettingsSaveOwed() { return s_saveOwed; }
+void RuntimeSettingsSaveDrain()
+{
+   if(!s_saveOwed) return;
+   s_saveOwed = false;
+   s_saveThrottleMs = GetTickCount();
    RuntimeSettingsSaveOverrides();
 }
 

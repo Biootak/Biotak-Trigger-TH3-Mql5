@@ -155,20 +155,24 @@ double GetLowerTimeframeTH(const string currentTimeframe, int offset) {
         DEBUG_PRINTF("GetLowerTimeframeTH - Error: No matching timeframe found for: ", currentTimeframe);
         return EMPTY_VALUE;
     }
-    int targetIndex = matchIndex - offset;
-    if(targetIndex < 0 || targetIndex >= arraySize) {
-        DEBUG_PRINTF3("GetLowerTimeframeTH - Error: Invalid target index. Index: ", IntegerToString(targetIndex),
-              ", TF: " + currentTimeframe, ", Offset: " + IntegerToString(offset));
+    //--- P-TH-20 (2026-10-30), ported from the MQL4 tree 2026-10-31: PATTERN AND
+    //--- TRIGGER ARE HALF AND A QUARTER ON EVERY TIMEFRAME, BY CONSTRUCTION.
+    //--- This used to return the table value at `matchIndex - offset`: the rung one
+    //--- (or two) below the chart's own. That is half/quarter only while the chain
+    //--- doubles, which it does from M1 up to H4. The step H4 -> the day is x5.625
+    //--- in minutes, so on a D1 chart pattern/trigger came out at 0.42 / 0.21 of
+    //--- structure, on W1 at 0.53 / 0.38 and on MN1 at 0.48 / 0.26 — while the
+    //--- DRAWN ladder (CalculateFractalValues) always stated structure x 0.5 and
+    //--- x 0.25. Two owners of one rule is the defect; the rule wins here too:
+    //---     pattern = structure / 2   ·   trigger = structure / 4   ·   = structure / 2^offset
+    //--- `offset` stays a rung count (0 = structure, 1 = pattern, 2 = trigger), so
+    //--- no caller changes, and M1 no longer returns EMPTY_VALUE either.
+    double basePct = FractalPercentScaled(matchIndex);
+    if(basePct <= 0.0) {
+        DEBUG_PRINTF("GetLowerTimeframeTH - Warning: Zero or negative percentage at index ", matchIndex);
         return EMPTY_VALUE;
     }
-    // Pattern/Trigger: the two rungs the half/quarter rule is about.
-    // `FractalPercentScaled` keeps them at exactly half and a quarter of
-    // the Structure step (the retired knob kept it so too, at any ratio).
-    double result = FractalPercentScaled(targetIndex);
-    if(result <= 0.0) {
-        DEBUG_PRINTF("GetLowerTimeframeTH - Warning: Zero or negative percentage at index ", targetIndex);
-    }
-    // Debug: Print("GetLowerTimeframeTH - Found at index ", matchIndex, " returning value: ", result);
+    double result = basePct / MathPow(2.0, (double)offset);
     return result;
 }
 

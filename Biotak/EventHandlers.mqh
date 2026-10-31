@@ -8164,7 +8164,17 @@ void RunIncrementalObjectCleanup()
             // on purpose: this file is also compiled by `Biotak Sync Compare.mq5`,
             // which does NOT include the sessions module. The literal is the one copy
             // that must track it (Sessions_Draw.mqh:41).
-            if(StringFind(objName, indicatorPrefix + "SESS_") == 0) continue;
+            //--- P-SESS-43 (2026-10-31) — THE SESSION FAMILY IS SELF-OWNED, AND THIS
+            //--- PASS HAS NO OPINION ABOUT IT. Ported from the MT4 tree, where the same
+            //--- line was measured: the age rule below is "ours, not under the level
+            //--- prefix, first anchor older than an hour => delete", and a session box
+            //--- satisfies every clause BY CONSTRUCTION (it is anchored at its window's
+            //--- START, so last Monday's box is days old and today's live box opened
+            //--- hours ago). The family declares and sweeps itself (P-SESS-37), which is
+            //--- the only leak an age rule is here to prevent — so it is exempted HERE,
+            //--- and the exemption is one name: SESS_TAG, spelled literally because this
+            //--- file must also compile where the sessions module is absent.
+            if(StringFind(objName, indicatorPrefix + "SESS_") == 0) continue;   // P-SESS-43
 
             if(StringFind(objName, "TH3_Structure_") == 0) continue;
             if(StringLen(objName) >= currentPrefixLen && StringSubstr(objName, 0, currentPrefixLen) == objectPrefix) continue;

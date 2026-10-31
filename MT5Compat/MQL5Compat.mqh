@@ -127,6 +127,11 @@ double CompatAsk()
    return SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 }
 
+// MT5-ONLY: MQL4's IsConnected() has no MQL5 twin. The terminal's own flag is
+// the same answer — TERMINAL_CONNECTED goes false when the trade server drops,
+// which is exactly the state P-SESS-25 refuses to learn a broker hour from.
+bool CompatIsConnected() { return (TerminalInfoInteger(TERMINAL_CONNECTED) != 0); }
+
 #define Bid    CompatBid()
 #define Ask    CompatAsk()
 #define Digits _Digits

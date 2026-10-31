@@ -79,6 +79,12 @@ JUSTIFY = [
     (r'\biATR\s*\(', "MQL5 iATR accessor", "mt5"),
     (r'ArraySetAsSeries\(\s*\w+\s*,\s*true\s*\);',
      "MQL5 arrays are not timeseries by default, MQL4's always were", "mt5"),
+    # MQL4's IsConnected() has no MQL5 twin; the MT5 side asks the terminal's own
+    # TERMINAL_CONNECTED flag through CompatIsConnected() (same state: the trade
+    # server is down). P-SESS-25 refuses to LEARN a broker hour from a dead feed.
+    (r'\bIsConnected\(\)',
+     "MQL4 IsConnected(); MT5 reads TERMINAL_CONNECTED through CompatIsConnected",
+     "mt4", "Sessions_Model.mqh"),
     (r'(?<![\w.])Bars\s*\(', "MQL4 Bars(symbol,timeframe) call", "mt4"),
     (r'(?<![\w.])iBars\s*\(', "MQL5 iBars(symbol,timeframe) call", "mt5"),
     (r'\bPeriodSeconds\s*\(', "MT4 PeriodSeconds", "mt4"),
@@ -1187,6 +1193,12 @@ DECLARED_MT5_INCLUDES = {
     "propertychangedetector.mqh",    # required by MQL5Compat
     "renderbridge.mqh",              # R-RENDER-ENGINE, the canvas engine seam
     "mql5compat.mqh",                # the platform layer itself
+    # The canvas engine's layer 1..3 core (Engine/RenderCore.mqh, "MT5-ONLY" in
+    # its own header). AGENTS.md declares the render engine as the ONE MT5-only
+    # feature, and its seam (RenderBridge.mqh) was already declared above - the
+    # core the seam drives belongs to the same declared feature, so it is a
+    # platform include and not a second architecture.
+    "rendercore.mqh",
 }
 
 

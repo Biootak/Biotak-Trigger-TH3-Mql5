@@ -287,6 +287,13 @@ int OnInit()
 void OnDeinit(const int reason)
 {
     CompatDeinitBegin();   // MT5-ONLY P-PERF-99: no event can be consumed after this
+    // P-SESS-36 (2026-10-31) — THE SWITCH THAT IS STILL OWED DIES WITH THIS ATTACH.
+    // A timeframe change IS a deinit + init, so a save that a switch asked for
+    // inside the throttle's 500 ms window must reach the store HERE, before the
+    // next attach reads it back. MEASURED on MT4: the ring's sessions key saved
+    // through the throttle, the store kept the old value, and the next attach
+    // wiped the family because it loaded "sessions off". Free when nothing is owed.
+    RuntimeSettingsSaveDrain();
     uint p4d = GetTickCount();   // P-PERF-04: teardown budget (timeframe switch)
 #ifdef BIOTAK_RENDER_ENGINE
     RBridgeShutdown();   // MT5-ONLY (R-RENDER-ENGINE): the canvas layers die with the instance

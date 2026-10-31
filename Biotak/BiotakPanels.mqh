@@ -576,7 +576,7 @@ bool PnlCardFade(const int item)
 // active · the overview NAV). Both are WIDE (> PNL_WIDE_MIN_ROWS 10), so their
 // bodies compose — the OVERVIEW card pairs its sliders and switches, and the
 // editor pairs each HH/MM slider with its sibling.
-int g_PnlRows[PNL_COUNT] = {5,18,11,6,1,8,11,6,4,2,7,7,1,7,15,11,13};
+int g_PnlRows[PNL_COUNT] = {5,18,11,6,1,8,11,6,4,2,7,7,1,7,15,15,13};
 
 // g_PnlRows[12] is the BASE (TAB row only) — PnlRowsCount(12) returns
 // 1 + the open tab's section rows (6 each tab), the same dynamic pattern
@@ -1761,7 +1761,7 @@ void PalPaintRecents(const int px,const int syTop)
       int sy=syTop;
       if(i == 0) PalHoverRegionAdd(px+PAL_PAD, sy, PAL_RSHOW, 1, cell, pitch, 0, 1);
        PnlSetButton(n, sx, sy, cell, cell, "", g_PalRecent[i],
-                    PnlSwatchBorder(g_PalRecent[i],PNL_CLR_FIELD), true);
+                    PnlSwatchBorder(g_PalRecent[i],PNL_CLR_FIELD));
        ObjectSetInteger(0,n,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
        ObjectSetString(0,n,OBJPROP_TOOLTIP, "#"+PalHexText(g_PalRecent[i])+"  ("+PalColorText(g_PalRecent[i])+")");
        string nr=n+"G";
@@ -1960,7 +1960,7 @@ void PalDrawMixer(const int contY)
       int kx=trackX+(int)MathRound(comps[i]/255.0*(trackW-10));
       PnlSetRect(p+"mf"+IntegerToString(i), trackX, y+2, kx-trackX+10, 8, fill[i]);
       ObjectSetInteger(0,p+"mf"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_CTL);
-       PnlSetButton(p+"mknb"+IntegerToString(i), kx, y, 10, 12, "", fill[i], PNL_CLR_TRACK_BD, true);
+       PnlSetButton(p+"mknb"+IntegerToString(i), kx, y, 10, 12, "", fill[i], PNL_CLR_TRACK_BD);
       ObjectSetInteger(0,p+"mknb"+IntegerToString(i),OBJPROP_ZORDER,Z_PANEL_POP_FG);
        PnlSetLabel(p+"mv"+IntegerToString(i), px+PalW()-PAL_PAD, y, IntegerToString(comps[i]), PNL_CLR_VALUE, PNL_PT_PAL);
        // P-UI-26: ANCHOR_RIGHT_UPPER, not ANCHOR_RIGHT (middle-right sat a
@@ -1984,7 +1984,7 @@ void PalDrawMixer(const int contY)
    int tkx = trackX + (int)MathRound((trOk ? ClampInt(tr,0,100) : 0) / 100.0 * (trackW-10));
    PnlSetRect(p+"mf3", trackX, oy+2, MathMax(0, tkx-trackX+10), 8, trFill);
    ObjectSetInteger(0,p+"mf3",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
-   PnlSetButton(p+"mknb3", tkx, oy, 10, 12, "", trFill, trOk ? PNL_CLR_ACCENT : PNL_CLR_DIS_BD, true);
+   PnlSetButton(p+"mknb3", tkx, oy, 10, 12, "", trFill, trOk ? PNL_CLR_ACCENT : PNL_CLR_DIS_BD);
    ObjectSetInteger(0,p+"mknb3",OBJPROP_ZORDER,Z_PANEL_POP_FG);
     PnlSetLabel(p+"mv3", px+PalW()-PAL_PAD, oy, trOk ? IntegerToString(tr)+"%" : "--", PNL_CLR_VALUE, PNL_PT_PAL);
     ObjectSetInteger(0,p+"mv3",OBJPROP_ANCHOR,ANCHOR_RIGHT_UPPER);
@@ -2097,7 +2097,7 @@ void PnlSpecBuild(const int item)
       PnlSpecAdd(0, PNL_K_SEC, -1, 0, "", "", "VISIBILITY", 1);
       PnlSpecAdd(0, PNL_K_LEGACY, 3, 1, "eye");   // hotkey T lives in the header badge only
    }
-   else if(item == 1)   // ZONES & LEVELS (gold) — 11 settings / 18 display rows
+   else if(item == 1)   // ZONES & LEVELS (gold) — 11 settings / 19 display rows
                         // (P-UI-131k retired the BORDER TRANSPARENCY row from the display:
                         // the two per-half opacities own the edge now. Address 7 lives on.)
    {
@@ -2140,7 +2140,7 @@ void PnlSpecBuild(const int item)
       // module reads and changed nothing on the chart (P-UI-47). That row is gone
       // too; setting 9 stays persisted and inert so the addresses above it do not
       // move.
-      PnlSpecAdd(1, PNL_K_SEC, -1, 0, "", "", "SUB-CARDS", 4);
+      PnlSpecAdd(1, PNL_K_SEC, -1, 0, "", "", "SUB-CARDS", 5);
       PnlSpecAdd(1, PNL_K_LEGACY, 10, 1, "steps", "", "", 0, "5 LEVELS");
       PnlSpecAdd(1, PNL_K_LEGACY, 11, 1, "line", "", "", 0, "ONE STYLE");
       // P-UI-126: APPENDED (row 12), so every address above keeps its number and a
@@ -2151,6 +2151,13 @@ void PnlSpecBuild(const int item)
       // P-UI-131: the GENERAL card's door on the main card, APPENDED (row 13) the
       // same way P-UI-126 added the row above.
       PnlSpecAdd(1, PNL_K_LEGACY, 13, 1, "info", "", "", 0, "GENERAL");
+      // P-UI-220: the ANCHOR's START POINT (address 4 of the CUSTOM PRICE card) had
+      // ONE door — hold the PIN ring item, or hold the custom-price line. Nothing on
+      // the levels' own card named it, so «این تنظیمات startpoint سطوح رو توی پنل ها
+      // ندیدم» was a true report about a live setting. APPENDED (row 18) the way
+      // P-UI-126 and P-UI-131 appended theirs, so every address above keeps its
+      // number and the NAV row itself persists nothing.
+      PnlSpecAdd(1, PNL_K_LEGACY, 18, 1, "target", "", "", 0, "START POINT");
    }
    else if(item == 2)   // ATR LABELS (gold) — the countdown tag, the label
                         // switches, the plan ATR and the card colours: addresses
@@ -2428,7 +2435,7 @@ void PnlSpecBuild(const int item)
       // keeps ONE home for the mode and makes card 4 reachable from here too.
       PnlSpecAdd(14, PNL_K_LEGACY, 14, 1, "tag", "", "", 0, "HOVER CHIP");
    }
-   // P-SESS — SESSIONS (15): the overview. 11 rows, WIDE (two columns): the
+   // P-SESS — SESSIONS (15): the overview. 17 rows, WIDE (two columns): the
    // master and its door first, then every drawn family as one switch, its two
    // reach sliders paired. Row order = address order (spec order is the paint).
    else if(item == 15)
@@ -2443,7 +2450,12 @@ void PnlSpecBuild(const int item)
       PnlSpecAdd(15, PNL_K_LEGACY, 7, 1, "layers");   // overlap
       PnlSpecAdd(15, PNL_K_LEGACY, 8, 1, "timer");    // countdown
       PnlSpecAdd(15, PNL_K_LEGACY, 9, 1, "sparkles"); // alerts
-      PnlSpecAdd(15, PNL_K_LEGACY, 10, 1, "tag");     // EDIT SESSIONS nav
+      PnlSpecAdd(15, PNL_K_LEGACY, 10, 1, "layers");   // FILL % (P-SESS-14 — the look)
+      PnlSpecAdd(15, PNL_K_LEGACY, 11, 1, "clock");    // ZONE LAW (P-SESS-15 — standard table / city clock)
+      PnlSpecAdd(15, PNL_K_LEGACY, 13, 1, "line");     // TV LEVELS (P-SESS-18 — Midpoint / Mean / VWAP / Trendline)
+      PnlSpecAdd(15, PNL_K_LEGACY, 14, 1, "ruler");    // STRIP (P-SESS-19 — the bottom session divider)
+      PnlSpecAdd(15, PNL_K_LEGACY, 16, 1, "layers");   // STYLE Filled|Empty for the whole family (P-SESS-25 — appended)
+      PnlSpecAdd(15, PNL_K_LEGACY, 12, 1, "tag");     // EDIT SESSIONS nav
    }
    // P-SESS — SESSION EDITOR (16): one slot at a time, chosen at row 0. 13 rows,
    // WIDE. The NAMED rows (preset/zone/style) are dropdowns by option count
@@ -2665,7 +2677,7 @@ void PalDraw()
    // spellings disagreed by 2 px and the button's own bottom edge armed a drag.
    int cseX = 0, cseY = 0, cseW = 0, cseH = 0;
    PalCloseSeat(px, py, w, cseX, cseY, cseW, cseH);
-   PnlSetButton(p+"close", cseX, cseY, cseW, cseH, "x", PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD, true);   ObjectSetInteger(0,p+"close",OBJPROP_COLOR,PNL_CLR_MUTED);
+   PnlSetButton(p+"close", cseX, cseY, cseW, cseH, "x", PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD);   ObjectSetInteger(0,p+"close",OBJPROP_COLOR,PNL_CLR_MUTED);
    ObjectSetInteger(0,p+"close",OBJPROP_FONTSIZE,PnlPt(PNL_PT_PAL));   // P-UI-30
    ObjectSetInteger(0,p+"close",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
 
@@ -2689,7 +2701,7 @@ void PalDraw()
       string tb=p+"t"+IntegerToString(i);
       PnlSetButton(tb, px+PAL_PAD+i*(tw2+tgap), ty, tw2, PAL_TABS-6, tabs[i],
                    act?PNL_CLR_SEG_ON:PNL_CLR_SEG_OFF,
-                   act?PNL_CLR_SEG_ON:PNL_CLR_SEG_BD, true);
+                   act?PNL_CLR_SEG_ON:PNL_CLR_SEG_BD);
       ObjectSetInteger(0,tb,OBJPROP_COLOR, act?PNL_CLR_ACCENT_TX:PNL_CLR_SEG_TX);
       ObjectSetInteger(0,tb,OBJPROP_FONTSIZE,PnlPt(8));   // P-UI-30
       ObjectSetInteger(0,tb,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
@@ -2715,7 +2727,7 @@ void PalDraw()
        {
           string pn=p+"pg"+IntegerToString(k);
           PnlSetButton(pn, pgx+k*20, gy-2, 18, 16, (k==0)?"<":">",
-                       PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD, true);
+                       PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD);
           ObjectSetInteger(0,pn,OBJPROP_COLOR,PNL_CLR_SEG_TX);
           ObjectSetInteger(0,pn,OBJPROP_FONTSIZE,PnlPt(7));
           ObjectSetInteger(0,pn,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
@@ -2737,7 +2749,7 @@ void PalDraw()
             int sy=gy0+qj*pitch;
              color sw=PalPickColor(row0+qj,qi);
              PnlSetButton(n, sx, sy, cell, cell, "", sw,
-                          PnlSwatchBorder(sw,PNL_CLR_FIELD), true);
+                          PnlSwatchBorder(sw,PNL_CLR_FIELD));
              ObjectSetInteger(0,n,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
              ObjectSetString(0,n,OBJPROP_TOOLTIP, BioPickFamily(row0+qj)+"  ·  #"+PalHexText(sw));
              // TV parity: rounded cell face over the square button (one pair of
@@ -2789,7 +2801,7 @@ void PalDraw()
          //--- covered both. That is why the `Z_PANEL_POP_FG` write (P-DRAW-64a2)
          //--- never fixed it: it ordered the CLICKS, not the paint.
          //--- THE HOST FIRST, THEN ITS INK — the plate law, applied to a button.
-         PnlSetButton(p+sfx, bx, tgy+3, tw, 20, "", PNL_CLR_SEG_OFF, on ? PNL_CLR_ACCENT : PNL_CLR_SEG_BD, true);
+         PnlSetButton(p+sfx, bx, tgy+3, tw, 20, "", PNL_CLR_SEG_OFF, on ? PNL_CLR_ACCENT : PNL_CLR_SEG_BD);
          ObjectSetInteger(0,p+sfx,OBJPROP_ZORDER,Z_PANEL_POP_CTL);
          ObjectSetString(0,p+sfx,OBJPROP_TOOLTIP,
             isB ? "The drawing's BORDER — click, then pick a colour here"
@@ -2821,7 +2833,7 @@ void PalDraw()
       ObjectSetInteger(0,p+"tgtc",OBJPROP_ZORDER,Z_PANEL_POP_BG);
       PnlSetLabel(p+"tgtn", px+PAL_PAD+82, tgy+8, PalTgtLabel(g_PalTgt), PNL_CLR_TITLE, 8);
       ObjectSetInteger(0,p+"tgtn",OBJPROP_ZORDER,Z_PANEL_POP_BG);
-      PnlSetButton(p+"tgt", px+w-PAL_PAD-64, tgy+3, 64, 20, "cycle  >>", PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD, true);
+      PnlSetButton(p+"tgt", px+w-PAL_PAD-64, tgy+3, 64, 20, "cycle  >>", PNL_CLR_SEG_OFF, PNL_CLR_SEG_BD);
       ObjectSetInteger(0,p+"tgt",OBJPROP_COLOR,PNL_CLR_SEG_TX);
       ObjectSetInteger(0,p+"tgt",OBJPROP_FONTSIZE,PnlPt(7));   // P-UI-30
       ObjectSetInteger(0,p+"tgt",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
@@ -2842,7 +2854,7 @@ void PalDraw()
    // so it can never leave the card — the 201px popup's hard-coded 100px track
    // started 5px past the edge and pushed its value 11px onto the chart.
    int fy=py+PalFootY();
-   PnlSetButton(p+"done", px+PAL_PAD, fy+4, PAL_FT_DONE, 22, "Done", PNL_CLR_ACCENT, PNL_CLR_ACCENT, true);
+   PnlSetButton(p+"done", px+PAL_PAD, fy+4, PAL_FT_DONE, 22, "Done", PNL_CLR_ACCENT, PNL_CLR_ACCENT);
    ObjectSetInteger(0,p+"done",OBJPROP_COLOR,PNL_CLR_DONE_TX);
    ObjectSetInteger(0,p+"done",OBJPROP_ZORDER,Z_PANEL_POP_CTL);
    int tr0=PaletteKindTransparency(g_PalKind);
@@ -3424,6 +3436,12 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else if(row==15) { kind=4; label="EDGE BOTTOM"; }      // shaded/bottom line
       else if(row==16) { label="TOP OPACITY"; unit="%"; minV=-1; maxV=100; }
       else if(row==17) { label="BOTTOM OPACITY"; unit="%"; minV=-1; maxV=100; }
+      // P-UI-220: the levels' own ANCHOR door. `inpTHStartPointType` (Midpoint|High|
+      // Low|Custom|Prev Close) was settable from the dialog and from the CUSTOM PRICE
+      // card's ANCHOR band, and that card has no ring item of its own — it opens by
+      // HOLDING the PIN item or the custom-price line. So the setting read as missing
+      // («توی پنل ها ندیدم کجاهستش») while it was live the whole time.
+      else if(row==18) { kind=5; label="START POINT"; opts="8"; }   // NAV → custom price card
       else             { kind=5; label="LINES"; opts="7"; }              // NAV → unified lines card
    }
    else if(item==2)   // ATR LABELS — the chart-labels card (High/Low
@@ -3688,6 +3706,24 @@ void PnlSetDef(const int item,const int row,int &kind,string &label,
       else if(row==7)  { kind=1; label="OVERLAP"; }
       else if(row==8)  { kind=1; label="COUNTDOWN"; }
       else if(row==9)  { kind=1; label="ALERTS"; }
+      // P-SESS-14 — THE LOOK. One numeric row after the seven switches.
+      // P-SESS-25 (2026-10-30): THE ROW NOW SAYS WHAT IT DOES. It was spelled FILL %
+      // (ink the body KEEPS), so the number a user had to reach was the complement
+      // of the one he thinks in. The address (10) and the stored SSFA (ink %) do NOT
+      // move; only the face and the arithmetic: TRANSPARENCY = 100 - ink, and 0 is
+      // a solid box.
+      else if(row==10) { label="TRANSPARENCY"; minV=0; maxV=100; unit="%"; }
+      // P-SESS-25 — one STYLE row for the whole family (the editor keeps its per-slot
+      // STYLE), APPENDED at 16 so no address above it moves and no slot re-decodes.
+      else if(row==16) { kind=2; label="STYLE"; opts="Filled|Empty"; minV=0; maxV=1; }
+      // P-SESS-15 — THE ZONE LAW. OFF = the classic fixed table every session chart
+      // quotes (Tokyo 00-09Z, London 08-17Z, NY 13-22Z, Sydney 22-07Z); ON = each
+      // city's OWN clock, so its DST term moves the edge by the hour it really moves.
+      else if(row==11) { kind=1; label="ZONE LAW"; }
+      // P-SESS-18 — THE TRADINGVIEW LEVELS: midpoint, mean, VWAP, trendline.
+      else if(row==13) { kind=2; label="TV LEVELS"; opts="Off|Midpoint|Mean|VWAP|Trend|All"; minV=0; maxV=5; }
+      // P-SESS-19 — THE STRIP: the active session coloured along the BOTTOM edge.
+      else if(row==14) { kind=1; label="STRIP"; }
       else             { kind=5; label="EDIT SESSIONS"; opts="16"; }   // NAV → the editor
    }
    else if(item==16)  // P-SESS — SESSION EDITOR: one slot at a time (row 0 picks
@@ -4340,7 +4376,7 @@ double PnlDefValSet(const int item,const int row)
                if(row==17) return 1;   // P-UI-143: BOTTOM OPACITY card look as shipped
               if(row==8) return (FactoryDefault(FF_LS_FIRST)>0.5)?1.0:0.0;
               if(row==9) return (FactoryDefault(FF_SHOW_MIDPOINT)>0.5)?1.0:0.0;
-              return 0;                        // rows 10-11 = NAV rows
+              return 0;                        // rows 10-13 and 18 = NAV rows
       case 2: if(row==0) return (FactoryDefault(FF_SHOW_COUNTDOWN)>0.5)?1.0:0.0;
               if(row==1) return 3;   // COLOR row → palette sentinel
               if(row==2) return FactoryDefault(FF_COUNTDOWN_SIZE);
@@ -4469,7 +4505,13 @@ double PnlDefValSet(const int item,const int row)
                if(row==7) return 1.0;                 // OVERLAP on
                if(row==8) return 1.0;                 // COUNTDOWN on
                if(row==9) return 0.0;                 // ALERTS off
-               return 0;                              // row 10 = NAV
+               if(row==10) return 62;                 // TRANSPARENCY: 62 % given up is the shipped 14 % visible (P-SESS-28: the paint fades 38^2/100)
+               if(row==11) return 0.0;                // ZONE LAW: the standard table (P-SESS-15)
+               if(row==16) return 1.0;                // STYLE: EMPTY ships — no fill over the candles (P-SESS-29)
+               if(row==13) return 0;                  // TV LEVELS: OFF — TradingView's own default
+               if(row==14) return 1.0;                // STRIP: on (P-SESS-19)
+               if(row==15) return -13;                // BROKER UTC: AUTO (P-SESS-23 - learn it)
+               return 0;                              // row 12 = NAV
       case 16: {                                      // the selected slot's factory preset
                SessSlot fdef; SessSlotFactory(g_sessSlotsEdit, fdef);
                if(row==0) return (double)g_sessSlotsEdit;      // the pick itself
@@ -4585,7 +4627,7 @@ double PnlCurrentSet(const int item,const int row)
               if(row==14 || row==15) return 0;                 // P-UI-131h: colour rows
               if(row==16) return g_zoneEdgeTopTransparency;
               if(row==17) return g_zoneEdgeBottomTransparency;
-              return 0;                        // rows 10-11 = NAV rows
+              return 0;                        // rows 10-13 and 18 = NAV rows
       case 2: if(row==0) return PnlMuteGatedValue(g_showLiveCountdown);   // countdown's own layer · P-UI-93
               if(row==1) return 0;   // COUNT COLOR (palette only)
               if(row==2) return g_countdownFontSize;
@@ -4714,7 +4756,12 @@ double PnlCurrentSet(const int item,const int row)
                 if(row==7) return g_sessOverlap ? 1.0 : 0.0;
                 if(row==8) return g_sessCountdown ? 1.0 : 0.0;
                 if(row==9) return g_sessAlerts ? 1.0 : 0.0;
-                return 0;                        // row 10 = NAV
+                if(row==10) return 100 - g_sessFill;       // P-SESS-25: TRANSPARENCY (the face of the stored ink)
+                if(row==11) return g_sessDst ? 1.0 : 0.0;  // P-SESS-15
+                if(row==16) return SessAllStyleIs(SESS_STYLE_OUTLINE) ? 1.0 : 0.0;   // P-SESS-25
+                if(row==13) return g_sessTv;               // P-SESS-18 the TV levels
+                if(row==14) return g_sessStrip ? 1.0 : 0.0;// P-SESS-19 the bottom strip
+                return 0;                        // row 12 = NAV
        case 16: {                                // decode the selected slot once
                 SessSlot cs; SessSlotGet(g_sessSlotsEdit, cs);
                 if(row==0) return (double)g_sessSlotsEdit;
@@ -5117,6 +5164,13 @@ int PnlApplySet(const int item,const int row,const double v)
                 RequestUISync();
                 g_forceClearOnNextDraw = true; g_redrawTHLevelsNeeded = true;
                 g_labelsRelayoutNeeded = true; flags = REFRESH_ALL;
+                // P-UI-220: «اثار هستش یا نه» is answered by THIS line, not by a
+                // screenshot — the type the per-frame resolver reads back, the
+                // override it reads it from, and the rebuild the write asked for.
+                DrawStripDiagEmit("[P-UI-220] start point set type=" +
+                                  IntegerToString((int)g_thStartPointType) +
+                                  " override=" + IntegerToString(g_startPointOverride) +
+                                  " rebuild=1");
              }
           }
           else             { g_magnetSensitivityPips=ClampInt((int)MathRound(v),0,100); RuntimeSettingsSaveOverridesThrottled(); }
@@ -5232,7 +5286,20 @@ int PnlApplySet(const int item,const int row,const double v)
           else if(row==7)  { g_sessOverlap  = (v>0.5); }
           else if(row==8)  { g_sessCountdown= (v>0.5); }
           else if(row==9)  { g_sessAlerts   = (v>0.5); }
-          RuntimeSettingsSaveOverridesThrottled();   // OV_SSON/SSHD/.../SSAL
+          // P-SESS-14: the look. P-SESS-25: the row speaks TRANSPARENCY (0 = solid),
+          // while the stored value stays the ink the body KEEPS (SSFA), so every saved
+          // chart decodes exactly as before.
+          else if(row==10) { g_sessFill     = ClampSettingInt(100 - (int)MathRound(v),0,SESS_FILL_MAX); }
+          else if(row==11) { g_sessDst      = (v>0.5); }      // P-SESS-15: the zone law
+          // P-SESS-25: Filled|Empty for the whole family — ONE write, every slot.
+          else if(row==16) { SessSetAllStyle((v > 0.5) ? SESS_STYLE_OUTLINE : SESS_STYLE_FILLED); }
+          else if(row==13) { g_sessTv       = ClampSettingInt((int)MathRound(v),0,5); }   // P-SESS-18: the TV levels
+          else if(row==14) { g_sessStrip    = (v>0.5); }      // P-SESS-19: the bottom strip
+          //--- P-SESS-34 (2026-10-31): A SINGLE CLICK MUST REACH THE DISK — a one-click
+          //--- switch can be dropped by the 500 ms throttle, so the next attach came
+          //--- back with the strip off. Sliders keep the throttle; switches save now.
+          if(row==1 || row==2 || row==10 || row==13) RuntimeSettingsSaveOverridesThrottled();  // days / transparency / TV (drags)
+          else                                        RuntimeSettingsSaveOverrides();            // switches + STYLE: one write, always
           SessionsTick();                            // paint now, not next tick
           break;
        case 16: { // P-SESS — SESSION EDITOR. One slot at a time: decode, change
@@ -5355,7 +5422,13 @@ int PnlResetAll()
    UpdateCircularBadges();
    SaveUIStates();
    if(g_PnlOpen >= 0) PnlRebuildKeepSpot(g_PnlOpen);   // the widgets show the restored values
-   _LOG_GATE_W Print("[UI] reset ALL keys=", keys);
+   //--- P-UI-219: the FLUSHED channel, not the journal (AGENTS law 3). The report
+   //--- «روی ریست ال کلیک میکنم این میاد» was undecidable from the Experts tab
+   //--- precisely because a `Print` here sat unread in MT4's RAM buffer: the count
+   //--- of deleted keys is the difference between "the button never ran" and
+   //--- "it ran and wiped nothing".
+   DrawStripDiagEmit("[P-UI-219] reset ALL keys=" + IntegerToString(keys) +
+                     " open=" + IntegerToString(g_PnlOpen));
    return REFRESH_ALL | REFRESH_HTF;                   // (5) every surface, HTF candles included
 }
 
@@ -5363,18 +5436,26 @@ int PnlResetAll()
 //| P-UI-145 (2026-10-13) — THE SEAT REGISTRY: NO UI CONTROL MAY BE    |
 //| DRAGGED OFF ITS SEAT.                                             |
 //|                                                                  |
-//| Every card and palette control is born `OBJPROP_SELECTABLE=true`  |
-//| (PnlSetButton below — the name router needs OBJECT_CLICK), and    |
-//| the project's own measured law says what that costs (P-UI-48 /    |
+//| Every card and palette control USED to be born `OBJPROP_SELECTABLE |
+//| =true` (PnlSetButton below — the name router needed OBJECT_CLICK), |
+//| and the project's own measured law says what that cost (P-UI-48 /  |
 //| P-BK-15, BaseKnot_Base.mqh:848): «MT4 grabs a selectable object    |
 //| exactly once, on the press that lands on it» — a press that then  |
 //| travels native-drags the OBJECT, and a selected object is moved   |
 //| by every later drag anywhere on the chart (the hijack). A shaky   |
 //| hand (3–10 px, below the card's own PNL_DRAG_CTRL_PX proof)       |
-//| therefore displaces a swatch / cell / tab / × off its seat, and   |
-//| the displaced button is then saved into the chart profile at its  |
+//| therefore displaced a swatch / cell / tab / × off its seat, and   |
+//| the displaced button was then saved into the chart profile at its  |
 //| absolute pixels and restored as a ghost after the next restart —  |
 //| the user's «ممکن است به‌اشتباه درگ شده … روی هم افتاده».          |
+//|                                                                  |
+//| P-UI-219 (2026-10-30) closes the first half of that story: the     |
+//| factory no longer sets the flag at all, so no panel control can be |
+//| grabbed, native-dragged, or opened in the properties dialog. The   |
+//| registry SURVIVES because it became the delivery: with no           |
+//| OBJECT_CLICK to route, `PnlSeatPressAct` (the router below) hits   |
+//| the SAME seats this paint wrote. One list, two readers, zero       |
+//| second grid.                                                      |
 //|                                                                  |
 //| The answer is ONE registry filled by the ONE factory that paints  |
 //| buttons (never a second arithmetic — contract item 7): the seat   |
@@ -5478,6 +5559,12 @@ void PnlSeatForget(const string prefix)
    s_pnlSeatFullSaid = false;   // the pool has room again — a later FULL is a new fact
 }
 
+//--- P-UI-219 (2026-10-30): the registry's READ side, for the press-time door in
+//--- the router below. The arrays stay private to this file — the door asks
+//--- for a name, it never copies the grid (contract item 7: one owner per arithmetic).
+int PnlSeatCount() { return s_pnlSeatN; }
+string PnlSeatNameAt(const int i) { return (i < 0 || i >= s_pnlSeatN) ? "" : s_pnlSeatNm[i]; }
+
 //+------------------------------------------------------------------+
 //| Object factories                                                  |
 //+------------------------------------------------------------------+
@@ -5514,7 +5601,7 @@ void PnlSetRect(const string n,const int x,const int y,const int w,const int h,c
 }
 
 void PnlSetButton(const string n,const int x,const int y,const int w,const int h,
-                  const string txt,const color bg,const color border,const bool selectable)
+                  const string txt,const color bg,const color border)
 {
    if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
@@ -5533,7 +5620,16 @@ void PnlSetButton(const string n,const int x,const int y,const int w,const int h
    ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT);
    ObjectSetInteger(0,n,OBJPROP_BORDER_COLOR,border);
    ObjectSetInteger(0,n,OBJPROP_STATE,false);
-   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,selectable);
+   //--- P-UI-219 (2026-10-30): NEVER selectable. MT grabs a selectable object on
+   //--- the press that lands on it (P-UI-48's own law, quoted above at the seat
+   //--- registry), so a press on a panel button is spent on SELECTION and the
+   //--- next press on the same pixel opens the terminal's object-properties
+   //--- dialog — the user's «روی ریست ال کلیک میکنم این میاد» with the
+   //--- `…_Pnl14_ral` window on screen and no act line behind it. Delivery does
+   //--- NOT need the flag any more: the coordinate hit tests and
+   //--- `PnlSeatPressAct` answer for every control this factory paints, off the
+   //--- seat remembered two lines above.
+   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
    ObjectSetInteger(0,n,OBJPROP_ZORDER,Z_PANEL_CTL);
 }
@@ -5929,14 +6025,14 @@ string PnlFormat(const int item,const int row,const double v)
    // why the first cut of this guard never fired and the two chips kept reading "-1%".
    // A slider parked at its own left end would otherwise read as a deliberate 0% —
    // the one thing it is not.
-   if(v < 0 && minV < 0) return "AUTO";
+   if(v < 0 && minV < 0 && v <= minV + 0.0001) return "AUTO";
    if(PnlIsStyleRow(item,row)) return StyleName((int)MathRound(v));
    if(unit=="%") return IntegerToString((int)MathRound(v))+"%";
    if(unit=="x") return DoubleToStr(v,1);
    // P-UI-26: unit-suffixed chips (COUNT SIZE 12pt, COUNT GAP 6px, MAGNET
    // SENS 50p) — the chip is 46px, longest live value "100%"
    // is 4 chars, so suffixed values always fit; bare numbers hid the unit.
-   if(unit=="pt" || unit=="px" || unit=="p" || unit=="R")
+   if(unit=="pt" || unit=="px" || unit=="p" || unit=="R" || unit=="h")
       return IntegerToString((int)MathRound(v))+unit;
    return IntegerToString((int)MathRound(v));
 }
@@ -7100,7 +7196,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
       int sy = ry + PNL_QSW_Y;
 
        PnlSetButton(PnlName(item,row,"CB"), px+PNL_PAD_X, sy, PNL_QSW_PREV, 22, "", ccVis,
-                    (g_PalOpen && g_PalKind==kk) ? a1 : PnlSwatchBorder(ccVis,PNL_CLR_CARD), true);
+                    (g_PalOpen && g_PalKind==kk) ? a1 : PnlSwatchBorder(ccVis,PNL_CLR_CARD));
        // RICH-MT4: glass frame over the flat preview block — transparent
        // middle (the colour shows through), baked top-light + bottom-shade.
        // Non-selectable, above the button: clicks still reach CB (footer pattern).
@@ -7115,7 +7211,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
           color qc = QuickPalColor(qi);
           PnlSetButton(PnlName(item,row,"Q"+IntegerToString(qi)),
                        qx+qi*(PNL_QSW_W+PNL_QSW_GAP), sy, PNL_QSW_W, 22, "", qc,
-                       (qc==cc) ? a1 : PnlSwatchBorder(qc,PNL_CLR_CARD), true);
+                       (qc==cc) ? a1 : PnlSwatchBorder(qc,PNL_CLR_CARD));
           PnlSetBitmap(PnlName(item,row,"GLS"+IntegerToString(qi)),
                        qx+qi*(PNL_QSW_W+PNL_QSW_GAP), sy, PNL_QSW_W, 22,
                        "::Files\\Icons\\pnl_glass22.bmp", Z_PANEL_MARK);   // glass sheen
@@ -7145,7 +7241,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
        // the button stays underneath purely as the click target (footer
        // pattern) and is pushed under the skin.
        PnlSetButton(PnlName(item,row,"NAV"), nx, ry+PNL_CTL_Y-1, nw, 26, "",
-                    PNL_CLR_CARD, PNL_CLR_CARD, true);
+                    PNL_CLR_CARD, PNL_CLR_CARD);
        ObjectSetInteger(0,PnlName(item,row,"NAV"),OBJPROP_ZORDER,Z_PANEL_BASE);
        PnlSetBitmap(PnlName(item,row,"NAVB"), nx, ry+PNL_CTL_Y-1, nw, 26,
                     "::Files\\Icons\\pnl_nav.bmp", Z_PANEL_SKIN);
@@ -7231,7 +7327,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
             // P-UI-131d: the seam is 4 (the micro step the pills use), not 2 — a
             // 2px gap reads as one glued control, exactly what the user reported.
              PnlSetButton(PnlName(item,row,"C"+IntegerToString(i)), tx, ry+PNL_CTL_Y,
-                          tw, PNL_CTL_H, "", PNL_CLR_CARD, PNL_CLR_CARD, true);
+                          tw, PNL_CTL_H, "", PNL_CLR_CARD, PNL_CLR_CARD);
              ObjectSetString(0,PnlName(item,row,"C"+IntegerToString(i)),OBJPROP_TOOLTIP,arr[i]);
             if(i<nic)
                PnlSetBitmap(PnlName(item,row,"CI"+IntegerToString(i)), tx+5, ry+PNL_CTL_Y+4,
@@ -7262,7 +7358,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
          int dx,dy,dw,dh;
          PnlDdRect(item,row,dx,dy,dw,dh);   // P-UI-210: the ONE closed-dropdown rect
           PnlSetButton(PnlName(item,row,"DD"), dx, dy, dw, dh, "",
-                       PNL_CLR_FIELD, PNL_CLR_FIELD_BD, true);
+                       PNL_CLR_FIELD, PNL_CLR_FIELD_BD);
          PnlSetBitmap(PnlName(item,row,"DDI"), dx+7, dy+7, PNL_GLYPH_CANVAS, PNL_GLYPH_CANVAS,
                       PnlGlyphRes(item,PnlRowIcon(item,row),true), Z_PANEL_INK);
          PnlSetLabel(PnlName(item,row,"DDT"), dx+24, dy+8, PnlDdOptText(item,row),
@@ -7297,7 +7393,7 @@ void PnlCreateRow(const int item,const int row,const int px,const int py)
              PnlSetButton(PnlName(item,row,"C"+IntegerToString(j)), sx2, ry+PNL_CTL_Y+1, w, 24,
                           arr[j],
                           (j==idx) ? a1 : PNL_CLR_SEG_OFF,
-                          (j==idx) ? PnlAccentA2(acc) : PNL_CLR_SEG_BD, true);
+                          (j==idx) ? PnlAccentA2(acc) : PNL_CLR_SEG_BD);
              ObjectSetString(0,PnlName(item,row,"C"+IntegerToString(j)),OBJPROP_TOOLTIP,arr[j]);
             ObjectSetInteger(0,PnlName(item,row,"C"+IntegerToString(j)),OBJPROP_COLOR,
                              (j==idx) ? PnlAccentInk(acc) : PNL_CLR_SEG_TX);
@@ -7408,7 +7504,7 @@ void PnlFooterBtn(const int item,const string tag,const int bx,const int fy,
    int bw  = PnlFootBtnW(label);
    string nm = PnlHead(item,tag);
    PnlSetButton(nm, bx, fy+10, bw, PNL_BTN_H, "",
-                PNL_CLR_FOOTBG, PNL_CLR_FOOTBG, true);
+                PNL_CLR_FOOTBG, PNL_CLR_FOOTBG);
    ObjectSetInteger(0,nm,OBJPROP_ZORDER,Z_PANEL_BASE);
    ObjectSetString(0,nm,OBJPROP_TOOLTIP,label);
    PnlSetBitmap(nm+"bg", bx-PNL_BTN_PAD, fy+10-PNL_BTN_PAD,
@@ -7786,7 +7882,7 @@ void PnlCreate(const int item)
     // (preview .hd is a flex row — mark, .htxt, .key, .ver, .x). This used to
     // place .ver first, which read "0 T ×" instead of the preview's "T 0 ×".
     PnlSetButton(PnlHead(item,"ver"), hx-vw, py+20, vw, 16, vtxt,
-                 PnlAccentSoft(hacc), PnlAccentBd(hacc), true);
+                 PnlAccentSoft(hacc), PnlAccentBd(hacc));
     ObjectSetInteger(0,PnlHead(item,"ver"),OBJPROP_COLOR,ha1);
     ObjectSetInteger(0,PnlHead(item,"ver"),OBJPROP_FONTSIZE,PnlPt(PNL_PT_VER));   // P-UI-30
     hx -= vw+10;
@@ -7805,7 +7901,7 @@ void PnlCreate(const int item)
     // actually shows: MT4 buttons are square, the preview's is radius 8.
      int xbx = px+cardW-PNL_PAD_X-PNL_XBTN_VIS;
      PnlSetButton(PnlHead(item,"close"), xbx, py+15, PNL_XBTN_VIS, PNL_XBTN_VIS, "",
-                  C'28,34,44', C'28,34,44', true);   // #1C222C --ghostBg (1 LSB off before)
+                  C'28,34,44', C'28,34,44');   // #1C222C --ghostBg (1 LSB off before)
     ObjectSetInteger(0,PnlHead(item,"close"),OBJPROP_ZORDER,Z_PANEL_BASE);
     ObjectSetString(0,PnlHead(item,"close"),OBJPROP_TOOLTIP,"Close");
     PnlSetBitmap(PnlHead(item,"xbg"), xbx-PNL_XBTN_PAD, py+15-PNL_XBTN_PAD,
@@ -9818,6 +9914,10 @@ void UIPressAct(const string code="")
    if(!s_PnlClickChannel) UISuppressNextClick();
 }
 
+//--- P-UI-219 (2026-10-30): the seat door is DEFINED below `PnlHandleClick` (it calls
+//--- that owner) and DECLARED here because the press chain below is its caller.
+bool PnlSeatPressAct(const int mx,const int my,const bool palOnly);
+
 void PnlHandleMouseMove(const int mx,const int my,const bool leftDown,const bool pressStart)
 {
    // P-UI-81: a NEW press is the proof that the previous gesture is over — reap
@@ -9861,6 +9961,12 @@ void PnlHandleMouseMove(const int mx,const int my,const bool leftDown,const bool
             return;
          }
       }
+      // P-UI-219: THE PALETTE'S OWN BUTTONS. They are born non-selectable now, so
+      // MT sends them no OBJECT_CLICK (P-DRAW-84's law) — the registry answers for
+      // them here, BEFORE the card's controls, exactly as `PalHandleClick` sits at
+      // the head of the name router: the popover floats above the card, so its
+      // pixels are its own and never the row underneath.
+      if(pressStart && PnlSeatPressAct(mx,my,true)) return;
       // fall through: palette open but not on a mixer track → panel drags work
    }
 
@@ -10171,6 +10277,11 @@ void PnlHandleMouseMove(const int mx,const int my,const bool leftDown,const bool
          if(kf != REFRESH_NONE) RefreshDisplay(kf);
          return;
       }
+      // P-UI-219: the card's buttons with no dedicated hit test of their own (the
+      // C<i> tab and segment pills) are reached off the seat the paint wrote. LAST,
+      // so every specific owner above keeps its precedence — this answers only a
+      // press nothing else claimed.
+      if(PnlSeatPressAct(mx,my,false)) return;
       // The press landed on NO control of this card: the arm above is its whole
       // answer (the header, the card body and the pixels BETWEEN the controls all
       // grab there, P-UI-70a/P-UI-89), and the whole panel then follows the
@@ -10182,6 +10293,17 @@ void PnlHandleMouseMove(const int mx,const int my,const bool leftDown,const bool
 
    if(!leftDown)
    {
+      // P-UI-221: A SLIDER'S RELEASE IS ITS VALUE. The moves are throttled (30 ms)
+      // and the release was not, so the release used to be the one event that never
+      // reached the row's owner — the chip showed a number the model never got.
+      if(g_PnlDragItem >= 0 && g_PnlDragRow >= 0 && mx > 0 && my > 0)
+      {
+         double vEnd;
+         PnlValueFromX(g_PnlDragItem,g_PnlDragRow,mx,vEnd);
+         int fEnd = PnlApply(g_PnlDragItem,g_PnlDragRow,vEnd);
+         PnlSetVisualValue(g_PnlDragItem,g_PnlDragRow,vEnd);
+         if(fEnd != REFRESH_NONE) RefreshDisplay(fEnd);
+      }
       g_PnlDragItem=-1; g_PnlDragRow=-1;
       DragReleaseIf(DRAG_PANEL_KNOB);
       UIDragBudgetEnd();   // P-UI-33: release settles the tail exactly once
@@ -10690,6 +10812,60 @@ int PnlHandleClick(const string name,const int mouseX,const int mouseY)
    }
 
    return REFRESH_NONE;
+}
+
+//+------------------------------------------------------------------+
+//| P-UI-219 (2026-10-30) — THE SEAT DOOR                             |
+//|                                                                   |
+//| Every control `PnlSetButton` paints is now born SELECTABLE=false,  |
+//| because the terminal grabs a selectable object on the press that   |
+//| lands on it (P-UI-48's own law) — that grab spent the press, and   |
+//| the next press on the same pixel opened the terminal's object-     |
+//| properties dialog. «روی ریست ال کلیک میکنم این میاد» is exactly    |
+//| that dialog over `…_Pnl14_ral`, with no act line behind it.        |
+//|                                                                   |
+//| The flag was only ever there so the terminal would SEND OBJECT_CLICK|
+//| (P-DRAW-84), so removing it removes the delivery too. This is the  |
+//| delivery that replaces it: the seat the paint wrote (P-UI-145) is  |
+//| hit-tested in pixels and dispatched through the SAME owner the name|
+//| router used, so no second grid of arithmetic exists (contract      |
+//| item 7). Cost: one walk of the remembered seats, ONLY on a press — |
+//| never on a tick, never on a poll.                                  |
+//|                                                                   |
+//| Newest seat first: the terminal paints in CREATION order           |
+//| (P-LOG-10), so when two remembered boxes overlap the later one is  |
+//| on top and owns the pixel.                                         |
+//+------------------------------------------------------------------+
+bool PnlSeatPressAct(const int mx,const int my,const bool palOnly)
+{
+   const string palPfx = g_UI.btnPrefix + "Pal_";
+   for(int i = PnlSeatCount() - 1; i >= 0; i--)
+   {
+      const string nm = PnlSeatNameAt(i);
+      if(nm == "") continue;
+      const bool isPal = (StringFind(nm, palPfx) == 0);
+      if(isPal != palOnly) continue;
+      int si, sr; string sk;
+      ParsePnlName(nm, si, sr, sk);
+      // A seat of a card that is not the open one is a stale memory, not a
+      // control — the palette's names carry no item (Parse gives -1).
+      if(!isPal && si != g_PnlOpen) continue;
+      if(!PnlCtrlRectHit(nm, mx, my, 0)) continue;
+      // LATCH FIRST: PnlHandleClick's own coordinate fallback is gated on
+      // PnlGestureConsumed(), so the dispatch below can never re-enter this
+      // chain. One gesture, one owner (P-UI-74's rule, unchanged).
+      UIPressAct(sk);
+      //--- P-UI-219's witness, on the FLUSHED channel (AGENTS law 3): «nothing
+      //--- happened» and «nothing was pressed» are different facts, and the
+      //--- Experts journal is a RAM cache (P-DRAW-126) — the file answers in
+      //--- one read.
+      DrawStripDiagEmit("[P-UI-219] seat acted nm=" + nm + " xy=" +
+                        IntegerToString(mx) + "," + IntegerToString(my));
+      const int f = PnlHandleClick(nm, mx, my);
+      if(f != REFRESH_NONE) RefreshDisplay(f);
+      return true;
+   }
+   return false;
 }
 
 //+------------------------------------------------------------------+
