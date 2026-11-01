@@ -1116,13 +1116,19 @@ bool DrawStripHexToColor(const string s, color &c)
 string DrawDescTag(const string d, const string tag, const string val)
 {
    string out = d;
-   int at = StringFind(out, tag);
-   if(at >= 0)
+   //--- P-DRAW-136b (2026-11-01) — EVERY copy, not just the first. An orphan `[CL…`
+   //--- left without its `]` by an older build's string surgery could never be matched
+   //--- again, so each new colour prepended a fresh tag and never removed the old one:
+   //--- MEASURED on his own fibo, six `[CL…` blocks in one description.
+   while(true)
    {
+      int at = StringFind(out, tag);
+      if(at < 0) break;
       int e = StringFind(out, "]", at + StringLen(tag));
-      if(e > at) out = StringSubstr(out, 0, at) + StringSubstr(out, e + 1);
+      if(e <= at) break;
+      out = StringSubstr(out, 0, at) + StringSubstr(out, e + 1);
    }
-   if(StringLen(out) > 0 && StringGetCharacter(out, 0) == ' ') out = StringSubstr(out, 1);
+   while(StringLen(out) > 0 && StringGetCharacter(out, 0) == ' ') out = StringSubstr(out, 1);
    string want = tag + val + "]";
    return (out == "") ? want : (want + " " + out);
 }
@@ -1151,6 +1157,129 @@ bool DrawDescTagColor(const string d, const string tag, color &c)
    if(StringGetCharacter(t, 0) != '#') t = "#" + t;
    return DrawStripHexToColor(t, c);
 }
+
+//--- P-DRAW-136 (2026-11-01) — A TAG MAY NOT RIDE A DESCRIPTION THE TERMINAL PAINTS.
+//--- MEASURED on the user's frame (EURUSD M15, `Fibo 16117`): six `[CL…]` blocks drawn
+//--- along the fibo's diagonal — «این نوشته‌ها چی اومده … خودش اومده روی فیبو». The tag
+//--- channel (`[OP…] [CL…] [FT…] [FL…] [LK…]`) lives on `OBJPROP_TEXT`, and the terminal
+//--- paints that text for the fibo family whenever the chart's "object descriptions"
+//--- switch is on. A trend line, a ray and a path already refuse it (P-HR-04, P-UI-137);
+//--- the fibo family is the fourth. Its tag block lives in a store row here and the
+//--- description keeps ONLY the user's text. Cost: one row scan, no object read; a still
+//--- frame writes nothing.
+#define DRAW_TAG_ROWS_MAX 128
+static string s_tagName[];
+static string s_tagBlob[];
+//--- the kinds whose `OBJPROP_TEXT` the terminal draws AS TEXT on the drawing itself
+bool DrawKindPaintsDesc(const EDrawKind k)
+{
+   return (k == DK_FIBO || k == DK_FIBOFAN || k == DK_FIBOCHAN || k == DK_EXPANSION);
+}
+int DrawTagFind(const string nm)
+{
+   for(int i = 0; i < ArraySize(s_tagName); i++)
+      if(s_tagName[i] == nm) return i;
+   return -1;
+}
+void DrawTagDropAt(const int r)
+{
+   int n = ArraySize(s_tagName);
+   if(r < 0 || r >= n) return;
+   for(int i = r; i < n - 1; i++) { s_tagName[i] = s_tagName[i + 1]; s_tagBlob[i] = s_tagBlob[i + 1]; }
+   ArrayResize(s_tagName, n - 1);
+   ArrayResize(s_tagBlob, n - 1);
+}
+int DrawTagRow(const string nm)
+{
+   int r = DrawTagFind(nm);
+   if(r >= 0) return r;
+   if(ArraySize(s_tagName) >= DRAW_TAG_ROWS_MAX)
+      for(int i = ArraySize(s_tagName) - 1; i >= 0; i--)      // a row whose drawing is gone is read by nobody
+         if(ObjectFind(0, s_tagName[i]) < 0) DrawTagDropAt(i);
+   int n = ArraySize(s_tagName);
+   ArrayResize(s_tagName, n + 1);
+   ArrayResize(s_tagBlob, n + 1);
+   s_tagName[n] = nm;
+   s_tagBlob[n] = "";
+   return n;
+}
+//--- the six prefixes a tag of OURS can wear: one string, one stride (4 bytes, 3 chars)
+#define DRAW_TAG_PREFIXES "[OP [CL [FT [FL [LK [FW "
+string DrawTagPrefixAt(const int i) { return StringSubstr(DRAW_TAG_PREFIXES, i * 4, 3); }
+//--- cut every tag block of OURS out of a description; `user` keeps the rest verbatim
+string DrawTagExtract(const string d, string &user)
+{
+   string rest = d, tags = "";
+   while(true)
+   {
+      int best = -1; string hit = "";
+      for(int i = 0; i < 6; i++)
+      {
+         string t = DrawTagPrefixAt(i);
+         int at = StringFind(rest, t);
+         if(at >= 0 && (best < 0 || at < best)) { best = at; hit = t; }
+      }
+      if(best < 0) break;
+      int e = StringFind(rest, "]", best + StringLen(hit));
+      if(e <= best) break;
+      tags += StringSubstr(rest, best, e - best + 1) + " ";
+      rest = StringSubstr(rest, 0, best) + StringSubstr(rest, e + 1);
+   }
+   StringTrimLeft(rest);
+   StringTrimRight(rest);
+   StringTrimRight(tags);
+   user = rest;
+   return tags;
+}
+//--- THE ONE READER the tag sites ask: the tag block this drawing wears.
+string DrawTagBlob(const string nm)
+{
+   if(nm == "" || ObjectFind(0, nm) < 0) return "";
+   if(!DrawKindPaintsDesc(DrawKindOf(nm))) return ObjectGetString(0, nm, OBJPROP_TEXT);
+   int r = DrawTagFind(nm);
+   if(r >= 0) return s_tagBlob[r];
+   //--- first touch: the tags an older build left on the description are MOVED here,
+   //--- and his own text is what the terminal keeps painting. One write, once.
+   string user = "";
+   string tags = DrawTagExtract(ObjectGetString(0, nm, OBJPROP_TEXT), user);
+   r = DrawTagRow(nm);
+   s_tagBlob[r] = tags;
+   if(tags != "") ObjectSetString(0, nm, OBJPROP_TEXT, user);
+   return s_tagBlob[r];
+}
+//--- THE ONE WRITER: a still frame writes nothing (the row already holds these bytes).
+void DrawTagPut(const string nm, const string blob)
+{
+   if(nm == "" || ObjectFind(0, nm) < 0) return;
+   if(!DrawKindPaintsDesc(DrawKindOf(nm)))
+   {
+      if(blob != ObjectGetString(0, nm, OBJPROP_TEXT)) ObjectSetString(0, nm, OBJPROP_TEXT, blob);
+      return;
+   }
+   int r = DrawTagRow(nm);
+   if(s_tagBlob[r] == blob) return;
+   s_tagBlob[r] = blob;
+}
+//--- the attach heal: a drawing the strip was never opened on still wears what an older
+//--- build wrote. One walk per attach; returns the healed names ("" = none).
+string DrawTagHealAll()
+{
+   string healed = "";
+   for(int i = ObjectsTotal(0, -1, -1) - 1; i >= 0; i--)
+   {
+      string nm = ObjectName(0, i);
+      if(nm == "" || ObjectFind(0, nm) < 0) continue;
+      if(!DrawKindPaintsDesc(DrawKindOf(nm))) continue;
+      string user = "";
+      string tags = DrawTagExtract(ObjectGetString(0, nm, OBJPROP_TEXT), user);
+      if(tags == "") continue;
+      int r = DrawTagRow(nm);
+      if(s_tagBlob[r] == "") s_tagBlob[r] = tags;
+      ObjectSetString(0, nm, OBJPROP_TEXT, user);
+      healed += (healed == "" ? "" : ",") + nm;
+   }
+   return healed;
+}
 //--- the LINE/BORDER's own alpha (`[OP…]`).
 int DrawSlotOpacityGet(const string name)
 {
@@ -1163,7 +1292,7 @@ int DrawSlotOpacityGet(const string name)
       string pid = "";
       if(PathIdOfName(name, pid)) return PathInkOpacityGet(pid);
    }
-   int v = DrawDescTagValue(ObjectGetString(0, name, OBJPROP_TEXT), "[OP", DRAW_OP_DEF);
+   int v = DrawDescTagValue(DrawTagBlob(name), "[OP", DRAW_OP_DEF);
    if(v < DRAW_OP_MIN) v = DRAW_OP_MIN;
    if(v > 100) v = 100;
    return v;
@@ -1177,7 +1306,7 @@ int DrawSlotFillOpacityGet(const string name)
 {
    if(name == "" || ObjectFind(0, name) < 0) return DRAW_OP_DEF;
    if(DrawKindOf(name) == DK_TEXT) return DRAW_OP_DEF;
-   string d = ObjectGetString(0, name, OBJPROP_TEXT);
+   string d = DrawTagBlob(name);
    if(StringFind(d, "[FT") < 0) return DrawSlotOpacityGet(name);
    int v = DrawDescTagValue(d, "[FT", 0);
    if(v < 0) v = 0;
@@ -1196,14 +1325,14 @@ bool DrawSlotColorPure(const string name, color &c)
 {
    if(name == "" || ObjectFind(0, name) < 0) return false;
    if(DrawKindOf(name) == DK_TEXT) return false;
-   return DrawDescTagColor(ObjectGetString(0, name, OBJPROP_TEXT), "[CL", c);
+   return DrawDescTagColor(DrawTagBlob(name), "[CL", c);
 }
 //--- P-DRAW-64: the INTERIOR's pure colour (`[FL…]`), or false when it has none yet.
 bool DrawSlotFillPure(const string name, color &c)
 {
    if(name == "" || ObjectFind(0, name) < 0) return false;
    if(DrawKindOf(name) == DK_TEXT) return false;
-   return DrawDescTagColor(ObjectGetString(0, name, OBJPROP_TEXT), "[FL", c);
+   return DrawDescTagColor(DrawTagBlob(name), "[FL", c);
 }
 //--- the RENDER colour: what the chart must wear for this pure colour at the
 //--- object's own opacity.
@@ -1226,9 +1355,7 @@ color DrawSlotColorStore(const string name, const color pure)
 {
    if(name == "" || ObjectFind(0, name) < 0) return pure;
    if(DrawKindOf(name) == DK_TEXT) return pure;
-   string d = ObjectGetString(0, name, OBJPROP_TEXT);
-   d = DrawDescTag(d, "[CL", DrawDescColorHex(pure));
-   ObjectSetString(0, name, OBJPROP_TEXT, d);
+   DrawTagPut(name, DrawDescTag(DrawTagBlob(name), "[CL", DrawDescColorHex(pure)));
    return DrawSlotRenderColor(name, pure);
 }
 // ══════════════════════════════════════════════════════════════════════════
@@ -1819,7 +1946,7 @@ int FibPenLookNative(const int lk)
 int FibPenLookGet(const string fibo)
 {
    if(fibo == "" || ObjectFind(0, fibo) < 0) return 0;
-   int lk = DrawDescTagValue(ObjectGetString(0, fibo, OBJPROP_TEXT), FIBPEN_LK, 0);
+   int lk = DrawDescTagValue(DrawTagBlob(fibo), FIBPEN_LK, 0);
    if(lk < FIBPEN_LOOK_NEON || lk > FIBPEN_LOOK_WASH) return 0;
    return lk;
 }
@@ -1827,14 +1954,13 @@ void FibPenLookSet(const string fibo, const int lk)
 {
    if(fibo == "" || ObjectFind(0, fibo) < 0) return;
    if(lk < FIBPEN_LOOK_NEON || lk > FIBPEN_LOOK_WASH) return;
-   string d = ObjectGetString(0, fibo, OBJPROP_TEXT);
-   string nd = DrawDescTag(d, FIBPEN_LK, IntegerToString(lk));
-   if(nd != d) ObjectSetString(0, fibo, OBJPROP_TEXT, nd);
+   string d = DrawTagBlob(fibo);
+   DrawTagPut(fibo, DrawDescTag(d, FIBPEN_LK, IntegerToString(lk)));
 }
 bool FibPenLookDrop(const string fibo)
 {
    if(fibo == "" || ObjectFind(0, fibo) < 0) return false;
-   string d = ObjectGetString(0, fibo, OBJPROP_TEXT);
+   string d = DrawTagBlob(fibo);
    int at = StringFind(d, FIBPEN_LK);
    if(at < 0) return false;
    int e = StringFind(d, "]", at + StringLen(FIBPEN_LK));
@@ -1842,7 +1968,7 @@ bool FibPenLookDrop(const string fibo)
    string nd = StringSubstr(d, 0, at) + StringSubstr(d, e + 1);
    if(StringLen(nd) > 0 && StringGetCharacter(nd, 0) == ' ') nd = StringSubstr(nd, 1);
    if(nd == d) return false;
-   ObjectSetString(0, fibo, OBJPROP_TEXT, nd);
+   DrawTagPut(fibo, nd);
    return true;
 }
 //--- P-UNIFY-3: WHO THE PEN SERVES. The pen can state exactly the four kinds whose
@@ -2348,7 +2474,7 @@ int FibPenOffPx(const int w, const int q)
 bool FibPenTagDrop(const string fibo)
 {
    if(fibo == "" || ObjectFind(0, fibo) < 0) return false;
-   string d = ObjectGetString(0, fibo, OBJPROP_TEXT);
+   string d = DrawTagBlob(fibo);
    int at = StringFind(d, FIBPEN_TAG);
    if(at < 0) return false;
    int e = StringFind(d, "]", at + StringLen(FIBPEN_TAG));
@@ -2356,7 +2482,7 @@ bool FibPenTagDrop(const string fibo)
    string nd = StringSubstr(d, 0, at) + StringSubstr(d, e + 1);
    if(StringLen(nd) > 0 && StringGetCharacter(nd, 0) == ' ') nd = StringSubstr(nd, 1);
    if(nd == d) return false;
-   ObjectSetString(0, fibo, OBJPROP_TEXT, nd);
+   DrawTagPut(fibo, nd);
    return true;
 }
 
@@ -3142,14 +3268,15 @@ void DrawSlotOpacitySet(const string name, const int op, const int slot)
       pure = (color)(int)DrawSlotRead(name, inner ? DRAW_SLOT_FILLCLR : DRAW_SLOT_COLOR);
       havePure = ((int)pure >= 0);
    }
-   string d = ObjectGetString(0, name, OBJPROP_TEXT);
+   string d = DrawTagBlob(name);
    d = DrawDescTag(d, inner ? "[FT" : "[OP", IntegerToString(v));
    //--- the border's `[CL…]` is rewritten from the colour it READ (the healer); the
    //--- interior's is NOT: an interior with no colour of its own keeps following the
    //--- border, which is the state a pre-split drawing is in.
    if(!inner && havePure) d = DrawDescTag(d, "[CL", DrawDescColorHex(pure));
-   if(d != ObjectGetString(0, name, OBJPROP_TEXT))
-      ObjectSetString(0, name, OBJPROP_TEXT, d);
+   //--- P-DRAW-136: on a kind the terminal PAINTS its description for (the fibo family)
+   //--- the tags go to the store and the object keeps only the user's own text.
+   DrawTagPut(name, d);
    if(!havePure) return;   // no colour on the drawing: nothing to blend, nothing written
    if(inner)
    {
@@ -3952,10 +4079,9 @@ bool DrawSlotWrite(const string name, const int slot, const double v, const bool
          //--- on are two acts in either order.
          color ic = (color)(int)MathRound(v);
          if((int)ic < 0) return false;   // no colour, no write (P-DRAW-48's lesson)
-         string dd = ObjectGetString(0, name, OBJPROP_TEXT);
-         dd = DrawDescTag(dd, "[FL", DrawDescColorHex(ic));
-         if(dd != ObjectGetString(0, name, OBJPROP_TEXT))
-            ObjectSetString(0, name, OBJPROP_TEXT, dd);
+         //--- P-DRAW-136: same carrier as the border's `[CL…]` — a painted description
+         //--- never carries a tag, so this write lands in the store on the fibo family.
+         DrawTagPut(name, DrawDescTag(DrawTagBlob(name), "[FL", DrawDescColorHex(ic)));
          if(remember) s_dkFillClr[k] = ic;   // P-DRAW-130: a preview's fill is not a remembered fill
          if(DrawKindHasFillBody(k)) FillChildSync(name);
          PenStackSync(name, false);

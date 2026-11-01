@@ -1672,6 +1672,33 @@ void PalComputePos()
    g_PalX=px; g_PalY=py;
 }
 
+//--- P-UI-222a (2026-10-31) — THE PALETTE IS A POPUP OF A SURFACE, AND THE WINDOW
+//--- THAT MOVED IS ITS WINDOW TOO. Ported from the MT4 tree, where this shipped
+//--- first: `PalComputePos` had exactly ONE caller (`PalOpenKind`), so an open
+//--- popup was placed once, at open, and never again. A chart that shrank under an
+//--- open popup left `g_PalX/g_PalY` outside the new width, where the terminal clips
+//--- every object of the family: the swatch grid, the Done button and the TR track
+//--- all gone. The DPI branch rebuilt it (`UIRebuildForMetrics` -> `PalOpenKind`),
+//--- which is why a monitor move healed it and a plain resize did not.
+//---
+//--- The fix is the ring's and the chip's own shape (`CircHomesRefresh`): the resize
+//--- RE-DERIVES the place from its home instead of writing a clamped value back.
+//--- `PalComputePos` is that one owner — a hand spot re-clamps from `s_palMX/MY`
+//--- (the stored pair is never touched, contract §4), a card/drawing spot re-anchors
+//--- to its live parent. The paint runs only when the answer moved, so a scroll or a
+//--- zoom that changes no edge costs one compare.
+bool PalReclampOpen()
+{
+   if(!g_PalOpen) return false;
+   const int x0 = g_PalX, y0 = g_PalY;
+   PalComputePos();
+   if(g_PalX == x0 && g_PalY == y0) return false;
+   PalDraw();
+   PnlPublishCover();
+   HTFCardCullRefresh();
+   return true;
+}
+
 //--- P-UI-137 (2026-10-02) — THE CENSUS EPOCH. One popup census per OPEN, never per
 //--- repaint (MEASURED: on every pass the popup walked the chart and wrote ~55
 //--- flushed lines, and PalDraw runs on every chip / tab / pager click — the popup
@@ -11506,6 +11533,12 @@ void HandleUIChartEvent(const int id, const long &lparam, const double &dparam, 
       // (probe-budget-audit's `chart change stops invalidating` seed anchors on it).
       if(PnlDpiPoll()) UIRebuildForMetrics();
       if(PnlClampOpenPanel()) ChartRedraw();   // shrunken chart: keep header grabbable
+      // P-UI-222a: the palette is a POPUP of a surface, and the window that moved is
+      // its window too. It was placed at open and never re-derived, so a shrink left
+      // every swatch and the Done button clipped outside the chart. Same owner as the
+      // open (`PalComputePos`), same rule as the ring/chip homes: re-derive, never
+      // write a clamped value back. Ported from the MT4 tree (2026-10-31).
+      if(PalReclampOpen()) ChartRedraw();
       // P-PERF-02: pan/zoom changes what the HTF overlay must cover — re-check
       // its viewport cap on the event that moved the view, not on the next 1 s
       // timer probe (internally throttled, so a zoom storm stays cheap).

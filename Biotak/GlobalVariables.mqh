@@ -222,6 +222,24 @@ static string g_s1ClickRow = "";        // the rung-1 line the current press lan
 static int    g_s1ClickRowY = 0;        // its pixel row at the press (the travel test)
 static uint   g_s1ClickLastMs = 0;      // the contract's own double-click stamp
 static uint   g_s1ClickHandledMs = 0;   // the twin-event dedupe (two transports, one click)
+// P-UI-224 (2026-11-01) — THE OPENER WINDOW, ON THE PRESS (P-UI-130's shape).
+//
+// `g_s1HandleShown` is the reveal latch AND the click contract's own "has the
+// user asked for these circles yet?" answer. The press-edge claim writes it
+// (P-UI-98g: a hand on the line IS the request), so by the time the RELEASE's
+// click reached `Step1HandleClickAt` the latch already read TRUE and the click
+// fell through to the SET arm — one click revealed the pair and, 300 ms later,
+// `HandsetClickSweep` SET it: `g_s1LinesArmed=false`, the circles parked, the
+// claim refused. That is «فعال شدنش اینقدر سخت»: every activation destroyed
+// itself. The fix is this ONE bool — the press that revealed spent its click on
+// the reveal. A new press edge disarms it (one release = one channel).
+static bool   g_s1PressRevealed = false;  // the CURRENT press turned the circles on
+// The reader the click contract asks. TRUE = this click has already been
+// answered by the reveal it caused, so it must not also arm a SET.
+bool Step1ClickPressRevealed()
+{
+   return g_s1PressRevealed;
+}
 
 void HandsetHandleAtXY(const string hn, const int cx, const int cy, const int half, const string bmp)
 {
@@ -438,15 +456,15 @@ static string g_s1SetPending = "";
 static uint   g_s1SetPendingMs = 0;
 static uint   g_cpJustDraggedMs = 0;       // a drag release that MOVED the line:
 static uint   g_s1JustDraggedMs = 0;       //   its click echo must not set anything
-// P-UI-98m: the re-arm candidate for a SET (masked) custom price line. A masked
-// line fires no OBJECT_CLICK, so the press edge records the row off the line's
-// own grab test and the button-up / CHARTEVENT_CLICK edges ask it - exactly
-// the step-1 click shape, except a single click here is a no-op (already set)
-// and only a double re-arms, so no sweep slot is needed.
+// P-UI-98m/P-UI-225: the re-arm candidate for a SET (masked) custom price line. A
+// masked line fires no OBJECT_CLICK, so the press edge records the row off the
+// line's own grab test and the button-up / CHARTEVENT_CLICK edges ask it - the
+// step-1 click shape. ONE click re-arms (they used to need a double), and the
+// stamp that click writes is what the armed contract refuses a SET for 350 ms
+// against, so a re-arm can never set the line back in the same gesture.
 static bool   g_cpClickArmed = false;      // press landed on the SET line's row
 static int    g_cpClickY = 0;              // its pixel row (the travel test)
-static uint   g_cpClickLastMs = 0;         // double-click window
-static uint   g_cpClickHandledMs = 0;      // twin-transport dedupe
+static uint   g_cpClickHandledMs = 0;      // the twin dedupe AND the re-arm stamp
 // TV-parity 2026-09-07: the Base Box TEXT edit field (card 12, OBJ_EDIT) owns
 // the keyboard while focused — letter hotkeys must stay silent or typing box
 // text would toggle indicator state (same pattern as the palette hex field).

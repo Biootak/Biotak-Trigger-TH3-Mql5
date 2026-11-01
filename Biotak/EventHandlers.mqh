@@ -204,8 +204,8 @@ void CustomPriceMarkerSync()
     {
         static string s_cpMarkTip = "";
         string tip = g_cpLineArmed
-            ? "Custom price: drag the green circle - click to commit, double-click re-arms"
-            : "Custom price (set) - double-click to re-activate";
+            ? "Custom price: drag the green circle - click to commit"
+            : "Custom price (set) - click the green circle to drag it again";
         if(s_cpMarkTip != tip)
         {
             s_cpMarkTip = tip;
@@ -382,7 +382,7 @@ void HandsetRevealDropOnForeignClick(const int x, const int y)
     // edge, and `shown` is false exactly then. The two hit tests are the price.
     if(HandsetMarkerRevealAt(x, y)) return;           // a marker's own click: nothing is dropped
     if(!g_cpHandleShown && !g_s1HandleShown) return;  // nothing revealed: nothing to drop
-    g_cpHandleShown = false;
+    if(g_cpLineArmed) g_cpHandleShown = false;        // P-UI-225: a SET line keeps its ONLY face
     g_s1HandleShown = false;
     HandsetMarkersRide();   // one ride parks the green dot and both red circles
     ThrottledChartRedraw();
@@ -480,9 +480,17 @@ void CustomPriceLineOwnLock(const bool locked)
 // pair on the mouse stream, the button-up finalize below (a motionless
 // release emits no MOUSE_MOVE, P-BK-03), and the green circle's own
 // OBJECT_CLICK. One physical click can reach it twice; a 60 ms twin guard
-// drops the second. A single click here is a no-op (already set) and only a
-// double re-arms, so no sweep slot is needed - the first click of a double
-// can never commit anything.
+// drops the second.
+//
+// P-UI-225 (2026-11-01) - ONE CLICK, NOT TWO. This owner required a double
+// click, and that requirement WAS the lottery the user named: «باید دابل کلیک
+// بکنم اونم شانسی بگیره فعال بشه که راحت درگه بشه». A SET line has no face to
+// aim at - P-UI-98p never paints it, and SET used to park its green circle as
+// well - so the double had to land on an unseen row inside a 240 ms window. A
+// single click RE-ARMS now, and it is SPENT on that: `g_cpClickHandledMs` is
+// the stamp the armed contract's SET branch refuses for 350 ms (the
+// CHARTEVENT_OBJECT_CLICK block below), so the click that frees the line
+// cannot set it straight back.
 //==============================================================================
 void CustomPriceRearmClickAt()
 {
@@ -495,18 +503,18 @@ void CustomPriceRearmClickAt()
     }
     uint now = GetTickCount();
     if(g_cpClickHandledMs != 0 && now - g_cpClickHandledMs < 60) return;   // the same click's twin event
-    g_cpClickHandledMs = now;
-    bool dbl = (g_cpClickLastMs != 0 && now - g_cpClickLastMs < DOUBLE_CLICK_THRESHOLD_MS);
-    g_cpClickLastMs = now;
-    if(!dbl) return;
+    g_cpClickHandledMs = now;   // P-UI-225: AND the re-arm stamp the armed contract reads
     CustomPriceLineOwnArm(true);
     g_cpHandleShown = true;
     CustomPriceMarkerSync();
     ThrottledChartRedraw();
+    #ifndef BUILD_LITE
+    DrawStripDiagEmit("[hs] rearm click -> armed=1 shown=1");
+    #endif
 }
 
 // The button-up that carries no move (P-BK-03): a motionless press/release on
-// the SET line's row is a click, and only a double of those re-arms.
+// the SET line's row is a click, and ONE of those re-arms it (P-UI-225).
 void CustomPriceRearmFinalize()
 {
     if(!UILeftButtonUp()) return;   // the press's own echo (P-UI-73): keep the row for the real release
@@ -533,19 +541,33 @@ void HandsetClickSweep()
         if(g_cpLineArmed)
         {
             CustomPriceLineOwnArm(false);
-            g_cpHandleShown = false;   // P-UI-98g: SET takes the green circle away
+            // P-UI-225: SET KEEPS THE GREEN CIRCLE. The line is never painted
+            // (P-UI-98p), so parking the circle left the placement with NO face at
+            // all - the user's click had to find an invisible row, which is the
+            // «سخت و شانسی» half of the report. P-UI-98m already says it: «وقتی
+            // سلکت نیس فقط همون دایره سبز بمونه». The circle is the re-arm target
+            // now, and its tooltip says one click brings the line back.
             CustomPriceMarkerSync();
         }
     }
     if(g_s1SetPendingMs != 0 && now - g_s1SetPendingMs >= DOUBLE_CLICK_THRESHOLD_MS
        && UILeftButtonUp())
     {
+        // P-UI-224: the row the sweep is about is consumed before this block, so
+        // capture it FIRST - the witness must name what it committed.
+        string s1SetRow = g_s1SetPending;
         g_s1SetPendingMs = 0;
         g_s1SetPending = "";
         if(g_s1LinesArmed && !g_s1DragLive)
         {
             g_s1LinesArmed = false;   // SET: the factor stays, the ladder keeps the step
             g_s1HandleShown = false;  // P-UI-98g: nothing points at a set line
+            // P-UI-224: the transition that used to fire on the REVEAL click.
+            // One flushed line, so «دایره آمد و بلافاصله رفت» is a timestamp.
+            #ifndef BUILD_LITE
+            DrawStripDiagEmit("[hs] SET committed row=" + s1SetRow +
+                              " armed=0 shown=0");
+            #endif
             g_redrawTHLevelsNeeded = true;
             RedrawAllObjects(true);   // the face owner re-owns selectability + parks the dot
         }
@@ -652,6 +674,10 @@ void CustomPriceDragHealStale()
     CustomPriceDragLockOff();
     g_customPriceLineDragging = false;
     g_customPriceDragOwn = false;
+    // P-UI-224: a healed gesture is a SPENT gesture — the base goes with the
+    // flags, or the next foreign create rolls the line back to it (see
+    // CustomPriceGrabBaseClear).
+    CustomPriceGrabBaseClear();
     // P-UI-98: a step-1 gesture whose release never arrived heals the same way —
     // the flags drop and the handle's selection goes (a stuck g_s1DragLive would
     // pin the handle's price forever, since the render skips its writes while the
@@ -838,6 +864,26 @@ static double s_ownGrabCursorPrice = 0.0; // price under that pixel at the grab
 // through the very price-per-pixel the chart is drawn at: the line as drawn plus a
 // few pixels, i.e. what the terminal itself uses - a normal press grabs the line, a
 // press clearly away still pans the chart.
+// P-UI-224 (2026-11-01) — THE GRAB BASE IS SPENT WHEN THE GESTURE ENDS.
+//
+// `s_ownGrabPrice` is "the price the line had when THIS gesture grabbed it". Its
+// two readers both run at the END of the gesture — `CustomPriceRestoreGrabPrice`
+// (P-UI-100b's draw rollback) and the release's echo test — so nothing ever
+// cleared it, and the value outlived the gesture that wrote it. That stale base
+// is what `CustomPriceForeignDrawSeen` then used: the next foreign OBJECT_CREATE
+// (a box, a fib, a trendline the user drew) rolled the line back to a price from
+// a gesture that ended long ago AND opened the 600 ms `s_cpForeignDrawUntil`
+// window, during which the claim is refused — the measured «چندبار تلاش میکنم
+// تا یکیش بگیره». ONE owner, called by both ways a gesture can end: the release
+// latch and the stale-drag heal. Zero cost per frame.
+void CustomPriceGrabBaseClear()
+{
+    s_ownGrabPrice = 0.0;
+    s_ownGrabCursorPrice = 0.0;
+    s_ownGrabX = 0;
+    s_ownGrabY = 0;
+}
+
 bool CustomPriceGrabAt(const int x, const int y)
 {
     if(!g_customPriceLineCreated) return false;
@@ -850,7 +896,15 @@ bool CustomPriceGrabAt(const int x, const int y)
     if(heightPx <= 0 || span <= 0) return false;
     // P-UI-98q: the tolerance covers the visible affordance - the 19 px green
     // circle, not the unpainted line under it.
-    int tolPx = (int)inpCustomPriceLevelWidth + 4 + (CP_HANDLE_HALF - HANDSET_HANDLE_HALF);
+    // P-UI-224 (2026-11-01): IT DID NOT. `width + 4 + (CP_HANDLE_HALF -
+    // HANDSET_HANDLE_HALF)` is `1 + 4 + 2` = 7 px at width 1, while the circle
+    // the user aims at is 19 px (half `CP_HANDLE_HALF` = 9): the raster's own
+    // rim answered "not on the line" to every reader of this test — the reveal
+    // (HandsetMarkerRevealAt), the claim (pixelHit), MT4's-hold recovery
+    // (atLineNow) and the deselect guard — so a press on the outer 3 px of the
+    // circle did nothing at all: «فعال شدن دایره سخت است». Derived from the
+    // raster's half now, widened by the line's own drawn half.
+    int tolPx = CP_HANDLE_HALF + 1 + (int)inpCustomPriceLevelWidth / 2;
     if(tolPx < 5) tolPx = 5;
     double tolPrice = span * ((double)tolPx / (double)heightPx);
     return (MathAbs(linePrice - priceAtCursor) <= tolPrice);
@@ -1698,6 +1752,12 @@ int OnInitHandler() {
     // instance's "this name is absent" facts are not trustworthy yet.
     CacheAbsentResetAll();
     HRayOnInit(); PathOnInit();   // P-HR-06 / P-UI-136: adopt the chart's drawings into the registry (idempotent)
+    //--- P-DRAW-136: the same adopt pass for the TAG channel — a fibo an older build
+    //--- wrote `[CL…] [OP…]` onto still wears them on its description, where the
+    //--- terminal paints them along the diagonal. One walk per attach, both entries.
+    string healedTags = DrawTagHealAll();
+    if(healedTags != "")   // the witness is the FLUSHED file, never Print (P-LOG-3)
+       DrawStripDiagEmit("[P-DRAW-136] attach heal obj=" + healedTags);
 
     // Restore hidden state
     string gvar_name = "Biotak_isHidden_" + GetCachedChartIdStr();
@@ -5347,6 +5407,15 @@ void Step1DragSettle()
     // and it runs AFTER the echo stamp (which reads the grab base it clears).
     Step1GestureStateClear();
     CustomPriceDragFrame(true);   // the gesture's last pixel is painted from the final F
+    // P-UI-224: the settle in one flushed line — the number the echo test read,
+    // whether the gesture MOVED, and the state the click contract will inherit.
+    #ifndef BUILD_LITE
+    DrawStripDiagEmit("[hs] s1settle row=" + name + " moved=" + IntegerToString(s1Moved ? 1 : 0) +
+                      " grab=" + DoubleToString(s_s1GrabPrice, _Digits) +
+                      " now=" + DoubleToString(settled, _Digits) +
+                      " armed=" + IntegerToString(g_s1LinesArmed ? 1 : 0) +
+                      " shown=" + IntegerToString(g_s1HandleShown ? 1 : 0));
+    #endif
     CustomPriceDragLockOff();     // the view is the user's again (idempotent)
     // P-UI-45: drop the selection the grab left behind — a SELECTED line is
     // moved by MT4 on every later drag anywhere on the chart. Guarded write.
@@ -5538,6 +5607,13 @@ bool Step1HandleOwnClaim(const string handle, const int x, const int y)
     // P-UI-98g: a hand on the line IS the request for its handle - the circles
     // appear while the gesture runs (and stay after it), so a drag started on a
     // line the user never clicked does not look like nothing happened.
+    // P-UI-224 (2026-11-01): AND THE ASK IS SPENT BY THE CLICK THAT ENDS THIS
+    // PRESS. This write is a REVEAL, and the release's own click reads the same
+    // latch to decide "the user has asked, so this click is a SET". It did: one
+    // click revealed the pair and 300 ms later `HandsetClickSweep` SET it — the
+    // circles parked, the claim refused, «فعال شدنش اینقدر سخت». One press, one
+    // meaning (P-UI-130's opener window, declared in GlobalVariables).
+    if(!g_s1HandleShown) g_s1PressRevealed = true;
     g_s1HandleShown = true;
     g_s1OwnActive = true;
     // P-UI-98h: a hand on the line CANCELS any pending SET - the press echo of
@@ -5665,28 +5741,37 @@ void Step1HandleOwnDragMove(const int x, const int y)
 // a lost press, and it is defined a hundred lines before this block.)
 
 // THE click. `name` is the rung-1 line the click landed on; the armed state is
-// read as it is NOW, so a click on a SET handle is the double-click that wakes it.
+// read as it is NOW, so a click on a SET handle RE-ARMS it - ONE click (P-UI-225:
+// it used to need a double, on a row whose circles are parked, which is the
+// «شانسی» in «باید دابل کلیک بکنم اونم شانسی بگیره فعال بشه»).
 void Step1HandleClickAt(const string name)
 {
     if(name == "") return;
     uint now = GetTickCount();
     if(g_s1ClickHandledMs != 0 && now - g_s1ClickHandledMs < 60) return;   // the same click's twin event
     g_s1ClickHandledMs = now;
+    if(!g_s1LinesArmed)
+    {
+        g_s1SetPending = "";
+        g_s1SetPendingMs = 0;
+        g_s1LinesArmed = true;     // re-armed: draggable again, the red handle back
+        g_s1HandleShown = true;    // P-UI-98g: and revealed, like the green one
+        g_s1PressRevealed = true;  // P-UI-225: THIS click is spent on the re-arm
+        g_redrawTHLevelsNeeded = true;
+        RedrawAllObjects(true);    // the face owner re-owns the pair + icon
+        #ifndef BUILD_LITE
+        DrawStripDiagEmit("[hs] s1rearm click -> armed=1 shown=1");
+        #endif
+        return;
+    }
     bool dbl = (g_s1ClickLastMs != 0 && now - g_s1ClickLastMs < DOUBLE_CLICK_THRESHOLD_MS);
     g_s1ClickLastMs = now;
     if(dbl)
     {
-        // the second click CANCELS the pending SET and wakes a set handle — the
-        // user's «با دبل کلیک فعال بشه ... و ست نهایی بشه» pair, in one place
+        // the second click CANCELS the pending SET - «با دبل کلیک فعال بشه ... و
+        // ست نهایی بشه»: a double never sets on its first click.
         g_s1SetPending = "";
         g_s1SetPendingMs = 0;
-        if(!g_s1LinesArmed)
-        {
-            g_s1LinesArmed = true;   // re-armed: draggable again, the red handle back
-            g_s1HandleShown = true;  // P-UI-98g: and revealed, like the green one
-            g_redrawTHLevelsNeeded = true;
-            RedrawAllObjects(true);  // the face owner re-owns the pair + icon
-        }
         return;
     }
     // P-UI-98g: THE FIRST CLICK SHOWS THE RED CIRCLES. The pair is armed from the
@@ -5709,10 +5794,28 @@ void Step1HandleClickAt(const string name)
     // delivered on the PRESS, so this line is reached with the hand already
     // holding the line, and the sweeper would commit it the moment the button
     // comes up, i.e. right after a drag that worked.
+    // P-UI-224 (2026-11-01): AND A CLICK THAT REVEALED IS ALREADY SPENT. The
+    // press-edge claim turns the circles on (P-UI-98g), which is the answer to
+    // THIS click; arming a SET here is what made that same click kill the pair
+    // it had just activated ~300 ms later. Exactly the echo rule above, for a
+    // second kind of echo.
+    if(Step1ClickPressRevealed())
+    {
+        g_s1PressRevealed = false;   // spent: one press, one answer
+        #ifndef BUILD_LITE
+        DrawStripDiagEmit("[hs] click row=" + name + " -> reveal (spent) armed=" +
+                          IntegerToString(g_s1LinesArmed ? 1 : 0));
+        #endif
+        return;
+    }
     if(g_s1LinesArmed && !g_s1DragLive && now - g_s1JustDraggedMs > 350)
     {
         g_s1SetPending = name;
         g_s1SetPendingMs = now;      // HandsetClickSweep commits it past the double window
+        #ifndef BUILD_LITE
+        DrawStripDiagEmit("[hs] click row=" + name + " -> set pending armed=1 shown=" +
+                          IntegerToString(g_s1HandleShown ? 1 : 0));
+        #endif
     }
 }
 
@@ -5937,6 +6040,9 @@ void RoutCustomPriceGesture(const int id, const long &lparam, const double &dpar
         static bool s_dragDownSeen = false;
         bool pressEdge = (leftButtonDown && !s_dragDownSeen);
         s_dragDownSeen = leftButtonDown;
+        // P-UI-224: a NEW press opens a new opener window - the reveal the
+        // previous press spent cannot answer this one (P-UI-130's disarm).
+        if(pressEdge) g_s1PressRevealed = false;
         // P-UI-99 (2026-09-21): THE HOLD IS RETIRED — THE CLAIM IS IMMEDIATE.
         // User order: «اون هولد از خط کاستوم پرایس بردار به جاش سلکت و انسلاکت
         // شو درست کن که کاربر راحت باشه و همچنین کلیک شو بقیه ابجکت ها در حین
@@ -5958,6 +6064,20 @@ void RoutCustomPriceGesture(const int id, const long &lparam, const double &dpar
         // on the line, so a pan or a box drag started elsewhere is never claimed.
         if(leftButtonDown)
         {
+            // P-UI-224 (2026-11-01): THE PRESS THAT CANNOT EVEN ASK. Two live
+            // gesture flags gate the whole claim block below, so a STUCK one
+            // refuses every press (the red circle's and the green line's alike)
+            // until the 1.5 s heal — «باید چندبار تلاش کنم تا یکیش بگیره». One
+            // flushed line per press edge names it, through the diag channel and
+            // never `Print` (P-DRAW-126: the journal is a RAM buffer).
+            #ifndef BUILD_LITE
+            if(pressEdge && (g_customPriceLineDragging || g_s1DragLive))
+                DrawStripDiagEmit("[hs] press SKIP live cp=" +
+                                  IntegerToString(g_customPriceLineDragging ? 1 : 0) +
+                                  " s1=" + IntegerToString(g_s1DragLive ? 1 : 0) +
+                                  " own=" + IntegerToString(g_s1OwnActive ? 1 : 0) +
+                                  " y=" + IntegerToString((int)dparam));
+            #endif
             // P-UI-98e: our own step-1 carry, ONE pass per held event. It runs
             // before the claim below so a press that already belongs to the
             // handle is never re-claimed by the custom-price line (one cursor,
@@ -6216,6 +6336,24 @@ void RoutCustomPriceGesture(const int id, const long &lparam, const double &dpar
                                       CustomPriceGrabAt((int)lparam, (int)dparam));
                     if(!onLineNow) HandLinesSelectionGuard();
                 }
+                // P-UI-224: THE PRESS IN ONE LINE — every gate that decides it
+                // and the numbers they were tested against. «فعال شدنش سخت است»
+                // is a question about a NUMBER (which gate said no), and this is
+                // that number, on the FLUSHED channel (never Print: P-DRAW-126).
+                #ifndef BUILD_LITE
+                if(pressEdge)
+                    DrawStripDiagEmit("[hs] press y=" + IntegerToString((int)dparam) +
+                                      " onCustom=" + IntegerToString(onCustomLine ? 1 : 0) +
+                                      " s1on=" + IntegerToString(s1OnRow ? 1 : 0) +
+                                      " s1claim=" + IntegerToString(s1Claimed ? 1 : 0) +
+                                      " armed=" + IntegerToString(g_s1LinesArmed ? 1 : 0) +
+                                      " shown=" + IntegerToString(g_s1HandleShown ? 1 : 0) +
+                                      " cparmed=" + IntegerToString(g_cpLineArmed ? 1 : 0) +
+                                      " fdraw=" + IntegerToString(TickDeadlinePending(s_cpForeignDrawUntil) ? 1 : 0) +
+                                      " terminal=" + IntegerToString(terminalGrab ? 1 : 0) +
+                                      " pixel=" + IntegerToString(pixelHit ? 1 : 0) +
+                                      " take=" + IntegerToString(g_customPriceLineDragging ? 1 : 0));
+                #endif
             }
             if(g_customPriceLineDragging)
             {
@@ -6405,6 +6543,22 @@ void RoutCustomPriceGesture(const int id, const long &lparam, const double &dpar
                 // owed to; nothing touches the line while it is being dragged.
                 UpdateCustomPriceTooltip();
                 }   // P-UI-100b: end of the "this gesture really moved the line" half
+                // P-UI-224 (2026-11-01) — THE GRAB BASE IS SPENT HERE, AND HERE ONLY.
+                //
+                // `s_ownGrabPrice` is read twice above (the draw's rollback and the
+                // settle's echo test), so the clear comes after both. It used to be
+                // written at every claim and never cleared: `CustomPriceForeignDrawSeen`
+                // rolls the line back to it on ANY foreign OBJECT_CREATE and opens the
+                // 600 ms window that refuses every grab — so the next box or fib the
+                // user drew teleported the line to a price from a gesture that ended
+                // hours ago («چندبار تلاش میکنم تا یکیش بگیره»). Zero cost per frame.
+                #ifndef BUILD_LITE
+                DrawStripDiagEmit("[hs] cpsettle grab=" + DoubleToString(s_ownGrabPrice, _Digits) +
+                                  " line=" + DoubleToString(settledPrice, _Digits) +
+                                  " wrote=" + IntegerToString((s_ownLastWrite > 0.0) ? 1 : 0) +
+                                  " armed=" + IntegerToString(g_cpLineArmed ? 1 : 0));
+                #endif
+                CustomPriceGrabBaseClear();
             }
         }
     }
@@ -7653,7 +7807,14 @@ void OnChartEventHandler(const int id, const long &lparam, const double &dparam,
             // first click of a double never sets first. A click that is the ECHO of
             // a drag release (the just-dragged stamp) sets nothing: the line drags
             // freely until the user deliberately clicks it.
-            else if(currentTickCount - g_cpJustDraggedMs > 350)
+            // P-UI-225: AND THE RE-ARM CLICK IS SPENT ON THE RE-ARM. The events of
+            // one press arrive unordered, so the click that wakes a SET line can
+            // also land here - and this branch is what SETs an armed line, which
+            // set it back in the same gesture. `g_cpClickHandledMs` is the re-arm's
+            // own stamp, so this is the same "one press, one meaning" fence the
+            // reveal wears (P-UI-224).
+            else if(currentTickCount - g_cpJustDraggedMs > 350 &&
+                    (g_cpClickHandledMs == 0 || currentTickCount - g_cpClickHandledMs > 350))
             {
                 g_cpSetPending = sparam;
                 g_cpSetPendingMs = currentTickCount;

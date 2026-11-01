@@ -92,6 +92,17 @@ param(
 # ============================================================
 
 $SCRIPT_ROOT    = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+#--- THE DUPLICATE-PROXY TRAP, AND WHY IT IS FIXED HERE. This process carries BOTH cases
+#--- of the same variable name (`HTTPS_PROXY` and `https_proxy`), and Start-Process builds
+#--- the child environment from a case-INSENSITIVE dictionary, so it dies with
+#--- "Item has already been added. Key in dictionary: 'HTTPS_PROXY'". The compiler then
+#--- never runs and this script reports "Log file was not created", which reads like a
+#--- compiler problem and is not. tools/mt5-build.ps1 has carried this fix since it was
+#--- written; the full build did not, so the canonical build was the broken one.
+foreach ($n in @('http_proxy', 'https_proxy', 'no_proxy', 'all_proxy')) {
+    if (Test-Path "Env:$n") { Remove-Item "Env:$n" -Force }
+}
 $DEFAULT_MT5_INSTALL = "C:\Program Files\AMarkets - MetaTrader 5"
 $DEFAULT_METAEDITOR  = Join-Path $DEFAULT_MT5_INSTALL "metaeditor64.exe"
 $APPDATA_TERMINAL_ROOT = Join-Path $env:APPDATA "MetaQuotes\Terminal"
@@ -824,6 +835,28 @@ if ($resolvedMql5Dir) {
 Write-Host ""
 Write-Host "  Logs folder: $PROJECT_LOG_DIR" -ForegroundColor Gray
 Write-Host ""
+
+#--- P-UI-224 (2026-10-31) - THE UI SCENARIO MATRIX, ASKED OF THIS TREE.
+#--- The matrix and its gate live in the MT4 repository (one list for both platforms),
+#--- and `--platform=mt5` scopes the question to this tree so a build here proves this
+#--- tree. It runs ONLY when the compile is clean: a gate reading a half-written tree
+#--- reports noise, not findings. Without this step the MT5 side was never asked, which
+#--- is how it kept both P-UI-222 defects after the MT4 fix shipped.
+if ($allSuccess) {
+    $m4Gate = Join-Path (Split-Path -Parent $PSScriptRoot) 'Biotak-Trigger-TH3-mql4\tools\ui_scenario_check.js'
+    if (Test-Path $m4Gate) {
+        Write-Host "  --- UI scenario gate (mt5) ---" -ForegroundColor Cyan
+        & node $m4Gate --platform=mt5
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [FAIL] ui scenario gate (mt5)" -ForegroundColor Red
+            $allSuccess = $false
+        } else {
+            Write-Host "  [PASS] ui scenario gate (mt5)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  [WARN] the MT4 tools are not beside this tree - the UI scenario gate did not run" -ForegroundColor Yellow
+    }
+}
 
 if ($allSuccess) {
     Write-Host "  All compilations PASSED!" -ForegroundColor Green

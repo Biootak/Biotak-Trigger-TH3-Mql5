@@ -72,6 +72,22 @@ terminal, so the new `.ex5` is the code the charts actually run:**
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/mt5-reload.ps1
 ```
 
+**The UI scenario gate runs here too (P-UI-224, 2026-10-31).** The matrix and
+its gate live in the MT4 repository — one list, both platforms — and the build
+asks it about THIS tree after a clean compile:
+
+```powershell
+node ..\Biotak-Trigger-TH3-mql4\tools\ui_scenario_check.js --platform=mt5
+```
+
+`compile-th3.ps1` runs it and fails the build on a red. It asks the same 9
+surfaces × 13 scenarios the MT4 tree answers, and it is why the MT5 tree now
+carries both P-UI-222 re-derivations (`PalReclampOpen` in `BiotakPanels.mqh`,
+the gear re-place in `DrawStrip.mqh`): before this, no gate had ever asked this
+tree, so it kept both defects after the MT4 fix shipped. 71 of its 89 sites
+report as `mapped` rather than direct — that is honest, not a pass: the code is
+here, in a monolith, where MT4 has a split module.
+
 **Never ask the user to flip the timeframe to load a build, and never tell them
 "the fix is ready, switch TF".** A compile is not a reload: MetaEditor only
 writes bytes; the resident indicator keeps executing the old `.ex5` until the
