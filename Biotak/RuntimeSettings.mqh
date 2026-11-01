@@ -140,7 +140,7 @@ static bool g_showMidpointLine = true;                           // [03] inpShow
 static bool g_showMidZones = true;                               // [07.1] inpShowMidZones (P-UI-143: card look as shipped)
 static ENUM_ZONE_STYLE g_midZoneStyle = ZONE_STYLE_BOX_FILLED;   // [07.1] inpMidZoneStyle
 static int g_midZoneTransparency = 66;                           // [07.2] inpMidZoneTransparency (P-UI-143)
-static double g_midZoneHeightPercent = 50.0;                     // [07.2] inpMidZoneHeightPercent
+static double g_midZoneHeightPercent = 33.0;                     // [07.2] inpMidZoneHeightPercent (P-UI-143: card look as shipped, 33%)
 static ENUM_LINE_STYLE g_midZoneBorderStyle = STYLE_SOLID;       // [07.2] inpMidZoneBorderStyle
 static int g_midZoneBorderWidth = 5;                             // [07.2] inpMidZoneBorderWidth (P-UI-143)
 // P-UI-63: the EDGE's transparency, the band's sibling. `g_midZoneTransparency` owns the
@@ -158,7 +158,7 @@ static int   g_zoneEdgeTopTransparency = -1;
 static int   g_zoneEdgeBottomTransparency = 1;   // P-UI-143: card look as shipped (was AUTO)
 static bool g_showPipDistanceLabels = true;                      // [03] inpShowPipDistanceLabels
 static bool g_showATRLabels = false;                             // [03] inpShowATRLabels
-static bool g_showATRTargets = true;                             // [03] inpShowATRTargets
+static bool g_showATRTargets = false;                            // [03] inpShowATRTargets (default OFF)
 static bool g_showATRTradeLabels = true;                         // [03] inpShowATRTradeLabels
 static bool g_showATRTradeSLLabels = true;                       // [03] inpShowATRTradeSLLabels
 static bool g_showATRTradeTPLabels = true;                       // [03] inpShowATRTradeTPLabels
@@ -207,7 +207,7 @@ static bool g_showTHLabels = false;                              // [03] inpShow
 static bool g_showFractalTHs = false;                            // [03] inpShowFractalTHs
 static bool g_showStandardTHs = false;                           // [03] inpShowStandardTHs
 static bool g_thVolNorm = false;                                 // [03] inpTHVolNorm (P-TH-VOLNORM)
-static bool g_showTHTargets = true;                              // [03] inpShowTHTargets
+static bool g_showTHTargets = false;                             // [03] inpShowTHTargets (default OFF)
 static int g_thLabelsMarginBottom = 40;                          // [13] inpTHLabelsMarginBottom
 static bool g_enableTH3Tool = true;                              // [14] inpEnableTH3Tool
 static ENUM_TH3_DRAWING_MODE g_th3DrawingMode = TH3_MODE_ABCD;  // [14] inpTH3DrawingMode
@@ -1111,6 +1111,36 @@ void MidZonesStateForget()
    GVShadowsInvalidate();
 }
 
+// P-LBL-11 (2026-11-01) — THE ATR/TH TARGET ROWS START OFF, AND THE DEFAULT HAS TO
+// BEAT WHAT IS ALREADY STORED.
+//
+// User order: «این تارگت ها لیبل هاش پیش فرض خاموش باشه همه برای atr و هم th». The
+// INPUTS default both off now, but `OV_A1` (ATR targets) and `OV_TG` (TH targets) are
+// re-applied by the loader on EVERY attach, so a chart that ever had a row on would
+// keep it on for ever and the new default would never be visible on it — P-UI-119's
+// lesson in the same shape as `MidZonesStateForget` above.
+//
+// ONE TIME per symbol: the prefix carries the symbol (`BIOMENU_<SYMBOL>_OV_`), and the
+// stamp is what stops a LATER choice of the user's from being wiped. The stamp lives
+// OUTSIDE the BIOMENU_ namespace on purpose: a UI-version reset (ClearAllGVs) keeps
+// every `OV_` but wipes every other key under that prefix, so a stamp born there would
+// resurrect this migration and silently overwrite the user's own later choice. Same
+// idiom as `Biotak_LevelsOffDefault_`.
+//
+// Caller: RuntimeSettingsLoadOverrides(), BEFORE its first read. A delete after the
+// reads leaves the old value in this attach's mirrors — the "it came back" report. The
+// shadow epoch is bumped with the delete, or the saver would compare against a key that
+// no longer exists and skip writing the user's own value back.
+void RuntimeSettingsTargetsForgetOnce()
+{
+   const string stamp = "Biotak_TargetsOffDefault_" + _Symbol;
+   if(GlobalVariableCheck(stamp)) return;
+   GlobalVariableDel(g_settingsGVPrefix + "OV_A1");
+   GlobalVariableDel(g_settingsGVPrefix + "OV_TG");
+   GVShadowsInvalidate();
+   GlobalVariableSet(stamp, 1.0);
+}
+
 // P-PERF-27c: shared change-guard for the OTHER two blocks that persisted their
 // state during the same teardown (SaveUIStates, SavePalRecent). Each keeps its
 // own shadow array and passes an index; returns true only when the value really
@@ -1302,6 +1332,7 @@ void RuntimeSettingsLoadOverrides()
 {
    if(StringLen(g_settingsGVPrefix) == 0) return;
    string p = g_settingsGVPrefix + "OV_";
+   RuntimeSettingsTargetsForgetOnce();   // P-LBL-11: the OFF default must beat a stored OV_A1/OV_TG
    if(GlobalVariableCheck(p + "ML"))  g_maxLevels = ClampSettingInt((int)GlobalVariableGet(p + "ML"), 1, MAX_SAFE_LEVELS);
    if(GlobalVariableCheck(p + "TW"))  g_triggerWidth = ClampSettingInt((int)GlobalVariableGet(p + "TW"), 1, 5);
    if(GlobalVariableCheck(p + "TS"))  g_triggerStyle = (ENUM_LINE_STYLE)ClampSettingInt((int)GlobalVariableGet(p + "TS"), 0, 4);

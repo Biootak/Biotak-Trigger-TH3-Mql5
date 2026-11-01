@@ -58,7 +58,7 @@ input string S1 = "[03] DISPLAY / VISIBILITY";
 input bool inpShowLines = false;              // Show level lines (default OFF — zones/structure only)
 input bool inpShowTHLevels = true;
 input bool inpShowTHLabels = false;
-input bool inpShowTHTargets = true;              // Show TH Targets
+input bool inpShowTHTargets = false;             // Show TH Targets (default OFF)
 input bool inpShowPipDistanceLabels = true;
 input bool inpShowMidpointLine = true;
 input bool inpShowTimeframeInLabels = true;
@@ -68,7 +68,7 @@ input bool inpShowStandardTHs = false;
 // relative range (THVolNorm.mqh). OFF = the professor's table, byte-identical.
 input bool inpTHVolNorm = false;                // Scale TH labels to the pair's own volatility (OFF = classic TH)
 input bool inpShowATRLabels = false;              // Show ATR Labels
-input bool inpShowATRTargets = true;             // Show ATR Targets
+input bool inpShowATRTargets = false;            // Show ATR Targets (default OFF)
 input bool inpShowATRTradeLabels = true;         // Master switch for ATR trade labels
 input bool inpShowATRTradeSLLabels = true;       // Show Hunter row (Str Bond row retired 2026-09-10 — R-STBOND)
 input bool inpShowATRTradeTPLabels = true;       // Show #SL/#TP1-3 row
@@ -143,7 +143,7 @@ input ENUM_ZONE_STYLE inpMidZoneStyle = ZONE_STYLE_BOX_FILLED;
 input group "07.2) ZONES - VISUAL DENSITY"
 input string S10b = "[07.2] ZONES / VISUAL DENSITY";
 input int inpMidZoneTransparency = 66;   // P-UI-143: card look as shipped
-input double inpMidZoneHeightPercent = 50.0;
+input double inpMidZoneHeightPercent = 33.0;   // P-UI-143: card look as shipped (user order 2026-10-31: 33%)
 input ENUM_LINE_STYLE inpMidZoneBorderStyle = STYLE_SOLID; // Box border line style (Solid/Dash/Dot/...)
 input int inpMidZoneBorderWidth = 5;                       // P-UI-143: card look as shipped (1-5)
 // P-UI-63: the EDGE's own transparency, independent of inpMidZoneTransparency (which
