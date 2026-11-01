@@ -1705,9 +1705,62 @@ int RefreshHTFCandles()
 //| draw fires only on TF change / new HTF bar / missing boxes.       |
 //+------------------------------------------------------------------+
 #define HTF_ENSURE_RETRY_MS 1000
+// P-HTF-AUDIT (2026-10-31 MT4): how many of OUR family objects the chart wears under
+// this chart's prefix, and how many of them are still VISIBLE. The cached
+// `g_HTFDrawnCount` is the drawer's own bookkeeping and can drift from the chart
+// (a prune that only took the tail, a family inherited from a previous instance),
+// so the OFF press must ask the OBJECTS, not the counter.
+int HTFFamilyCount(int &visible)
+{
+   visible = 0;
+   if(StringLen(g_HTFPrefix) == 0) return 0;
+   int n = 0;
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+   {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_HTFPrefix) != 0) continue;
+      n++;
+      if((int)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != OBJ_NO_PERIODS) visible++;
+   }
+   return n;
+}
+
+// P-HTF-AUDIT-3/4 — THE INSTANCE RECONCILES ONCE, BEFORE ANY DRAW DECISION, and the
+// F edge is the same kind of mismatch. The switch is a GlobalVariable and the candles
+// are chart objects; the two survive an attach INDEPENDENTLY, so every mismatch was
+// reachable: born OFF with a visible family -> the old guard returned and nothing
+// masked it (candles on screen with the switch off); born ON with a MASKED family ->
+// the ensure saw "boxes exist", never unmasked. The F-HIDE walk masks every cached
+// rect (correct: hidden means hidden) and the F-SHOW walk now SKIPS this family
+// (VisibilityManager, P-HTF-AUDIT-4), which is why the family must be re-asserted
+// here. The state is the truth, the chart is the copy: one walk per instance, one
+// bool compare per tick, zero per-tick cost.
 void HTFEnsureDrawn()
 {
-   if(!g_UI.showHTF || StringLen(g_HTFPrefix) == 0) return;
+   if(StringLen(g_HTFPrefix) == 0) return;
+   static bool s_reconciled = false;
+   static bool s_seenHidden = false;
+   const bool hidNow = IsIndicatorHidden();
+   if(!s_reconciled || hidNow != s_seenHidden)
+   {
+      s_reconciled = true;
+      s_seenHidden = hidNow;
+      // The exact probe, not `HTFAnyBoxesExist()`: that one only looks at indices
+      // 0..2, and a family whose head was culled still has to be masked.
+      int vis0 = 0;
+      int fam0 = HTFFamilyCount(vis0);
+      if(fam0 > 0)
+      {
+         HTFApplyVisibleMasks(false);
+         int vis1 = 0;
+         HTFFamilyCount(vis1);
+         DrawStripDiagEmit("[HTF] reconcile on=" + IntegerToString(g_UI.showHTF ? 1 : 0) +
+                           " hidden=" + IntegerToString(hidNow ? 1 : 0) +
+                           " family=" + IntegerToString(fam0) +
+                           " visible " + IntegerToString(vis0) + "->" + IntegerToString(vis1));
+      }
+   }
+   if(!g_UI.showHTF) return;
 
    int tf = ResolveHTFPeriod();   // auto mode follows the CURRENT chart TF
    static int s_lastDrawnTf = -1; // TF of the boxes on chart (-1=none yet, 0=hidden-by-design)
@@ -1789,26 +1842,33 @@ void HTFEnsureDrawn()
 // P-HTF-KEY — the toggle walk: masking, not deleting. OFF hides the family in
 // place (guarded flips only); ON unmasks it — instant both ways, no history
 // re-read, rapid-press safe. First ON with no family builds once, like before.
-void HTFApplyVisibleMasks()
+void HTFApplyVisibleMasks(const bool allowBuild = true)
 {
    if(StringLen(g_HTFPrefix) == 0) return;
-   if(g_UI.showHTF && !HTFAnyBoxesExist()) { RefreshHTFCandles(); return; }
-   for(int i = 0; i < g_HTFDrawnCount; i++)
+   if(g_UI.showHTF && !HTFAnyBoxesExist())
    {
-      string id = IntegerToString(i);
-      string nm[5];
-      nm[0] = g_HTFPrefix + id;
-      nm[1] = g_HTFPrefix + id + "_F";
-      nm[2] = g_HTFPrefix + id + "_B";
-      nm[3] = g_HTFPrefix + "WU" + id;
-      nm[4] = g_HTFPrefix + "WL" + id;
-      for(int k = 0; k < 5; k++)
-      {
-         if(ObjectFind(0, nm[k]) < 0) continue;
-         long want = HTFBoxMask(HTFCullHas(nm[k]));
-         if((long)ObjectGetInteger(0, nm[k], OBJPROP_TIMEFRAMES) != want)
-            ObjectSetInteger(0, nm[k], OBJPROP_TIMEFRAMES, want);
-      }
+      // P-HTF-AUDIT-3: only the TOGGLE builds on this path. The instance's own
+      // reconcile calls with allowBuild=false, because HTFEnsureDrawn owns the
+      // first build and its staging guard (P-PERF-06) must not be bypassed.
+      if(allowBuild) RefreshHTFCandles();
+      return;
+   }
+   // P-HTF-AUDIT-2 (2026-10-31 MT4, user: «چرا کندل‌های htf ... روشن میشه خودکار در
+   // صورتی که خاموش بود»): the walk asks the OBJECTS, never `g_HTFDrawnCount`.
+   // MEASURED hole: the count is a STATIC that dies with the instance, while the
+   // family is chart state that survives an attach/TF switch under the same chart
+   // id — so after a re-attach the counter read 0 with a whole family on screen,
+   // the old `for(i < count)` loop ran zero times, and an OFF press masked NOTHING.
+   // Same walk serves ON (a cull-covered box stays hidden, a released one comes
+   // back), so both edges now agree by construction. Cost: one enumeration per
+   // PRESS (the toggle is rare), replacing 5x count ObjectFind calls.
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
+   {
+      string nm = ObjectName(0, i, 0, -1);
+      if(StringFind(nm, g_HTFPrefix) != 0) continue;
+      long want = HTFBoxMask(HTFCullHas(nm));
+      if((long)ObjectGetInteger(0, nm, OBJPROP_TIMEFRAMES) != want)
+         ObjectSetInteger(0, nm, OBJPROP_TIMEFRAMES, want);
    }
 }
 
@@ -1842,6 +1902,13 @@ bool HTFHasKeys(const string pfx)
 void InitializeHTFCandles()
 {
    g_HTFPrefix = HTF_PREFIX_BASE + IntegerToString(ChartID()) + "_";
+   // P-HTF-AUDIT-4: publish the namespace to the F walks (VisibilityManager,
+   // included BEFORE this module — it cannot call in here, and the Lite build
+   // carries it without any HTF module). The value stays `g_HTFPrefix`; this
+   // module remains its only writer, exactly like the g_OverlayNameRoot line
+   // below. The reader uses it to SKIP this family, never to mask it: the mask
+   // composer is HTFBoxMask, and it is the only writer of that property.
+   g_HTFVisNamespace = g_HTFPrefix;
    // P-DRAW-87 (2026-09-30): PUBLISH the namespace, do not re-declare it. The
    // draw-strip's `DrawIsIndicatorObject` (DrawToolbar, included before this file)
    // is the ONE owner of "this object is the product's, not the user's drawing",
