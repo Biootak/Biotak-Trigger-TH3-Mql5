@@ -1041,8 +1041,8 @@ bool BaseKnotOnChartEvent(const int id, const long &lparam, const double &dparam
         {
            if(BaseKnotLocked(bid)) return true;   // locked — swallow, children stay put
            // P-BK-19a: the terminal just NAMED the object it is dragging, so the
-           // gesture is ITS — the cursor fallback stays off for the rest of it.
-           s_bkNativeClaim = true;
+           // gesture is ITS - the cursor fallback stays off for the rest of it.
+           s_bkNativeClaim = true; g_bkNativeDragMs = GetTickCount();   // P-BK-158 (MT4 twin): this heartbeat feeds the deselect veto
            // P-BK-65: AND IT JUST SAID WHICH OBJECT: the BOX, not a chip. That is the
            // ground truth behind two answers this press needs — "the body-size heal may
            // run" (`s_bkBoxNamed`) and "this press is NOT a resize" (a chip gesture

@@ -966,6 +966,45 @@ string BaseKnotGVTwin(const string id)
 //| retired so the box stays selected like MT4's own; kept for a         |
 //| one-line restore.                                                    |
 //+------------------------------------------------------------------+
+// P-BK-156/158/159 (MT4 twin, 2026-11-02) - THE SELECTION HAS ONE WRITER, AND IT IS THE LAST.
+//
+// MEASURED on MT4 (11:47/11:48 frames), same code here: our press grants the selection, the
+// terminal's own click on an ALREADY-selected object toggles it OFF, and a later beat re-grants it
+// ("one thing turns it off, the next turns it on"). Two more holes rode with it: a release whose
+// pixel could not be priced (axis/margin/subwindow) counted as "elsewhere", and the release of the
+// terminal's OWN 1-px drag dropped the selection it had just made (measured 712,576 -> 713,576).
+// Ported verbatim: measured-only drop (P-BK-156), native-drag veto on the terminal's own 400 ms
+// heartbeat (P-BK-158), in-event repair of the toggled-off grant (P-BK-159).
+#define BK_NATIVE_DRAG_HOLD_MS 400   // the same silence window the strip's latch uses
+static uint g_bkNativeDragMs = 0;    // last OBJECT_DRAG on one of OUR boxes; 0 = never
+// P-BK-159: the terminal toggled off a grant OUR press made - restore it in the same event.
+bool BaseKnotReselectByName(const string nm)
+{
+   if(nm == "" || ObjectFind(0, nm) < 0) return false;
+   for(int i = 0; i < ArraySize(g_bkBoxes); i++)
+   {
+      if(BaseKnotBoxName(BaseKnotPrefix(g_bkBoxes[i].id)) != nm) continue;
+      if((bool)ObjectGetInteger(0, nm, OBJPROP_SELECTED)) return false;   // nothing was lost
+      bool ok = ObjectSetInteger(0, nm, OBJPROP_SELECTED, true);
+      if(ok) Print("[BK-159] re-selected in event nm=", nm, " id=", g_bkBoxes[i].id);
+      return ok;
+   }
+   return false;
+}
+// P-BK-156 + P-BK-158: only a pixel the terminal can PRICE may drop, and never while it is
+// moving a drawing. Both refusals name themselves, before the write.
+bool BaseKnotDropAllowed(const string sel, const int mx, const int my)
+{
+   int sw = 0; datetime ct = 0; double cp = 0;
+   bool measured = (ChartXYToTimePrice(0, mx, my, sw, ct, cp) && sw == 0 && ct > 0 && cp > 0);
+   if(g_bkNativeDragMs != 0 && GetTickCount() - g_bkNativeDragMs < BK_NATIVE_DRAG_HOLD_MS)
+   {
+      Print("[BK-158] drop vetoed box=", sel, " at ", mx, ",", my, " - a native drag is live");
+      return false;
+   }
+   Print("[BK-156] drop box=", sel, " at ", mx, ",", my, " measured=", (measured ? 1 : 0));
+   return measured;
+}
 void BaseKnotDropSelection(const string id)
 {
    if(id == "") return;

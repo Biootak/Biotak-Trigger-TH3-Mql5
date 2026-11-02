@@ -1127,8 +1127,8 @@ bool BaseKnotDeselectOnChartClick(const int mx, const int my)
    // same gesture, instead of at the timer's edge. Per-note, not a latch: the next commit
    // re-arms it (BaseKnotRegister).
    BaseKnotInfoDismiss();
-   string sel = BaseKnotSelectedBoxId();
-   if(sel == "") return false;   // nothing of ours is selected — only the dismissal happened
+   string sel = BaseKnotSelectedBoxId(); if(sel == "") return false;   // nothing of ours is selected - only the dismissal
+   if(!BaseKnotDropAllowed(sel, mx, my)) return false;   // P-BK-156/158 (MT4 twin): measured-only, never on a live native drag
    BaseKnotDropSelection(sel);   // P-BK-26's ONE owner: read-guarded, one write
    BaseKnotSelectionMarkersWipe(sel);
    return true;

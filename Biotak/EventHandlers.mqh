@@ -8558,6 +8558,40 @@ void CoopPump()
    // list. One bool compare once it has answered.
    TH3SiblingUnitLateCheck();
    uint sliceStart = GetTickCount();
+
+   //--- P-HANG-01 (2026-11-02) — THE REFUSED HISTORY WRITE RUNS HERE, NOT AT THE
+   //--- ASK. Ported with the MT4 card: `BasePriceHistoryAskFlush` records the
+   //--- target day when the terminal refuses a FileOpen and returns immediately;
+   //--- this beat does the ONE full rewrite from the live RAM state. Before it,
+   //--- Save/Append/Load/Cleanup retried with `Sleep(100)` between attempts, all
+   //--- of them reachable from OnCalculate — and MQL says an indicator may not do
+   //--- that: «The Sleep() function can't be called for custom indicators, since
+   //--- indicators are executed in the interface thread and should not slow it
+   //--- down.» The interface thread is the chart: its paint, its mouse, its event
+   //--- queue. Bounded by HIST_FLUSH_MAX_TRIES beats, then dropped and SAID so.
+   if(BasePriceHistoryFlushPending())
+   {
+      int hYear = 0, hDay = 0;
+      BasePriceHistoryFlushTarget(hYear, hDay);
+      string hArr[];
+      GetHistoryArray(hArr);
+      int hN = ArraySize(hArr);
+      uint hAge = BasePriceHistoryFlushAgeMs();
+      int hTries = BasePriceHistoryFlushTries();
+      uint hT0 = GetTickCount();
+      bool hWrote = (hN > 0 && SaveBasePriceHistory(hYear, hDay, hArr, hN));
+      uint hMs = GetTickCount() - hT0;
+      int hStep = BasePriceHistoryFlushStep(hWrote);
+      //--- one line per EDGE (written / dropped) and one for the first retained
+      //--- retry: a day that never locks pays nothing.
+      if(hStep != 0 || hTries == 0)
+         DrawStripDiagEmit("[P-HANG] hist " + (hStep == 1 ? "drained" : (hStep == 2 ? "DROPPED" : "retained")) +
+                           " day=" + IntegerToString(hYear) + "/" + IntegerToString(hDay) +
+                           " entries=" + IntegerToString(hN) + " err=" + IntegerToString(BasePriceHistoryFlushErr()) +
+                           " tries=" + IntegerToString(hTries) + " age=" + IntegerToString((int)hAge) +
+                           "ms save=" + IntegerToString((int)hMs) + "ms");
+   }
+
    // P-PERF-35b: THE ORDER IS CHEAP-FIRST, AND THE JOB IDS ARE NOT THE ORDER.
    //
    // HEAVY_FRAME is id 1, so iterating the ids ran the REBUILD first: it could

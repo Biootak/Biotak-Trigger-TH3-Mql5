@@ -10235,6 +10235,10 @@ bool DrawStripClickToggle(const string nm, const bool wasDrag)
     {
         DrawStripHoldSelect();     // P-UI-113f: native anchors/settings survive the click
         DrawStripHoldSelectArm();  // P-UI-113g: prove it again after MT4 commits the release
+        // P-BK-159 (MT4 twin): the two calls above REFUSE an indicator object, so a Base Knot box
+        // kept whatever the terminal decided - and it decides "toggle", because our press had
+        // already selected it. Repair IN THIS EVENT, not on the next beat: one read, one write.
+        if(DrawIsIndicatorObject(nm)) BaseKnotReselectByName(nm);
     }
     DrawStripOpenerArm();   // P-UI-113c: the click that opened it owns its twin
     Print("[drawstrip] click opened on \"", nm, "\" selected=",
